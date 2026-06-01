@@ -1,4 +1,8 @@
-# Electronic Logbook Personal Use License
+## Disclaimer
+
+This Logbook is not affiliated with, endorsed by, or approved by the Civil Aviation Safety Authority (CASA). Any references to CASA, the Civil Aviation Safety Regulations (CASR), or related standards are for informational purposes only.
+
+## Electronic Logbook Personal Use License
 
 Copyright (c) 2026 alphadelta332.
 
