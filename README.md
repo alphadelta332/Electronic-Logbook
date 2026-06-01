@@ -8,6 +8,11 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.2.1] - 2026-06-01
+- Updated public-repository GitHub requests to retry without authentication when an old workbook contains a stale private-repo token
+- Added a fallback to the public `main` branch when an old workbook still points update checks at `dev`
+- Refreshed the release workbook so future downloads include the token fallback in the embedded updater bootstrap
+
 ### [1.2.0] - 2026-06-01
 - Prepared the project for public repository release
 - Added public security, contribution, and licensing information

@@ -102,6 +102,16 @@ Private Function FetchRemoteVersion() As String
         http.setRequestHeader "Authorization", "token " & token
     End If
     http.send
+    If http.Status <> 200 And token <> "" Then
+        ' Existing workbooks may contain a stale private-repo PAT.
+        ' Public repo reads should still work after retrying unauthenticated.
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", url, False
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
     If http.Status = 200 Then
         FetchRemoteVersion = Trim(http.responseText)
     End If
@@ -883,13 +893,22 @@ Private Function RawURL(filename As String, Optional gitRef As String = "") As S
 End Function
 
 Private Function ResolveGitHubRef() As String
-    Dim sha As String
+    Dim branchName As String
+    Dim sha        As String
 
-    sha = GetBranchCommitSha(GetGitHubBranch())
+    branchName = GetGitHubBranch()
+    sha = GetBranchCommitSha(branchName)
     If sha <> "" Then
         ResolveGitHubRef = sha
+    ElseIf LCase$(branchName) <> "main" Then
+        sha = GetBranchCommitSha("main")
+        If sha <> "" Then
+            ResolveGitHubRef = sha
+        Else
+            ResolveGitHubRef = branchName
+        End If
     Else
-        ResolveGitHubRef = GetGitHubBranch()
+        ResolveGitHubRef = branchName
     End If
 End Function
 
@@ -916,6 +935,16 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
         http.setRequestHeader "Authorization", "token " & token
     End If
     http.send
+    If http.Status <> 200 And token <> "" Then
+        ' Retry without auth so a revoked PAT in GitHubToken does not block
+        ' public update downloads.
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", url, False
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
     If http.Status <> 200 Then GoTo Fail
 
     Set stream = CreateObject("ADODB.Stream")
@@ -1031,6 +1060,17 @@ Private Function GetBranchCommitSha(branchName As String) As String
         http.setRequestHeader "Authorization", "token " & token
     End If
     http.send
+    If http.Status <> 200 And token <> "" Then
+        ' Retry without auth so a revoked PAT in GitHubToken does not block
+        ' public branch resolution.
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", apiUrl, False
+        http.setRequestHeader "Accept", "application/vnd.github+json"
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
     If http.Status <> 200 Then GoTo Fail
 
     body = http.responseText

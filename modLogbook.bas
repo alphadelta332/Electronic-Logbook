@@ -1432,6 +1432,14 @@ Public Sub OpenHelp()
         http.setRequestHeader "Authorization", "token " & token
     End If
     http.send
+    If http.Status <> 200 And token <> "" Then
+        ' The public README should still load if an old workbook contains
+        ' a stale private-repo PAT.
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", url, False
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.send
+    End If
 
     If http.Status <> 200 Then GoTo Fail
     markdown = http.responseText
