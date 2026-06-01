@@ -150,8 +150,11 @@ This prompt will not appear again after the initial build unless a later update 
 1. Download `Electronic_Logbook_Master.xlsm` from this repository
 2. Rename it to something personal (e.g. `Electronic_Logbook_YourName.xlsm`)
 3. Open the file and enable macros when prompted
-4. On first open, click **Yes** when prompted to build the Routes table (it will be empty at this stage, which is fine -- it will populate as you add entries)
-5. Navigate to the **New Entry** sheet and begin entering your flights
+4. If you store the file in OneDrive and Excel shows **AUTOSAVE TURNED OFF** with a warning about personal information, turn off the privacy flag for your personal copy:
+   1. Navigate to File > Info > Inspect Workbook
+   2. Click the button that says `Allow this information to be saved in your file`
+5. On first open, click **Yes** when prompted to build the Routes table (it will be empty at this stage, which is fine -- it will populate as you add entries)
+6. Navigate to the **New Entry** sheet and begin entering your flights
 
 > **Note:** The logbook contains two placeholder entries by default. Do not delete these until you have added at least two of your own entries, as they are required to maintain the correct table and formula structure.
 
