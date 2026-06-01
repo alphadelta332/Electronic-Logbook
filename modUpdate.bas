@@ -279,6 +279,12 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Saving updated file"
     UpdateStatus "Saving updated logbook..."
+    ' Document Inspector's "remove personal information on save" flag disables
+    ' AutoSave/OneDrive collaboration when it leaks into user workbooks.
+    On Error Resume Next
+    masterWb.RemovePersonalInformation = False
+    On Error GoTo UpdateFailed
+
     ' Save to a local temp path first, then move to destination.
     ' Direct SaveAs to OneDrive paths is unreliable depending on sync state.
     localSavePath = Environ("TEMP") & "\LB_Updated_Staging.xlsm"
