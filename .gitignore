@@ -1,0 +1,12 @@
+~$*
+/.claude
+AI_HANDOVER.md
+AI-Handover.md
+release.local.json
+*.local.json
+.env
+.env.*
+*.log
+PUBLIC_RELEASE_EXCEL_HANDOVER.md
+PrepareForRelease.ps1
+PrepareForTesting.ps1

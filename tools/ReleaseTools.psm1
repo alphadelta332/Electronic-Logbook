@@ -1,0 +1,177 @@
+function Get-ReleaseConfig {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepoRoot
+    )
+
+    $repoRoot = (Resolve-Path $RepoRoot).Path
+    $config = [ordered]@{
+        MasterWorkbook = Join-Path $repoRoot "Electronic_Logbook_Master.xlsm"
+        WorkingCopyWorkbook = ""
+    }
+
+    $localConfigPath = Join-Path $repoRoot "release.local.json"
+    if (Test-Path $localConfigPath) {
+        $localConfig = Get-Content $localConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        foreach ($property in $localConfig.PSObject.Properties) {
+            if ($config.Contains($property.Name)) {
+                $value = [string]$property.Value
+                if (-not [System.IO.Path]::IsPathRooted($value) -and -not [string]::IsNullOrWhiteSpace($value)) {
+                    $value = Join-Path $repoRoot $value
+                }
+                $config[$property.Name] = $value
+            }
+        }
+    }
+
+    return [pscustomobject]$config
+}
+
+function Get-ReleaseVersion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepoRoot
+    )
+
+    $versionPath = Join-Path $RepoRoot "version.txt"
+    if (-not (Test-Path $versionPath)) {
+        throw "version.txt not found at $versionPath"
+    }
+
+    $version = (Get-Content $versionPath -Raw -Encoding UTF8).Trim()
+    if ($version -notmatch '^\d+\.\d+\.\d+$') {
+        throw "version.txt must contain a semantic version like 1.2.3. Found '$version'."
+    }
+
+    return $version
+}
+
+function Close-ExcelComObjects {
+    param(
+        $Excel,
+        $Workbook,
+        [bool]$Save
+    )
+
+    if ($Workbook -ne $null) {
+        try {
+            if ($Save) {
+                $Workbook.Close($true)
+            } else {
+                $Workbook.Close($false)
+            }
+        } catch {}
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Workbook) | Out-Null
+    }
+
+    if ($Excel -ne $null) {
+        try { $Excel.Quit() } catch {}
+        [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Excel) | Out-Null
+    }
+
+    [GC]::Collect()
+    [GC]::WaitForPendingFinalizers()
+    [GC]::Collect()
+}
+
+function Invoke-WorkbookEdit {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkbookPath,
+        [Parameter(Mandatory)]
+        [scriptblock]$Operation,
+        [switch]$ReadOnly,
+        [switch]$Visible
+    )
+
+    if (-not (Test-Path $WorkbookPath)) {
+        throw "Workbook not found: $WorkbookPath"
+    }
+
+    $resolvedPath = (Resolve-Path $WorkbookPath).Path
+    $excel = $null
+    $workbook = $null
+    $save = $false
+
+    try {
+        $excel = New-Object -ComObject Excel.Application
+        $excel.Visible = [bool]$Visible
+        $excel.DisplayAlerts = $false
+        $excel.EnableEvents = $false
+        try {
+            # msoAutomationSecurityForceDisable prevents Workbook_Open from firing during tooling.
+            $excel.AutomationSecurity = 3
+        } catch {}
+
+        $workbook = $excel.Workbooks.Open($resolvedPath, $false, [bool]$ReadOnly)
+        & $Operation $workbook $excel
+        $save = -not $ReadOnly
+    } finally {
+        Close-ExcelComObjects -Excel $excel -Workbook $workbook -Save $save
+    }
+}
+
+function Set-WorkbookNameValue {
+    param(
+        [Parameter(Mandatory)]
+        $Workbook,
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [Parameter(Mandatory)]
+        [object]$Value
+    )
+
+    try {
+        $Workbook.Names.Item($Name).RefersToRange.Value2 = $Value
+    } catch {
+        throw "Named range '$Name' not found in $($Workbook.Name)."
+    }
+}
+
+function Set-LogbookWorkbookState {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkbookPath,
+        [Parameter(Mandatory)]
+        [ValidateSet("dev", "main")]
+        [string]$Branch,
+        [AllowEmptyString()]
+        [string]$Version
+    )
+
+    Write-Host "Processing: $WorkbookPath"
+    Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Operation {
+        param($Workbook)
+
+        Set-WorkbookNameValue -Workbook $Workbook -Name "GitHubBranch" -Value $Branch
+        if (-not [string]::IsNullOrWhiteSpace($Version)) {
+            Set-WorkbookNameValue -Workbook $Workbook -Name "LogbookVersion" -Value $Version
+        }
+    }
+
+    Write-Host "  GitHubBranch = $Branch" -ForegroundColor Green
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        Write-Host "  LogbookVersion = $Version" -ForegroundColor Green
+    } else {
+        Write-Host "  LogbookVersion unchanged" -ForegroundColor Yellow
+    }
+}
+
+function Assert-VbaProjectAccess {
+    param(
+        [Parameter(Mandatory)]
+        $Workbook
+    )
+
+    try {
+        $null = $Workbook.VBProject.VBComponents.Count
+    } catch {
+        throw "Excel blocked access to the VBA project. Enable Trust Center > Macro Settings > Trust access to the VBA project object model."
+    }
+}
+
+Export-ModuleMember -Function Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-LogbookWorkbookState, Assert-VbaProjectAccess

@@ -1,0 +1,24 @@
+name: Static checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  release-metadata:
+    name: Release metadata
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate release metadata
+        shell: pwsh
+        run: ./tools/Test-ReleaseMetadata.ps1
