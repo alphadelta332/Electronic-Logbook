@@ -1,5 +1,5 @@
 Attribute VB_Name = "modLogbook"
-Public Const ROUTE_DEFINITION_VERSION As Long = 1
+Public Const ROUTE_DEFINITION_VERSION As Long = 2
 
 Sub AddToLogbook()
 
@@ -31,6 +31,7 @@ Sub AddToLogbook()
     Dim entryDate As Date
     Dim diagStep As String
     Dim opcDetected As Boolean
+    Dim flightReviewDetected As Boolean
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
@@ -39,8 +40,13 @@ Sub AddToLogbook()
             MsgBox "ERROR: The Logbook table is missing the OPC helper column. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
+        If Not ListColumnExists(tbl, "FlightReview") Then
+            MsgBox "ERROR: The Logbook table is missing the FlightReview helper column. Please update the workbook structure before adding entries.", vbCritical
+            GoTo Cleanup
+        End If
         todayDate = Range("today").Value
         opcDetected = (InStr(1, Range("neDetails").Value, "OPC", vbTextCompare) > 0)
+        flightReviewDetected = IsFlightReviewDetails(CStr(Range("neDetails").Value))
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -220,7 +226,7 @@ Sub AddToLogbook()
             End If
         End If
 
-    '--- 4f. IPC / IR Test / OPC Detection Check
+    '--- 4f. IPC / IR Test / OPC / Flight Review Detection Check
         If Not suppressWarnings Then
             If InStr(1, Range("neDetails").Value, "IPC", vbTextCompare) > 0 Or _
                InStr(1, Range("neDetails").Value, "IR Test", vbTextCompare) > 0 Then
@@ -234,6 +240,14 @@ Sub AddToLogbook()
                     "Only use OPC if this was a qualifying operator proficiency check covering IFR operations. Continue?", _
                     vbOKCancel + vbInformation, _
                     "OPC Detection")
+                If response = vbCancel Then GoTo Cleanup
+            End If
+
+            If flightReviewDetected Then
+                response = MsgBox( _
+                    "Note: This entry will be recorded as a Flight Review. Continue?", _
+                    vbOKCancel + vbInformation, _
+                    "Flight Review Detection")
                 If response = vbCancel Then GoTo Cleanup
             End If
         End If
@@ -496,6 +510,23 @@ Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As S
     On Error Resume Next
     ListColumnExists = Not tbl.ListColumns(columnName) Is Nothing
     On Error GoTo 0
+End Function
+
+Private Function IsFlightReviewDetails(ByVal details As String) As Boolean
+    Dim det As String
+
+    det = Replace(details, "|", "")
+    det = Replace(det, "(", "|")
+    det = Replace(det, ")", "|")
+    det = Replace(det, "-", "|")
+    det = Replace(det, ",", "|")
+    det = Replace(det, " ", "|")
+    det = Replace(det, "&", "|")
+    det = "|" & det & "|"
+
+    IsFlightReviewDetails = _
+        (InStr(1, det, "|Flight|Review|", vbTextCompare) > 0) Or _
+        (InStr(1, det, "|FR|", vbTextCompare) > 0)
 End Function
 
 Private Sub FixHoursByYearPivotLayout(Optional ByVal wb As Workbook = Nothing)
@@ -1081,7 +1112,7 @@ End Sub
 
 Private Function IsRouteParserIgnoreToken(ByVal token As String) As Boolean
     Select Case UCase$(Trim$(token))
-        Case "IPC", "OPC", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
+        Case "IPC", "OPC", "FR", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
             IsRouteParserIgnoreToken = True
         Case Else
             IsRouteParserIgnoreToken = False
@@ -1665,6 +1696,7 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Dim fDetails As String
     Dim fOpcDetected As String
     Dim fOpcDateSource As String
+    Dim fFlightReviewDetected As String
     Dim fRows    As String
     Dim fCrumb   As String
     fDate    = CStr(Range("neDate").Value)
@@ -1678,6 +1710,11 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Else
         fOpcDetected = "No"
         fOpcDateSource = ""
+    End If
+    If IsFlightReviewDetails(fDetails) Then
+        fFlightReviewDetected = "Yes"
+    Else
+        fFlightReviewDetected = "No"
     End If
     fRows    = CStr(ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
 
@@ -1721,6 +1758,7 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "Details      : " & fDetails
         Print #fileNum, "OPC detected : " & fOpcDetected
         If fOpcDateSource <> "" Then Print #fileNum, "OPC date src : " & fOpcDateSource
+        Print #fileNum, "FR detected  : " & fFlightReviewDetected
         Print #fileNum, "Logbook rows : " & fRows
         Print #fileNum, ""
     Close #fileNum
@@ -1880,3 +1918,17 @@ NextOD:
     ResolveLocalPath = Environ("USERPROFILE") & "\Documents"
     Set fso = Nothing
 End Function
+
+Sub ShowDevSheets()
+    Sheets("Admin").Visible = xlSheetVisible
+    Sheets("Routes").Visible = xlSheetVisible
+    Sheets("ChartData").Visible = xlSheetVisible
+    Sheets("Airports").Visible = xlSheetVisible
+End Sub
+
+Sub HideDevSheets()
+    Sheets("Admin").Visible = xlSheetVeryHidden
+    Sheets("Routes").Visible = xlSheetVeryHidden
+    Sheets("ChartData").Visible = xlSheetVeryHidden
+    Sheets("Airports").Visible = xlSheetVeryHidden
+End Sub
