@@ -33,6 +33,9 @@ Sub AddToLogbook()
     Dim ipcDetected As Boolean
     Dim opcDetected As Boolean
     Dim flightReviewDetected As Boolean
+    Dim totalsWereOn As Boolean
+    Dim totalsStateCaptured As Boolean
+    Dim tableStyleName As String
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
@@ -347,8 +350,20 @@ Sub AddToLogbook()
         diagStep = "Step 5a: Add Row"
         WriteCrumb diagStep
 
-    '--- 5a. Add New Row & Copy Year, Month, Day
-        Set newRow = tbl.ListRows.Add
+    '--- 5a. Add a clean table row without inheriting direct visual formats
+        Dim fmtCol As Long
+        Dim templateRow As Range
+
+        totalsWereOn = tbl.ShowTotals
+        totalsStateCaptured = True
+        tableStyleName = tbl.TableStyle.Name
+        Set templateRow = tbl.DataBodyRange.Rows(1)
+
+        If totalsWereOn Then tbl.ShowTotals = False
+
+        Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
+
+    '--- Copy Year, Month, Day
         newRow.Range.cells(1, 2).Resize(1, 3).Value = Range("neYear", "neDay").Value
 
     '--- 5b. Fill Down Formula Columns from Previous Row
@@ -377,23 +392,24 @@ Sub AddToLogbook()
             newRow.Range.cells(1, 3).Value = StrConv(newRow.Range.cells(1, 3).Value, vbProperCase)
         End If
 
-    '--- 5e. Fix Year Column Formatting (copy number format from previous row)
+    '--- 5e. Remove formats inherited by row insertion and formula FillDown
         diagStep = "Step 5e: Format Row"
         WriteCrumb diagStep
-        newRow.Range.cells(1, 2).NumberFormat = _
-            tbl.DataBodyRange.cells(tbl.ListRows.Count - 1, 2).NumberFormat
+        newRow.Range.ClearFormats
 
-    '--- 5f. Fix Row Formatting (copy number formats from previous row, column by column)
-        ' Avoids clipboard-based PasteSpecial which causes intermittent Excel crashes.
-        ' Table stripe/fill/bold is controlled by the table style, not cell-level formats.
-        Dim fmtCol As Long
         For fmtCol = 1 To tbl.ListColumns.Count
             newRow.Range.Cells(1, fmtCol).NumberFormat = _
-                tbl.DataBodyRange.Cells(tbl.ListRows.Count - 1, fmtCol).NumberFormat
+                templateRow.Cells(1, fmtCol).NumberFormat
         Next fmtCol
 
-    '--- 5g. Sort Logbook by Date
-        diagStep = "Step 5g: Sort Logbook"
+        tbl.TableStyle = tableStyleName
+        tbl.ShowTableStyleRowStripes = True
+        tbl.ShowTableStyleColumnStripes = False
+        tbl.ShowTotals = totalsWereOn
+        totalsStateCaptured = False
+
+    '--- 5f. Sort Logbook by Date
+        diagStep = "Step 5f: Sort Logbook"
         WriteCrumb diagStep
         Application.Calculate
         SortLogbookByDate tbl
@@ -485,6 +501,12 @@ Cleanup:
         Dim errDesc     As String
         errNum = Err.Number
         errDesc = Err.Description
+
+        If totalsStateCaptured Then
+            On Error Resume Next
+            tbl.ShowTotals = totalsWereOn
+            On Error GoTo 0
+        End If
 
         Application.ScreenUpdating = True
         Application.EnableEvents = True
