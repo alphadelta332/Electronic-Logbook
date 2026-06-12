@@ -224,6 +224,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
+    NormalizeLogbookTotalsFormatting masterWb
 
     diagStep = "Updating hidden rows"
     Dim wsLog     As Worksheet
@@ -879,6 +880,52 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
 Fail:
     Application.CutCopyMode = False
     Err.Clear
+End Sub
+
+Private Sub NormalizeLogbookTotalsFormatting(masterWb As Workbook)
+    Dim lo                     As ListObject
+    Dim totalsRange            As Range
+    Dim tableStyleName         As String
+    Dim columnCount            As Long
+    Dim colIndex               As Long
+    Dim numberFormats()        As Variant
+    Dim horizontalAlignments() As Variant
+    Dim verticalAlignments()   As Variant
+    Dim wrapTextValues()       As Variant
+
+    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
+    If Not lo.ShowTotals Then Exit Sub
+
+    Set totalsRange = lo.TotalsRowRange
+    tableStyleName = lo.TableStyle.Name
+    columnCount = lo.ListColumns.Count
+
+    ReDim numberFormats(1 To columnCount)
+    ReDim horizontalAlignments(1 To columnCount)
+    ReDim verticalAlignments(1 To columnCount)
+    ReDim wrapTextValues(1 To columnCount)
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            numberFormats(colIndex) = .NumberFormat
+            horizontalAlignments(colIndex) = .HorizontalAlignment
+            verticalAlignments(colIndex) = .VerticalAlignment
+            wrapTextValues(colIndex) = .WrapText
+        End With
+    Next colIndex
+
+    totalsRange.ClearFormats
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            .NumberFormat = numberFormats(colIndex)
+            .HorizontalAlignment = horizontalAlignments(colIndex)
+            .VerticalAlignment = verticalAlignments(colIndex)
+            .WrapText = wrapTextValues(colIndex)
+        End With
+    Next colIndex
+
+    lo.TableStyle = tableStyleName
 End Sub
 
 ' ==============================================================

@@ -407,6 +407,7 @@ Sub AddToLogbook()
         tbl.ShowTableStyleColumnStripes = False
         tbl.ShowTotals = totalsWereOn
         totalsStateCaptured = False
+        NormalizeLogbookTotalsFormatting tbl
 
     '--- 5f. Sort Logbook by Date
         diagStep = "Step 5f: Sort Logbook"
@@ -525,6 +526,70 @@ Cleanup:
 
         Exit Sub
 
+End Sub
+
+Public Sub NormalizeLogbookTableFormatting()
+    Dim tbl As ListObject
+
+    On Error GoTo Fail
+
+    Application.ScreenUpdating = False
+    Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
+    NormalizeLogbookTotalsFormatting tbl
+    Application.ScreenUpdating = True
+
+    MsgBox "Logbook totals-row formatting has been reset to the selected table style.", _
+           vbInformation, "Logbook Formatting Reset"
+    Exit Sub
+Fail:
+    Application.ScreenUpdating = True
+    MsgBox "The Logbook formatting could not be reset." & vbNewLine & vbNewLine & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Formatting Reset Failed"
+End Sub
+
+Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
+    Dim totalsRange As Range
+    Dim tableStyleName As String
+    Dim columnCount As Long
+    Dim colIndex As Long
+    Dim numberFormats() As Variant
+    Dim horizontalAlignments() As Variant
+    Dim verticalAlignments() As Variant
+    Dim wrapTextValues() As Variant
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set totalsRange = tbl.TotalsRowRange
+    tableStyleName = tbl.TableStyle.Name
+    columnCount = tbl.ListColumns.Count
+
+    ReDim numberFormats(1 To columnCount)
+    ReDim horizontalAlignments(1 To columnCount)
+    ReDim verticalAlignments(1 To columnCount)
+    ReDim wrapTextValues(1 To columnCount)
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            numberFormats(colIndex) = .NumberFormat
+            horizontalAlignments(colIndex) = .HorizontalAlignment
+            verticalAlignments(colIndex) = .VerticalAlignment
+            wrapTextValues(colIndex) = .WrapText
+        End With
+    Next colIndex
+
+    totalsRange.ClearFormats
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            .NumberFormat = numberFormats(colIndex)
+            .HorizontalAlignment = horizontalAlignments(colIndex)
+            .VerticalAlignment = verticalAlignments(colIndex)
+            .WrapText = wrapTextValues(colIndex)
+        End With
+    Next colIndex
+
+    tbl.TableStyle = tableStyleName
 End Sub
 
 Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
