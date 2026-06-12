@@ -1,5 +1,5 @@
 Attribute VB_Name = "modLogbook"
-Public Const ROUTE_DEFINITION_VERSION As Long = 2
+Public Const ROUTE_DEFINITION_VERSION As Long = 3
 
 Sub AddToLogbook()
 
@@ -30,23 +30,27 @@ Sub AddToLogbook()
     Dim todayDate As Date
     Dim entryDate As Date
     Dim diagStep As String
+    Dim ipcDetected As Boolean
     Dim opcDetected As Boolean
     Dim flightReviewDetected As Boolean
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
         Set tbl = wsLog.ListObjects("Logbook")
-        If Not ListColumnExists(tbl, "OPC") Then
-            MsgBox "ERROR: The Logbook table is missing the OPC helper column. Please update the workbook structure before adding entries.", vbCritical
+        If Not ListColumnExists(tbl, "IPC") Or _
+           Not ListColumnExists(tbl, "OPC") Or _
+           Not ListColumnExists(tbl, "FlightReview") Then
+            MsgBox "ERROR: The Logbook table is missing one or more currency helper columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
-        If Not ListColumnExists(tbl, "FlightReview") Then
-            MsgBox "ERROR: The Logbook table is missing the FlightReview helper column. Please update the workbook structure before adding entries.", vbCritical
+        If Not KeywordTableIsValid() Then
+            MsgBox "ERROR: The Keywords table is missing or does not contain the Flight Review, IPC and OPC columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
         todayDate = Range("today").Value
-        opcDetected = (InStr(1, Range("neDetails").Value, "OPC", vbTextCompare) > 0)
-        flightReviewDetected = IsFlightReviewDetails(CStr(Range("neDetails").Value))
+        ipcDetected = KeywordDetected(CStr(Range("neDetails").Value), "IPC")
+        opcDetected = KeywordDetected(CStr(Range("neDetails").Value), "OPC")
+        flightReviewDetected = KeywordDetected(CStr(Range("neDetails").Value), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -226,28 +230,22 @@ Sub AddToLogbook()
             End If
         End If
 
-    '--- 4f. IPC / IR Test / OPC / Flight Review Detection Check
+    '--- 4f. IPC / OPC / Flight Review Detection Check
         If Not suppressWarnings Then
-            If InStr(1, Range("neDetails").Value, "IPC", vbTextCompare) > 0 Or _
-               InStr(1, Range("neDetails").Value, "IR Test", vbTextCompare) > 0 Then
-                response = MsgBox("Note: This entry will be recorded as an IPC. Continue?", vbOKCancel + vbInformation, "IPC Detection")
-                If response = vbCancel Then GoTo Cleanup
-            End If
-
-            If opcDetected Then
+            If ipcDetected Or opcDetected Or flightReviewDetected Then
+                Dim detectionMessage As String
+                detectionMessage = "This entry will be counted as " & _
+                                   DetectedCurrencyItemsText(ipcDetected, opcDetected, flightReviewDetected) & _
+                                   "."
+                If opcDetected Then
+                    detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
+                                       "Only use an OPC keyword if this was a qualifying operator proficiency check covering IFR operations."
+                End If
+                detectionMessage = detectionMessage & vbCrLf & vbCrLf & "Continue?"
                 response = MsgBox( _
-                    "Note: This entry will be recorded as an OPC." & vbCrLf & vbCrLf & _
-                    "Only use OPC if this was a qualifying operator proficiency check covering IFR operations. Continue?", _
+                    detectionMessage, _
                     vbOKCancel + vbInformation, _
-                    "OPC Detection")
-                If response = vbCancel Then GoTo Cleanup
-            End If
-
-            If flightReviewDetected Then
-                response = MsgBox( _
-                    "Note: This entry will be recorded as a Flight Review. Continue?", _
-                    vbOKCancel + vbInformation, _
-                    "Flight Review Detection")
+                    "Currency Detection")
                 If response = vbCancel Then GoTo Cleanup
             End If
         End If
@@ -512,21 +510,98 @@ Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As S
     On Error GoTo 0
 End Function
 
-Private Function IsFlightReviewDetails(ByVal details As String) As Boolean
-    Dim det As String
+Private Function KeywordTableIsValid() As Boolean
+    Dim tblKeywords As ListObject
 
-    det = Replace(details, "|", "")
-    det = Replace(det, "(", "|")
-    det = Replace(det, ")", "|")
-    det = Replace(det, "-", "|")
-    det = Replace(det, ",", "|")
-    det = Replace(det, " ", "|")
-    det = Replace(det, "&", "|")
-    det = "|" & det & "|"
+    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
+    If tblKeywords Is Nothing Then Exit Function
 
-    IsFlightReviewDetails = _
-        (InStr(1, det, "|Flight|Review|", vbTextCompare) > 0) Or _
-        (InStr(1, det, "|FR|", vbTextCompare) > 0)
+    KeywordTableIsValid = _
+        ListColumnExists(tblKeywords, "Flight Review") And _
+        ListColumnExists(tblKeywords, "IPC") And _
+        ListColumnExists(tblKeywords, "OPC")
+End Function
+
+Private Function KeywordDetected(ByVal details As String, ByVal keywordColumn As String) As Boolean
+    Dim tblKeywords As ListObject
+    Dim keywordRange As Range
+    Dim keywordCell As Range
+    Dim normalizedDetails As String
+    Dim normalizedKeyword As String
+
+    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
+    If tblKeywords Is Nothing Then Exit Function
+
+    On Error Resume Next
+    Set keywordRange = tblKeywords.ListColumns(keywordColumn).DataBodyRange
+    On Error GoTo 0
+    If keywordRange Is Nothing Then Exit Function
+
+    normalizedDetails = NormalizeKeywordText(details, True)
+    For Each keywordCell In keywordRange.Cells
+        If Not IsError(keywordCell.Value) Then
+            If Trim$(CStr(keywordCell.Value)) <> "" Then
+                normalizedKeyword = NormalizeKeywordText(CStr(keywordCell.Value))
+                If InStr(1, normalizedDetails, normalizedKeyword, vbBinaryCompare) > 0 Then
+                    KeywordDetected = True
+                    Exit Function
+                End If
+            End If
+        End If
+    Next keywordCell
+End Function
+
+Private Function NormalizeKeywordText(ByVal value As String, _
+                                      Optional ByVal removeSeparator As Boolean = False) As String
+    If removeSeparator Then value = Replace(value, "|", "")
+    value = LCase$(value)
+    value = Replace(value, "(", "|")
+    value = Replace(value, ")", "|")
+    value = Replace(value, "-", "|")
+    value = Replace(value, ",", "|")
+    value = Replace(value, " ", "|")
+    value = Replace(value, "&", "|")
+    NormalizeKeywordText = "|" & value & "|"
+End Function
+
+Private Function DetectedCurrencyItemsText(ByVal ipcDetected As Boolean, _
+                                           ByVal opcDetected As Boolean, _
+                                           ByVal flightReviewDetected As Boolean) As String
+    Dim items(1 To 3) As String
+    Dim itemCount As Long
+
+    If ipcDetected Then
+        itemCount = itemCount + 1
+        items(itemCount) = "an IPC"
+    End If
+    If opcDetected Then
+        itemCount = itemCount + 1
+        items(itemCount) = "an OPC"
+    End If
+    If flightReviewDetected Then
+        itemCount = itemCount + 1
+        items(itemCount) = "a Flight Review"
+    End If
+
+    Select Case itemCount
+        Case 1
+            DetectedCurrencyItemsText = items(1)
+        Case 2
+            DetectedCurrencyItemsText = items(1) & " and " & items(2)
+        Case 3
+            DetectedCurrencyItemsText = items(1) & ", " & items(2) & " and " & items(3)
+    End Select
+End Function
+
+Private Function FindListObject(ByVal wb As Workbook, ByVal tableName As String) As ListObject
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        Set FindListObject = ws.ListObjects(tableName)
+        If Not FindListObject Is Nothing Then Exit Function
+    Next ws
+    On Error GoTo 0
 End Function
 
 Private Sub FixHoursByYearPivotLayout(Optional ByVal wb As Workbook = Nothing)
@@ -1115,8 +1190,35 @@ Private Function IsRouteParserIgnoreToken(ByVal token As String) As Boolean
         Case "IPC", "OPC", "FR", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
             IsRouteParserIgnoreToken = True
         Case Else
-            IsRouteParserIgnoreToken = False
+            IsRouteParserIgnoreToken = KeywordTableContainsToken(token)
     End Select
+End Function
+
+Private Function KeywordTableContainsToken(ByVal token As String) As Boolean
+    Dim tblKeywords As ListObject
+    Dim keywordColumn As ListColumn
+    Dim keywordCell As Range
+    Dim normalizedToken As String
+
+    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
+    If tblKeywords Is Nothing Then Exit Function
+
+    normalizedToken = NormalizeKeywordText(token)
+    For Each keywordColumn In tblKeywords.ListColumns
+        If Not keywordColumn.DataBodyRange Is Nothing Then
+            For Each keywordCell In keywordColumn.DataBodyRange.Cells
+                If Not IsError(keywordCell.Value) Then
+                    If Trim$(CStr(keywordCell.Value)) <> "" Then
+                        If InStr(1, NormalizeKeywordText(CStr(keywordCell.Value)), _
+                                   normalizedToken, vbBinaryCompare) > 0 Then
+                            KeywordTableContainsToken = True
+                            Exit Function
+                        End If
+                    End If
+                End If
+            Next keywordCell
+        End If
+    Next keywordColumn
 End Function
 
 Sub ExportKeplerJSON()
@@ -1694,8 +1796,8 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Dim fReg     As String
     Dim fPIC     As String
     Dim fDetails As String
+    Dim fIpcDetected As String
     Dim fOpcDetected As String
-    Dim fOpcDateSource As String
     Dim fFlightReviewDetected As String
     Dim fRows    As String
     Dim fCrumb   As String
@@ -1704,14 +1806,17 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     fReg     = CStr(Range("neReg").Value)
     fPIC     = CStr(Range("nePIC").Value)
     fDetails = CStr(Range("neDetails").Value)
-    If InStr(1, fDetails, "OPC", vbTextCompare) > 0 Then
+    If KeywordDetected(fDetails, "IPC") Then
+        fIpcDetected = "Yes"
+    Else
+        fIpcDetected = "No"
+    End If
+    If KeywordDetected(fDetails, "OPC") Then
         fOpcDetected = "Yes"
-        fOpcDateSource = "Details keyword"
     Else
         fOpcDetected = "No"
-        fOpcDateSource = ""
     End If
-    If IsFlightReviewDetails(fDetails) Then
+    If KeywordDetected(fDetails, "Flight Review") Then
         fFlightReviewDetected = "Yes"
     Else
         fFlightReviewDetected = "No"
@@ -1756,8 +1861,8 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "Reg          : " & fReg
         Print #fileNum, "PIC          : " & fPIC
         Print #fileNum, "Details      : " & fDetails
+        Print #fileNum, "IPC detected : " & fIpcDetected
         Print #fileNum, "OPC detected : " & fOpcDetected
-        If fOpcDateSource <> "" Then Print #fileNum, "OPC date src : " & fOpcDateSource
         Print #fileNum, "FR detected  : " & fFlightReviewDetected
         Print #fileNum, "Logbook rows : " & fRows
         Print #fileNum, ""

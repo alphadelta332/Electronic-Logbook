@@ -8,6 +8,14 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.3.0] - 2026-06-12
+- Expanded currency and recency tracking, including Flight Review calculations
+- Added a configurable Keywords table for detecting IPC, OPC, and Flight Review entries from the Details field
+- Combined currency-detection confirmations when an entry matches multiple items
+- Preserved user-configured Keywords during automatic updates
+- Prevented configured currency keywords from being interpreted as route data
+- Added IPC, OPC, and Flight Review detection results to debug logs
+
 ### [1.2.1] - 2026-06-01
 - Updated public-repository GitHub requests to retry without authentication when an old workbook contains a stale private-repo token
 - Added a fallback to the public `main` branch when an old workbook still points update checks at `dev`
@@ -88,7 +96,7 @@ Initial release.
 ## Features
 
 - Structured flight data entry with hard and soft validation
-- Automatic currency and recency calculations (passenger carrying, IFR, NVFR, OPC)
+- Automatic currency and recency calculations (passenger carrying, IFR, NVFR, IPC, OPC, and Flight Review)
 - Cumulative and statistical analysis across the full logbook
 - Charts: hours by year, hours by type, hours by registration, hours over time
 - Airport visit tracking with visit counts and base flagging
@@ -168,7 +176,9 @@ Always add entries using the **New Entry** sheet -- do not attempt to add rows m
 
 After an entry is added, the Logbook table is automatically sorted by Date. Depending on your date reset setting, the New Entry date can reset to today or to the day after the entry you just added.
 
-Entering `OPC` in the Details field triggers the `Logbook[OPC]` helper column. This feeds the 61.870 3-month recency exemption and 61.880 proficiency validity logic. Only use `OPC` for a qualifying operator proficiency check that covered IFR operations.
+The Details field is checked against the workbook's **Keywords** table to identify IPC, OPC, and Flight Review entries. Matching entries feed the relevant currency and recency calculations, and the logbook asks for confirmation before saving them. Keywords can be configured to match the terms you normally use.
+
+Only use an OPC keyword for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption and 61.880 proficiency-validity logic.
 
 The entry form includes validation that will warn you of potential errors before saving, including:
 
@@ -236,6 +246,7 @@ The following data is carried across from your existing logbook to the updated v
 | All flight log entries (Year through Circling) | Yes |
 | All other logbook columns (formulas, cumulative totals) | Rebuilt from master |
 | Airport list | Rebuilt from master |
+| IPC, OPC, and Flight Review Keywords | Preserved |
 | Routes table | Preserved where possible; you will be prompted if it needs to be rebuilt |
 | Charts and pivot tables | Rebuilt from master |
 | VBA code | Updated from master |

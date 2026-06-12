@@ -157,6 +157,7 @@ End Function
 ' Data preserved from user:
 '   Logbook[Year] through Logbook[Circling]  (raw flight entries)
 '   Airports[Base]                            (matched by ICAO)
+'   Keywords table                            (user detection terms)
 '   Routes table and route cache state
 '
 ' Everything else comes from the master.
@@ -205,6 +206,9 @@ Private Sub RunUpdate(newVersion As String)
     diagStep = "Copying Logbook data into master"
     UpdateStatus "Copying flight data..."
     InjectLogbookData masterWb
+
+    diagStep = "Copying Keywords data into master"
+    CopyKeywordsData masterWb
 
     diagStep = "Copying Routes data into master"
     UpdateStatus "Copying route cache..."
@@ -527,6 +531,66 @@ Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long
 NextCol:
     Next colIdx
 End Sub
+
+Private Sub CopyKeywordsData(masterWb As Workbook)
+    Dim loSrc      As ListObject
+    Dim loDst      As ListObject
+    Dim srcCol     As ListColumn
+    Dim dstColIdx  As Long
+    Dim sourceRows As Long
+    Dim destRows   As Long
+
+    On Error GoTo Fail
+
+    Set loSrc = FindListObject(ThisWorkbook, "Keywords")
+    Set loDst = FindListObject(masterWb, "Keywords")
+    If loSrc Is Nothing Or loDst Is Nothing Then Exit Sub
+    If loSrc.DataBodyRange Is Nothing Then Exit Sub
+
+    sourceRows = loSrc.DataBodyRange.Rows.Count
+    If loDst.DataBodyRange Is Nothing Then
+        destRows = 0
+    Else
+        destRows = loDst.DataBodyRange.Rows.Count
+    End If
+
+    If destRows = 0 Then
+        loDst.ListRows.Add
+        destRows = 1
+    End If
+
+    If sourceRows > destRows Then
+        loDst.Resize loDst.Range.Resize(sourceRows + 1, loDst.ListColumns.Count)
+    ElseIf sourceRows < destRows Then
+        loDst.DataBodyRange.Rows(sourceRows + 1).Resize(destRows - sourceRows).Delete
+    End If
+
+    For Each srcCol In loSrc.ListColumns
+        dstColIdx = 0
+        On Error Resume Next
+        dstColIdx = loDst.ListColumns(srcCol.Name).Index
+        On Error GoTo Fail
+        If dstColIdx > 0 Then
+            loDst.DataBodyRange.Columns(dstColIdx).Resize(sourceRows, 1).Value = _
+                srcCol.DataBodyRange.Resize(sourceRows, 1).Value
+        End If
+    Next srcCol
+
+    Exit Sub
+Fail:
+    Err.Clear
+End Sub
+
+Private Function FindListObject(ByVal wb As Workbook, ByVal tableName As String) As ListObject
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        Set FindListObject = ws.ListObjects(tableName)
+        If Not FindListObject Is Nothing Then Exit Function
+    Next ws
+    On Error GoTo 0
+End Function
 
 Private Sub CopyRoutesData(masterWb As Workbook)
     Dim loSrc      As ListObject
