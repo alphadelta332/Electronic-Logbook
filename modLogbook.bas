@@ -50,7 +50,8 @@ Sub AddToLogbook()
         todayDate = Range("today").Value
         ipcDetected = KeywordDetected(CStr(Range("neDetails").Value), "IPC")
         opcDetected = KeywordDetected(CStr(Range("neDetails").Value), "OPC")
-        flightReviewDetected = KeywordDetected(CStr(Range("neDetails").Value), "Flight Review")
+        flightReviewDetected = ipcDetected Or _
+                               KeywordDetected(CStr(Range("neDetails").Value), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -1816,7 +1817,7 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Else
         fOpcDetected = "No"
     End If
-    If KeywordDetected(fDetails, "Flight Review") Then
+    If KeywordDetected(fDetails, "IPC") Or KeywordDetected(fDetails, "Flight Review") Then
         fFlightReviewDetected = "Yes"
     Else
         fFlightReviewDetected = "No"

@@ -717,19 +717,23 @@ End Sub
 ' TABLE FORMATTING
 ' ==============================================================
 ' Copies formatting from the user's actual Logbook table into the
-' master, preserving custom cell formatting applied prior to the update.
+' master, preserving custom cell formatting applied prior to the update
+' except for the font family, which always comes from the master.
 ' The multi-row label band above the table is intentionally left as the
 ' master version so structural header fixes ship with updates.
 
 Private Sub CopyTableFormatting(masterWb As Workbook)
-    Dim srcWs  As Worksheet
-    Dim dstWs  As Worksheet
-    Dim srcLo  As ListObject
-    Dim dstLo  As ListObject
-    Dim dstCol As ListColumn
-    Dim srcCol As ListColumn
-    Dim srcRng As Range
-    Dim dstRng As Range
+    Dim srcWs             As Worksheet
+    Dim dstWs             As Worksheet
+    Dim srcLo             As ListObject
+    Dim dstLo             As ListObject
+    Dim dstCol            As ListColumn
+    Dim srcCol            As ListColumn
+    Dim srcRng            As Range
+    Dim dstRng            As Range
+    Dim masterHeaderFont  As String
+    Dim masterDataFont    As String
+    Dim masterTotalsFont  As String
 
     On Error GoTo Fail
 
@@ -737,6 +741,16 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
     Set dstWs = masterWb.Sheets("Logbook")
     Set srcLo = srcWs.ListObjects("Logbook")
     Set dstLo = dstWs.ListObjects("Logbook")
+
+    ' xlPasteFormats also copies the user's old font. Snapshot the master font
+    ' first so workbook-wide typography changes ship with the update.
+    masterHeaderFont = dstLo.HeaderRowRange.Cells(1, 1).Font.Name
+    If Not dstLo.DataBodyRange Is Nothing Then
+        masterDataFont = dstLo.DataBodyRange.Cells(1, 1).Font.Name
+    End If
+    If dstLo.ShowTotals Then
+        masterTotalsFont = dstLo.TotalsRowRange.Cells(1, 1).Font.Name
+    End If
 		
 	' Copy the table style name from user to master
     ' xlPasteFormats does not transfer ListObject.TableStyle
@@ -765,6 +779,14 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
             Application.CutCopyMode = False
         End If
     Next dstCol
+
+    If masterHeaderFont <> "" Then dstLo.HeaderRowRange.Font.Name = masterHeaderFont
+    If Not dstLo.DataBodyRange Is Nothing And masterDataFont <> "" Then
+        dstLo.DataBodyRange.Font.Name = masterDataFont
+    End If
+    If dstLo.ShowTotals And masterTotalsFont <> "" Then
+        dstLo.TotalsRowRange.Font.Name = masterTotalsFont
+    End If
 
     ' CumAzi is a calculated numeric/general column. Reset it explicitly so
     ' a workbook that already inherited a bad date format does not preserve it
@@ -822,6 +844,7 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
     Dim otherCol As Long
     Dim srcRange As Range
     Dim dstRange As Range
+    Dim masterFont As String
 
     On Error GoTo Fail
 
@@ -844,10 +867,14 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
     dstRow = dstLo.TotalsRowRange.Row
     Set dstRange = dstWs.Range(dstWs.Cells(dstRow, regCol), _
                                dstWs.Cells(dstRow + 1, otherCol))
+    If Not dstLo.DataBodyRange Is Nothing Then
+        masterFont = dstLo.DataBodyRange.Cells(1, 1).Font.Name
+    End If
 
     srcRange.Copy
     dstRange.PasteSpecial xlPasteFormats
     Application.CutCopyMode = False
+    If masterFont <> "" Then dstRange.Font.Name = masterFont
     Exit Sub
 Fail:
     Application.CutCopyMode = False
