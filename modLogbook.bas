@@ -407,7 +407,7 @@ Sub AddToLogbook()
         tbl.ShowTableStyleColumnStripes = False
         tbl.ShowTotals = totalsWereOn
         totalsStateCaptured = False
-        NormalizeLogbookTotalsFormatting tbl
+        NormalizeLogbookFormatting tbl
 
     '--- 5f. Sort Logbook by Date
         diagStep = "Step 5f: Sort Logbook"
@@ -528,24 +528,92 @@ Cleanup:
 
 End Sub
 
-Public Sub NormalizeLogbookTableFormatting()
+Public Sub NormalizeLogbookTableFormatting(Optional ByVal showConfirmation As Boolean = True)
     Dim tbl As ListObject
 
     On Error GoTo Fail
 
     Application.ScreenUpdating = False
     Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
-    NormalizeLogbookTotalsFormatting tbl
+    NormalizeLogbookFormatting tbl
     Application.ScreenUpdating = True
 
-    MsgBox "Logbook totals-row formatting has been reset to the selected table style.", _
-           vbInformation, "Logbook Formatting Reset"
+    If showConfirmation Then
+        MsgBox "Logbook table formatting has been reset to the selected table style.", _
+               vbInformation, "Logbook Formatting Reset"
+    End If
     Exit Sub
 Fail:
     Application.ScreenUpdating = True
     MsgBox "The Logbook formatting could not be reset." & vbNewLine & vbNewLine & _
            "Error " & Err.Number & ": " & Err.Description, _
            vbCritical, "Formatting Reset Failed"
+End Sub
+
+Private Sub NormalizeLogbookFormatting(ByVal tbl As ListObject)
+    NormalizeLogbookDataBorders tbl
+    NormalizeLogbookTotalsFormatting tbl
+    ApplyLogbookTotalsFormatting tbl
+End Sub
+
+Private Sub NormalizeLogbookDataBorders(ByVal tbl As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+    Dim leftLineStyle() As Variant
+    Dim leftWeight() As Variant
+    Dim leftColor() As Variant
+    Dim rightLineStyle() As Variant
+    Dim rightWeight() As Variant
+    Dim rightColor() As Variant
+
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = tbl.DataBodyRange.Rows(1)
+    ReDim leftLineStyle(1 To tbl.ListColumns.Count)
+    ReDim leftWeight(1 To tbl.ListColumns.Count)
+    ReDim leftColor(1 To tbl.ListColumns.Count)
+    ReDim rightLineStyle(1 To tbl.ListColumns.Count)
+    ReDim rightWeight(1 To tbl.ListColumns.Count)
+    ReDim rightColor(1 To tbl.ListColumns.Count)
+
+    For colIndex = 1 To tbl.ListColumns.Count
+        With templateRow.Cells(1, colIndex).Borders(xlEdgeLeft)
+            leftLineStyle(colIndex) = .LineStyle
+            leftWeight(colIndex) = .Weight
+            leftColor(colIndex) = .Color
+        End With
+        With templateRow.Cells(1, colIndex).Borders(xlEdgeRight)
+            rightLineStyle(colIndex) = .LineStyle
+            rightWeight(colIndex) = .Weight
+            rightColor(colIndex) = .Color
+        End With
+    Next colIndex
+
+    tbl.DataBodyRange.Borders.LineStyle = xlNone
+
+    For colIndex = 1 To tbl.ListColumns.Count
+        Set dataColumn = tbl.DataBodyRange.Columns(colIndex)
+        If leftLineStyle(colIndex) <> xlNone Then
+            SetBorderFormat dataColumn.Borders(xlEdgeLeft), _
+                            leftLineStyle(colIndex), leftWeight(colIndex), leftColor(colIndex)
+        End If
+        If rightLineStyle(colIndex) <> xlNone Then
+            SetBorderFormat dataColumn.Borders(xlEdgeRight), _
+                            rightLineStyle(colIndex), rightWeight(colIndex), rightColor(colIndex)
+        End If
+    Next colIndex
+End Sub
+
+Private Sub SetBorderFormat(ByVal targetBorder As Border, _
+                            ByVal lineStyle As Variant, _
+                            ByVal weight As Variant, _
+                            ByVal color As Variant)
+    targetBorder.LineStyle = lineStyle
+    If lineStyle <> xlNone Then
+        targetBorder.Weight = weight
+        targetBorder.Color = color
+    End If
 End Sub
 
 Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
@@ -590,6 +658,48 @@ Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
     Next colIndex
 
     tbl.TableStyle = tableStyleName
+End Sub
+
+Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
+    Dim ws As Worksheet
+    Dim totalsBlock As Range
+    Dim topRow As Range
+    Dim bottomRow As Range
+    Dim nameFormula As String
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set ws = tbl.Parent
+    Set totalsBlock = ws.Range(ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Reg").Range.Column), _
+                               ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
+    Set topRow = totalsBlock.Rows(1)
+    Set bottomRow = totalsBlock.Rows(2)
+
+    nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
+    On Error Resume Next
+    ThisWorkbook.Names("LogbookTotals").RefersTo = nameFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        ThisWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
+    End If
+    On Error GoTo 0
+
+    topRow.Interior.Pattern = xlNone
+    topRow.Font.Color = vbBlack
+    topRow.Font.Bold = False
+    topRow.Cells(1, 3).Font.Bold = True
+
+    bottomRow.Interior.Pattern = xlSolid
+    bottomRow.Interior.Color = RGB(231, 230, 230)
+    bottomRow.Font.Color = vbBlack
+    bottomRow.Font.Bold = True
+
+    totalsBlock.Borders.LineStyle = xlNone
+    SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
 End Sub
 
 Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
