@@ -156,6 +156,7 @@ End Function
 '
 ' Data preserved from user:
 '   Logbook[Year] through Logbook[Circling]  (raw flight entries)
+'   Logbook[CurrencyExclusions]               (currency detection opt-outs)
 '   Airports[Base]                            (matched by ICAO)
 '   Keywords table                            (user detection terms)
 '   Routes table and route cache state
@@ -480,7 +481,8 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     Dim srcCol    As ListColumn
     Dim dstColIdx As Long
     For Each srcCol In loSrc.ListColumns
-        If srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd Then
+        If (srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd) Or _
+           srcCol.Name = "CurrencyExclusions" Then
             On Error Resume Next
             dstColIdx = loDst.ListColumns(srcCol.Name).Index
             If Err.Number = 0 Then

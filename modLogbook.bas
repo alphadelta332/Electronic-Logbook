@@ -33,6 +33,7 @@ Sub AddToLogbook()
     Dim ipcDetected As Boolean
     Dim opcDetected As Boolean
     Dim flightReviewDetected As Boolean
+    Dim currencyExcluded As Boolean
     Dim totalsWereOn As Boolean
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
@@ -42,7 +43,8 @@ Sub AddToLogbook()
         Set tbl = wsLog.ListObjects("Logbook")
         If Not ListColumnExists(tbl, "IPC") Or _
            Not ListColumnExists(tbl, "OPC") Or _
-           Not ListColumnExists(tbl, "FlightReview") Then
+           Not ListColumnExists(tbl, "FlightReview") Or _
+           Not ListColumnExists(tbl, "CurrencyExclusions") Then
             MsgBox "ERROR: The Logbook table is missing one or more currency helper columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
@@ -245,18 +247,22 @@ Sub AddToLogbook()
                     detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
                                        "Only use an OPC keyword if this was a qualifying operator proficiency check covering IFR operations."
                 End If
-                detectionMessage = detectionMessage & vbCrLf & vbCrLf & "Continue?"
+                detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
+                                   "Yes: save and count the detected currency items." & vbCrLf & _
+                                   "No: save without counting them." & vbCrLf & _
+                                   "Cancel: return to the entry form."
                 response = MsgBox( _
                     detectionMessage, _
-                    vbOKCancel + vbInformation, _
+                    vbYesNoCancel + vbInformation, _
                     "Currency Detection")
                 If response = vbCancel Then GoTo Cleanup
+                If response = vbNo Then currencyExcluded = True
             End If
         End If
 
     '--- 4g. OPC Without Instrument Hours / Approaches Check
         If Not suppressWarnings Then
-            If opcDetected Then
+            If opcDetected And Not currencyExcluded Then
                 If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
                    (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") And _
                    Application.WorksheetFunction.CountIf(Range("neILS", "neCircling"), ">0") = 0 Then
@@ -387,13 +393,19 @@ Sub AddToLogbook()
         dataCols = Range("neType", "neCircling").Columns.Count
         newRow.Range.cells(1, 5).Resize(1, dataCols).Value = Range("neType", "neCircling").Value
 
-    '--- 5d. Fix Month Formatting (always Proper Case e.g. Mar)
+    '--- 5d. Record Currency Detection Exclusion
+        With newRow.Range.Cells(1, tbl.ListColumns("CurrencyExclusions").Index)
+            .ClearContents
+            If currencyExcluded Then .Value = True
+        End With
+
+    '--- 5e. Fix Month Formatting (always Proper Case e.g. Mar)
         If VarType(newRow.Range.cells(1, 3).Value) = vbString Then
             newRow.Range.cells(1, 3).Value = StrConv(newRow.Range.cells(1, 3).Value, vbProperCase)
         End If
 
-    '--- 5e. Remove formats inherited by row insertion and formula FillDown
-        diagStep = "Step 5e: Format Row"
+    '--- 5f. Remove formats inherited by row insertion and formula FillDown
+        diagStep = "Step 5f: Format Row"
         WriteCrumb diagStep
         newRow.Range.ClearFormats
 
@@ -413,8 +425,8 @@ Sub AddToLogbook()
         totalsStateCaptured = False
         NormalizeLogbookFormatting tbl
 
-    '--- 5f. Sort Logbook by Date
-        diagStep = "Step 5f: Sort Logbook"
+    '--- 5g. Sort Logbook by Date
+        diagStep = "Step 5g: Sort Logbook"
         WriteCrumb diagStep
         Application.Calculate
         SortLogbookByDate tbl
