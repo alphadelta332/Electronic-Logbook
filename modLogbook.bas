@@ -619,6 +619,8 @@ End Sub
 Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim totalsRange As Range
     Dim tableStyleName As String
+    Dim tableFontName As String
+    Dim tableFontSize As Double
     Dim columnCount As Long
     Dim colIndex As Long
     Dim numberFormats() As Variant
@@ -630,6 +632,8 @@ Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
 
     Set totalsRange = tbl.TotalsRowRange
     tableStyleName = tbl.TableStyle.Name
+    tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
+    tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
     columnCount = tbl.ListColumns.Count
 
     ReDim numberFormats(1 To columnCount)
@@ -658,6 +662,8 @@ Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
     Next colIndex
 
     tbl.TableStyle = tableStyleName
+    totalsRange.Font.Name = tableFontName
+    totalsRange.Font.Size = tableFontSize
 End Sub
 
 Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
@@ -666,6 +672,9 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim topRow As Range
     Dim bottomRow As Range
     Dim nameFormula As String
+    Dim tableFontName As String
+    Dim tableFontSize As Double
+    Dim bandedRowColor As Long
 
     If Not tbl.ShowTotals Then Exit Sub
 
@@ -674,6 +683,9 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
                                ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
     Set topRow = totalsBlock.Rows(1)
     Set bottomRow = totalsBlock.Rows(2)
+    tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
+    tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
+    bandedRowColor = tbl.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
@@ -690,11 +702,14 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     topRow.Cells(1, 3).Font.Bold = True
 
     bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = RGB(231, 230, 230)
+    bottomRow.Interior.Color = bandedRowColor
     bottomRow.Font.Color = vbBlack
     bottomRow.Font.Bold = True
+    totalsBlock.Font.Name = tableFontName
+    totalsBlock.Font.Size = tableFontSize
 
     totalsBlock.Borders.LineStyle = xlNone
+    SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
