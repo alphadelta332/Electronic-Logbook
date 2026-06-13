@@ -21,6 +21,7 @@ if ([string]::IsNullOrWhiteSpace($WorkbookPath)) {
 }
 
 $standardModules = @("modBoot.bas", "modLogbook.bas")
+$userForms = @("frmVerifyCurrency.frm")
 if ($IncludeModUpdate) {
     $standardModules += "modUpdate.bas"
 }
@@ -31,11 +32,40 @@ if (-not $IncludeModUpdate) {
     Write-Host "modUpdate.bas is not embedded by default; modBoot downloads it at runtime." -ForegroundColor Yellow
 }
 
+# Excel caches removed UserForm component names until the workbook closes.
+# Remove forms in a separate save/close pass so they re-import as forms, not standard modules.
 Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     param($Workbook)
 
     Assert-VbaProjectAccess -Workbook $Workbook
     $components = $Workbook.VBProject.VBComponents
+
+    foreach ($formFile in $userForms) {
+        $formName = [System.IO.Path]::GetFileNameWithoutExtension($formFile)
+        try {
+            $existing = $components.Item($formName)
+            $components.Remove($existing)
+            Write-Host "  Removed existing $formName before UserForm import"
+        } catch {}
+    }
+}
+
+Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
+    param($Workbook)
+
+    Assert-VbaProjectAccess -Workbook $Workbook
+    $components = $Workbook.VBProject.VBComponents
+
+    foreach ($formFile in $userForms) {
+        $formPath = Join-Path $repoRoot $formFile
+        if (-not (Test-Path $formPath)) {
+            throw "VBA UserForm source not found: $formPath"
+        }
+
+        $formName = [System.IO.Path]::GetFileNameWithoutExtension($formFile)
+        $components.Import($formPath) | Out-Null
+        Write-Host "  Imported $formFile"
+    }
 
     foreach ($moduleFile in $standardModules) {
         $modulePath = Join-Path $repoRoot $moduleFile

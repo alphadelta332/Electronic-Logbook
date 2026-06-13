@@ -2239,6 +2239,135 @@ Public Sub RefreshSuppressWarningsButton()
     End If
 End Sub
 
+Public Sub VerifyCurrencyChecks()
+    Dim entryCount As Long
+
+    Load frmVerifyCurrency
+    entryCount = PopulateCurrencyVerificationList(frmVerifyCurrency.lstEntries)
+
+    If entryCount = 0 Then
+        Unload frmVerifyCurrency
+        MsgBox "No detected Flight Reviews, IPCs, or OPCs were found in the past 25 months.", _
+               vbInformation, "Verify Flight Reviews, IPCs, and OPCs"
+        Exit Sub
+    End If
+
+    frmVerifyCurrency.Show
+End Sub
+
+Public Sub ConfigureCurrencyVerificationList(ByVal targetList As Object)
+    With targetList
+        .Clear
+        .ColumnCount = 6
+        .ColumnWidths = "0 pt;65 pt;220 pt;28 pt;28 pt;28 pt"
+        .MultiSelect = fmMultiSelectMulti
+    End With
+End Sub
+
+Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As Long
+    Dim tbl As ListObject
+    Dim cutoffDate As Date
+    Dim rowIndex As Long
+    Dim entryDate As Variant
+    Dim flightReviewValue As Variant
+    Dim ipcValue As Variant
+    Dim opcValue As Variant
+
+    ConfigureCurrencyVerificationList targetList
+    Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
+    cutoffDate = DateAdd("m", -25, CDate(Range("today").Value))
+
+    For rowIndex = tbl.ListRows.Count To 1 Step -1
+        entryDate = tbl.ListColumns("Date").DataBodyRange.Cells(rowIndex, 1).Value
+        flightReviewValue = tbl.ListColumns("FlightReview").DataBodyRange.Cells(rowIndex, 1).Value
+        ipcValue = tbl.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value
+        opcValue = tbl.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value
+
+        If IsDate(entryDate) Then
+            If CDate(entryDate) >= cutoffDate And _
+               (CurrencyCheckValueIsMarked(flightReviewValue) Or _
+                CurrencyCheckValueIsMarked(ipcValue) Or _
+                CurrencyCheckValueIsMarked(opcValue)) Then
+                targetList.AddItem CStr(rowIndex)
+                targetList.List(targetList.ListCount - 1, 1) = Format$(CDate(entryDate), "dd mmm yyyy")
+                targetList.List(targetList.ListCount - 1, 2) = _
+                    CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value)
+                targetList.List(targetList.ListCount - 1, 3) = CurrencyCheckMarker(flightReviewValue)
+                targetList.List(targetList.ListCount - 1, 4) = CurrencyCheckMarker(ipcValue)
+                targetList.List(targetList.ListCount - 1, 5) = CurrencyCheckMarker(opcValue)
+            End If
+        End If
+    Next rowIndex
+
+    PopulateCurrencyVerificationList = targetList.ListCount
+End Function
+
+Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Boolean
+    Dim tbl As ListObject
+    Dim selectedCount As Long
+    Dim itemIndex As Long
+    Dim rowIndex As Long
+    Dim response As VbMsgBoxResult
+
+    For itemIndex = 0 To targetList.ListCount - 1
+        If targetList.Selected(itemIndex) Then selectedCount = selectedCount + 1
+    Next itemIndex
+
+    If selectedCount = 0 Then
+        MsgBox "Select at least one entry to exclude.", _
+               vbInformation, "Verify Flight Reviews, IPCs, and OPCs"
+        Exit Function
+    End If
+
+    response = MsgBox( _
+        "Exclude " & selectedCount & " selected " & _
+        IIf(selectedCount = 1, "entry", "entries") & _
+        " from Flight Review, IPC, and OPC detection?" & vbCrLf & vbCrLf & _
+        "The original logbook details will not be changed.", _
+        vbOKCancel + vbExclamation, _
+        "Confirm Currency Exclusions")
+    If response <> vbOK Then Exit Function
+
+    On Error GoTo Fail
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
+    For itemIndex = 0 To targetList.ListCount - 1
+        If targetList.Selected(itemIndex) Then
+            rowIndex = CLng(targetList.List(itemIndex, 0))
+            tbl.ListColumns("CurrencyExclusions").DataBodyRange.Cells(rowIndex, 1).Value = True
+        End If
+    Next itemIndex
+
+    Application.Calculate
+    ThisWorkbook.Save
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox selectedCount & " " & IIf(selectedCount = 1, "entry was", "entries were") & _
+           " excluded from currency detection.", _
+           vbInformation, "Currency Exclusions Applied"
+    ExcludeSelectedCurrencyEntries = True
+    Exit Function
+
+Fail:
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    MsgBox "The selected currency exclusions could not be applied." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Currency Exclusion Error"
+End Function
+
+Private Function CurrencyCheckValueIsMarked(ByVal value As Variant) As Boolean
+    If IsError(value) Then Exit Function
+    CurrencyCheckValueIsMarked = Trim$(CStr(value)) <> ""
+End Function
+
+Private Function CurrencyCheckMarker(ByVal value As Variant) As String
+    If CurrencyCheckValueIsMarked(value) Then CurrencyCheckMarker = "X"
+End Function
+
 ' ==============================================================
 ' PATH UTILITIES
 ' ==============================================================
