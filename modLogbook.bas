@@ -2304,28 +2304,42 @@ Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As 
 End Function
 
 Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal entryCount As Long)
+    Const DATE_WIDTH As Long = 65
+    Const MARKER_WIDTH As Long = 28
+    Const LIST_TEXT_INSET As Long = 6
+    Const LIST_EXTRA_WIDTH As Long = 20
+    Const FORM_EXTRA_WIDTH As Long = 39
     Dim listHeight As Double
+    Dim detailsWidth As Long
+    Dim listWidth As Long
 
     listHeight = CurrencyVerificationListHeight(entryCount)
+    detailsWidth = CurrencyVerificationDetailsWidth(targetForm, targetForm.lstEntries)
+    listWidth = DATE_WIDTH + detailsWidth + (3 * MARKER_WIDTH) + LIST_EXTRA_WIDTH
 
     With targetForm
         .ScrollBars = fmScrollBarsNone
         .KeepScrollBarsVisible = fmScrollBarsNone
-        .Width = 430
+        .Width = listWidth + FORM_EXTRA_WIDTH
         .Height = .lstEntries.Top + listHeight + .cmdExclude.Height + 58
         .lblInstructions.Caption = _
             "The following entries have been marked as a Flight Review, IPC, or OPC. " & _
             "Select any entries that should not count."
-        .lblInstructions.Width = 391
+        .lblInstructions.Width = listWidth
         .lstEntries.IntegralHeight = False
         .lstEntries.Left = 12
-        .lstEntries.Width = 391
+        .lstEntries.Width = listWidth
         .lstEntries.Height = listHeight
-        .lblDate.Left = 14
-        .lblDetails.Left = 79
-        .lblFR.Left = 317
-        .lblIPC.Left = 345
-        .lblOPC.Left = 373
+        .lstEntries.ColumnWidths = _
+            "0 pt;" & DATE_WIDTH & " pt;" & detailsWidth & " pt;" & _
+            MARKER_WIDTH & " pt;" & MARKER_WIDTH & " pt;" & MARKER_WIDTH & " pt"
+        .lblDate.Left = .lstEntries.Left + LIST_TEXT_INSET
+        .lblDetails.Left = .lstEntries.Left + DATE_WIDTH + LIST_TEXT_INSET
+        .lblFR.Left = .lstEntries.Left + DATE_WIDTH + detailsWidth + LIST_TEXT_INSET
+        .lblIPC.Left = .lblFR.Left + MARKER_WIDTH
+        .lblOPC.Left = .lblIPC.Left + MARKER_WIDTH
+        .lblDate.Width = DATE_WIDTH - LIST_TEXT_INSET
+        .lblDetails.Width = detailsWidth - LIST_TEXT_INSET
         .lblFR.Width = 28
         .lblIPC.Width = 28
         .lblOPC.Width = 28
@@ -2334,10 +2348,45 @@ Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal 
         .lblOPC.TextAlign = fmTextAlignLeft
         .cmdExclude.Top = .lstEntries.Top + listHeight + 12
         .cmdCancel.Top = .cmdExclude.Top
-        .cmdExclude.Left = 238
-        .cmdCancel.Left = 348
+        .cmdCancel.Left = .lstEntries.Left + .lstEntries.Width - .cmdCancel.Width
+        .cmdExclude.Left = .cmdCancel.Left - .cmdExclude.Width - 8
     End With
 End Sub
+
+Private Function CurrencyVerificationDetailsWidth(ByVal targetForm As Object, _
+                                                  ByVal targetList As Object) As Long
+    Const MIN_DETAILS_WIDTH As Long = 100
+    Const MAX_DETAILS_WIDTH As Long = 260
+    Const TEXT_PADDING As Long = 10
+    Dim originalCaption As String
+    Dim originalAutoSize As Boolean
+    Dim measuredWidth As Double
+    Dim itemIndex As Long
+
+    With targetForm.lblDetails
+        originalCaption = .Caption
+        originalAutoSize = .AutoSize
+        .AutoSize = True
+
+        For itemIndex = -1 To targetList.ListCount - 1
+            If itemIndex = -1 Then
+                .Caption = originalCaption
+            Else
+                .Caption = CStr(targetList.List(itemIndex, 2))
+            End If
+            If .Width > measuredWidth Then measuredWidth = .Width
+        Next itemIndex
+
+        .Caption = originalCaption
+        .AutoSize = originalAutoSize
+    End With
+
+    CurrencyVerificationDetailsWidth = CLng(measuredWidth + TEXT_PADDING)
+    If CurrencyVerificationDetailsWidth < MIN_DETAILS_WIDTH Then _
+        CurrencyVerificationDetailsWidth = MIN_DETAILS_WIDTH
+    If CurrencyVerificationDetailsWidth > MAX_DETAILS_WIDTH Then _
+        CurrencyVerificationDetailsWidth = MAX_DETAILS_WIDTH
+End Function
 
 Private Function CurrencyVerificationListHeight(ByVal entryCount As Long) As Double
     CurrencyVerificationListHeight = 8 + (entryCount * 12)
