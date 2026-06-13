@@ -745,14 +745,17 @@ Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
 End Sub
 
 Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
+    Const MASTER_TOTALS_FILL_COLOR As Long = 14277081
     Dim ws As Worksheet
     Dim totalsBlock As Range
     Dim topRow As Range
     Dim bottomRow As Range
+    Dim labelCells As Range
+    Dim hoursCells As Range
+    Dim cellLeftOfBlock As Range
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
-    Dim bandedRowColor As Long
 
     If Not tbl.ShowTotals Then Exit Sub
 
@@ -761,9 +764,11 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
                                ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
     Set topRow = totalsBlock.Rows(1)
     Set bottomRow = totalsBlock.Rows(2)
+    Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
+    Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
+    Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
     tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
-    bandedRowColor = tbl.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
@@ -780,11 +785,18 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     topRow.Cells(1, 3).Font.Bold = True
 
     bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = bandedRowColor
+    bottomRow.Interior.Color = MASTER_TOTALS_FILL_COLOR
     bottomRow.Font.Color = vbBlack
     bottomRow.Font.Bold = True
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
+
+    labelCells.HorizontalAlignment = xlRight
+    labelCells.WrapText = False
+    hoursCells.HorizontalAlignment = xlCenter
+    hoursCells.VerticalAlignment = xlCenter
+    hoursCells.WrapText = False
+    bottomRow.Cells(1, 3).NumberFormat = topRow.Cells(1, 3).NumberFormat
 
     totalsBlock.Borders.LineStyle = xlNone
     SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
@@ -793,6 +805,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
+    cellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
 
 Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
@@ -2309,6 +2322,9 @@ Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal 
     Const LIST_TEXT_INSET As Long = 6
     Const LIST_EXTRA_WIDTH As Long = 20
     Const FORM_EXTRA_WIDTH As Long = 39
+    Const INSTRUCTIONS_HEIGHT As Long = 30
+    Const HEADER_GAP As Long = 6
+    Const LIST_GAP As Long = 3
     Dim listHeight As Double
     Dim detailsWidth As Long
     Dim listWidth As Long
@@ -2321,13 +2337,19 @@ Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal 
         .ScrollBars = fmScrollBarsNone
         .KeepScrollBarsVisible = fmScrollBarsNone
         .Width = listWidth + FORM_EXTRA_WIDTH
-        .Height = .lstEntries.Top + listHeight + .cmdExclude.Height + 58
         .lblInstructions.Caption = _
             "The following entries have been marked as a Flight Review, IPC, or OPC. " & _
             "Select any entries that should not count."
         .lblInstructions.Width = listWidth
+        .lblInstructions.Height = INSTRUCTIONS_HEIGHT
+        .lblDate.Top = .lblInstructions.Top + .lblInstructions.Height + HEADER_GAP
+        .lblDetails.Top = .lblDate.Top
+        .lblFR.Top = .lblDate.Top
+        .lblIPC.Top = .lblDate.Top
+        .lblOPC.Top = .lblDate.Top
         .lstEntries.IntegralHeight = False
         .lstEntries.Left = 12
+        .lstEntries.Top = .lblDate.Top + .lblDate.Height + LIST_GAP
         .lstEntries.Width = listWidth
         .lstEntries.Height = listHeight
         .lstEntries.ColumnWidths = _
@@ -2350,6 +2372,7 @@ Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal 
         .cmdCancel.Top = .cmdExclude.Top
         .cmdCancel.Left = .lstEntries.Left + .lstEntries.Width - .cmdCancel.Width
         .cmdExclude.Left = .cmdCancel.Left - .cmdExclude.Width - 8
+        .Height = .cmdExclude.Top + .cmdExclude.Height + 39
     End With
 End Sub
 

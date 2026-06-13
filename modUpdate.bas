@@ -1030,14 +1030,17 @@ Private Sub NormalizeLogbookTotalsFormatting(lo As ListObject)
 End Sub
 
 Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
+    Const MASTER_TOTALS_FILL_COLOR As Long = 14277081
     Dim ws As Worksheet
     Dim totalsBlock As Range
     Dim topRow As Range
     Dim bottomRow As Range
+    Dim labelCells As Range
+    Dim hoursCells As Range
+    Dim cellLeftOfBlock As Range
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
-    Dim bandedRowColor As Long
 
     If Not lo.ShowTotals Then Exit Sub
 
@@ -1046,9 +1049,11 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
                                ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
     Set topRow = totalsBlock.Rows(1)
     Set bottomRow = totalsBlock.Rows(2)
+    Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
+    Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
+    Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
     tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
-    bandedRowColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
@@ -1065,11 +1070,18 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     topRow.Cells(1, 3).Font.Bold = True
 
     bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = bandedRowColor
+    bottomRow.Interior.Color = MASTER_TOTALS_FILL_COLOR
     bottomRow.Font.Color = vbBlack
     bottomRow.Font.Bold = True
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
+
+    labelCells.HorizontalAlignment = xlRight
+    labelCells.WrapText = False
+    hoursCells.HorizontalAlignment = xlCenter
+    hoursCells.VerticalAlignment = xlCenter
+    hoursCells.WrapText = False
+    bottomRow.Cells(1, 3).NumberFormat = topRow.Cells(1, 3).NumberFormat
 
     totalsBlock.Borders.LineStyle = xlNone
     SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
@@ -1078,6 +1090,7 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
+    cellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
 
 ' ==============================================================
