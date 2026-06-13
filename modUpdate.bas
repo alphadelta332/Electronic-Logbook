@@ -1034,6 +1034,7 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     Dim totalsBlock As Range
     Dim topRow As Range
     Dim bottomRow As Range
+    Dim adjacentBottomCell As Range
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
@@ -1046,6 +1047,7 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
                                ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
     Set topRow = totalsBlock.Rows(1)
     Set bottomRow = totalsBlock.Rows(2)
+    Set adjacentBottomCell = ws.Cells(bottomRow.Row, totalsBlock.Column - 1)
     tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
     bandedRowColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
@@ -1068,10 +1070,13 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     bottomRow.Interior.Color = bandedRowColor
     bottomRow.Font.Color = vbBlack
     bottomRow.Font.Bold = True
+    totalsBlock.HorizontalAlignment = xlRight
+    totalsBlock.WrapText = False
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
 
     totalsBlock.Borders.LineStyle = xlNone
+    adjacentBottomCell.Borders.LineStyle = xlNone
     SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack

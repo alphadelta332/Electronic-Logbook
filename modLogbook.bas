@@ -749,6 +749,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim totalsBlock As Range
     Dim topRow As Range
     Dim bottomRow As Range
+    Dim adjacentBottomCell As Range
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
@@ -761,6 +762,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
                                ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
     Set topRow = totalsBlock.Rows(1)
     Set bottomRow = totalsBlock.Rows(2)
+    Set adjacentBottomCell = ws.Cells(bottomRow.Row, totalsBlock.Column - 1)
     tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
     bandedRowColor = tbl.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
@@ -783,10 +785,13 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     bottomRow.Interior.Color = bandedRowColor
     bottomRow.Font.Color = vbBlack
     bottomRow.Font.Bold = True
+    totalsBlock.HorizontalAlignment = xlRight
+    totalsBlock.WrapText = False
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
 
     totalsBlock.Borders.LineStyle = xlNone
+    adjacentBottomCell.Borders.LineStyle = xlNone
     SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
@@ -2299,7 +2304,47 @@ Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As 
         End If
     Next rowIndex
 
+    ConfigureCurrencyVerificationForm targetList.Parent, targetList.ListCount
+    targetList.IntegralHeight = False
+    targetList.Width = 371
+    targetList.Height = CurrencyVerificationListHeight(targetList.ListCount)
     PopulateCurrencyVerificationList = targetList.ListCount
+End Function
+
+Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal entryCount As Long)
+    Dim listHeight As Double
+
+    listHeight = CurrencyVerificationListHeight(entryCount)
+
+    With targetForm
+        .Width = 410
+        .lstEntries.IntegralHeight = False
+        .lstEntries.Left = 12
+        .lstEntries.Width = 371
+        .lstEntries.Height = listHeight
+        .lblDate.Left = 14
+        .lblDetails.Left = 79
+        .lblFR.Left = 297
+        .lblIPC.Left = 325
+        .lblOPC.Left = 353
+        .lblFR.Width = 28
+        .lblIPC.Width = 28
+        .lblOPC.Width = 28
+        .lblFR.TextAlign = fmTextAlignLeft
+        .lblIPC.TextAlign = fmTextAlignLeft
+        .lblOPC.TextAlign = fmTextAlignLeft
+        .cmdExclude.Top = .lstEntries.Top + listHeight + 12
+        .cmdCancel.Top = .cmdExclude.Top
+        .cmdExclude.Left = 218
+        .cmdCancel.Left = 328
+        .Height = .cmdExclude.Top + .cmdExclude.Height + 34
+    End With
+End Sub
+
+Private Function CurrencyVerificationListHeight(ByVal entryCount As Long) As Double
+    CurrencyVerificationListHeight = 8 + (entryCount * 12)
+    If CurrencyVerificationListHeight < 80 Then CurrencyVerificationListHeight = 80
+    If CurrencyVerificationListHeight > 260 Then CurrencyVerificationListHeight = 260
 End Function
 
 Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Boolean
