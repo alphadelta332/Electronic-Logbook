@@ -52,6 +52,7 @@ Sub AddToLogbook()
             MsgBox "ERROR: The Keywords table is missing or does not contain the Flight Review, IPC and OPC columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
+        RefreshTodayValue
         todayDate = Range("today").Value
         ipcDetected = KeywordDetected(CStr(Range("neDetails").Value), "IPC")
         opcDetected = KeywordDetected(CStr(Range("neDetails").Value), "OPC")
@@ -543,6 +544,22 @@ Cleanup:
         Exit Sub
 
 End Sub
+
+Public Function RefreshTodayValue() As Boolean
+    On Error GoTo CleanExit
+
+    Dim todayCell As Range
+    Set todayCell = ThisWorkbook.Names("today").RefersToRange
+
+    If todayCell.HasFormula Or _
+       Not IsDate(todayCell.Value) Or _
+       CLng(CDate(todayCell.Value)) <> CLng(Date) Then
+        todayCell.Value = Date
+        RefreshTodayValue = True
+    End If
+
+CleanExit:
+End Function
 
 Private Sub ApplyLogbookCellDataFormatting(ByVal targetCell As Range, _
                                            ByVal templateCell As Range)
