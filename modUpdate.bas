@@ -890,7 +890,6 @@ Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
     Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
     NormalizeLogbookDataFormatting lo
     NormalizeLogbookDataBorders lo
-    NormalizeLogbookTotalsFormatting lo
     ApplyLogbookTotalsFormatting masterWb, lo
 End Sub
 
@@ -929,6 +928,9 @@ Private Sub NormalizeLogbookDataBorders(lo As ListObject)
     Dim rightLineStyle() As Variant
     Dim rightWeight() As Variant
     Dim rightColor() As Variant
+    Dim totalsTopLineStyle() As Variant
+    Dim totalsTopWeight() As Variant
+    Dim totalsTopColor() As Variant
 
     If lo.DataBodyRange Is Nothing Then Exit Sub
 
@@ -939,6 +941,9 @@ Private Sub NormalizeLogbookDataBorders(lo As ListObject)
     ReDim rightLineStyle(1 To lo.ListColumns.Count)
     ReDim rightWeight(1 To lo.ListColumns.Count)
     ReDim rightColor(1 To lo.ListColumns.Count)
+    ReDim totalsTopLineStyle(1 To lo.ListColumns.Count)
+    ReDim totalsTopWeight(1 To lo.ListColumns.Count)
+    ReDim totalsTopColor(1 To lo.ListColumns.Count)
 
     For colIndex = 1 To lo.ListColumns.Count
         With templateRow.Cells(1, colIndex).Borders(xlEdgeLeft)
@@ -951,6 +956,13 @@ Private Sub NormalizeLogbookDataBorders(lo As ListObject)
             rightWeight(colIndex) = .Weight
             rightColor(colIndex) = .Color
         End With
+        If lo.ShowTotals Then
+            With lo.TotalsRowRange.Cells(1, colIndex).Borders(xlEdgeTop)
+                totalsTopLineStyle(colIndex) = .LineStyle
+                totalsTopWeight(colIndex) = .Weight
+                totalsTopColor(colIndex) = .Color
+            End With
+        End If
     Next colIndex
 
     lo.DataBodyRange.Borders.LineStyle = xlNone
@@ -964,6 +976,10 @@ Private Sub NormalizeLogbookDataBorders(lo As ListObject)
         If rightLineStyle(colIndex) <> xlNone Then
             SetBorderFormat dataColumn.Borders(xlEdgeRight), _
                             rightLineStyle(colIndex), rightWeight(colIndex), rightColor(colIndex)
+        End If
+        If lo.ShowTotals Then
+            SetBorderFormat lo.TotalsRowRange.Cells(1, colIndex).Borders(xlEdgeTop), _
+                            totalsTopLineStyle(colIndex), totalsTopWeight(colIndex), totalsTopColor(colIndex)
         End If
     Next colIndex
 End Sub
@@ -1032,25 +1048,17 @@ End Sub
 Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     Dim ws As Worksheet
     Dim totalsBlock As Range
-    Dim topRow As Range
-    Dim bottomRow As Range
-    Dim adjacentBottomCell As Range
+    Dim topLabel As Range
+    Dim bottomLabel As Range
     Dim nameFormula As String
-    Dim tableFontName As String
-    Dim tableFontSize As Double
-    Dim bandedRowColor As Long
 
     If Not lo.ShowTotals Then Exit Sub
 
     Set ws = lo.Parent
     Set totalsBlock = ws.Range(ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Reg").Range.Column), _
                                ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
-    Set topRow = totalsBlock.Rows(1)
-    Set bottomRow = totalsBlock.Rows(2)
-    Set adjacentBottomCell = ws.Cells(bottomRow.Row, totalsBlock.Column - 1)
-    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
-    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
-    bandedRowColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+    Set topLabel = totalsBlock.Cells(1, 2)
+    Set bottomLabel = totalsBlock.Cells(2, 2)
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
@@ -1061,28 +1069,10 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     End If
     On Error GoTo 0
 
-    topRow.Interior.Pattern = xlNone
-    topRow.Font.Color = vbBlack
-    topRow.Font.Bold = False
-    topRow.Cells(1, 3).Font.Bold = True
-
-    bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = bandedRowColor
-    bottomRow.Font.Color = vbBlack
-    bottomRow.Font.Bold = True
-    totalsBlock.HorizontalAlignment = xlRight
-    totalsBlock.WrapText = False
-    totalsBlock.Font.Name = tableFontName
-    totalsBlock.Font.Size = tableFontSize
-
-    totalsBlock.Borders.LineStyle = xlNone
-    adjacentBottomCell.Borders.LineStyle = xlNone
-    SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
+    topLabel.HorizontalAlignment = xlRight
+    topLabel.WrapText = False
+    bottomLabel.HorizontalAlignment = xlRight
+    bottomLabel.WrapText = False
 End Sub
 
 ' ==============================================================
