@@ -886,9 +886,35 @@ Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
     Dim lo As ListObject
 
     Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
+    NormalizeLogbookDataFormatting lo
     NormalizeLogbookDataBorders lo
     NormalizeLogbookTotalsFormatting lo
     ApplyLogbookTotalsFormatting masterWb, lo
+End Sub
+
+Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = lo.DataBodyRange.Rows(1)
+    lo.DataBodyRange.Font.Name = templateRow.Cells(1, 1).Font.Name
+    lo.DataBodyRange.Font.Size = templateRow.Cells(1, 1).Font.Size
+
+    For colIndex = 1 To lo.ListColumns.Count
+        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
+        With templateRow.Cells(1, colIndex)
+            dataColumn.HorizontalAlignment = .HorizontalAlignment
+            dataColumn.VerticalAlignment = .VerticalAlignment
+            dataColumn.WrapText = .WrapText
+            dataColumn.Orientation = .Orientation
+            dataColumn.IndentLevel = .IndentLevel
+            dataColumn.ShrinkToFit = .ShrinkToFit
+            dataColumn.ReadingOrder = .ReadingOrder
+        End With
+    Next colIndex
 End Sub
 
 Private Sub NormalizeLogbookDataBorders(lo As ListObject)

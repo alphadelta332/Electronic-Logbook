@@ -398,9 +398,13 @@ Sub AddToLogbook()
         newRow.Range.ClearFormats
 
         For fmtCol = 1 To tbl.ListColumns.Count
-            newRow.Range.Cells(1, fmtCol).NumberFormat = _
-                templateRow.Cells(1, fmtCol).NumberFormat
+            ApplyLogbookCellDataFormatting newRow.Range.Cells(1, fmtCol), _
+                                           templateRow.Cells(1, fmtCol)
         Next fmtCol
+        If tbl.ListRows.Count > 1 Then
+            newRow.Range.Cells(1, 2).NumberFormat = _
+                tbl.DataBodyRange.Cells(tbl.ListRows.Count - 1, 2).NumberFormat
+        End If
 
         tbl.TableStyle = tableStyleName
         tbl.ShowTableStyleRowStripes = True
@@ -528,6 +532,25 @@ Cleanup:
 
 End Sub
 
+Private Sub ApplyLogbookCellDataFormatting(ByVal targetCell As Range, _
+                                           ByVal templateCell As Range)
+    With targetCell
+        .NumberFormat = templateCell.NumberFormat
+        .HorizontalAlignment = templateCell.HorizontalAlignment
+        .VerticalAlignment = templateCell.VerticalAlignment
+        .WrapText = templateCell.WrapText
+        .Orientation = templateCell.Orientation
+        .IndentLevel = templateCell.IndentLevel
+        .ShrinkToFit = templateCell.ShrinkToFit
+        .ReadingOrder = templateCell.ReadingOrder
+        .Font.Name = templateCell.Font.Name
+        .Font.Size = templateCell.Font.Size
+        .Font.Bold = templateCell.Font.Bold
+        .Font.Italic = templateCell.Font.Italic
+        .Font.Underline = templateCell.Font.Underline
+    End With
+End Sub
+
 Public Sub NormalizeLogbookTableFormatting(Optional ByVal showConfirmation As Boolean = True)
     Dim tbl As ListObject
 
@@ -551,9 +574,35 @@ Fail:
 End Sub
 
 Private Sub NormalizeLogbookFormatting(ByVal tbl As ListObject)
+    NormalizeLogbookDataFormatting tbl
     NormalizeLogbookDataBorders tbl
     NormalizeLogbookTotalsFormatting tbl
     ApplyLogbookTotalsFormatting tbl
+End Sub
+
+Private Sub NormalizeLogbookDataFormatting(ByVal tbl As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = tbl.DataBodyRange.Rows(1)
+    tbl.DataBodyRange.Font.Name = templateRow.Cells(1, 1).Font.Name
+    tbl.DataBodyRange.Font.Size = templateRow.Cells(1, 1).Font.Size
+
+    For colIndex = 1 To tbl.ListColumns.Count
+        Set dataColumn = tbl.DataBodyRange.Columns(colIndex)
+        With templateRow.Cells(1, colIndex)
+            dataColumn.HorizontalAlignment = .HorizontalAlignment
+            dataColumn.VerticalAlignment = .VerticalAlignment
+            dataColumn.WrapText = .WrapText
+            dataColumn.Orientation = .Orientation
+            dataColumn.IndentLevel = .IndentLevel
+            dataColumn.ShrinkToFit = .ShrinkToFit
+            dataColumn.ReadingOrder = .ReadingOrder
+        End With
+    Next colIndex
 End Sub
 
 Private Sub NormalizeLogbookDataBorders(ByVal tbl As ListObject)
