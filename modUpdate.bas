@@ -891,6 +891,7 @@ Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
     NormalizeLogbookDataFormatting lo
     NormalizeLogbookDataBorders lo
     NormalizeLogbookTotalsFormatting lo
+    ApplyLogbookPalette masterWb, lo
     ApplyLogbookTotalsFormatting masterWb, lo
 End Sub
 
@@ -978,6 +979,70 @@ Private Sub SetBorderFormat(ByVal targetBorder As Border, _
         targetBorder.Color = color
     End If
 End Sub
+
+Private Sub ApplyLogbookPalette(masterWb As Workbook, lo As ListObject)
+    Const TOTALS_DARK_FACTOR As Double = 0.22
+    Const SUM_TOTALS_DARK_FACTOR As Double = 0.32
+    Dim headerRange As Range
+    Dim sumTotalsRange As Range
+    Dim secondaryColor As Long
+
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    secondaryColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+
+    On Error Resume Next
+    Set headerRange = masterWb.Names("LogbookHeaders").RefersToRange
+    Set sumTotalsRange = masterWb.Names("LogbookSumTotals").RefersToRange
+    On Error GoTo 0
+
+    If Not headerRange Is Nothing Then
+        headerRange.Interior.Pattern = xlSolid
+        headerRange.Interior.Color = secondaryColor
+        headerRange.Font.Color = ContrastingTextColor(secondaryColor)
+    End If
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    lo.TotalsRowRange.Interior.Pattern = xlSolid
+    lo.TotalsRowRange.Interior.Color = ScaleColor(secondaryColor, TOTALS_DARK_FACTOR)
+    lo.TotalsRowRange.Font.Color = vbWhite
+
+    If Not sumTotalsRange Is Nothing Then
+        sumTotalsRange.Interior.Pattern = xlSolid
+        sumTotalsRange.Interior.Color = ScaleColor(secondaryColor, SUM_TOTALS_DARK_FACTOR)
+        sumTotalsRange.Font.Color = vbWhite
+    End If
+End Sub
+
+Private Function ScaleColor(ByVal sourceColor As Long, ByVal factor As Double) As Long
+    Dim redValue As Long
+    Dim greenValue As Long
+    Dim blueValue As Long
+
+    redValue = (sourceColor And &HFF&) * factor
+    greenValue = ((sourceColor \ &H100&) And &HFF&) * factor
+    blueValue = ((sourceColor \ &H10000) And &HFF&) * factor
+    ScaleColor = RGB(redValue, greenValue, blueValue)
+End Function
+
+Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
+    Dim redValue As Long
+    Dim greenValue As Long
+    Dim blueValue As Long
+    Dim perceivedBrightness As Double
+
+    redValue = backgroundColor And &HFF&
+    greenValue = (backgroundColor \ &H100&) And &HFF&
+    blueValue = (backgroundColor \ &H10000) And &HFF&
+    perceivedBrightness = (redValue * 299 + greenValue * 587 + blueValue * 114) / 1000
+
+    If perceivedBrightness >= 150 Then
+        ContrastingTextColor = vbBlack
+    Else
+        ContrastingTextColor = vbWhite
+    End If
+End Function
 
 Private Sub NormalizeLogbookTotalsFormatting(lo As ListObject)
     Dim totalsRange            As Range
@@ -1090,6 +1155,8 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
+    cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
+    cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
     cellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
 
