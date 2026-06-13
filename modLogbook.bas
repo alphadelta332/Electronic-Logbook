@@ -2299,7 +2299,50 @@ Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As 
         End If
     Next rowIndex
 
+    ConfigureCurrencyVerificationForm targetList.Parent, targetList.ListCount
     PopulateCurrencyVerificationList = targetList.ListCount
+End Function
+
+Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal entryCount As Long)
+    Dim listHeight As Double
+
+    listHeight = CurrencyVerificationListHeight(entryCount)
+
+    With targetForm
+        .ScrollBars = fmScrollBarsNone
+        .KeepScrollBarsVisible = fmScrollBarsNone
+        .Width = 430
+        .Height = .lstEntries.Top + listHeight + .cmdExclude.Height + 58
+        .lblInstructions.Caption = _
+            "The following entries have been marked as a Flight Review, IPC, or OPC. " & _
+            "Select any entries that should not count."
+        .lblInstructions.Width = 391
+        .lstEntries.IntegralHeight = False
+        .lstEntries.Left = 12
+        .lstEntries.Width = 391
+        .lstEntries.Height = listHeight
+        .lblDate.Left = 14
+        .lblDetails.Left = 79
+        .lblFR.Left = 317
+        .lblIPC.Left = 345
+        .lblOPC.Left = 373
+        .lblFR.Width = 28
+        .lblIPC.Width = 28
+        .lblOPC.Width = 28
+        .lblFR.TextAlign = fmTextAlignLeft
+        .lblIPC.TextAlign = fmTextAlignLeft
+        .lblOPC.TextAlign = fmTextAlignLeft
+        .cmdExclude.Top = .lstEntries.Top + listHeight + 12
+        .cmdCancel.Top = .cmdExclude.Top
+        .cmdExclude.Left = 238
+        .cmdCancel.Left = 348
+    End With
+End Sub
+
+Private Function CurrencyVerificationListHeight(ByVal entryCount As Long) As Double
+    CurrencyVerificationListHeight = 8 + (entryCount * 12)
+    If CurrencyVerificationListHeight < 80 Then CurrencyVerificationListHeight = 80
+    If CurrencyVerificationListHeight > 260 Then CurrencyVerificationListHeight = 260
 End Function
 
 Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Boolean
