@@ -8,15 +8,21 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: publish-release
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: Publish GitHub release assets
     runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate release metadata
@@ -27,6 +33,36 @@ jobs:
           if ($env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag $env:GITHUB_REF_NAME does not match version.txt ($version). Expected v$version."
           }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Tag $env:GITHUB_REF_NAME does not point to a commit on main."
+          }
+
+      - name: Build release integrity files
+        shell: pwsh
+        run: |
+          $version = (Get-Content version.txt -Raw).Trim()
+          $assets = @(
+            Get-Item Electronic_Logbook_Master.xlsm
+            Get-Item README.pdf
+          )
+
+          $manifestAssets = foreach ($asset in $assets) {
+            $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($asset.Name)" | Add-Content SHA256SUMS.txt -Encoding ascii
+            [ordered]@{
+              name = $asset.Name
+              size = $asset.Length
+              sha256 = $hash
+            }
+          }
+
+          [ordered]@{
+            version = $version
+            tag = $env:GITHUB_REF_NAME
+            commit = $env:GITHUB_SHA
+            assets = @($manifestAssets)
+          } | ConvertTo-Json -Depth 4 | Set-Content release-manifest.json -Encoding utf8
 
       - name: Publish release
         shell: pwsh
@@ -36,6 +72,8 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             Electronic_Logbook_Master.xlsm `
             README.pdf `
+            SHA256SUMS.txt `
+            release-manifest.json `
             --title $env:GITHUB_REF_NAME `
             --generate-notes `
             --verify-tag

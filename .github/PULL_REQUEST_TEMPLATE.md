@@ -12,5 +12,6 @@
 - [ ] Working copy branch was switched without changing its `LogbookVersion`
 - [ ] Updated copy was smoke tested manually in Excel
 - [ ] Binary workbook change is expected
+- [ ] Release tag will be created only after this PR is merged to `main`
 
 ## Notes
