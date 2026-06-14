@@ -8,6 +8,9 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.3.1] - 2026-06-14
+- Added an anonymous bug report form that can be opened directly from the logbook
+
 ### [1.3.0] - 2026-06-14
 - Overhauled Currency + Recency section
   - Added Single/Multi Engine distinction
