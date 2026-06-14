@@ -894,6 +894,7 @@ Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
     ApplyLogbookPalette masterWb, lo
     ApplyLogbookTotalsRowBorders lo
     ApplyLogbookTotalsFormatting masterWb, lo
+    ApplyVisibleLogbookOutsideBorder lo
 End Sub
 
 Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
@@ -1230,6 +1231,22 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
     cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
     cellLeftOfBlock.Borders.LineStyle = xlNone
+End Sub
+
+Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
+    Dim visibleRange As Range
+    Dim ws As Worksheet
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    Set ws = lo.Parent
+    Set visibleRange = ws.Range(ws.Cells(2, lo.ListColumns("Date").Range.Column), _
+                                ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Circling").Range.Column))
+
+    SetBorderFormat visibleRange.Borders(xlEdgeTop), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
 End Sub
 
 ' ==============================================================

@@ -609,6 +609,7 @@ Private Sub NormalizeLogbookFormatting(ByVal tbl As ListObject)
     ApplyLogbookPalette tbl
     ApplyLogbookTotalsRowBorders tbl
     ApplyLogbookTotalsFormatting tbl
+    ApplyVisibleLogbookOutsideBorder tbl
 End Sub
 
 Private Sub NormalizeLogbookDataFormatting(ByVal tbl As ListObject)
@@ -945,6 +946,22 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
     cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
     cellLeftOfBlock.Borders.LineStyle = xlNone
+End Sub
+
+Private Sub ApplyVisibleLogbookOutsideBorder(ByVal tbl As ListObject)
+    Dim visibleRange As Range
+    Dim ws As Worksheet
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set ws = tbl.Parent
+    Set visibleRange = ws.Range(ws.Cells(2, tbl.ListColumns("Date").Range.Column), _
+                                ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Circling").Range.Column))
+
+    SetBorderFormat visibleRange.Borders(xlEdgeTop), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
 End Sub
 
 Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
