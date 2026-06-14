@@ -700,8 +700,7 @@ Private Sub SetBorderFormat(ByVal targetBorder As Border, _
 End Sub
 
 Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
-    Const TOTALS_DARK_FACTOR As Double = 0.22
-    Const SUM_TOTALS_DARK_FACTOR As Double = 0.32
+    Const SUM_TOTALS_LIGHTNESS As Double = 0.2
     Dim headerRange As Range
     Dim sumTotalsRange As Range
     Dim secondaryColor As Long
@@ -724,25 +723,80 @@ Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
     If Not tbl.ShowTotals Then Exit Sub
 
     tbl.TotalsRowRange.Interior.Pattern = xlSolid
-    tbl.TotalsRowRange.Interior.Color = ScaleColor(secondaryColor, TOTALS_DARK_FACTOR)
+    tbl.TotalsRowRange.Interior.Color = vbBlack
     tbl.TotalsRowRange.Font.Color = vbWhite
 
     If Not sumTotalsRange Is Nothing Then
         sumTotalsRange.Interior.Pattern = xlSolid
-        sumTotalsRange.Interior.Color = ScaleColor(secondaryColor, SUM_TOTALS_DARK_FACTOR)
+        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
         sumTotalsRange.Font.Color = vbWhite
     End If
 End Sub
 
-Private Function ScaleColor(ByVal sourceColor As Long, ByVal factor As Double) As Long
-    Dim redValue As Long
-    Dim greenValue As Long
-    Dim blueValue As Long
+Private Function ColorWithLightness(ByVal sourceColor As Long, ByVal targetLightness As Double) As Long
+    Dim redValue As Double
+    Dim greenValue As Double
+    Dim blueValue As Double
+    Dim maximumValue As Double
+    Dim minimumValue As Double
+    Dim hue As Double
+    Dim saturation As Double
+    Dim lightness As Double
+    Dim firstChannel As Double
+    Dim secondChannel As Double
 
-    redValue = (sourceColor And &HFF&) * factor
-    greenValue = ((sourceColor \ &H100&) And &HFF&) * factor
-    blueValue = ((sourceColor \ &H10000) And &HFF&) * factor
-    ScaleColor = RGB(redValue, greenValue, blueValue)
+    redValue = (sourceColor And &HFF&) / 255
+    greenValue = ((sourceColor \ &H100&) And &HFF&) / 255
+    blueValue = ((sourceColor \ &H10000) And &HFF&) / 255
+    maximumValue = WorksheetFunction.Max(redValue, greenValue, blueValue)
+    minimumValue = WorksheetFunction.Min(redValue, greenValue, blueValue)
+    lightness = (maximumValue + minimumValue) / 2
+
+    If maximumValue = minimumValue Then
+        ColorWithLightness = RGB(targetLightness * 255, targetLightness * 255, targetLightness * 255)
+        Exit Function
+    End If
+
+    If lightness > 0.5 Then
+        saturation = (maximumValue - minimumValue) / (2 - maximumValue - minimumValue)
+    Else
+        saturation = (maximumValue - minimumValue) / (maximumValue + minimumValue)
+    End If
+
+    If maximumValue = redValue Then
+        hue = (greenValue - blueValue) / (maximumValue - minimumValue)
+        If greenValue < blueValue Then hue = hue + 6
+    ElseIf maximumValue = greenValue Then
+        hue = (blueValue - redValue) / (maximumValue - minimumValue) + 2
+    Else
+        hue = (redValue - greenValue) / (maximumValue - minimumValue) + 4
+    End If
+    hue = hue / 6
+
+    secondChannel = targetLightness * (1 + saturation)
+    If targetLightness >= 0.5 Then secondChannel = targetLightness + saturation - targetLightness * saturation
+    firstChannel = 2 * targetLightness - secondChannel
+
+    ColorWithLightness = RGB(255 * HueChannel(firstChannel, secondChannel, hue + 1 / 3), _
+                             255 * HueChannel(firstChannel, secondChannel, hue), _
+                             255 * HueChannel(firstChannel, secondChannel, hue - 1 / 3))
+End Function
+
+Private Function HueChannel(ByVal firstChannel As Double, _
+                            ByVal secondChannel As Double, _
+                            ByVal hue As Double) As Double
+    If hue < 0 Then hue = hue + 1
+    If hue > 1 Then hue = hue - 1
+
+    If hue < 1 / 6 Then
+        HueChannel = firstChannel + (secondChannel - firstChannel) * 6 * hue
+    ElseIf hue < 1 / 2 Then
+        HueChannel = secondChannel
+    ElseIf hue < 2 / 3 Then
+        HueChannel = firstChannel + (secondChannel - firstChannel) * (2 / 3 - hue) * 6
+    Else
+        HueChannel = firstChannel
+    End If
 End Function
 
 Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
@@ -885,7 +939,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlDouble, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
     cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
