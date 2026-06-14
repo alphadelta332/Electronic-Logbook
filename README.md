@@ -8,13 +8,14 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
-### [1.3.0] - 2026-06-12
-- Expanded currency and recency tracking, including Flight Review calculations
-- Added a configurable Keywords table for detecting IPC, OPC, and Flight Review entries from the Details field
-- Combined currency-detection confirmations when an entry matches multiple items
-- Preserved user-configured Keywords during automatic updates
-- Prevented configured currency keywords from being interpreted as route data
-- Added IPC, OPC, and Flight Review detection results to debug logs
+### [1.3.0] - 2026-06-14
+- Overhauled Currency + Recency section
+  - Added Single/Multi Engine distinction
+  - Added Flight Review tracking
+  - Fixed Passenger Carrying recency incorrectly calculating expiry date
+  - Added Currency Validity Check button, allowing users to disqualify entries that have incorrectly been recorded as a Flight Review, IPC, or OPC
+- General UI updates/improvements
+- Improved speed of sheet when entering data in new entries
 
 ### [1.2.1] - 2026-06-01
 - Updated public-repository GitHub requests to retry without authentication when an old workbook contains a stale private-repo token
