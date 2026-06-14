@@ -2004,6 +2004,25 @@ Sub SetLogbookFilterArrows()
 
 End Sub
 
+Public Sub ReportBug()
+    Const BUG_REPORT_FORM_URL As String = _
+        "https://docs.google.com/forms/d/e/1FAIpQLScCSzixoAFcyIBE6FI-wl1xMofomKPTePtUcwrUK7II7z_V9w/viewform"
+
+    On Error GoTo Fail
+    If InStr(1, BUG_REPORT_FORM_URL, "REPLACE_WITH_FORM_ID", vbTextCompare) > 0 Then
+        MsgBox "The bug report form has not been configured yet.", _
+               vbInformation, "Bug Report Form Unavailable"
+        Exit Sub
+    End If
+
+    ThisWorkbook.FollowHyperlink Address:=BUG_REPORT_FORM_URL, NewWindow:=True
+    Exit Sub
+
+Fail:
+    MsgBox "Could not open the bug report form. Please visit:" & vbCrLf & vbCrLf & _
+           BUG_REPORT_FORM_URL, vbExclamation, "Bug Report Form Unavailable"
+End Sub
+
 Public Sub OpenHelp()
     Dim http      As Object
     Dim token     As String

@@ -54,6 +54,17 @@ foreach ($entry in $moduleExpectations.GetEnumerator()) {
     }
 }
 
+$modLogbook = Get-Content (Join-Path $repoRoot "modLogbook.bas") -Raw -Encoding UTF8
+if ($modLogbook -notmatch "Public Sub ReportBug\(\)") {
+    throw "modLogbook.bas does not contain ReportBug."
+}
+if ($modLogbook -notmatch "https://docs\.google\.com/forms/") {
+    throw "ReportBug does not contain a Google Forms responder URL."
+}
+if ($modLogbook -match "https://docs\.google\.com/forms/d/e/REPLACE_WITH_FORM_ID/viewform") {
+    throw "ReportBug Google Forms responder URL has not been configured."
+}
+
 $userFormFiles = @("frmVerifyCurrency.frm", "frmVerifyCurrency.frx")
 foreach ($formFile in $userFormFiles) {
     if (-not (Test-Path (Join-Path $repoRoot $formFile))) {
