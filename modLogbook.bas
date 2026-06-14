@@ -1,4 +1,6 @@
 Attribute VB_Name = "modLogbook"
+Option Explicit
+
 Public Const ROUTE_DEFINITION_VERSION As Long = 3
 
 Sub AddToLogbook()

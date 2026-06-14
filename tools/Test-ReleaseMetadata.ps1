@@ -14,6 +14,14 @@ $version = Get-ReleaseVersion -RepoRoot $repoRoot
 $readmePath = Join-Path $repoRoot "README.md"
 $pdfPath = Join-Path $repoRoot "README.pdf"
 $publicDocs = @("LICENSE.md", "SECURITY.md", "CONTRIBUTING.md")
+$requiredTooling = @(
+    "PrepareForRelease.ps1",
+    "PrepareForTesting.ps1",
+    "tools\ReleaseChecklist.ps1",
+    "tools\Test-VbaSourceQuality.ps1",
+    "tools\Test-WorkbookPublicReadiness.ps1",
+    "tools\Test-WorkbookVbaParity.ps1"
+)
 
 if (-not (Test-Path $readmePath)) {
     throw "README.md not found."
@@ -23,6 +31,12 @@ foreach ($doc in $publicDocs) {
     $docPath = Join-Path $repoRoot $doc
     if (-not (Test-Path $docPath)) {
         throw "$doc not found."
+    }
+}
+
+foreach ($tool in $requiredTooling) {
+    if (-not (Test-Path (Join-Path $repoRoot $tool))) {
+        throw "Required release tool $tool not found."
     }
 }
 

@@ -1,3 +1,5 @@
+Option Explicit
+
 Private Sub Workbook_Open()
     ' Restore any Application state left dirty by a previous crash.
     ' AddToLogbook disables these for performance; a hard crash bypasses Cleanup.
