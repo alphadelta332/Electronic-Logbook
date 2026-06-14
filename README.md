@@ -8,6 +8,12 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.4.0] - 2026-06-14
+- Hardened GitHub release protections and automated release checks
+- Added release asset checksums and machine-readable integrity metadata
+- Added automated VBA source-quality and workbook/source consistency checks
+- Improved release preparation tooling and workbook maintainability
+
 ### [1.3.1] - 2026-06-14
 - Added an anonymous bug report form that can be opened directly from the logbook
 
