@@ -607,6 +607,7 @@ Private Sub NormalizeLogbookFormatting(ByVal tbl As ListObject)
     NormalizeLogbookDataBorders tbl
     NormalizeLogbookTotalsFormatting tbl
     ApplyLogbookPalette tbl
+    ApplyLogbookTotalsRowBorders tbl
     ApplyLogbookTotalsFormatting tbl
 End Sub
 
@@ -688,11 +689,14 @@ Private Sub SetBorderFormat(ByVal targetBorder As Border, _
                             ByVal lineStyle As Variant, _
                             ByVal weight As Variant, _
                             ByVal color As Variant)
-    targetBorder.LineStyle = lineStyle
-    If lineStyle <> xlNone Then
-        targetBorder.Weight = weight
-        targetBorder.Color = color
+    If lineStyle = xlNone Then
+        targetBorder.LineStyle = xlNone
+        Exit Sub
     End If
+
+    targetBorder.Weight = weight
+    targetBorder.Color = color
+    targetBorder.LineStyle = lineStyle
 End Sub
 
 Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
@@ -758,6 +762,20 @@ Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
         ContrastingTextColor = vbWhite
     End If
 End Function
+
+Private Sub ApplyLogbookTotalsRowBorders(ByVal tbl As ListObject)
+    Dim totalsRange As Range
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set totalsRange = tbl.TotalsRowRange
+    totalsRange.Borders.LineStyle = xlNone
+    SetBorderFormat totalsRange.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
+End Sub
 
 Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim totalsRange As Range
