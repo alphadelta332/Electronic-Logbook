@@ -1,5 +1,5 @@
 Attribute VB_Name = "modLogbook"
-Public Const ROUTE_DEFINITION_VERSION As Long = 1
+Public Const ROUTE_DEFINITION_VERSION As Long = 3
 
 Sub AddToLogbook()
 
@@ -30,17 +30,34 @@ Sub AddToLogbook()
     Dim todayDate As Date
     Dim entryDate As Date
     Dim diagStep As String
+    Dim ipcDetected As Boolean
     Dim opcDetected As Boolean
+    Dim flightReviewDetected As Boolean
+    Dim currencyExcluded As Boolean
+    Dim totalsWereOn As Boolean
+    Dim totalsStateCaptured As Boolean
+    Dim tableStyleName As String
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
         Set tbl = wsLog.ListObjects("Logbook")
-        If Not ListColumnExists(tbl, "OPC") Then
-            MsgBox "ERROR: The Logbook table is missing the OPC helper column. Please update the workbook structure before adding entries.", vbCritical
+        If Not ListColumnExists(tbl, "IPC") Or _
+           Not ListColumnExists(tbl, "OPC") Or _
+           Not ListColumnExists(tbl, "FlightReview") Or _
+           Not ListColumnExists(tbl, "CurrencyExclusions") Then
+            MsgBox "ERROR: The Logbook table is missing one or more currency helper columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
+        If Not KeywordTableIsValid() Then
+            MsgBox "ERROR: The Keywords table is missing or does not contain the Flight Review, IPC and OPC columns. Please update the workbook structure before adding entries.", vbCritical
+            GoTo Cleanup
+        End If
+        RefreshTodayValue
         todayDate = Range("today").Value
-        opcDetected = (InStr(1, Range("neDetails").Value, "OPC", vbTextCompare) > 0)
+        ipcDetected = KeywordDetected(CStr(Range("neDetails").Value), "IPC")
+        opcDetected = KeywordDetected(CStr(Range("neDetails").Value), "OPC")
+        flightReviewDetected = ipcDetected Or _
+                               KeywordDetected(CStr(Range("neDetails").Value), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -220,27 +237,33 @@ Sub AddToLogbook()
             End If
         End If
 
-    '--- 4f. IPC / IR Test / OPC Detection Check
+    '--- 4f. IPC / OPC / Flight Review Detection Check
         If Not suppressWarnings Then
-            If InStr(1, Range("neDetails").Value, "IPC", vbTextCompare) > 0 Or _
-               InStr(1, Range("neDetails").Value, "IR Test", vbTextCompare) > 0 Then
-                response = MsgBox("Note: This entry will be recorded as an IPC. Continue?", vbOKCancel + vbInformation, "IPC Detection")
-                If response = vbCancel Then GoTo Cleanup
-            End If
-
-            If opcDetected Then
+            If ipcDetected Or opcDetected Or flightReviewDetected Then
+                Dim detectionMessage As String
+                detectionMessage = "This entry will be counted as " & _
+                                   DetectedCurrencyItemsText(ipcDetected, opcDetected, flightReviewDetected) & _
+                                   "."
+                If opcDetected Then
+                    detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
+                                       "Only use an OPC keyword if this was a qualifying operator proficiency check covering IFR operations."
+                End If
+                detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
+                                   "Yes: save and count the detected currency items." & vbCrLf & _
+                                   "No: save without counting them." & vbCrLf & _
+                                   "Cancel: return to the entry form."
                 response = MsgBox( _
-                    "Note: This entry will be recorded as an OPC." & vbCrLf & vbCrLf & _
-                    "Only use OPC if this was a qualifying operator proficiency check covering IFR operations. Continue?", _
-                    vbOKCancel + vbInformation, _
-                    "OPC Detection")
+                    detectionMessage, _
+                    vbYesNoCancel + vbInformation, _
+                    "Currency Detection")
                 If response = vbCancel Then GoTo Cleanup
+                If response = vbNo Then currencyExcluded = True
             End If
         End If
 
     '--- 4g. OPC Without Instrument Hours / Approaches Check
         If Not suppressWarnings Then
-            If opcDetected Then
+            If opcDetected And Not currencyExcluded Then
                 If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
                    (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") And _
                    Application.WorksheetFunction.CountIf(Range("neILS", "neCircling"), ">0") = 0 Then
@@ -334,8 +357,20 @@ Sub AddToLogbook()
         diagStep = "Step 5a: Add Row"
         WriteCrumb diagStep
 
-    '--- 5a. Add New Row & Copy Year, Month, Day
-        Set newRow = tbl.ListRows.Add
+    '--- 5a. Add a clean table row without inheriting direct visual formats
+        Dim fmtCol As Long
+        Dim templateRow As Range
+
+        totalsWereOn = tbl.ShowTotals
+        totalsStateCaptured = True
+        tableStyleName = tbl.TableStyle.Name
+        Set templateRow = tbl.DataBodyRange.Rows(1)
+
+        If totalsWereOn Then tbl.ShowTotals = False
+
+        Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
+
+    '--- Copy Year, Month, Day
         newRow.Range.cells(1, 2).Resize(1, 3).Value = Range("neYear", "neDay").Value
 
     '--- 5b. Fill Down Formula Columns from Previous Row
@@ -359,25 +394,37 @@ Sub AddToLogbook()
         dataCols = Range("neType", "neCircling").Columns.Count
         newRow.Range.cells(1, 5).Resize(1, dataCols).Value = Range("neType", "neCircling").Value
 
-    '--- 5d. Fix Month Formatting (always Proper Case e.g. Mar)
+    '--- 5d. Record Currency Detection Exclusion
+        With newRow.Range.Cells(1, tbl.ListColumns("CurrencyExclusions").Index)
+            .ClearContents
+            If currencyExcluded Then .Value = True
+        End With
+
+    '--- 5e. Fix Month Formatting (always Proper Case e.g. Mar)
         If VarType(newRow.Range.cells(1, 3).Value) = vbString Then
             newRow.Range.cells(1, 3).Value = StrConv(newRow.Range.cells(1, 3).Value, vbProperCase)
         End If
 
-    '--- 5e. Fix Year Column Formatting (copy number format from previous row)
-        diagStep = "Step 5e: Format Row"
+    '--- 5f. Remove formats inherited by row insertion and formula FillDown
+        diagStep = "Step 5f: Format Row"
         WriteCrumb diagStep
-        newRow.Range.cells(1, 2).NumberFormat = _
-            tbl.DataBodyRange.cells(tbl.ListRows.Count - 1, 2).NumberFormat
+        newRow.Range.ClearFormats
 
-    '--- 5f. Fix Row Formatting (copy number formats from previous row, column by column)
-        ' Avoids clipboard-based PasteSpecial which causes intermittent Excel crashes.
-        ' Table stripe/fill/bold is controlled by the table style, not cell-level formats.
-        Dim fmtCol As Long
         For fmtCol = 1 To tbl.ListColumns.Count
-            newRow.Range.Cells(1, fmtCol).NumberFormat = _
-                tbl.DataBodyRange.Cells(tbl.ListRows.Count - 1, fmtCol).NumberFormat
+            ApplyLogbookCellDataFormatting newRow.Range.Cells(1, fmtCol), _
+                                           templateRow.Cells(1, fmtCol)
         Next fmtCol
+        If tbl.ListRows.Count > 1 Then
+            newRow.Range.Cells(1, 2).NumberFormat = _
+                tbl.DataBodyRange.Cells(tbl.ListRows.Count - 1, 2).NumberFormat
+        End If
+
+        tbl.TableStyle = tableStyleName
+        tbl.ShowTableStyleRowStripes = True
+        tbl.ShowTableStyleColumnStripes = False
+        tbl.ShowTotals = totalsWereOn
+        totalsStateCaptured = False
+        NormalizeLogbookFormatting tbl
 
     '--- 5g. Sort Logbook by Date
         diagStep = "Step 5g: Sort Logbook"
@@ -473,6 +520,12 @@ Cleanup:
         errNum = Err.Number
         errDesc = Err.Description
 
+        If totalsStateCaptured Then
+            On Error Resume Next
+            tbl.ShowTotals = totalsWereOn
+            On Error GoTo 0
+        End If
+
         Application.ScreenUpdating = True
         Application.EnableEvents = True
         Application.Calculation = xlCalculationAutomatic
@@ -492,9 +545,522 @@ Cleanup:
 
 End Sub
 
+Public Function RefreshTodayValue() As Boolean
+    On Error GoTo CleanExit
+
+    Dim todayCell As Range
+    Set todayCell = ThisWorkbook.Names("today").RefersToRange
+
+    If todayCell.HasFormula Or _
+       Not IsDate(todayCell.Value) Or _
+       CLng(CDate(todayCell.Value)) <> CLng(Date) Then
+        todayCell.Value = Date
+        RefreshTodayValue = True
+    End If
+
+CleanExit:
+End Function
+
+Private Sub ApplyLogbookCellDataFormatting(ByVal targetCell As Range, _
+                                           ByVal templateCell As Range)
+    With targetCell
+        .NumberFormat = templateCell.NumberFormat
+        .HorizontalAlignment = templateCell.HorizontalAlignment
+        .VerticalAlignment = templateCell.VerticalAlignment
+        .WrapText = templateCell.WrapText
+        .Orientation = templateCell.Orientation
+        .IndentLevel = templateCell.IndentLevel
+        .ShrinkToFit = templateCell.ShrinkToFit
+        .ReadingOrder = templateCell.ReadingOrder
+        .Font.Name = templateCell.Font.Name
+        .Font.Size = templateCell.Font.Size
+        .Font.Bold = templateCell.Font.Bold
+        .Font.Italic = templateCell.Font.Italic
+        .Font.Underline = templateCell.Font.Underline
+    End With
+End Sub
+
+Public Sub NormalizeLogbookTableFormatting(Optional ByVal showConfirmation As Boolean = True)
+    Dim tbl As ListObject
+
+    On Error GoTo Fail
+
+    Application.ScreenUpdating = False
+    Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
+    NormalizeLogbookFormatting tbl
+    Application.ScreenUpdating = True
+
+    If showConfirmation Then
+        MsgBox "Logbook table formatting has been reset to the selected table style.", _
+               vbInformation, "Logbook Formatting Reset"
+    End If
+    Exit Sub
+Fail:
+    Application.ScreenUpdating = True
+    MsgBox "The Logbook formatting could not be reset." & vbNewLine & vbNewLine & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Formatting Reset Failed"
+End Sub
+
+Private Sub NormalizeLogbookFormatting(ByVal tbl As ListObject)
+    NormalizeLogbookDataFormatting tbl
+    NormalizeLogbookDataBorders tbl
+    NormalizeLogbookTotalsFormatting tbl
+    ApplyLogbookPalette tbl
+    ApplyLogbookTotalsRowBorders tbl
+    ApplyLogbookTotalsFormatting tbl
+    ApplyVisibleLogbookOutsideBorder tbl
+End Sub
+
+Private Sub NormalizeLogbookDataFormatting(ByVal tbl As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = tbl.DataBodyRange.Rows(1)
+    tbl.DataBodyRange.Font.Name = templateRow.Cells(1, 1).Font.Name
+    tbl.DataBodyRange.Font.Size = templateRow.Cells(1, 1).Font.Size
+
+    For colIndex = 1 To tbl.ListColumns.Count
+        Set dataColumn = tbl.DataBodyRange.Columns(colIndex)
+        With templateRow.Cells(1, colIndex)
+            dataColumn.HorizontalAlignment = .HorizontalAlignment
+            dataColumn.VerticalAlignment = .VerticalAlignment
+            dataColumn.WrapText = .WrapText
+            dataColumn.Orientation = .Orientation
+            dataColumn.IndentLevel = .IndentLevel
+            dataColumn.ShrinkToFit = .ShrinkToFit
+            dataColumn.ReadingOrder = .ReadingOrder
+        End With
+    Next colIndex
+End Sub
+
+Private Sub NormalizeLogbookDataBorders(ByVal tbl As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+    Dim leftLineStyle() As Variant
+    Dim leftWeight() As Variant
+    Dim leftColor() As Variant
+    Dim rightLineStyle() As Variant
+    Dim rightWeight() As Variant
+    Dim rightColor() As Variant
+
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = tbl.DataBodyRange.Rows(1)
+    ReDim leftLineStyle(1 To tbl.ListColumns.Count)
+    ReDim leftWeight(1 To tbl.ListColumns.Count)
+    ReDim leftColor(1 To tbl.ListColumns.Count)
+    ReDim rightLineStyle(1 To tbl.ListColumns.Count)
+    ReDim rightWeight(1 To tbl.ListColumns.Count)
+    ReDim rightColor(1 To tbl.ListColumns.Count)
+
+    For colIndex = 1 To tbl.ListColumns.Count
+        With templateRow.Cells(1, colIndex).Borders(xlEdgeLeft)
+            leftLineStyle(colIndex) = .LineStyle
+            leftWeight(colIndex) = .Weight
+            leftColor(colIndex) = .Color
+        End With
+        With templateRow.Cells(1, colIndex).Borders(xlEdgeRight)
+            rightLineStyle(colIndex) = .LineStyle
+            rightWeight(colIndex) = .Weight
+            rightColor(colIndex) = .Color
+        End With
+    Next colIndex
+
+    tbl.DataBodyRange.Borders.LineStyle = xlNone
+
+    For colIndex = 1 To tbl.ListColumns.Count
+        Set dataColumn = tbl.DataBodyRange.Columns(colIndex)
+        If leftLineStyle(colIndex) <> xlNone Then
+            SetBorderFormat dataColumn.Borders(xlEdgeLeft), _
+                            leftLineStyle(colIndex), leftWeight(colIndex), leftColor(colIndex)
+        End If
+        If rightLineStyle(colIndex) <> xlNone Then
+            SetBorderFormat dataColumn.Borders(xlEdgeRight), _
+                            rightLineStyle(colIndex), rightWeight(colIndex), rightColor(colIndex)
+        End If
+    Next colIndex
+End Sub
+
+Private Sub SetBorderFormat(ByVal targetBorder As Border, _
+                            ByVal lineStyle As Variant, _
+                            ByVal weight As Variant, _
+                            ByVal color As Variant)
+    If lineStyle = xlNone Then
+        targetBorder.LineStyle = xlNone
+        Exit Sub
+    End If
+
+    targetBorder.Weight = weight
+    targetBorder.Color = color
+    targetBorder.LineStyle = lineStyle
+End Sub
+
+Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
+    Const SUM_TOTALS_LIGHTNESS As Double = 0.2
+    Dim headerRange As Range
+    Dim sumTotalsRange As Range
+    Dim secondaryColor As Long
+
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    secondaryColor = tbl.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+
+    On Error Resume Next
+    Set headerRange = ThisWorkbook.Names("LogbookHeaders").RefersToRange
+    Set sumTotalsRange = ThisWorkbook.Names("LogbookSumTotals").RefersToRange
+    On Error GoTo 0
+
+    If Not headerRange Is Nothing Then
+        headerRange.Interior.Pattern = xlSolid
+        headerRange.Interior.Color = secondaryColor
+        headerRange.Font.Color = ContrastingTextColor(secondaryColor)
+    End If
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    tbl.TotalsRowRange.Interior.Pattern = xlSolid
+    tbl.TotalsRowRange.Interior.Color = vbBlack
+    tbl.TotalsRowRange.Font.Color = vbWhite
+
+    If Not sumTotalsRange Is Nothing Then
+        sumTotalsRange.Interior.Pattern = xlSolid
+        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
+        sumTotalsRange.Font.Color = vbWhite
+    End If
+End Sub
+
+Private Function ColorWithLightness(ByVal sourceColor As Long, ByVal targetLightness As Double) As Long
+    Dim redValue As Double
+    Dim greenValue As Double
+    Dim blueValue As Double
+    Dim maximumValue As Double
+    Dim minimumValue As Double
+    Dim hue As Double
+    Dim saturation As Double
+    Dim lightness As Double
+    Dim firstChannel As Double
+    Dim secondChannel As Double
+
+    redValue = (sourceColor And &HFF&) / 255
+    greenValue = ((sourceColor \ &H100&) And &HFF&) / 255
+    blueValue = ((sourceColor \ &H10000) And &HFF&) / 255
+    maximumValue = WorksheetFunction.Max(redValue, greenValue, blueValue)
+    minimumValue = WorksheetFunction.Min(redValue, greenValue, blueValue)
+    lightness = (maximumValue + minimumValue) / 2
+
+    If maximumValue = minimumValue Then
+        ColorWithLightness = RGB(targetLightness * 255, targetLightness * 255, targetLightness * 255)
+        Exit Function
+    End If
+
+    If lightness > 0.5 Then
+        saturation = (maximumValue - minimumValue) / (2 - maximumValue - minimumValue)
+    Else
+        saturation = (maximumValue - minimumValue) / (maximumValue + minimumValue)
+    End If
+
+    If maximumValue = redValue Then
+        hue = (greenValue - blueValue) / (maximumValue - minimumValue)
+        If greenValue < blueValue Then hue = hue + 6
+    ElseIf maximumValue = greenValue Then
+        hue = (blueValue - redValue) / (maximumValue - minimumValue) + 2
+    Else
+        hue = (redValue - greenValue) / (maximumValue - minimumValue) + 4
+    End If
+    hue = hue / 6
+
+    secondChannel = targetLightness * (1 + saturation)
+    If targetLightness >= 0.5 Then secondChannel = targetLightness + saturation - targetLightness * saturation
+    firstChannel = 2 * targetLightness - secondChannel
+
+    ColorWithLightness = RGB(255 * HueChannel(firstChannel, secondChannel, hue + 1 / 3), _
+                             255 * HueChannel(firstChannel, secondChannel, hue), _
+                             255 * HueChannel(firstChannel, secondChannel, hue - 1 / 3))
+End Function
+
+Private Function HueChannel(ByVal firstChannel As Double, _
+                            ByVal secondChannel As Double, _
+                            ByVal hue As Double) As Double
+    If hue < 0 Then hue = hue + 1
+    If hue > 1 Then hue = hue - 1
+
+    If hue < 1 / 6 Then
+        HueChannel = firstChannel + (secondChannel - firstChannel) * 6 * hue
+    ElseIf hue < 1 / 2 Then
+        HueChannel = secondChannel
+    ElseIf hue < 2 / 3 Then
+        HueChannel = firstChannel + (secondChannel - firstChannel) * (2 / 3 - hue) * 6
+    Else
+        HueChannel = firstChannel
+    End If
+End Function
+
+Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
+    Dim redValue As Long
+    Dim greenValue As Long
+    Dim blueValue As Long
+    Dim perceivedBrightness As Double
+
+    redValue = backgroundColor And &HFF&
+    greenValue = (backgroundColor \ &H100&) And &HFF&
+    blueValue = (backgroundColor \ &H10000) And &HFF&
+    perceivedBrightness = (redValue * 299 + greenValue * 587 + blueValue * 114) / 1000
+
+    If perceivedBrightness >= 150 Then
+        ContrastingTextColor = vbBlack
+    Else
+        ContrastingTextColor = vbWhite
+    End If
+End Function
+
+Private Sub ApplyLogbookTotalsRowBorders(ByVal tbl As ListObject)
+    Dim totalsRange As Range
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set totalsRange = tbl.TotalsRowRange
+    totalsRange.Borders.LineStyle = xlNone
+    SetBorderFormat totalsRange.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
+End Sub
+
+Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
+    Dim totalsRange As Range
+    Dim tableStyleName As String
+    Dim tableFontName As String
+    Dim tableFontSize As Double
+    Dim columnCount As Long
+    Dim colIndex As Long
+    Dim numberFormats() As Variant
+    Dim horizontalAlignments() As Variant
+    Dim verticalAlignments() As Variant
+    Dim wrapTextValues() As Variant
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set totalsRange = tbl.TotalsRowRange
+    tableStyleName = tbl.TableStyle.Name
+    tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
+    tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
+    columnCount = tbl.ListColumns.Count
+
+    ReDim numberFormats(1 To columnCount)
+    ReDim horizontalAlignments(1 To columnCount)
+    ReDim verticalAlignments(1 To columnCount)
+    ReDim wrapTextValues(1 To columnCount)
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            numberFormats(colIndex) = .NumberFormat
+            horizontalAlignments(colIndex) = .HorizontalAlignment
+            verticalAlignments(colIndex) = .VerticalAlignment
+            wrapTextValues(colIndex) = .WrapText
+        End With
+    Next colIndex
+
+    totalsRange.ClearFormats
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            .NumberFormat = numberFormats(colIndex)
+            .HorizontalAlignment = horizontalAlignments(colIndex)
+            .VerticalAlignment = verticalAlignments(colIndex)
+            .WrapText = wrapTextValues(colIndex)
+        End With
+    Next colIndex
+
+    tbl.TableStyle = tableStyleName
+    totalsRange.Font.Name = tableFontName
+    totalsRange.Font.Size = tableFontSize
+End Sub
+
+Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
+    Const MASTER_TOTALS_FILL_COLOR As Long = 14277081
+    Dim ws As Worksheet
+    Dim totalsBlock As Range
+    Dim topRow As Range
+    Dim bottomRow As Range
+    Dim labelCells As Range
+    Dim hoursCells As Range
+    Dim cellLeftOfBlock As Range
+    Dim nameFormula As String
+    Dim tableFontName As String
+    Dim tableFontSize As Double
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set ws = tbl.Parent
+    Set totalsBlock = ws.Range(ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Reg").Range.Column), _
+                               ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
+    Set topRow = totalsBlock.Rows(1)
+    Set bottomRow = totalsBlock.Rows(2)
+    Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
+    Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
+    Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
+    tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
+    tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
+
+    nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
+    On Error Resume Next
+    ThisWorkbook.Names("LogbookTotals").RefersTo = nameFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        ThisWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
+    End If
+    On Error GoTo 0
+
+    topRow.Interior.Pattern = xlNone
+    topRow.Font.Color = vbBlack
+    topRow.Font.Bold = False
+    topRow.Cells(1, 3).Font.Bold = True
+
+    bottomRow.Interior.Pattern = xlSolid
+    bottomRow.Interior.Color = MASTER_TOTALS_FILL_COLOR
+    bottomRow.Font.Color = vbBlack
+    bottomRow.Font.Bold = True
+    totalsBlock.Font.Name = tableFontName
+    totalsBlock.Font.Size = tableFontSize
+
+    labelCells.HorizontalAlignment = xlRight
+    labelCells.WrapText = False
+    hoursCells.HorizontalAlignment = xlCenter
+    hoursCells.VerticalAlignment = xlCenter
+    hoursCells.WrapText = False
+    bottomRow.Cells(1, 3).NumberFormat = topRow.Cells(1, 3).NumberFormat
+
+    totalsBlock.Borders.LineStyle = xlNone
+    SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
+    cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
+    cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
+    cellLeftOfBlock.Borders.LineStyle = xlNone
+End Sub
+
+Private Sub ApplyVisibleLogbookOutsideBorder(ByVal tbl As ListObject)
+    Dim visibleRange As Range
+    Dim ws As Worksheet
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set ws = tbl.Parent
+    Set visibleRange = ws.Range(ws.Cells(2, tbl.ListColumns("Date").Range.Column), _
+                                ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Circling").Range.Column))
+
+    SetBorderFormat visibleRange.Borders(xlEdgeTop), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
+End Sub
+
 Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
     On Error Resume Next
     ListColumnExists = Not tbl.ListColumns(columnName) Is Nothing
+    On Error GoTo 0
+End Function
+
+Private Function KeywordTableIsValid() As Boolean
+    Dim tblKeywords As ListObject
+
+    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
+    If tblKeywords Is Nothing Then Exit Function
+
+    KeywordTableIsValid = _
+        ListColumnExists(tblKeywords, "Flight Review") And _
+        ListColumnExists(tblKeywords, "IPC") And _
+        ListColumnExists(tblKeywords, "OPC")
+End Function
+
+Private Function KeywordDetected(ByVal details As String, ByVal keywordColumn As String) As Boolean
+    Dim tblKeywords As ListObject
+    Dim keywordRange As Range
+    Dim keywordCell As Range
+    Dim normalizedDetails As String
+    Dim normalizedKeyword As String
+
+    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
+    If tblKeywords Is Nothing Then Exit Function
+
+    On Error Resume Next
+    Set keywordRange = tblKeywords.ListColumns(keywordColumn).DataBodyRange
+    On Error GoTo 0
+    If keywordRange Is Nothing Then Exit Function
+
+    normalizedDetails = NormalizeKeywordText(details, True)
+    For Each keywordCell In keywordRange.Cells
+        If Not IsError(keywordCell.Value) Then
+            If Trim$(CStr(keywordCell.Value)) <> "" Then
+                normalizedKeyword = NormalizeKeywordText(CStr(keywordCell.Value))
+                If InStr(1, normalizedDetails, normalizedKeyword, vbBinaryCompare) > 0 Then
+                    KeywordDetected = True
+                    Exit Function
+                End If
+            End If
+        End If
+    Next keywordCell
+End Function
+
+Private Function NormalizeKeywordText(ByVal value As String, _
+                                      Optional ByVal removeSeparator As Boolean = False) As String
+    If removeSeparator Then value = Replace(value, "|", "")
+    value = LCase$(value)
+    value = Replace(value, "(", "|")
+    value = Replace(value, ")", "|")
+    value = Replace(value, "-", "|")
+    value = Replace(value, ",", "|")
+    value = Replace(value, " ", "|")
+    value = Replace(value, "&", "|")
+    NormalizeKeywordText = "|" & value & "|"
+End Function
+
+Private Function DetectedCurrencyItemsText(ByVal ipcDetected As Boolean, _
+                                           ByVal opcDetected As Boolean, _
+                                           ByVal flightReviewDetected As Boolean) As String
+    Dim items(1 To 3) As String
+    Dim itemCount As Long
+
+    If ipcDetected Then
+        itemCount = itemCount + 1
+        items(itemCount) = "an IPC"
+    End If
+    If opcDetected Then
+        itemCount = itemCount + 1
+        items(itemCount) = "an OPC"
+    End If
+    If flightReviewDetected Then
+        itemCount = itemCount + 1
+        items(itemCount) = "a Flight Review"
+    End If
+
+    Select Case itemCount
+        Case 1
+            DetectedCurrencyItemsText = items(1)
+        Case 2
+            DetectedCurrencyItemsText = items(1) & " and " & items(2)
+        Case 3
+            DetectedCurrencyItemsText = items(1) & ", " & items(2) & " and " & items(3)
+    End Select
+End Function
+
+Private Function FindListObject(ByVal wb As Workbook, ByVal tableName As String) As ListObject
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        Set FindListObject = ws.ListObjects(tableName)
+        If Not FindListObject Is Nothing Then Exit Function
+    Next ws
     On Error GoTo 0
 End Function
 
@@ -1081,11 +1647,38 @@ End Sub
 
 Private Function IsRouteParserIgnoreToken(ByVal token As String) As Boolean
     Select Case UCase$(Trim$(token))
-        Case "IPC", "OPC", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
+        Case "IPC", "OPC", "FR", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
             IsRouteParserIgnoreToken = True
         Case Else
-            IsRouteParserIgnoreToken = False
+            IsRouteParserIgnoreToken = KeywordTableContainsToken(token)
     End Select
+End Function
+
+Private Function KeywordTableContainsToken(ByVal token As String) As Boolean
+    Dim tblKeywords As ListObject
+    Dim keywordColumn As ListColumn
+    Dim keywordCell As Range
+    Dim normalizedToken As String
+
+    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
+    If tblKeywords Is Nothing Then Exit Function
+
+    normalizedToken = NormalizeKeywordText(token)
+    For Each keywordColumn In tblKeywords.ListColumns
+        If Not keywordColumn.DataBodyRange Is Nothing Then
+            For Each keywordCell In keywordColumn.DataBodyRange.Cells
+                If Not IsError(keywordCell.Value) Then
+                    If Trim$(CStr(keywordCell.Value)) <> "" Then
+                        If InStr(1, NormalizeKeywordText(CStr(keywordCell.Value)), _
+                                   normalizedToken, vbBinaryCompare) > 0 Then
+                            KeywordTableContainsToken = True
+                            Exit Function
+                        End If
+                    End If
+                End If
+            Next keywordCell
+        End If
+    Next keywordColumn
 End Function
 
 Sub ExportKeplerJSON()
@@ -1663,8 +2256,9 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Dim fReg     As String
     Dim fPIC     As String
     Dim fDetails As String
+    Dim fIpcDetected As String
     Dim fOpcDetected As String
-    Dim fOpcDateSource As String
+    Dim fFlightReviewDetected As String
     Dim fRows    As String
     Dim fCrumb   As String
     fDate    = CStr(Range("neDate").Value)
@@ -1672,12 +2266,20 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     fReg     = CStr(Range("neReg").Value)
     fPIC     = CStr(Range("nePIC").Value)
     fDetails = CStr(Range("neDetails").Value)
-    If InStr(1, fDetails, "OPC", vbTextCompare) > 0 Then
+    If KeywordDetected(fDetails, "IPC") Then
+        fIpcDetected = "Yes"
+    Else
+        fIpcDetected = "No"
+    End If
+    If KeywordDetected(fDetails, "OPC") Then
         fOpcDetected = "Yes"
-        fOpcDateSource = "Details keyword"
     Else
         fOpcDetected = "No"
-        fOpcDateSource = ""
+    End If
+    If KeywordDetected(fDetails, "IPC") Or KeywordDetected(fDetails, "Flight Review") Then
+        fFlightReviewDetected = "Yes"
+    Else
+        fFlightReviewDetected = "No"
     End If
     fRows    = CStr(ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
 
@@ -1719,8 +2321,9 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "Reg          : " & fReg
         Print #fileNum, "PIC          : " & fPIC
         Print #fileNum, "Details      : " & fDetails
+        Print #fileNum, "IPC detected : " & fIpcDetected
         Print #fileNum, "OPC detected : " & fOpcDetected
-        If fOpcDateSource <> "" Then Print #fileNum, "OPC date src : " & fOpcDateSource
+        Print #fileNum, "FR detected  : " & fFlightReviewDetected
         Print #fileNum, "Logbook rows : " & fRows
         Print #fileNum, ""
     Close #fileNum
@@ -1805,6 +2408,237 @@ Public Sub RefreshSuppressWarningsButton()
     End If
 End Sub
 
+Public Sub VerifyCurrencyChecks()
+    Dim entryCount As Long
+
+    Load frmVerifyCurrency
+    entryCount = PopulateCurrencyVerificationList(frmVerifyCurrency.lstEntries)
+
+    If entryCount = 0 Then
+        Unload frmVerifyCurrency
+        MsgBox "No detected Flight Reviews, IPCs, or OPCs were found in the past 25 months.", _
+               vbInformation, "Verify Flight Reviews, IPCs, and OPCs"
+        Exit Sub
+    End If
+
+    frmVerifyCurrency.Show
+End Sub
+
+Public Sub ConfigureCurrencyVerificationList(ByVal targetList As Object)
+    With targetList
+        .Clear
+        .ColumnCount = 6
+        .ColumnWidths = "0 pt;65 pt;220 pt;28 pt;28 pt;28 pt"
+        .MultiSelect = fmMultiSelectMulti
+    End With
+End Sub
+
+Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As Long
+    Dim tbl As ListObject
+    Dim cutoffDate As Date
+    Dim rowIndex As Long
+    Dim entryDate As Variant
+    Dim flightReviewValue As Variant
+    Dim ipcValue As Variant
+    Dim opcValue As Variant
+
+    ConfigureCurrencyVerificationList targetList
+    Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
+    cutoffDate = DateAdd("m", -25, CDate(Range("today").Value))
+
+    For rowIndex = tbl.ListRows.Count To 1 Step -1
+        entryDate = tbl.ListColumns("Date").DataBodyRange.Cells(rowIndex, 1).Value
+        flightReviewValue = tbl.ListColumns("FlightReview").DataBodyRange.Cells(rowIndex, 1).Value
+        ipcValue = tbl.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value
+        opcValue = tbl.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value
+
+        If IsDate(entryDate) Then
+            If CDate(entryDate) >= cutoffDate And _
+               (CurrencyCheckValueIsMarked(flightReviewValue) Or _
+                CurrencyCheckValueIsMarked(ipcValue) Or _
+                CurrencyCheckValueIsMarked(opcValue)) Then
+                targetList.AddItem CStr(rowIndex)
+                targetList.List(targetList.ListCount - 1, 1) = Format$(CDate(entryDate), "dd mmm yyyy")
+                targetList.List(targetList.ListCount - 1, 2) = _
+                    CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value)
+                targetList.List(targetList.ListCount - 1, 3) = CurrencyCheckMarker(flightReviewValue)
+                targetList.List(targetList.ListCount - 1, 4) = CurrencyCheckMarker(ipcValue)
+                targetList.List(targetList.ListCount - 1, 5) = CurrencyCheckMarker(opcValue)
+            End If
+        End If
+    Next rowIndex
+
+    ConfigureCurrencyVerificationForm targetList.Parent, targetList.ListCount
+    PopulateCurrencyVerificationList = targetList.ListCount
+End Function
+
+Private Sub ConfigureCurrencyVerificationForm(ByVal targetForm As Object, ByVal entryCount As Long)
+    Const DATE_WIDTH As Long = 65
+    Const MARKER_WIDTH As Long = 28
+    Const LIST_TEXT_INSET As Long = 6
+    Const LIST_EXTRA_WIDTH As Long = 20
+    Const FORM_EXTRA_WIDTH As Long = 39
+    Const INSTRUCTIONS_HEIGHT As Long = 30
+    Const HEADER_GAP As Long = 6
+    Const LIST_GAP As Long = 3
+    Dim listHeight As Double
+    Dim detailsWidth As Long
+    Dim listWidth As Long
+
+    listHeight = CurrencyVerificationListHeight(entryCount)
+    detailsWidth = CurrencyVerificationDetailsWidth(targetForm, targetForm.lstEntries)
+    listWidth = DATE_WIDTH + detailsWidth + (3 * MARKER_WIDTH) + LIST_EXTRA_WIDTH
+
+    With targetForm
+        .ScrollBars = fmScrollBarsNone
+        .KeepScrollBarsVisible = fmScrollBarsNone
+        .Width = listWidth + FORM_EXTRA_WIDTH
+        .lblInstructions.Caption = _
+            "The following entries have been marked as a Flight Review, IPC, or OPC. " & _
+            "Select any entries that should not count."
+        .lblInstructions.Width = listWidth
+        .lblInstructions.Height = INSTRUCTIONS_HEIGHT
+        .lblDate.Top = .lblInstructions.Top + .lblInstructions.Height + HEADER_GAP
+        .lblDetails.Top = .lblDate.Top
+        .lblFR.Top = .lblDate.Top
+        .lblIPC.Top = .lblDate.Top
+        .lblOPC.Top = .lblDate.Top
+        .lstEntries.IntegralHeight = False
+        .lstEntries.Left = 12
+        .lstEntries.Top = .lblDate.Top + .lblDate.Height + LIST_GAP
+        .lstEntries.Width = listWidth
+        .lstEntries.Height = listHeight
+        .lstEntries.ColumnWidths = _
+            "0 pt;" & DATE_WIDTH & " pt;" & detailsWidth & " pt;" & _
+            MARKER_WIDTH & " pt;" & MARKER_WIDTH & " pt;" & MARKER_WIDTH & " pt"
+        .lblDate.Left = .lstEntries.Left + LIST_TEXT_INSET
+        .lblDetails.Left = .lstEntries.Left + DATE_WIDTH + LIST_TEXT_INSET
+        .lblFR.Left = .lstEntries.Left + DATE_WIDTH + detailsWidth + LIST_TEXT_INSET
+        .lblIPC.Left = .lblFR.Left + MARKER_WIDTH
+        .lblOPC.Left = .lblIPC.Left + MARKER_WIDTH
+        .lblDate.Width = DATE_WIDTH - LIST_TEXT_INSET
+        .lblDetails.Width = detailsWidth - LIST_TEXT_INSET
+        .lblFR.Width = 28
+        .lblIPC.Width = 28
+        .lblOPC.Width = 28
+        .lblFR.TextAlign = fmTextAlignLeft
+        .lblIPC.TextAlign = fmTextAlignLeft
+        .lblOPC.TextAlign = fmTextAlignLeft
+        .cmdExclude.Top = .lstEntries.Top + listHeight + 12
+        .cmdCancel.Top = .cmdExclude.Top
+        .cmdCancel.Left = .lstEntries.Left + .lstEntries.Width - .cmdCancel.Width
+        .cmdExclude.Left = .cmdCancel.Left - .cmdExclude.Width - 8
+        .Height = .cmdExclude.Top + .cmdExclude.Height + 39
+    End With
+End Sub
+
+Private Function CurrencyVerificationDetailsWidth(ByVal targetForm As Object, _
+                                                  ByVal targetList As Object) As Long
+    Const MIN_DETAILS_WIDTH As Long = 100
+    Const MAX_DETAILS_WIDTH As Long = 260
+    Const TEXT_PADDING As Long = 10
+    Dim originalCaption As String
+    Dim originalAutoSize As Boolean
+    Dim measuredWidth As Double
+    Dim itemIndex As Long
+
+    With targetForm.lblDetails
+        originalCaption = .Caption
+        originalAutoSize = .AutoSize
+        .AutoSize = True
+
+        For itemIndex = -1 To targetList.ListCount - 1
+            If itemIndex = -1 Then
+                .Caption = originalCaption
+            Else
+                .Caption = CStr(targetList.List(itemIndex, 2))
+            End If
+            If .Width > measuredWidth Then measuredWidth = .Width
+        Next itemIndex
+
+        .Caption = originalCaption
+        .AutoSize = originalAutoSize
+    End With
+
+    CurrencyVerificationDetailsWidth = CLng(measuredWidth + TEXT_PADDING)
+    If CurrencyVerificationDetailsWidth < MIN_DETAILS_WIDTH Then _
+        CurrencyVerificationDetailsWidth = MIN_DETAILS_WIDTH
+    If CurrencyVerificationDetailsWidth > MAX_DETAILS_WIDTH Then _
+        CurrencyVerificationDetailsWidth = MAX_DETAILS_WIDTH
+End Function
+
+Private Function CurrencyVerificationListHeight(ByVal entryCount As Long) As Double
+    CurrencyVerificationListHeight = 8 + (entryCount * 12)
+    If CurrencyVerificationListHeight < 80 Then CurrencyVerificationListHeight = 80
+    If CurrencyVerificationListHeight > 260 Then CurrencyVerificationListHeight = 260
+End Function
+
+Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Boolean
+    Dim tbl As ListObject
+    Dim selectedCount As Long
+    Dim itemIndex As Long
+    Dim rowIndex As Long
+    Dim response As VbMsgBoxResult
+
+    For itemIndex = 0 To targetList.ListCount - 1
+        If targetList.Selected(itemIndex) Then selectedCount = selectedCount + 1
+    Next itemIndex
+
+    If selectedCount = 0 Then
+        MsgBox "Select at least one entry to exclude.", _
+               vbInformation, "Verify Flight Reviews, IPCs, and OPCs"
+        Exit Function
+    End If
+
+    response = MsgBox( _
+        "Exclude " & selectedCount & " selected " & _
+        IIf(selectedCount = 1, "entry", "entries") & _
+        " from Flight Review, IPC, and OPC detection?" & vbCrLf & vbCrLf & _
+        "The original logbook details will not be changed.", _
+        vbOKCancel + vbExclamation, _
+        "Confirm Currency Exclusions")
+    If response <> vbOK Then Exit Function
+
+    On Error GoTo Fail
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+
+    Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
+    For itemIndex = 0 To targetList.ListCount - 1
+        If targetList.Selected(itemIndex) Then
+            rowIndex = CLng(targetList.List(itemIndex, 0))
+            tbl.ListColumns("CurrencyExclusions").DataBodyRange.Cells(rowIndex, 1).Value = True
+        End If
+    Next itemIndex
+
+    Application.Calculate
+    ThisWorkbook.Save
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox selectedCount & " " & IIf(selectedCount = 1, "entry was", "entries were") & _
+           " excluded from currency detection.", _
+           vbInformation, "Currency Exclusions Applied"
+    ExcludeSelectedCurrencyEntries = True
+    Exit Function
+
+Fail:
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+    MsgBox "The selected currency exclusions could not be applied." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Currency Exclusion Error"
+End Function
+
+Private Function CurrencyCheckValueIsMarked(ByVal value As Variant) As Boolean
+    If IsError(value) Then Exit Function
+    CurrencyCheckValueIsMarked = Trim$(CStr(value)) <> ""
+End Function
+
+Private Function CurrencyCheckMarker(ByVal value As Variant) As String
+    If CurrencyCheckValueIsMarked(value) Then CurrencyCheckMarker = "X"
+End Function
+
 ' ==============================================================
 ' PATH UTILITIES
 ' ==============================================================
@@ -1880,3 +2714,17 @@ NextOD:
     ResolveLocalPath = Environ("USERPROFILE") & "\Documents"
     Set fso = Nothing
 End Function
+
+Sub ShowDevSheets()
+    Sheets("Admin").Visible = xlSheetVisible
+    Sheets("Routes").Visible = xlSheetVisible
+    Sheets("ChartData").Visible = xlSheetVisible
+    Sheets("Airports").Visible = xlSheetVisible
+End Sub
+
+Sub HideDevSheets()
+    Sheets("Admin").Visible = xlSheetVeryHidden
+    Sheets("Routes").Visible = xlSheetVeryHidden
+    Sheets("ChartData").Visible = xlSheetVeryHidden
+    Sheets("Airports").Visible = xlSheetVeryHidden
+End Sub

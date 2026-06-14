@@ -54,6 +54,13 @@ foreach ($entry in $moduleExpectations.GetEnumerator()) {
     }
 }
 
+$userFormFiles = @("frmVerifyCurrency.frm", "frmVerifyCurrency.frx")
+foreach ($formFile in $userFormFiles) {
+    if (-not (Test-Path (Join-Path $repoRoot $formFile))) {
+        throw "$formFile not found."
+    }
+}
+
 $thisWorkbookPath = Join-Path $repoRoot "ThisWorkbook.cls"
 if (-not (Test-Path $thisWorkbookPath)) {
     throw "ThisWorkbook.cls not found."

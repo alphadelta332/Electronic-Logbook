@@ -6,6 +6,9 @@ Private Sub Workbook_Open()
     Application.Calculation = xlCalculationAutomatic
     Application.CutCopyMode = False
 
+    ' Keep date-sensitive formulas current without a volatile TODAY() formula.
+    RefreshTodayValue
+
     ' Check for logbook updates
     modBoot.CheckForUpdate
 
@@ -17,6 +20,16 @@ Private Sub Workbook_Open()
 
     ' Prompt only when the routes cache is missing or was built with an old parser.
     CheckRoutesTableOnOpen ThisWorkbook
+End Sub
+
+Private Sub Workbook_SheetActivate(ByVal Sh As Object)
+    On Error GoTo CleanExit
+
+    If Sh.Name = "Currency + Recency" Then
+        If RefreshTodayValue() Then Sh.Calculate
+    End If
+
+CleanExit:
 End Sub
 
 Private Sub SetNewEntryDateToTodayOnOpen()

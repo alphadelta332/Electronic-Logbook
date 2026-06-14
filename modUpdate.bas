@@ -156,7 +156,9 @@ End Function
 '
 ' Data preserved from user:
 '   Logbook[Year] through Logbook[Circling]  (raw flight entries)
+'   Logbook[CurrencyExclusions]               (currency detection opt-outs)
 '   Airports[Base]                            (matched by ICAO)
+'   Keywords table                            (user detection terms)
 '   Routes table and route cache state
 '
 ' Everything else comes from the master.
@@ -206,6 +208,9 @@ Private Sub RunUpdate(newVersion As String)
     UpdateStatus "Copying flight data..."
     InjectLogbookData masterWb
 
+    diagStep = "Copying Keywords data into master"
+    CopyKeywordsData masterWb
+
     diagStep = "Copying Routes data into master"
     UpdateStatus "Copying route cache..."
     CopyRoutesData masterWb
@@ -220,6 +225,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
+    NormalizeLogbookFormatting masterWb
 
     diagStep = "Updating hidden rows"
     Dim wsLog     As Worksheet
@@ -475,7 +481,8 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     Dim srcCol    As ListColumn
     Dim dstColIdx As Long
     For Each srcCol In loSrc.ListColumns
-        If srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd Then
+        If (srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd) Or _
+           srcCol.Name = "CurrencyExclusions" Then
             On Error Resume Next
             dstColIdx = loDst.ListColumns(srcCol.Name).Index
             If Err.Number = 0 Then
@@ -527,6 +534,66 @@ Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long
 NextCol:
     Next colIdx
 End Sub
+
+Private Sub CopyKeywordsData(masterWb As Workbook)
+    Dim loSrc      As ListObject
+    Dim loDst      As ListObject
+    Dim srcCol     As ListColumn
+    Dim dstColIdx  As Long
+    Dim sourceRows As Long
+    Dim destRows   As Long
+
+    On Error GoTo Fail
+
+    Set loSrc = FindListObject(ThisWorkbook, "Keywords")
+    Set loDst = FindListObject(masterWb, "Keywords")
+    If loSrc Is Nothing Or loDst Is Nothing Then Exit Sub
+    If loSrc.DataBodyRange Is Nothing Then Exit Sub
+
+    sourceRows = loSrc.DataBodyRange.Rows.Count
+    If loDst.DataBodyRange Is Nothing Then
+        destRows = 0
+    Else
+        destRows = loDst.DataBodyRange.Rows.Count
+    End If
+
+    If destRows = 0 Then
+        loDst.ListRows.Add
+        destRows = 1
+    End If
+
+    If sourceRows > destRows Then
+        loDst.Resize loDst.Range.Resize(sourceRows + 1, loDst.ListColumns.Count)
+    ElseIf sourceRows < destRows Then
+        loDst.DataBodyRange.Rows(sourceRows + 1).Resize(destRows - sourceRows).Delete
+    End If
+
+    For Each srcCol In loSrc.ListColumns
+        dstColIdx = 0
+        On Error Resume Next
+        dstColIdx = loDst.ListColumns(srcCol.Name).Index
+        On Error GoTo Fail
+        If dstColIdx > 0 Then
+            loDst.DataBodyRange.Columns(dstColIdx).Resize(sourceRows, 1).Value = _
+                srcCol.DataBodyRange.Resize(sourceRows, 1).Value
+        End If
+    Next srcCol
+
+    Exit Sub
+Fail:
+    Err.Clear
+End Sub
+
+Private Function FindListObject(ByVal wb As Workbook, ByVal tableName As String) As ListObject
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        Set FindListObject = ws.ListObjects(tableName)
+        If Not FindListObject Is Nothing Then Exit Function
+    Next ws
+    On Error GoTo 0
+End Function
 
 Private Sub CopyRoutesData(masterWb As Workbook)
     Dim loSrc      As ListObject
@@ -653,19 +720,23 @@ End Sub
 ' TABLE FORMATTING
 ' ==============================================================
 ' Copies formatting from the user's actual Logbook table into the
-' master, preserving custom cell formatting applied prior to the update.
+' master, preserving custom cell formatting applied prior to the update
+' except for the font family, which always comes from the master.
 ' The multi-row label band above the table is intentionally left as the
 ' master version so structural header fixes ship with updates.
 
 Private Sub CopyTableFormatting(masterWb As Workbook)
-    Dim srcWs  As Worksheet
-    Dim dstWs  As Worksheet
-    Dim srcLo  As ListObject
-    Dim dstLo  As ListObject
-    Dim dstCol As ListColumn
-    Dim srcCol As ListColumn
-    Dim srcRng As Range
-    Dim dstRng As Range
+    Dim srcWs             As Worksheet
+    Dim dstWs             As Worksheet
+    Dim srcLo             As ListObject
+    Dim dstLo             As ListObject
+    Dim dstCol            As ListColumn
+    Dim srcCol            As ListColumn
+    Dim srcRng            As Range
+    Dim dstRng            As Range
+    Dim masterHeaderFont  As String
+    Dim masterDataFont    As String
+    Dim masterTotalsFont  As String
 
     On Error GoTo Fail
 
@@ -673,6 +744,16 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
     Set dstWs = masterWb.Sheets("Logbook")
     Set srcLo = srcWs.ListObjects("Logbook")
     Set dstLo = dstWs.ListObjects("Logbook")
+
+    ' xlPasteFormats also copies the user's old font. Snapshot the master font
+    ' first so workbook-wide typography changes ship with the update.
+    masterHeaderFont = dstLo.HeaderRowRange.Cells(1, 1).Font.Name
+    If Not dstLo.DataBodyRange Is Nothing Then
+        masterDataFont = dstLo.DataBodyRange.Cells(1, 1).Font.Name
+    End If
+    If dstLo.ShowTotals Then
+        masterTotalsFont = dstLo.TotalsRowRange.Cells(1, 1).Font.Name
+    End If
 		
 	' Copy the table style name from user to master
     ' xlPasteFormats does not transfer ListObject.TableStyle
@@ -701,6 +782,14 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
             Application.CutCopyMode = False
         End If
     Next dstCol
+
+    If masterHeaderFont <> "" Then dstLo.HeaderRowRange.Font.Name = masterHeaderFont
+    If Not dstLo.DataBodyRange Is Nothing And masterDataFont <> "" Then
+        dstLo.DataBodyRange.Font.Name = masterDataFont
+    End If
+    If dstLo.ShowTotals And masterTotalsFont <> "" Then
+        dstLo.TotalsRowRange.Font.Name = masterTotalsFont
+    End If
 
     ' CumAzi is a calculated numeric/general column. Reset it explicitly so
     ' a workbook that already inherited a bad date format does not preserve it
@@ -758,6 +847,7 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
     Dim otherCol As Long
     Dim srcRange As Range
     Dim dstRange As Range
+    Dim masterFont As String
 
     On Error GoTo Fail
 
@@ -780,14 +870,383 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
     dstRow = dstLo.TotalsRowRange.Row
     Set dstRange = dstWs.Range(dstWs.Cells(dstRow, regCol), _
                                dstWs.Cells(dstRow + 1, otherCol))
+    If Not dstLo.DataBodyRange Is Nothing Then
+        masterFont = dstLo.DataBodyRange.Cells(1, 1).Font.Name
+    End If
 
     srcRange.Copy
     dstRange.PasteSpecial xlPasteFormats
     Application.CutCopyMode = False
+    If masterFont <> "" Then dstRange.Font.Name = masterFont
     Exit Sub
 Fail:
     Application.CutCopyMode = False
     Err.Clear
+End Sub
+
+Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
+    Dim lo As ListObject
+
+    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
+    NormalizeLogbookDataFormatting lo
+    NormalizeLogbookDataBorders lo
+    NormalizeLogbookTotalsFormatting lo
+    ApplyLogbookPalette masterWb, lo
+    ApplyLogbookTotalsRowBorders lo
+    ApplyLogbookTotalsFormatting masterWb, lo
+    ApplyVisibleLogbookOutsideBorder lo
+End Sub
+
+Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = lo.DataBodyRange.Rows(1)
+    lo.DataBodyRange.Font.Name = templateRow.Cells(1, 1).Font.Name
+    lo.DataBodyRange.Font.Size = templateRow.Cells(1, 1).Font.Size
+
+    For colIndex = 1 To lo.ListColumns.Count
+        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
+        With templateRow.Cells(1, colIndex)
+            dataColumn.HorizontalAlignment = .HorizontalAlignment
+            dataColumn.VerticalAlignment = .VerticalAlignment
+            dataColumn.WrapText = .WrapText
+            dataColumn.Orientation = .Orientation
+            dataColumn.IndentLevel = .IndentLevel
+            dataColumn.ShrinkToFit = .ShrinkToFit
+            dataColumn.ReadingOrder = .ReadingOrder
+        End With
+    Next colIndex
+End Sub
+
+Private Sub NormalizeLogbookDataBorders(lo As ListObject)
+    Dim templateRow As Range
+    Dim dataColumn As Range
+    Dim colIndex As Long
+    Dim leftLineStyle() As Variant
+    Dim leftWeight() As Variant
+    Dim leftColor() As Variant
+    Dim rightLineStyle() As Variant
+    Dim rightWeight() As Variant
+    Dim rightColor() As Variant
+
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    Set templateRow = lo.DataBodyRange.Rows(1)
+    ReDim leftLineStyle(1 To lo.ListColumns.Count)
+    ReDim leftWeight(1 To lo.ListColumns.Count)
+    ReDim leftColor(1 To lo.ListColumns.Count)
+    ReDim rightLineStyle(1 To lo.ListColumns.Count)
+    ReDim rightWeight(1 To lo.ListColumns.Count)
+    ReDim rightColor(1 To lo.ListColumns.Count)
+
+    For colIndex = 1 To lo.ListColumns.Count
+        With templateRow.Cells(1, colIndex).Borders(xlEdgeLeft)
+            leftLineStyle(colIndex) = .LineStyle
+            leftWeight(colIndex) = .Weight
+            leftColor(colIndex) = .Color
+        End With
+        With templateRow.Cells(1, colIndex).Borders(xlEdgeRight)
+            rightLineStyle(colIndex) = .LineStyle
+            rightWeight(colIndex) = .Weight
+            rightColor(colIndex) = .Color
+        End With
+    Next colIndex
+
+    lo.DataBodyRange.Borders.LineStyle = xlNone
+
+    For colIndex = 1 To lo.ListColumns.Count
+        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
+        If leftLineStyle(colIndex) <> xlNone Then
+            SetBorderFormat dataColumn.Borders(xlEdgeLeft), _
+                            leftLineStyle(colIndex), leftWeight(colIndex), leftColor(colIndex)
+        End If
+        If rightLineStyle(colIndex) <> xlNone Then
+            SetBorderFormat dataColumn.Borders(xlEdgeRight), _
+                            rightLineStyle(colIndex), rightWeight(colIndex), rightColor(colIndex)
+        End If
+    Next colIndex
+End Sub
+
+Private Sub SetBorderFormat(ByVal targetBorder As Border, _
+                            ByVal lineStyle As Variant, _
+                            ByVal weight As Variant, _
+                            ByVal color As Variant)
+    If lineStyle = xlNone Then
+        targetBorder.LineStyle = xlNone
+        Exit Sub
+    End If
+
+    targetBorder.Weight = weight
+    targetBorder.Color = color
+    targetBorder.LineStyle = lineStyle
+End Sub
+
+Private Sub ApplyLogbookPalette(masterWb As Workbook, lo As ListObject)
+    Const SUM_TOTALS_LIGHTNESS As Double = 0.2
+    Dim headerRange As Range
+    Dim sumTotalsRange As Range
+    Dim secondaryColor As Long
+
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    secondaryColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+
+    On Error Resume Next
+    Set headerRange = masterWb.Names("LogbookHeaders").RefersToRange
+    Set sumTotalsRange = masterWb.Names("LogbookSumTotals").RefersToRange
+    On Error GoTo 0
+
+    If Not headerRange Is Nothing Then
+        headerRange.Interior.Pattern = xlSolid
+        headerRange.Interior.Color = secondaryColor
+        headerRange.Font.Color = ContrastingTextColor(secondaryColor)
+    End If
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    lo.TotalsRowRange.Interior.Pattern = xlSolid
+    lo.TotalsRowRange.Interior.Color = vbBlack
+    lo.TotalsRowRange.Font.Color = vbWhite
+
+    If Not sumTotalsRange Is Nothing Then
+        sumTotalsRange.Interior.Pattern = xlSolid
+        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
+        sumTotalsRange.Font.Color = vbWhite
+    End If
+End Sub
+
+Private Function ColorWithLightness(ByVal sourceColor As Long, ByVal targetLightness As Double) As Long
+    Dim redValue As Double
+    Dim greenValue As Double
+    Dim blueValue As Double
+    Dim maximumValue As Double
+    Dim minimumValue As Double
+    Dim hue As Double
+    Dim saturation As Double
+    Dim lightness As Double
+    Dim firstChannel As Double
+    Dim secondChannel As Double
+
+    redValue = (sourceColor And &HFF&) / 255
+    greenValue = ((sourceColor \ &H100&) And &HFF&) / 255
+    blueValue = ((sourceColor \ &H10000) And &HFF&) / 255
+    maximumValue = WorksheetFunction.Max(redValue, greenValue, blueValue)
+    minimumValue = WorksheetFunction.Min(redValue, greenValue, blueValue)
+    lightness = (maximumValue + minimumValue) / 2
+
+    If maximumValue = minimumValue Then
+        ColorWithLightness = RGB(targetLightness * 255, targetLightness * 255, targetLightness * 255)
+        Exit Function
+    End If
+
+    If lightness > 0.5 Then
+        saturation = (maximumValue - minimumValue) / (2 - maximumValue - minimumValue)
+    Else
+        saturation = (maximumValue - minimumValue) / (maximumValue + minimumValue)
+    End If
+
+    If maximumValue = redValue Then
+        hue = (greenValue - blueValue) / (maximumValue - minimumValue)
+        If greenValue < blueValue Then hue = hue + 6
+    ElseIf maximumValue = greenValue Then
+        hue = (blueValue - redValue) / (maximumValue - minimumValue) + 2
+    Else
+        hue = (redValue - greenValue) / (maximumValue - minimumValue) + 4
+    End If
+    hue = hue / 6
+
+    secondChannel = targetLightness * (1 + saturation)
+    If targetLightness >= 0.5 Then secondChannel = targetLightness + saturation - targetLightness * saturation
+    firstChannel = 2 * targetLightness - secondChannel
+
+    ColorWithLightness = RGB(255 * HueChannel(firstChannel, secondChannel, hue + 1 / 3), _
+                             255 * HueChannel(firstChannel, secondChannel, hue), _
+                             255 * HueChannel(firstChannel, secondChannel, hue - 1 / 3))
+End Function
+
+Private Function HueChannel(ByVal firstChannel As Double, _
+                            ByVal secondChannel As Double, _
+                            ByVal hue As Double) As Double
+    If hue < 0 Then hue = hue + 1
+    If hue > 1 Then hue = hue - 1
+
+    If hue < 1 / 6 Then
+        HueChannel = firstChannel + (secondChannel - firstChannel) * 6 * hue
+    ElseIf hue < 1 / 2 Then
+        HueChannel = secondChannel
+    ElseIf hue < 2 / 3 Then
+        HueChannel = firstChannel + (secondChannel - firstChannel) * (2 / 3 - hue) * 6
+    Else
+        HueChannel = firstChannel
+    End If
+End Function
+
+Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
+    Dim redValue As Long
+    Dim greenValue As Long
+    Dim blueValue As Long
+    Dim perceivedBrightness As Double
+
+    redValue = backgroundColor And &HFF&
+    greenValue = (backgroundColor \ &H100&) And &HFF&
+    blueValue = (backgroundColor \ &H10000) And &HFF&
+    perceivedBrightness = (redValue * 299 + greenValue * 587 + blueValue * 114) / 1000
+
+    If perceivedBrightness >= 150 Then
+        ContrastingTextColor = vbBlack
+    Else
+        ContrastingTextColor = vbWhite
+    End If
+End Function
+
+Private Sub ApplyLogbookTotalsRowBorders(lo As ListObject)
+    Dim totalsRange As Range
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    Set totalsRange = lo.TotalsRowRange
+    totalsRange.Borders.LineStyle = xlNone
+    SetBorderFormat totalsRange.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
+End Sub
+
+Private Sub NormalizeLogbookTotalsFormatting(lo As ListObject)
+    Dim totalsRange            As Range
+    Dim tableStyleName         As String
+    Dim tableFontName          As String
+    Dim tableFontSize          As Double
+    Dim columnCount            As Long
+    Dim colIndex               As Long
+    Dim numberFormats()        As Variant
+    Dim horizontalAlignments() As Variant
+    Dim verticalAlignments()   As Variant
+    Dim wrapTextValues()       As Variant
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    Set totalsRange = lo.TotalsRowRange
+    tableStyleName = lo.TableStyle.Name
+    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
+    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
+    columnCount = lo.ListColumns.Count
+
+    ReDim numberFormats(1 To columnCount)
+    ReDim horizontalAlignments(1 To columnCount)
+    ReDim verticalAlignments(1 To columnCount)
+    ReDim wrapTextValues(1 To columnCount)
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            numberFormats(colIndex) = .NumberFormat
+            horizontalAlignments(colIndex) = .HorizontalAlignment
+            verticalAlignments(colIndex) = .VerticalAlignment
+            wrapTextValues(colIndex) = .WrapText
+        End With
+    Next colIndex
+
+    totalsRange.ClearFormats
+
+    For colIndex = 1 To columnCount
+        With totalsRange.Cells(1, colIndex)
+            .NumberFormat = numberFormats(colIndex)
+            .HorizontalAlignment = horizontalAlignments(colIndex)
+            .VerticalAlignment = verticalAlignments(colIndex)
+            .WrapText = wrapTextValues(colIndex)
+        End With
+    Next colIndex
+
+    lo.TableStyle = tableStyleName
+    totalsRange.Font.Name = tableFontName
+    totalsRange.Font.Size = tableFontSize
+End Sub
+
+Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
+    Const MASTER_TOTALS_FILL_COLOR As Long = 14277081
+    Dim ws As Worksheet
+    Dim totalsBlock As Range
+    Dim topRow As Range
+    Dim bottomRow As Range
+    Dim labelCells As Range
+    Dim hoursCells As Range
+    Dim cellLeftOfBlock As Range
+    Dim nameFormula As String
+    Dim tableFontName As String
+    Dim tableFontSize As Double
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    Set ws = lo.Parent
+    Set totalsBlock = ws.Range(ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Reg").Range.Column), _
+                               ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
+    Set topRow = totalsBlock.Rows(1)
+    Set bottomRow = totalsBlock.Rows(2)
+    Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
+    Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
+    Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
+    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
+    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
+
+    nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
+    On Error Resume Next
+    masterWb.Names("LogbookTotals").RefersTo = nameFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        masterWb.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
+    End If
+    On Error GoTo 0
+
+    topRow.Interior.Pattern = xlNone
+    topRow.Font.Color = vbBlack
+    topRow.Font.Bold = False
+    topRow.Cells(1, 3).Font.Bold = True
+
+    bottomRow.Interior.Pattern = xlSolid
+    bottomRow.Interior.Color = MASTER_TOTALS_FILL_COLOR
+    bottomRow.Font.Color = vbBlack
+    bottomRow.Font.Bold = True
+    totalsBlock.Font.Name = tableFontName
+    totalsBlock.Font.Size = tableFontSize
+
+    labelCells.HorizontalAlignment = xlRight
+    labelCells.WrapText = False
+    hoursCells.HorizontalAlignment = xlCenter
+    hoursCells.VerticalAlignment = xlCenter
+    hoursCells.WrapText = False
+    bottomRow.Cells(1, 3).NumberFormat = topRow.Cells(1, 3).NumberFormat
+
+    totalsBlock.Borders.LineStyle = xlNone
+    SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlContinuous, xlMedium, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
+    SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
+    cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
+    cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
+    cellLeftOfBlock.Borders.LineStyle = xlNone
+End Sub
+
+Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
+    Dim visibleRange As Range
+    Dim ws As Worksheet
+
+    If Not lo.ShowTotals Then Exit Sub
+
+    Set ws = lo.Parent
+    Set visibleRange = ws.Range(ws.Cells(2, lo.ListColumns("Date").Range.Column), _
+                                ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Circling").Range.Column))
+
+    SetBorderFormat visibleRange.Borders(xlEdgeTop), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
+    SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
 End Sub
 
 ' ==============================================================
