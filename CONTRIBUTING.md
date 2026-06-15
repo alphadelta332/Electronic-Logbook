@@ -24,3 +24,14 @@ At minimum, run:
 ```
 
 Then smoke test the prepared workbook manually in Excel.
+
+## External Updater
+
+Build and run the updater unit tests with:
+
+```powershell
+dotnet test ElectronicLogbook.Updater.sln --configuration Release
+```
+
+The updater is an experimental Windows-only prototype. It must never overwrite, rename, or
+delete the source workbook. See `updater/README.md` for its supported migration contract.
