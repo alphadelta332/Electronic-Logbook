@@ -26,6 +26,7 @@ try {
         param($Workbook)
 
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
+        $logbook.TableStyle = "TableStyleLight16"
         $logbook.ListColumns("Custom 1").Name = "Updater Test"
         $logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 = "TESTREG"
         $newLogbookRow = $logbook.ListRows.Add()
@@ -76,6 +77,17 @@ try {
         }
         if ($logbook.ListRows.Count -ne 3) {
             throw "Logbook row count was not preserved."
+        }
+        if ($logbook.TableStyle.Name -ne "TableStyleLight16") {
+            throw "Logbook table style was not preserved."
+        }
+        if ($logbook.Range.Rows.Hidden) {
+            throw "Expanded Logbook rows were left hidden."
+        }
+        $logbookTotals = $Workbook.Names.Item("LogbookTotals").RefersToRange
+        if ($logbookTotals.Rows.Count -ne 2 -or
+            $logbookTotals.Row -ne $logbook.TotalsRowRange.Row) {
+            throw "LogbookTotals was not anchored to the live two-row totals area."
         }
         if ($logbook.ListColumns("Reg").DataBodyRange.Cells(3, 1).Value2 -ne "TESTREG2") {
             throw "Expanded Logbook entry data was not preserved."

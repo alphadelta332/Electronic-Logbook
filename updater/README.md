@@ -14,6 +14,10 @@ renames, deletes, or overwrites the source workbook.
 - Airport `Base` flags matched by ICAO
 - Routes table and route-cache state
 - Date reset and warning-suppression preferences
+- Logbook table style, custom column formatting, totals-area formatting, and palette
+
+The updater also rebuilds the live Logbook totals ranges, repairs expanded-row visibility,
+refreshes pivot tables, and updates the Hours Over Time chart range.
 
 Everything else comes from the clean master workbook.
 
@@ -49,6 +53,6 @@ Run the disposable Excel migration test locally with:
 
 - Requires Microsoft Excel for Windows.
 - Uses Excel COM automation and must run while the source workbook is closed.
-- Does not yet refresh pivots/charts or normalize all workbook formatting.
+- Does not yet provide a full visual-diff test or normalize every possible user-customized format.
 - Does not replace the existing in-workbook updater.
 - The executable is not currently code-signed or distributed as a release asset.

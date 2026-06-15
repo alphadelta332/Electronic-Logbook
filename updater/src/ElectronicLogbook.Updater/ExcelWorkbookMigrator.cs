@@ -11,6 +11,8 @@ public sealed class ExcelWorkbookMigrator
     private const int AutomationSecurityForceDisable = 3;
     private const int XlCalculationManual = -4135;
     private const int XlCalculationAutomatic = -4105;
+    private const int XlPasteFormats = -4122;
+    private const int XlUp = -4162;
 
     private static readonly string[] PreservedNames =
     [
@@ -71,6 +73,8 @@ public sealed class ExcelWorkbookMigrator
             CopyAirportBaseFlags((object)sourceWorkbook, (object)outputWorkbook);
             step = "copying named preferences";
             CopyNamedPreferences((object)sourceWorkbook, (object)outputWorkbook);
+            step = "restoring Logbook presentation";
+            RestoreLogbookPresentation((object)sourceWorkbook, (object)outputWorkbook);
 
             var outputVersion = ReadName((object)outputWorkbook, "LogbookVersion");
             if (request.Manifest is not null &&
@@ -87,6 +91,10 @@ public sealed class ExcelWorkbookMigrator
             {
                 worksheet.Calculate();
             }
+            step = "refreshing pivot tables";
+            RefreshPivots((object)outputWorkbook);
+            step = "updating Hours Over Time chart";
+            UpdateHoursOverTimeChart((object)outputWorkbook);
 
             step = "validating preserved data";
             IReadOnlyDictionary<string, string> outputFingerprints =
@@ -100,6 +108,7 @@ public sealed class ExcelWorkbookMigrator
                         $"Preserved data validation failed for {expected.Key}.");
                 }
             }
+            ValidateLogbookStructure((object)sourceWorkbook, (object)outputWorkbook);
 
             step = "saving output workbook";
             outputWorkbook.RemovePersonalInformation = false;
@@ -297,6 +306,229 @@ public sealed class ExcelWorkbookMigrator
             {
                 // Preferences added in newer versions may not exist in old workbooks.
             }
+        }
+    }
+
+    private static void RestoreLogbookPresentation(
+        object sourceWorkbookObject,
+        object outputWorkbookObject)
+    {
+        dynamic sourceWorkbook = sourceWorkbookObject;
+        dynamic outputWorkbook = outputWorkbookObject;
+        dynamic source = GetTable(sourceWorkbookObject, "Logbook");
+        dynamic destination = GetTable(outputWorkbookObject, "Logbook");
+        dynamic worksheet = destination.Parent;
+
+        var masterHeaderFont = (string)destination.HeaderRowRange.Cells.Item(1, 1).Font.Name;
+        var masterDataFont = (string)destination.DataBodyRange.Cells.Item(1, 1).Font.Name;
+        var masterTotalsFont = (string)destination.TotalsRowRange.Cells.Item(1, 1).Font.Name;
+
+        destination.TableStyle = source.TableStyle.Name;
+        destination.ShowTableStyleRowStripes = source.ShowTableStyleRowStripes;
+        destination.ShowTableStyleColumnStripes = source.ShowTableStyleColumnStripes;
+        destination.ShowTableStyleFirstColumn = source.ShowTableStyleFirstColumn;
+        destination.ShowTableStyleLastColumn = source.ShowTableStyleLastColumn;
+
+        var lastUserFormatColumn = GetColumnIndex(destination, "CumAzi");
+        for (var destinationIndex = 1; destinationIndex <= lastUserFormatColumn; destinationIndex++)
+        {
+            var name = (string)destination.ListColumns.Item(destinationIndex).Name;
+            if (!HasColumn((object)source, name))
+            {
+                continue;
+            }
+
+            var sourceIndex = GetColumnIndex(source, name);
+            source.Range.Columns.Item(sourceIndex).Copy();
+            destination.Range.Columns.Item(destinationIndex).PasteSpecial(XlPasteFormats);
+        }
+        outputWorkbook.Application.CutCopyMode = false;
+
+        destination.HeaderRowRange.Font.Name = masterHeaderFont;
+        destination.DataBodyRange.Font.Name = masterDataFont;
+        destination.TotalsRowRange.Font.Name = masterTotalsFont;
+        destination.ListColumns.Item(GetColumnIndex(destination, "CumAzi"))
+            .DataBodyRange.NumberFormat = "General";
+        destination.TotalsRowRange.Cells.Item(
+            1,
+            GetColumnIndex(destination, "CumAzi")).NumberFormat = "General";
+
+        CopyTotalsAreaFormatting(source, destination);
+        EnsureTotalsArea(outputWorkbookObject, destination);
+        RestoreHeaderPalette(sourceWorkbook, outputWorkbook, destination);
+
+        var lastDataRow =
+            (int)destination.DataBodyRange.Row + (int)destination.DataBodyRange.Rows.Count - 1;
+        worksheet.Rows.Hidden = false;
+        if (lastDataRow + 4 <= (int)worksheet.Rows.Count)
+        {
+            worksheet.Rows[$"{lastDataRow + 4}:{worksheet.Rows.Count}"].Hidden = true;
+        }
+    }
+
+    private static void CopyTotalsAreaFormatting(dynamic source, dynamic destination)
+    {
+        dynamic sourceWorksheet = source.Parent;
+        dynamic destinationWorksheet = destination.Parent;
+        var sourceTotalsRow = (int)source.TotalsRowRange.Row;
+        var destinationTotalsRow = (int)destination.TotalsRowRange.Row;
+        var regColumn = (int)source.ListColumns.Item(GetColumnIndex(source, "Reg")).Range.Column;
+        var otherColumn = (int)source.ListColumns
+            .Item(GetColumnIndex(source, "Other Pilot or Crew")).Range.Column;
+
+        dynamic sourceRange = sourceWorksheet.Range[
+            sourceWorksheet.Cells.Item(sourceTotalsRow, regColumn),
+            sourceWorksheet.Cells.Item(sourceTotalsRow + 1, otherColumn)];
+        dynamic destinationRange = destinationWorksheet.Range[
+            destinationWorksheet.Cells.Item(destinationTotalsRow, regColumn),
+            destinationWorksheet.Cells.Item(destinationTotalsRow + 1, otherColumn)];
+        sourceRange.Copy();
+        destinationRange.PasteSpecial(XlPasteFormats);
+        destinationWorksheet.Application.CutCopyMode = false;
+    }
+
+    private static void EnsureTotalsArea(object workbookObject, dynamic table)
+    {
+        dynamic workbook = workbookObject;
+        dynamic worksheet = table.Parent;
+        var totalsRow = (int)table.TotalsRowRange.Row;
+        var picColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "PIC")).Range.Column;
+        var otherColumn = (int)table.ListColumns
+            .Item(GetColumnIndex(table, "Other Pilot or Crew")).Range.Column;
+        var regColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Reg")).Range.Column;
+        var firstCustomIndex = GetColumnIndex(table, "Details") + 1;
+        var sumStartColumn = (int)table.ListColumns.Item(firstCustomIndex).Range.Column;
+        var sumEndColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "TotalApps")).Range.Column;
+
+        worksheet.Cells.Item(totalsRow + 1, picColumn).Value2 = "Total Aeronautical Experience";
+        worksheet.Cells.Item(totalsRow + 1, otherColumn).Formula =
+            "=Logbook[[#Totals],[Other Pilot or Crew]]+Logbook[[#Totals],[IfrSim]]";
+
+        SetWorkbookName(
+            workbook,
+            "LogbookTotals",
+            worksheet.Range[
+                worksheet.Cells.Item(totalsRow, regColumn),
+                worksheet.Cells.Item(totalsRow + 1, otherColumn)]);
+        SetWorkbookName(
+            workbook,
+            "LogbookSumTotals",
+            worksheet.Range[
+                worksheet.Cells.Item(totalsRow, sumStartColumn),
+                worksheet.Cells.Item(totalsRow, sumEndColumn)]);
+    }
+
+    private static void RestoreHeaderPalette(
+        dynamic sourceWorkbook,
+        dynamic outputWorkbook,
+        dynamic destination)
+    {
+        dynamic sourceHeaders = sourceWorkbook.Names.Item("LogbookHeaders").RefersToRange;
+        dynamic outputHeaders = outputWorkbook.Names.Item("LogbookHeaders").RefersToRange;
+        outputHeaders.Interior.Pattern = sourceHeaders.Interior.Pattern;
+        outputHeaders.Interior.Color = sourceHeaders.Interior.Color;
+        outputHeaders.Font.Color = sourceHeaders.Font.Color;
+
+        var start = GetColumnIndex(destination, "SeIcusDay");
+        var end = GetColumnIndex(destination, "Circling");
+        dynamic hourHeaders = destination.HeaderRowRange.Cells.Item(1, start).Resize[
+            1,
+            end - start + 1];
+        foreach (dynamic cell in hourHeaders.Cells)
+        {
+            cell.Font.Color = cell.DisplayFormat.Interior.Color;
+        }
+    }
+
+    private static void RefreshPivots(object workbookObject)
+    {
+        dynamic workbook = workbookObject;
+        foreach (dynamic worksheet in workbook.Worksheets)
+        {
+            dynamic pivots = worksheet.PivotTables();
+            for (var index = 1; index <= (int)pivots.Count; index++)
+            {
+                dynamic pivot = pivots.Item(index);
+                pivot.RefreshTable();
+            }
+        }
+
+        try
+        {
+            dynamic hoursByYear = workbook.Worksheets.Item("ChartData")
+                .PivotTables("HoursByYear");
+            hoursByYear.PivotFields("Quarters (Date)").Orientation = 0;
+            hoursByYear.RefreshTable();
+        }
+        catch
+        {
+            // Older workbooks may not have this pivot or the optional Quarters grouping.
+        }
+    }
+
+    private static void UpdateHoursOverTimeChart(object workbookObject)
+    {
+        dynamic workbook = workbookObject;
+        dynamic chartData = workbook.Worksheets.Item("ChartData");
+        dynamic charts = workbook.Worksheets.Item("Charts");
+        dynamic runningTotal = workbook.Names.Item("RunningTotalHours").RefersToRange;
+        var firstColumn = (int)runningTotal.Columns.Item(1).Column;
+        var lastRow = (int)chartData.Cells.Item(chartData.Rows.Count, firstColumn).End(XlUp).Row;
+        if (lastRow < 2)
+        {
+            return;
+        }
+
+        dynamic chartRange = chartData.Range[
+            chartData.Cells.Item(2, firstColumn),
+            chartData.Cells.Item(lastRow, firstColumn + 1)];
+        dynamic series = charts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1);
+        series.XValues = chartRange.Columns.Item(1);
+        series.Values = chartRange.Columns.Item(2);
+    }
+
+    private static void SetWorkbookName(dynamic workbook, string name, dynamic range)
+    {
+        var refersTo = $"='{range.Worksheet.Name}'!{range.Address}";
+        try
+        {
+            workbook.Names.Item(name).RefersTo = refersTo;
+        }
+        catch
+        {
+            workbook.Names.Add(name, refersTo);
+        }
+    }
+
+    private static void ValidateLogbookStructure(
+        object sourceWorkbookObject,
+        object outputWorkbookObject)
+    {
+        dynamic source = GetTable(sourceWorkbookObject, "Logbook");
+        dynamic outputWorkbook = outputWorkbookObject;
+        dynamic destination = GetTable(outputWorkbookObject, "Logbook");
+
+        if (!string.Equals(
+                (string)source.TableStyle.Name,
+                (string)destination.TableStyle.Name,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Logbook table style was not preserved.");
+        }
+
+        for (var row = 1; row <= (int)destination.Range.Rows.Count; row++)
+        {
+            if ((bool)destination.Range.Rows.Item(row).Hidden)
+            {
+                throw new InvalidDataException("Logbook table contains hidden rows.");
+            }
+        }
+
+        dynamic totals = outputWorkbook.Names.Item("LogbookTotals").RefersToRange;
+        if ((int)totals.Rows.Count != 2 ||
+            (int)totals.Row != (int)destination.TotalsRowRange.Row)
+        {
+            throw new InvalidDataException("LogbookTotals is not anchored to the live two-row totals area.");
         }
     }
 
