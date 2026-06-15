@@ -298,9 +298,8 @@ public sealed class ExcelWorkbookMigrator
 
     private static IReadOnlyDictionary<string, string> ReadPreservedFingerprints(object workbook)
     {
-        return new Dictionary<string, string>(StringComparer.Ordinal)
+        var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Logbook"] = FingerprintLogbook(workbook),
             ["Keywords"] = FingerprintTable(workbook, "Keywords"),
             ["Routes"] = FingerprintColumns(
                 workbook,
@@ -309,9 +308,13 @@ public sealed class ExcelWorkbookMigrator
             ["AirportBases"] = FingerprintAirportBases(workbook),
             ["Preferences"] = FingerprintNames(workbook, PreservedNames)
         };
+        AddLogbookFingerprints(workbook, fingerprints);
+        return fingerprints;
     }
 
-    private static string FingerprintLogbook(dynamic workbook)
+    private static void AddLogbookFingerprints(
+        dynamic workbook,
+        IDictionary<string, string> fingerprints)
     {
         dynamic table = GetTable(workbook, "Logbook");
         var start = GetColumnIndex(table, "Year");
@@ -322,7 +325,15 @@ public sealed class ExcelWorkbookMigrator
             names.Add((string)table.ListColumns.Item(index).Name);
         }
         names.Add("CurrencyExclusions");
-        return FingerprintColumns(workbook, "Logbook", names);
+
+        fingerprints["LogbookHeaders"] = Sha256(string.Join('\u001f', names));
+        foreach (var name in names)
+        {
+            fingerprints[$"Logbook:{name}"] = FingerprintColumns(
+                workbook,
+                "Logbook",
+                new[] { name });
+        }
     }
 
     private static string FingerprintTable(dynamic workbook, string tableName)
@@ -461,7 +472,8 @@ public sealed class ExcelWorkbookMigrator
             }
             return;
         }
-        table.Resize(table.Range.Resize[rows + 1, table.ListColumns.Count]);
+        var totalsRows = (bool)table.ShowTotals ? 1 : 0;
+        table.Resize(table.Range.Resize[rows + 1 + totalsRows, table.ListColumns.Count]);
     }
 
     private static void FillFormulaColumns(dynamic table, int dataStart, int dataEnd)

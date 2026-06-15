@@ -28,6 +28,9 @@ try {
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
         $logbook.ListColumns("Custom 1").Name = "Updater Test"
         $logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 = "TESTREG"
+        $newLogbookRow = $logbook.ListRows.Add()
+        $newLogbookRow.Range.Cells(1, $logbook.ListColumns("Year").Index).Value2 = 2026
+        $newLogbookRow.Range.Cells(1, $logbook.ListColumns("Reg").Index).Value2 = "TESTREG2"
 
         $keywords = $Workbook.Sheets("Currency + Recency").ListObjects("Keywords")
         $keywords.ListColumns("IPC").DataBodyRange.Cells(1, 1).Value2 = "TEST IPC"
@@ -70,6 +73,12 @@ try {
         }
         if ($logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 -ne "TESTREG") {
             throw "Logbook entry data was not preserved."
+        }
+        if ($logbook.ListRows.Count -ne 3) {
+            throw "Logbook row count was not preserved."
+        }
+        if ($logbook.ListColumns("Reg").DataBodyRange.Cells(3, 1).Value2 -ne "TESTREG2") {
+            throw "Expanded Logbook entry data was not preserved."
         }
         if ($keywords.ListColumns("IPC").DataBodyRange.Cells(1, 1).Value2 -ne "TEST IPC") {
             throw "Keywords data was not preserved."
