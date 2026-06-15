@@ -11,7 +11,6 @@ public sealed class ExcelWorkbookMigrator
     private const int AutomationSecurityForceDisable = 3;
     private const int XlCalculationManual = -4135;
     private const int XlCalculationAutomatic = -4105;
-    private const int XlOpenXmlWorkbookMacroEnabled = 52;
 
     private static readonly string[] PreservedNames =
     [
@@ -34,6 +33,7 @@ public sealed class ExcelWorkbookMigrator
         dynamic? sourceWorkbook = null;
         dynamic? outputWorkbook = null;
         var excelProcessId = 0;
+        var migrationSucceeded = false;
         var step = "starting Excel";
 
         try
@@ -103,10 +103,11 @@ public sealed class ExcelWorkbookMigrator
 
             step = "saving output workbook";
             outputWorkbook.RemovePersonalInformation = false;
-            outputWorkbook.SaveAs(request.OutputPath, XlOpenXmlWorkbookMacroEnabled);
+            outputWorkbook.Save();
 
             dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
             var logbookRows = (int)outputLogbook.ListRows.Count;
+            migrationSucceeded = true;
             return new MigrationReport(
                 request.SourcePath,
                 request.MasterPath,
@@ -124,7 +125,6 @@ public sealed class ExcelWorkbookMigrator
             outputWorkbook = null;
             CloseWorkbook(sourceWorkbook);
             sourceWorkbook = null;
-            TryDelete(request.OutputPath);
             throw new InvalidOperationException(
                 $"Migration failed at {step}: {ex.Message}",
                 ex);
@@ -147,6 +147,10 @@ public sealed class ExcelWorkbookMigrator
             GC.Collect();
             GC.WaitForPendingFinalizers();
             EnsureProcessExited(excelProcessId);
+            if (!migrationSucceeded)
+            {
+                TryDelete(request.OutputPath);
+            }
         }
     }
 
