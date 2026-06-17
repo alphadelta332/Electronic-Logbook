@@ -56,10 +56,10 @@ Sub AddToLogbook()
         End If
         RefreshTodayValue
         todayDate = Range("today").Value
-        ipcDetected = KeywordDetected(CStr(Range("neDetails").Value), "IPC")
-        opcDetected = KeywordDetected(CStr(Range("neDetails").Value), "OPC")
+        ipcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "IPC")
+        opcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "OPC")
         flightReviewDetected = ipcDetected Or _
-                               KeywordDetected(CStr(Range("neDetails").Value), "Flight Review")
+                               KeywordDetected(CStr(NewEntryValue("neDetails")), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -100,14 +100,13 @@ Sub AddToLogbook()
         End If
 
     '--- 3c. Zero Hours Check
-        If Application.WorksheetFunction.CountIf( _
-            Range("neSeIcusDay", "neIfrSim"), ">0") = 0 Then
+        If CountPositiveNewEntryFields(NewEntryFlightHourFieldNames()) = 0 Then
             MsgBox "ERROR: Total hours cannot be zero.", vbCritical
             GoTo Cleanup
         End If
 
     '--- 3d. IFR Hours vs Total Hours Check
-        If Range("neIfrIf").Value > Application.WorksheetFunction.Sum(Range("neSeIcusDay", "neCopilotNight")) Then
+        If NewEntryNumericValue("neIfrIf") > SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
             MsgBox "ERROR: In Flight Instrument Hours cannot be greater than Total Hours.", vbCritical
             GoTo Cleanup
         End If
@@ -122,29 +121,29 @@ Sub AddToLogbook()
         fieldNames = Array("Year", "Month", "Day", "Type", "PIC")
 
         For i = 0 To UBound(requiredFields)
-            If Range(requiredFields(i)).Value = "" Then
+            If NewEntryValue(CStr(requiredFields(i))) = "" Then
                 MsgBox "ERROR: " & fieldNames(i) & " cannot be blank.", vbCritical
                 GoTo Cleanup
             End If
         Next i
 
         'Check 2: Details field must not be blank (checked separately as it falls outside the loop range)
-        If Range("neDetails").Value = "" Then
+        If NewEntryValue("neDetails") = "" Then
             MsgBox "ERROR: Details cannot be blank.", vbCritical
             GoTo Cleanup
         End If
 
     '--- 3f. Non-Numeric Value Check (Hours, Landings, Approaches)
-        Dim checkCell As Range
+        Dim checkField As Variant
 
-        For Each checkCell In Range("neSI1", "neCircling")
-            If checkCell.Value <> "" Then
-                If Not IsNumeric(checkCell.Value) Then
+        For Each checkField In NewEntryNumericFieldNames()
+            If NewEntryValue(CStr(checkField)) <> "" Then
+                If Not IsNumeric(NewEntryValue(CStr(checkField))) Then
                     MsgBox "ERROR: Non-numerical value found in Hours, Landings, or Approaches.", vbCritical
                     GoTo Cleanup
                 End If
             End If
-        Next checkCell
+        Next checkField
 
     '===============================
     ' STEP 4: WARNING CHECKS (CONTINUE OR CANCEL)
@@ -191,10 +190,10 @@ Sub AddToLogbook()
 
     '--- 4d. Day Hours vs Day Landings Cross-Check
         Dim dayHours As Double
-        dayHours = Application.WorksheetFunction.Sum( _
-            Range("neSeIcusDay"), Range("neSeDualDay"), Range("neSeCommandDay"), _
-            Range("neMeIcusDay"), Range("neMeDualDay"), Range("neMeCommandDay"), _
-            Range("neCopilotDay"))
+        dayHours = SumNewEntryFields(Array( _
+            "neSeIcusDay", "neSeDualDay", "neSeCommandDay", _
+            "neMeIcusDay", "neMeDualDay", "neMeCommandDay", _
+            "neCopilotDay"))
 
         If Not suppressWarnings Then
             'Check 1: Day hours recorded but no day landings
@@ -216,10 +215,10 @@ Sub AddToLogbook()
 
     '--- 4e. Night Hours vs Night Landings Cross-Check
         Dim nightHours As Double
-        nightHours = Application.WorksheetFunction.Sum( _
-            Range("neSeIcusNight"), Range("neSeDualNight"), Range("neSeCommandNight"), _
-            Range("neMeIcusNight"), Range("neMeDualNight"), Range("neMeCommandNight"), _
-            Range("neCopilotNight"))
+        nightHours = SumNewEntryFields(Array( _
+            "neSeIcusNight", "neSeDualNight", "neSeCommandNight", _
+            "neMeIcusNight", "neMeDualNight", "neMeCommandNight", _
+            "neCopilotNight"))
 
         If Not suppressWarnings Then
             'Check 1: Night hours recorded but no night landings
@@ -268,7 +267,7 @@ Sub AddToLogbook()
             If opcDetected And Not currencyExcluded Then
                 If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
                    (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") And _
-                   Application.WorksheetFunction.CountIf(Range("neILS", "neCircling"), ">0") = 0 Then
+                   CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
                     response = MsgBox("OPC detected but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -277,7 +276,7 @@ Sub AddToLogbook()
 
     '--- 4h. Approaches Without Instrument Hours Check
         If Not suppressWarnings Then
-            If Application.WorksheetFunction.CountIf(Range("neILS", "neCircling"), ">0") > 0 Then
+            If CountPositiveNewEntryFields(NewEntryApproachFieldNames()) > 0 Then
                 If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
                    (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") Then
                     response = MsgBox("Warning: Approaches recorded with no Instrument hours. Continue?", vbOKCancel + vbExclamation, "Approaches Warning")
@@ -290,7 +289,7 @@ Sub AddToLogbook()
         'Total landings (day + night) should not exceed 6x total flight hours
         If Not suppressWarnings Then
             If (Range("neLandingsDay").Value + Range("neLandingsNight").Value) > _
-                6 * Application.WorksheetFunction.Sum(Range("neSeIcusDay", "neCopilotNight")) Then
+                6 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Landings seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Landings Warning")
                 If response = vbCancel Then GoTo Cleanup
             End If
@@ -299,8 +298,8 @@ Sub AddToLogbook()
     '--- 4j. High Approaches vs Hours Check
         'Total approaches should not exceed 3x total flight hours
         If Not suppressWarnings Then
-            If Application.WorksheetFunction.Sum(Range("neILS", "neCircling")) > _
-                3 * Application.WorksheetFunction.Sum(Range("neSeIcusDay", "neCopilotNight")) Then
+            If SumNewEntryFields(NewEntryApproachFieldNames()) > _
+                3 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Approaches seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Approaches Warning")
                 If response = vbCancel Then GoTo Cleanup
             End If
@@ -308,13 +307,13 @@ Sub AddToLogbook()
 
     '--- 4k. Dual / ICUS / Copilot Without Other Crew Check
         If Not suppressWarnings Then
-            If Range("neOtherCrew").Value = "" Then
-                If Application.WorksheetFunction.Sum( _
-                    Range("neSeIcusDay"), Range("neSeIcusNight"), _
-                    Range("neSeDualDay"), Range("neSeDualNight"), _
-                    Range("neMeIcusDay"), Range("neMeIcusNight"), _
-                    Range("neMeDualDay"), Range("neMeDualNight"), _
-                    Range("neCopilotDay"), Range("neCopilotNight")) > 0 Then
+            If NewEntryValue("neOtherCrew") = "" Then
+                If SumNewEntryFields(Array( _
+                    "neSeIcusDay", "neSeIcusNight", _
+                    "neSeDualDay", "neSeDualNight", _
+                    "neMeIcusDay", "neMeIcusNight", _
+                    "neMeDualDay", "neMeDualNight", _
+                    "neCopilotDay", "neCopilotNight")) > 0 Then
                     response = MsgBox("Warning: Dual, ICUS, or Copilot hours recorded, but no Other Pilot or Crew recorded. Continue?", vbOKCancel + vbExclamation, "Other Crew Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -340,7 +339,7 @@ Sub AddToLogbook()
             If tbl.DataBodyRange.cells(rr, dateCol).Value = Range("neDate").Value And _
                LCase(Trim(tbl.DataBodyRange.cells(rr, typeCol).Value)) = LCase(Trim(Range("neType").Value)) And _
                LCase(Trim(tbl.DataBodyRange.cells(rr, regCol).Value)) = LCase(Trim(Range("neReg").Value)) And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(Range("neDetails").Value)) Then
+               LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(NewEntryValue("neDetails"))) Then
                 dupFound = True
                 Exit For
             End If
@@ -392,9 +391,7 @@ Sub AddToLogbook()
     '--- 5c. Copy Remaining Data (Type through Circling)
         diagStep = "Step 5c: Copy Data"
         WriteCrumb diagStep
-        Dim dataCols As Long
-        dataCols = Range("neType", "neCircling").Columns.Count
-        newRow.Range.cells(1, 5).Resize(1, dataCols).Value = Range("neType", "neCircling").Value
+        CopyNewEntryFieldsToLogbookRow newRow.Range
 
     '--- 5d. Record Currency Detection Exclusion
         With newRow.Range.Cells(1, tbl.ListColumns("CurrencyExclusions").Index)
@@ -469,11 +466,10 @@ Sub AddToLogbook()
         End Select
 
     '--- 7b. Reset PIC to Default
-        Range("nePIC").Value = "Self"
+        SetNewEntryValue "nePIC", "Self"
 
     '--- 7c. Clear Remaining Input Fields
-        Union(Range("neType", "neReg"), Range("neOtherCrew", "neDetails"), _
-              Range("neSI1", "neCircling")).ClearContents
+        ClearNewEntryFields NewEntryClearFieldNames()
 
     '--- 7d. Update Hidden Rows
         UpdateHiddenRows ThisWorkbook
@@ -1171,6 +1167,142 @@ Private Function LogbookDateFormula() As String
         "IF(ISNUMBER([@Month]),MONTH([@Month]),MONTH(DATEVALUE([@Month]&"" 1"")))," & _
         "IF(ISNUMBER([@Day]),IF([@Day]>31,DAY([@Day]),[@Day]),VALUE([@Day]))))," & _
         "NA())"
+End Function
+
+Private Function NewEntryCell(ByVal fieldName As String) As Range
+    Dim inputCell As Range
+    Set inputCell = Range(fieldName)
+
+    If inputCell.MergeCells Then
+        Set NewEntryCell = inputCell.MergeArea.Cells(1, 1)
+    Else
+        Set NewEntryCell = inputCell
+    End If
+End Function
+
+Private Function NewEntryValue(ByVal fieldName As String) As Variant
+    NewEntryValue = NewEntryCell(fieldName).Value
+End Function
+
+Private Function NewEntryNumericValue(ByVal fieldName As String) As Double
+    If NewEntryValue(fieldName) = "" Then
+        NewEntryNumericValue = 0
+    ElseIf Not IsNumeric(NewEntryValue(fieldName)) Then
+        NewEntryNumericValue = 0
+    Else
+        NewEntryNumericValue = CDbl(NewEntryValue(fieldName))
+    End If
+End Function
+
+Private Sub SetNewEntryValue(ByVal fieldName As String, ByVal value As Variant)
+    NewEntryCell(fieldName).Value = value
+End Sub
+
+Private Sub ClearNewEntryFields(ByVal fieldNames As Variant)
+    Dim fieldName As Variant
+    Dim clearedAreas As Object
+    Dim clearArea As Range
+    Dim areaKey As String
+
+    Set clearedAreas = CreateObject("Scripting.Dictionary")
+    For Each fieldName In fieldNames
+        Set clearArea = Range(CStr(fieldName))
+        If clearArea.MergeCells Then Set clearArea = clearArea.MergeArea
+        areaKey = clearArea.Worksheet.Name & "!" & clearArea.Address(External:=False)
+        If Not clearedAreas.Exists(areaKey) Then
+            clearArea.ClearContents
+            clearedAreas.Add areaKey, True
+        End If
+    Next fieldName
+End Sub
+
+Private Function SumNewEntryFields(ByVal fieldNames As Variant) As Double
+    Dim fieldName As Variant
+
+    For Each fieldName In fieldNames
+        SumNewEntryFields = SumNewEntryFields + NewEntryNumericValue(CStr(fieldName))
+    Next fieldName
+End Function
+
+Private Function CountPositiveNewEntryFields(ByVal fieldNames As Variant) As Long
+    Dim fieldName As Variant
+
+    For Each fieldName In fieldNames
+        If NewEntryNumericValue(CStr(fieldName)) > 0 Then
+            CountPositiveNewEntryFields = CountPositiveNewEntryFields + 1
+        End If
+    Next fieldName
+End Function
+
+Private Sub CopyNewEntryFieldsToLogbookRow(ByVal rowRange As Range)
+    Dim fieldNames As Variant
+    Dim i As Long
+
+    fieldNames = NewEntryLogbookFieldNames()
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        rowRange.Cells(1, 5 + i).Value = NewEntryValue(CStr(fieldNames(i)))
+    Next i
+End Sub
+
+Private Function NewEntryLogbookFieldNames() As Variant
+    NewEntryLogbookFieldNames = Array( _
+        "neType", "neReg", "nePIC", "neOtherCrew", "neDetails", _
+        "neSI1", "neSI2", "neSI3", "neSI4", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
+        "neLandingsDay", "neLandingsNight", _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntryNumericFieldNames() As Variant
+    NewEntryNumericFieldNames = Array( _
+        "neSI1", "neSI2", "neSI3", "neSI4", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
+        "neLandingsDay", "neLandingsNight", _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntryFlightTimeFieldNames() As Variant
+    NewEntryFlightTimeFieldNames = Array( _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight")
+End Function
+
+Private Function NewEntryFlightHourFieldNames() As Variant
+    NewEntryFlightHourFieldNames = Array( _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrSim")
+End Function
+
+Private Function NewEntryApproachFieldNames() As Variant
+    NewEntryApproachFieldNames = Array( _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntryClearFieldNames() As Variant
+    NewEntryClearFieldNames = Array( _
+        "neType", "neReg", "neOtherCrew", "neDetails", _
+        "neSI1", "neSI2", "neSI3", "neSI4", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
+        "neLandingsDay", "neLandingsNight", _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
 Private Function GetLatestLogbookEntryDate(ByVal tbl As ListObject) As Date
