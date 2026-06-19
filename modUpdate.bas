@@ -177,12 +177,17 @@ Private Sub RunUpdate(newVersion As String)
     Dim finalHandoffStarted As Boolean
     Dim sessionId     As String
     Dim expectedRows  As Long
+    Dim expectedTotalHours As Double
+    Dim expectedTotalKnown As Boolean
 
     ' Unique per-run filenames prevent stale leftovers from a prior failed update
     ' from being silently used as the staging input.
     sessionId = Format(Now, "yyyymmdd_hhmmss")
     On Error Resume Next
     expectedRows = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count
+    expectedTotalHours = GetLogbookTotalHours(ThisWorkbook)
+    expectedTotalKnown = (Err.Number = 0)
+    Err.Clear
     On Error GoTo 0
 
     tempPath = Environ("TEMP") & "\LB_Master_" & sessionId & ".xlsm"
@@ -324,7 +329,7 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo 0
     diagStep = "Validating staged update"
     UpdateStatus "Validating update..."
-    If Not ValidateStagedUpdate(localSavePath, newVersion, expectedRows) Then
+    If Not ValidateStagedUpdate(localSavePath, newVersion, expectedRows, expectedTotalHours, expectedTotalKnown) Then
         On Error Resume Next
         Kill localSavePath
         On Error GoTo 0
@@ -345,6 +350,20 @@ Private Sub RunUpdate(newVersion As String)
     Application.DisplayAlerts = False
     ThisWorkbook.SaveAs Filename:=oldPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
     Application.DisplayAlerts = True
+
+    diagStep = "Validating backup file"
+    UpdateStatus "Validating backup..."
+    If Not ValidateBackupWorkbook(oldPath) Then
+        Application.Calculation = xlCalculationAutomatic
+        Application.ScreenUpdating = True
+        Application.EnableEvents = True
+        UpdateStatus ""
+        MsgBox "The previous-version backup could not be validated after save." & vbCrLf & vbCrLf & _
+               "Your workbook has been kept as:" & vbCrLf & oldPath & vbCrLf & vbCrLf & _
+               "The update was stopped before replacing the original filename.", _
+               vbCritical, "Backup Validation Failed"
+        Exit Sub
+    End If
 
     diagStep = "Moving updated file to original filename"
     UpdateStatus "Saving updated logbook..."
@@ -440,6 +459,37 @@ Private Function BuildOldWorkbookPath(folderPath As String, workbookName As Stri
     Loop While Dir(candidate) <> ""
 
     BuildOldWorkbookPath = candidate
+End Function
+
+Private Function ValidateBackupWorkbook(backupPath As String) As Boolean
+    Dim backupWb As Workbook
+    Dim prevSec  As MsoAutomationSecurity
+
+    prevSec = Application.AutomationSecurity
+    Application.AutomationSecurity = msoAutomationSecurityForceDisable
+
+    On Error GoTo Fail
+    Set backupWb = Workbooks.Open(backupPath, ReadOnly:=True, UpdateLinks:=False)
+
+    On Error Resume Next
+    Dim t As ListObject
+    Set t = backupWb.Sheets("Logbook").ListObjects("Logbook")
+    On Error GoTo Fail
+    If t Is Nothing Then GoTo Fail
+
+    backupWb.Close SaveChanges:=False
+    Set backupWb = Nothing
+    Application.AutomationSecurity = prevSec
+    ValidateBackupWorkbook = True
+    Exit Function
+
+Fail:
+    On Error Resume Next
+    If Not backupWb Is Nothing Then backupWb.Close SaveChanges:=False
+    Application.AutomationSecurity = prevSec
+    Application.Run "WriteDebugLog", "modUpdate.ValidateBackupWorkbook", Err.Number, Err.Description, "Validating backup file"
+    On Error GoTo 0
+    ValidateBackupWorkbook = False
 End Function
 
 ' ==============================================================
@@ -1603,11 +1653,15 @@ End Function
 
 Private Function ValidateStagedUpdate(stagedPath As String, _
                                       expectedVersion As String, _
-                                      expectedRows As Long) As Boolean
+                                      expectedRows As Long, _
+                                      expectedTotalHours As Double, _
+                                      expectedTotalKnown As Boolean) As Boolean
     Dim stagedWb   As Workbook
     Dim tbl        As ListObject
     Dim actualRows As Long
     Dim actualVer  As String
+    Dim actualTotalHours As Double
+    Dim reqName    As Variant
     Dim failReason As String
     Dim prevSec    As MsoAutomationSecurity
 
@@ -1646,6 +1700,40 @@ Private Function ValidateStagedUpdate(stagedPath As String, _
         GoTo ValidationFailed
     End If
 
+    ' 4. Required names must exist in the staged workbook.
+    For Each reqName In Array("LogbookVersion", "GitHubBranch", "DateAfterExport", _
+                              "RoutesBuilt", "RoutesDirty", "RoutesDefinitionVersion", _
+                              "suppressWarningsUntil")
+        On Error Resume Next
+        Dim nm As Name
+        Set nm = stagedWb.Names(CStr(reqName))
+        On Error GoTo ValidationFailed
+        If nm Is Nothing Then
+            failReason = "Required name missing: " & CStr(reqName)
+            GoTo ValidationFailed
+        End If
+        Set nm = Nothing
+    Next reqName
+
+    ' 5. Keywords table must be present.
+    On Error Resume Next
+    Dim kw As ListObject
+    Set kw = stagedWb.Sheets("Settings").ListObjects("Keywords")
+    On Error GoTo ValidationFailed
+    If kw Is Nothing Then
+        failReason = "Keywords table missing from staged file."
+        GoTo ValidationFailed
+    End If
+
+    ' 6. Total-hours sanity check when the source total is available.
+    If expectedTotalKnown Then
+        actualTotalHours = GetLogbookTotalHours(stagedWb)
+        If Abs(actualTotalHours - expectedTotalHours) > 0.01 Then
+            failReason = "Total-hours mismatch: expected " & expectedTotalHours & ", found " & actualTotalHours & "."
+            GoTo ValidationFailed
+        End If
+    End If
+
     ' All checks passed.
     stagedWb.Close SaveChanges:=False
     Set stagedWb = Nothing
@@ -1665,4 +1753,19 @@ ValidationFailed:
     Application.Run "WriteDebugLog", "modUpdate.ValidateStagedUpdate", errN, failReason, "Validating staged update"
     On Error GoTo 0
     ValidateStagedUpdate = False
+End Function
+
+Private Function GetLogbookTotalHours(wb As Workbook) As Double
+    Dim tbl As ListObject
+    Set tbl = wb.Sheets("Logbook").ListObjects("Logbook")
+
+    If tbl Is Nothing Then Err.Raise vbObjectError + 900, , "Logbook table missing"
+    If tbl.DataBodyRange Is Nothing Then
+        GetLogbookTotalHours = 0
+        Exit Function
+    End If
+
+    Dim totalCol As Long
+    totalCol = tbl.ListColumns("Total").Index
+    GetLogbookTotalHours = Application.WorksheetFunction.Sum(tbl.ListColumns(totalCol).DataBodyRange)
 End Function

@@ -2,6 +2,7 @@ Attribute VB_Name = "modLogbook"
 Option Explicit
 
 Public Const ROUTE_DEFINITION_VERSION As Long = 3
+Private mProtectionDisabledForSession As Boolean
 
 Sub AddToLogbook()
 
@@ -2233,6 +2234,8 @@ End Sub
 Public Sub ReportBug()
     Const BUG_REPORT_FORM_URL As String = _
         "https://docs.google.com/forms/d/e/1FAIpQLScCSzixoAFcyIBE6FI-wl1xMofomKPTePtUcwrUK7II7z_V9w/viewform"
+    Dim diagnosticsPath As String
+    Dim diagnosticsCreated As Boolean
 
     On Error GoTo Fail
     If InStr(1, BUG_REPORT_FORM_URL, "REPLACE_WITH_FORM_ID", vbTextCompare) > 0 Then
@@ -2241,7 +2244,18 @@ Public Sub ReportBug()
         Exit Sub
     End If
 
+    diagnosticsCreated = ExportDiagnosticsInternal(False, diagnosticsPath)
+
     ThisWorkbook.FollowHyperlink Address:=BUG_REPORT_FORM_URL, NewWindow:=True
+
+    If diagnosticsCreated Then
+        MsgBox "The bug form has been opened." & vbCrLf & vbCrLf & _
+               "A diagnostics snapshot was also generated at:" & vbCrLf & diagnosticsPath & vbCrLf & vbCrLf & _
+               "Attach it only if requested.", vbInformation, "Bug Report Started"
+    Else
+        MsgBox "The bug form has been opened, but diagnostics export failed." & vbCrLf & vbCrLf & _
+               "You can still submit your report manually.", vbExclamation, "Bug Report Started"
+    End If
     Exit Sub
 
 Fail:
@@ -2577,6 +2591,12 @@ End Sub
 ' flight records, names, registrations, or file paths.
 
 Public Sub ExportDiagnostics()
+    Dim outPath As String
+    If ExportDiagnosticsInternal(True, outPath) Then Exit Sub
+End Sub
+
+Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean = True, _
+                                           Optional ByRef exportedPath As String = "") As Boolean
     On Error Resume Next
 
     Dim logDir   As String
@@ -2593,6 +2613,7 @@ Public Sub ExportDiagnostics()
     End If
     If Dir(logDir, vbDirectory) = "" Then MkDir logDir
     outPath = logDir & "\diagnostics_" & Format(Now, "yyyymmdd_hhmmss") & ".txt"
+    exportedPath = outPath
 
     version = Trim(CStr(wb.Names("LogbookVersion").RefersToRange.Value))
     If version = "" Then version = "Unknown"
@@ -2691,14 +2712,20 @@ Public Sub ExportDiagnostics()
     On Error GoTo 0
 
     If Dir(outPath) <> "" Then
-        MsgBox "Diagnostics saved to:" & vbCrLf & vbCrLf & outPath & vbCrLf & vbCrLf & _
-               "This file contains no personal data and is safe to share.", _
-               vbInformation, "Diagnostics Exported"
+        If showConfirmation Then
+            MsgBox "Diagnostics saved to:" & vbCrLf & vbCrLf & outPath & vbCrLf & vbCrLf & _
+                   "This file contains no personal data and is safe to share.", _
+                   vbInformation, "Diagnostics Exported"
+        End If
+        ExportDiagnosticsInternal = True
     Else
-        MsgBox "Could not write the diagnostics file. Check folder permissions.", _
-               vbExclamation, "Export Failed"
+        If showConfirmation Then
+            MsgBox "Could not write the diagnostics file. Check folder permissions.", _
+                   vbExclamation, "Export Failed"
+        End If
+        ExportDiagnosticsInternal = False
     End If
-End Sub
+End Function
 
 Public Sub ToggleSuppressWarnings()
     Dim isActive As Boolean
@@ -3082,6 +3109,159 @@ NextOD:
 
     ResolveLocalPath = Environ("USERPROFILE") & "\Documents"
     Set fso = Nothing
+End Function
+
+' ==============================================================
+' WORKBOOK PROTECTION
+' ==============================================================
+
+Public Sub EnsureWorkbookProtectionOnOpen()
+    If mProtectionDisabledForSession Then Exit Sub
+    ApplyWorkbookProtection False
+End Sub
+
+Public Sub EnableProtectionForRelease()
+    mProtectionDisabledForSession = False
+    ApplyWorkbookProtection True
+End Sub
+
+Public Sub DisableProtectionForDevelopment()
+    UnprotectWorkbookForEditing
+    mProtectionDisabledForSession = True
+    MsgBox "Workbook protection has been disabled for this Excel session." & vbCrLf & vbCrLf & _
+           "Close and reopen the workbook to re-enable protection automatically, or run EnableProtectionForRelease.", _
+           vbInformation, "Development Mode Enabled"
+End Sub
+
+Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False)
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim wsLog As Worksheet
+    Dim wsCharts As Worksheet
+    Dim tbl As ListObject
+
+    Set wb = ThisWorkbook
+
+    UnprotectWorkbookForEditing
+
+    For Each ws In wb.Worksheets
+        On Error Resume Next
+        ws.Cells.Locked = True
+        On Error GoTo 0
+    Next ws
+
+    UnlockNamedRangesByPrefix wb, "ne"
+    UnlockNamedRangeIfPresent wb, "DateAfterExport"
+    UnlockNamedRangeIfPresent wb, "FROverride"
+    UnlockNamedRangeIfPresent wb, "IPCOverride"
+    UnlockNamedRangeIfPresent wb, "OPCOverride"
+
+    On Error Resume Next
+    Set wsLog = wb.Sheets("Logbook")
+    On Error GoTo 0
+    If Not wsLog Is Nothing Then
+        On Error Resume Next
+        Set tbl = wsLog.ListObjects("Logbook")
+        On Error GoTo 0
+
+        If Not tbl Is Nothing Then
+            On Error Resume Next
+            If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.Locked = False
+            If Not tbl.HeaderRowRange Is Nothing Then tbl.HeaderRowRange.Locked = False
+            On Error GoTo 0
+        End If
+    End If
+
+    For Each ws In wb.Worksheets
+        On Error Resume Next
+        If LCase$(ws.Name) = "logbook" Then
+            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                       UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
+                       AllowFormattingCells:=True, AllowUsingPivotTables:=True
+        Else
+            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                       UserInterfaceOnly:=True, AllowUsingPivotTables:=True
+        End If
+        On Error GoTo 0
+    Next ws
+
+    On Error Resume Next
+    wb.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    On Error GoTo 0
+
+    If showConfirmation Then
+        MsgBox "Workbook protection has been enabled for release mode.", vbInformation, "Protection Enabled"
+    End If
+
+    Set tbl = Nothing
+    Set wsLog = Nothing
+    Set wsCharts = Nothing
+    Set wb = Nothing
+End Sub
+
+Private Sub UnprotectWorkbookForEditing()
+    Dim wb As Workbook
+    Dim ws As Worksheet
+
+    Set wb = ThisWorkbook
+
+    On Error Resume Next
+    wb.Unprotect Password:=ProtectionPassword()
+    For Each ws In wb.Worksheets
+        ws.Unprotect Password:=ProtectionPassword()
+    Next ws
+    On Error GoTo 0
+
+    Set wb = Nothing
+End Sub
+
+Private Sub UnlockNamedRangesByPrefix(wb As Workbook, prefix As String)
+    Dim nm As Name
+    Dim nmText As String
+    Dim baseName As String
+    Dim targetRange As Range
+
+    For Each nm In wb.Names
+        nmText = LCase$(nm.Name)
+        baseName = nmText
+
+        If InStrRev(baseName, "!") > 0 Then
+            baseName = Mid$(baseName, InStrRev(baseName, "!") + 1)
+        End If
+
+        If Left$(baseName, Len(prefix)) = LCase$(prefix) Then
+            On Error Resume Next
+            Set targetRange = nm.RefersToRange
+            If Not targetRange Is Nothing Then
+                targetRange.Locked = False
+                If targetRange.MergeCells Then
+                    targetRange.MergeArea.Locked = False
+                End If
+            End If
+            On Error GoTo 0
+            Set targetRange = Nothing
+        End If
+    Next nm
+End Sub
+
+Private Sub UnlockNamedRangeIfPresent(wb As Workbook, nameText As String)
+    Dim targetRange As Range
+    On Error Resume Next
+    Set targetRange = wb.Names(nameText).RefersToRange
+    If Not targetRange Is Nothing Then
+        targetRange.Locked = False
+        If targetRange.MergeCells Then
+            targetRange.MergeArea.Locked = False
+        End If
+    End If
+    On Error GoTo 0
+    Set targetRange = Nothing
+End Sub
+
+Private Function ProtectionPassword() As String
+    ' Keep blank by default to avoid password prompts during development.
+    ' Set a value here if you want password-protected unprotect operations.
+    ProtectionPassword = ""
 End Function
 
 Sub ShowDevSheets()

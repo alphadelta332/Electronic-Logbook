@@ -8,6 +8,9 @@ Private Sub Workbook_Open()
     Application.Calculation = xlCalculationAutomatic
     Application.CutCopyMode = False
 
+    ' Re-apply protection each time the workbook opens.
+    EnsureWorkbookProtectionOnOpen
+
     ' Keep date-sensitive formulas current without a volatile TODAY() formula.
     RefreshTodayValue
 
