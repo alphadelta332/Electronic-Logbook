@@ -7,6 +7,7 @@ release.local.json
 .env
 .env.*
 *.log
+diagnostics_*.txt
 **/bin/
 **/obj/
 **/TestResults/

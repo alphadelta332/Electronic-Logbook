@@ -175,8 +175,17 @@ Private Sub RunUpdate(newVersion As String)
     Dim errNum        As Long
     Dim diagStep      As String
     Dim finalHandoffStarted As Boolean
+    Dim sessionId     As String
+    Dim expectedRows  As Long
 
-    tempPath = Environ("TEMP") & "\LB_Master_Temp.xlsm"
+    ' Unique per-run filenames prevent stale leftovers from a prior failed update
+    ' from being silently used as the staging input.
+    sessionId = Format(Now, "yyyymmdd_hhmmss")
+    On Error Resume Next
+    expectedRows = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count
+    On Error GoTo 0
+
+    tempPath = Environ("TEMP") & "\LB_Master_" & sessionId & ".xlsm"
     ' Resolve to the local folder the logbook is already in.
     ' ResolveLocalPath handles OneDrive cloud URLs by mapping them to
     ' the local sync folder, so FileCopy always targets a real FS path.
@@ -293,7 +302,7 @@ Private Sub RunUpdate(newVersion As String)
 
     ' Save to a local temp path first, then move to destination.
     ' Direct SaveAs to OneDrive paths is unreliable depending on sync state.
-    localSavePath = Environ("TEMP") & "\LB_Updated_Staging.xlsm"
+    localSavePath = Environ("TEMP") & "\LB_Updated_" & sessionId & ".xlsm"
     masterWb.Sheets(1).EnableCalculation = True
     Application.Calculation = xlCalculationAutomatic
     Application.DisplayAlerts = False
@@ -309,6 +318,26 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo 0
 
     If Dir(localPath, vbDirectory) = "" Then MkDir localPath
+
+    ' Validate the staged workbook before any destructive operations.
+    ' This is the last safe abort point: the original file has not been touched.
+    On Error GoTo 0
+    diagStep = "Validating staged update"
+    UpdateStatus "Validating update..."
+    If Not ValidateStagedUpdate(localSavePath, newVersion, expectedRows) Then
+        On Error Resume Next
+        Kill localSavePath
+        On Error GoTo 0
+        Application.Calculation = xlCalculationAutomatic
+        Application.ScreenUpdating = True
+        Application.EnableEvents = True
+        UpdateStatus ""
+        MsgBox "The staged update failed validation. Your logbook has not been changed." & vbCrLf & vbCrLf & _
+               "Please try updating again. If the problem persists, use the Report a Bug button.", _
+               vbCritical, "Update Validation Failed"
+        Exit Sub
+    End If
+    On Error GoTo UpdateFailed
 
     diagStep = "Renaming current file to old copy"
     UpdateStatus "Renaming previous logbook..."
@@ -1562,4 +1591,78 @@ Private Function ExtractFirstSha(text As String) As String
     Exit Function
 Fail:
     ExtractFirstSha = ""
+End Function
+
+' ==============================================================
+' STAGED UPDATE VALIDATION
+' ==============================================================
+' Opens the staged workbook read-only and confirms it is safe to
+' use as a replacement before any destructive operations begin.
+' Returns True only when all checks pass; writes a debug entry
+' and returns False on any failure so the caller can abort cleanly.
+
+Private Function ValidateStagedUpdate(stagedPath As String, _
+                                      expectedVersion As String, _
+                                      expectedRows As Long) As Boolean
+    Dim stagedWb   As Workbook
+    Dim tbl        As ListObject
+    Dim actualRows As Long
+    Dim actualVer  As String
+    Dim failReason As String
+    Dim prevSec    As MsoAutomationSecurity
+
+    ' Prevent macros in the staged file from running during validation.
+    prevSec = Application.AutomationSecurity
+    Application.AutomationSecurity = msoAutomationSecurityForceDisable
+
+    On Error GoTo ValidationFailed
+
+    Set stagedWb = Workbooks.Open(stagedPath, ReadOnly:=True, UpdateLinks:=False)
+
+    ' 1. Logbook table must exist.
+    On Error Resume Next
+    Set tbl = stagedWb.Sheets("Logbook").ListObjects("Logbook")
+    On Error GoTo ValidationFailed
+    If tbl Is Nothing Then
+        failReason = "Logbook table missing from staged file."
+        GoTo ValidationFailed
+    End If
+
+    ' 2. Row count must match the source workbook.
+    On Error Resume Next
+    actualRows = tbl.DataBodyRange.Rows.Count
+    On Error GoTo ValidationFailed
+    If expectedRows > 0 And actualRows <> expectedRows Then
+        failReason = "Row count mismatch: expected " & expectedRows & ", found " & actualRows & "."
+        GoTo ValidationFailed
+    End If
+
+    ' 3. Version stamp must match the target version.
+    On Error Resume Next
+    actualVer = Trim(CStr(stagedWb.Names("LogbookVersion").RefersToRange.Value))
+    On Error GoTo ValidationFailed
+    If actualVer <> expectedVersion Then
+        failReason = "Version mismatch: expected " & expectedVersion & ", found """ & actualVer & """."
+        GoTo ValidationFailed
+    End If
+
+    ' All checks passed.
+    stagedWb.Close SaveChanges:=False
+    Set stagedWb = Nothing
+    Application.AutomationSecurity = prevSec
+    ValidateStagedUpdate = True
+    Exit Function
+
+ValidationFailed:
+    Dim errN As Long
+    Dim errD As String
+    errN = Err.Number
+    errD = Err.Description
+    If failReason = "" Then failReason = errD
+    On Error Resume Next
+    If Not stagedWb Is Nothing Then stagedWb.Close SaveChanges:=False
+    Application.AutomationSecurity = prevSec
+    Application.Run "WriteDebugLog", "modUpdate.ValidateStagedUpdate", errN, failReason, "Validating staged update"
+    On Error GoTo 0
+    ValidateStagedUpdate = False
 End Function

@@ -320,7 +320,39 @@ Sub AddToLogbook()
             End If
         End If
 
-    '--- 4l. Duplicate Entry Check
+    '--- 4l. Aircraft Type Engine Class History Check
+        If Not suppressWarnings Then
+            Dim currentSingleEngineHours As Double
+            Dim currentMultiEngineHours As Double
+            Dim hasSingleEngineHistory As Boolean
+            Dim hasMultiEngineHistory As Boolean
+
+            currentSingleEngineHours = SumNewEntryFields(NewEntrySingleEngineFieldNames())
+            currentMultiEngineHours = SumNewEntryFields(NewEntryMultiEngineFieldNames())
+
+            If currentSingleEngineHours > 0 Or currentMultiEngineHours > 0 Then
+                hasSingleEngineHistory = AircraftTypeHasEngineClassHours(tbl, _
+                                                                         CStr(NewEntryValue("neType")), _
+                                                                         NewEntrySingleEngineColumnNames())
+                hasMultiEngineHistory = AircraftTypeHasEngineClassHours(tbl, _
+                                                                        CStr(NewEntryValue("neType")), _
+                                                                        NewEntryMultiEngineColumnNames())
+
+                If currentSingleEngineHours > 0 And currentMultiEngineHours = 0 And hasMultiEngineHistory Then
+                    response = MsgBox("Warning: This type has previously been logged with Multi Engine hours, but this entry records Single Engine hours. Continue?", _
+                                      vbOKCancel + vbExclamation, _
+                                      "Aircraft Type Engine Class")
+                    If response = vbCancel Then GoTo Cleanup
+                ElseIf currentMultiEngineHours > 0 And currentSingleEngineHours = 0 And hasSingleEngineHistory Then
+                    response = MsgBox("Warning: This type has previously been logged with Single Engine hours, but this entry records Multi Engine hours. Continue?", _
+                                      vbOKCancel + vbExclamation, _
+                                      "Aircraft Type Engine Class")
+                    If response = vbCancel Then GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4m. Duplicate Entry Check
         'Warn if an entry with the same Date, Type, Reg and Details already exists in the logbook
         Dim dateCol     As Long
         Dim detailsCol  As Long
@@ -1278,6 +1310,18 @@ Private Function NewEntryFlightTimeFieldNames() As Variant
         "neCopilotDay", "neCopilotNight")
 End Function
 
+Private Function NewEntrySingleEngineFieldNames() As Variant
+    NewEntrySingleEngineFieldNames = Array( _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight")
+End Function
+
+Private Function NewEntryMultiEngineFieldNames() As Variant
+    NewEntryMultiEngineFieldNames = Array( _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight")
+End Function
+
 Private Function NewEntryFlightHourFieldNames() As Variant
     NewEntryFlightHourFieldNames = Array( _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
@@ -1290,6 +1334,18 @@ End Function
 Private Function NewEntryApproachFieldNames() As Variant
     NewEntryApproachFieldNames = Array( _
         "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntrySingleEngineColumnNames() As Variant
+    NewEntrySingleEngineColumnNames = Array( _
+        "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+        "SeCommandDay", "SeCommandNight")
+End Function
+
+Private Function NewEntryMultiEngineColumnNames() As Variant
+    NewEntryMultiEngineColumnNames = Array( _
+        "MeIcusDay", "MeIcusNight", "MeDualDay", "MeDualNight", _
+        "MeCommandDay", "MeCommandNight")
 End Function
 
 Private Function NewEntryClearFieldNames() As Variant
@@ -1324,6 +1380,42 @@ Private Function GetLatestLogbookEntryDate(ByVal tbl As ListObject) As Date
     End If
 
     GetLatestLogbookEntryDate = latestDate
+End Function
+
+Private Function AircraftTypeHasEngineClassHours(ByVal tbl As ListObject, _
+                                                 ByVal aircraftType As String, _
+                                                 ByVal hourColumnNames As Variant) As Boolean
+    Dim typeCol As Long
+    Dim rowIndex As Long
+    Dim normalizedType As String
+
+    If tbl.DataBodyRange Is Nothing Then Exit Function
+
+    normalizedType = LCase(Trim(aircraftType))
+    If normalizedType = "" Then Exit Function
+
+    typeCol = tbl.ListColumns("Type").Index
+
+    For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
+        If LCase(Trim(CStr(tbl.DataBodyRange.Cells(rowIndex, typeCol).Value))) = normalizedType Then
+            If SumLogbookRowColumns(tbl, rowIndex, hourColumnNames) > 0 Then
+                AircraftTypeHasEngineClassHours = True
+                Exit Function
+            End If
+        End If
+    Next rowIndex
+End Function
+
+Private Function SumLogbookRowColumns(ByVal tbl As ListObject, _
+                                      ByVal rowIndex As Long, _
+                                      ByVal columnNames As Variant) As Double
+    Dim columnName As Variant
+    Dim cellValue As Variant
+
+    For Each columnName In columnNames
+        cellValue = tbl.DataBodyRange.Cells(rowIndex, tbl.ListColumns(CStr(columnName)).Index).Value
+        If IsNumeric(cellValue) Then SumLogbookRowColumns = SumLogbookRowColumns + CDbl(cellValue)
+    Next columnName
 End Function
 
 Private Function IsLogbookRowSimOnly(ByVal tbl As ListObject, ByVal rowIndex As Long) As Boolean
@@ -2406,9 +2498,6 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
 
     Dim fDate    As String
     Dim fType    As String
-    Dim fReg     As String
-    Dim fPIC     As String
-    Dim fDetails As String
     Dim fIpcDetected As String
     Dim fOpcDetected As String
     Dim fFlightReviewDetected As String
@@ -2416,24 +2505,14 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Dim fCrumb   As String
     fDate    = CStr(Range("neDate").Value)
     fType    = CStr(Range("neType").Value)
-    fReg     = CStr(Range("neReg").Value)
-    fPIC     = CStr(Range("nePIC").Value)
-    fDetails = CStr(Range("neDetails").Value)
-    If KeywordDetected(fDetails, "IPC") Then
-        fIpcDetected = "Yes"
-    Else
-        fIpcDetected = "No"
-    End If
-    If KeywordDetected(fDetails, "OPC") Then
-        fOpcDetected = "Yes"
-    Else
-        fOpcDetected = "No"
-    End If
-    If KeywordDetected(fDetails, "IPC") Or KeywordDetected(fDetails, "Flight Review") Then
-        fFlightReviewDetected = "Yes"
-    Else
-        fFlightReviewDetected = "No"
-    End If
+    ' Evaluate keyword detection flags without retaining the personal Details text.
+    Dim detailsVal As String
+    detailsVal = CStr(Range("neDetails").Value)
+    fIpcDetected          = IIf(KeywordDetected(detailsVal, "IPC"), "Yes", "No")
+    fOpcDetected          = IIf(KeywordDetected(detailsVal, "OPC"), "Yes", "No")
+    fFlightReviewDetected = IIf(KeywordDetected(detailsVal, "IPC") Or _
+                                KeywordDetected(detailsVal, "Flight Review"), "Yes", "No")
+    detailsVal = ""   ' Clear from memory immediately
     fRows    = CStr(ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
 
     ' Read the last crash breadcrumb if one exists
@@ -2460,10 +2539,19 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, ""
         Print #fileNum, "-- ENVIRONMENT ----------------------------------"
         Print #fileNum, "Excel        : " & Application.Version & " / " & Application.OperatingSystem
-        Print #fileNum, "User         : " & Environ("USERNAME")
         Print #fileNum, "Workbook     : " & ThisWorkbook.Name
-        Print #fileNum, "WB path      : " & ThisWorkbook.Path
-        Print #fileNum, "Resolved path: " & ResolveLocalPath(ThisWorkbook)
+        Dim pathType As String
+        If InStr(1, ThisWorkbook.Path, "OneDrive", vbTextCompare) > 0 Or _
+           InStr(1, ThisWorkbook.Path, "sharepoint", vbTextCompare) > 0 Then
+            pathType = "OneDrive/SharePoint"
+        ElseIf Left(ThisWorkbook.Path, 2) = "\\" Then
+            pathType = "Network"
+        ElseIf Len(ThisWorkbook.Path) > 0 Then
+            pathType = "Local"
+        Else
+            pathType = "Unknown"
+        End If
+        Print #fileNum, "WB location  : " & pathType
         Print #fileNum, "Log saved to : " & logPath
         Print #fileNum, "AutoSave     : " & ThisWorkbook.AutoSaveOn
         Print #fileNum, "LB Version   : " & version
@@ -2471,9 +2559,6 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "-- ENTRY STATE ----------------------------------"
         Print #fileNum, "Date         : " & fDate
         Print #fileNum, "Type         : " & fType
-        Print #fileNum, "Reg          : " & fReg
-        Print #fileNum, "PIC          : " & fPIC
-        Print #fileNum, "Details      : " & fDetails
         Print #fileNum, "IPC detected : " & fIpcDetected
         Print #fileNum, "OPC detected : " & fOpcDetected
         Print #fileNum, "FR detected  : " & fFlightReviewDetected
@@ -2482,6 +2567,137 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Close #fileNum
 
     On Error GoTo 0
+End Sub
+
+' ==============================================================
+' EXPORT DIAGNOSTICS
+' ==============================================================
+' Generates a redacted diagnostics snapshot for support purposes.
+' Contains structural/version information only -- no personal data,
+' flight records, names, registrations, or file paths.
+
+Public Sub ExportDiagnostics()
+    On Error Resume Next
+
+    Dim logDir   As String
+    Dim outPath  As String
+    Dim fileNum  As Integer
+    Dim version  As String
+    Dim wb       As Workbook
+    Set wb = ThisWorkbook
+
+    ' Write alongside the workbook; fall back to Documents if path unavailable.
+    logDir = ResolveLocalPath(wb)
+    If logDir = "" Or Left(logDir, 4) = "http" Then
+        logDir = Environ("USERPROFILE") & "\Documents\Electronic Logbook"
+    End If
+    If Dir(logDir, vbDirectory) = "" Then MkDir logDir
+    outPath = logDir & "\diagnostics_" & Format(Now, "yyyymmdd_hhmmss") & ".txt"
+
+    version = Trim(CStr(wb.Names("LogbookVersion").RefersToRange.Value))
+    If version = "" Then version = "Unknown"
+
+    Dim pathType As String
+    If InStr(1, wb.Path, "OneDrive", vbTextCompare) > 0 Or _
+       InStr(1, wb.Path, "sharepoint", vbTextCompare) > 0 Then
+        pathType = "OneDrive/SharePoint"
+    ElseIf Left(wb.Path, 2) = "\\" Then
+        pathType = "Network"
+    ElseIf Len(wb.Path) > 0 Then
+        pathType = "Local"
+    Else
+        pathType = "Unknown"
+    End If
+
+    Dim tbl       As ListObject
+    Dim rowCount  As String
+    Dim colNames  As String
+    Dim c         As ListColumn
+    Set tbl = wb.Sheets("Logbook").ListObjects("Logbook")
+    If Not tbl Is Nothing Then
+        rowCount = CStr(tbl.DataBodyRange.Rows.Count)
+        For Each c In tbl.ListColumns
+            colNames = colNames & c.Name & ", "
+        Next c
+        If Len(colNames) > 2 Then colNames = Left(colNames, Len(colNames) - 2)
+    End If
+
+    ' Named range inventory (non-sensitive values only).
+    Dim gitBranch  As String
+    Dim dateReset  As String
+    Dim routesVer  As String
+    Dim routesBlt  As String
+    Dim routesDrty As String
+    gitBranch  = Trim(CStr(wb.Names("GitHubBranch").RefersToRange.Value))
+    dateReset  = Trim(CStr(wb.Names("DateAfterExport").RefersToRange.Value))
+    routesVer  = Trim(CStr(wb.Names("RoutesDefinitionVersion").RefersToRange.Value))
+    routesBlt  = Trim(CStr(wb.Names("RoutesBuilt").RefersToRange.Value))
+    routesDrty = Trim(CStr(wb.Names("RoutesDirty").RefersToRange.Value))
+
+    ' Keywords table row count.
+    Dim kwCount As String
+    Dim kwTbl   As ListObject
+    Set kwTbl = wb.Sheets("Settings").ListObjects("Keywords")
+    If Not kwTbl Is Nothing Then
+        If Not kwTbl.DataBodyRange Is Nothing Then
+            kwCount = CStr(kwTbl.DataBodyRange.Rows.Count)
+        Else
+            kwCount = "0"
+        End If
+    End If
+
+    ' Warning suppression state (active/inactive, not the timestamp).
+    Dim suppressState As String
+    suppressState = "Inactive"
+    Dim suppressVal As Variant
+    suppressVal = wb.Names("suppressWarningsUntil").RefersToRange.Value
+    If suppressVal <> "" Then
+        If IsDate(suppressVal) Then
+            If Now < CDate(suppressVal) Then suppressState = "Active"
+        End If
+    End If
+
+    fileNum = FreeFile
+    Open outPath For Output As #fileNum
+        Print #fileNum, "Electronic Logbook - Diagnostics Snapshot"
+        Print #fileNum, "Generated    : " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+        Print #fileNum, String(50, "-")
+        Print #fileNum, ""
+        Print #fileNum, "-- WORKBOOK --------------------------------------"
+        Print #fileNum, "LB Version   : " & version
+        Print #fileNum, "GitHub Branch: " & gitBranch
+        Print #fileNum, "WB location  : " & pathType
+        Print #fileNum, "AutoSave     : " & wb.AutoSaveOn
+        Print #fileNum, ""
+        Print #fileNum, "-- ENVIRONMENT -----------------------------------"
+        Print #fileNum, "Excel        : " & Application.Version & " / " & Application.OperatingSystem
+        Print #fileNum, ""
+        Print #fileNum, "-- LOGBOOK TABLE ---------------------------------"
+        Print #fileNum, "Row count    : " & rowCount
+        Print #fileNum, "Columns      : " & colNames
+        Print #fileNum, ""
+        Print #fileNum, "-- NAMED PREFERENCES -----------------------------"
+        Print #fileNum, "Date reset   : " & dateReset
+        Print #fileNum, "Warn suppress: " & suppressState
+        Print #fileNum, "Routes built : " & routesBlt
+        Print #fileNum, "Routes dirty : " & routesDrty
+        Print #fileNum, "Routes ver   : " & routesVer
+        Print #fileNum, "Keywords     : " & kwCount & " row(s)"
+        Print #fileNum, ""
+        Print #fileNum, "-- NOTE ------------------------------------------"
+        Print #fileNum, "This file contains no personal data, flight records,"
+        Print #fileNum, "names, registrations, or file paths."
+    Close #fileNum
+    On Error GoTo 0
+
+    If Dir(outPath) <> "" Then
+        MsgBox "Diagnostics saved to:" & vbCrLf & vbCrLf & outPath & vbCrLf & vbCrLf & _
+               "This file contains no personal data and is safe to share.", _
+               vbInformation, "Diagnostics Exported"
+    Else
+        MsgBox "Could not write the diagnostics file. Check folder permissions.", _
+               vbExclamation, "Export Failed"
+    End If
 End Sub
 
 Public Sub ToggleSuppressWarnings()
