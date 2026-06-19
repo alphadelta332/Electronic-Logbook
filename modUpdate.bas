@@ -218,6 +218,9 @@ Private Sub RunUpdate(newVersion As String)
     diagStep = "Opening master workbook"
     Set masterWb = Workbooks.Open(tempPath, ReadOnly:=False, UpdateLinks:=False)
 
+    diagStep = "Unprotecting master workbook"
+    PrepareMasterWorkbookForMigration masterWb
+
     diagStep = "Copying Logbook data into master"
     UpdateStatus "Copying flight data..."
     InjectLogbookData masterWb
@@ -289,8 +292,26 @@ Private Sub RunUpdate(newVersion As String)
         Set chartRng = wsData.Range( _
             wsData.Cells(2, rnhRange.Columns(1).Column), _
             wsData.Cells(chartLast, rnhRange.Columns(2).Column))
-        wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).XValues = chartRng.Columns(1)
-        wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).Values  = chartRng.Columns(2)
+        On Error Resume Next
+        Dim hotChartObj As ChartObject
+        Dim hotSeries As Series
+        Set hotChartObj = wsCharts.ChartObjects("HoursOverTime")
+        If hotChartObj.Chart.SeriesCollection.Count = 0 Then
+            hotChartObj.Chart.SeriesCollection.NewSeries
+        End If
+        Set hotSeries = hotChartObj.Chart.SeriesCollection(1)
+        hotSeries.XValues = chartRng.Columns(1)
+        hotSeries.Values = chartRng.Columns(2)
+        If Err.Number <> 0 Then
+            Err.Clear
+            hotChartObj.Chart.SetSourceData Source:=chartRng
+            If hotChartObj.Chart.SeriesCollection.Count > 0 Then
+                Set hotSeries = hotChartObj.Chart.SeriesCollection(1)
+                hotSeries.XValues = chartRng.Columns(1)
+                hotSeries.Values = chartRng.Columns(2)
+            End If
+        End If
+        On Error GoTo UpdateFailed
         Set chartRng = Nothing
     End If
     Set wsCharts = Nothing
@@ -460,6 +481,20 @@ Private Function BuildOldWorkbookPath(folderPath As String, workbookName As Stri
 
     BuildOldWorkbookPath = candidate
 End Function
+
+Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
+    Dim ws As Worksheet
+
+    ' The release workbook can now be saved in a protected state.
+    ' Update migration needs table resize/copy operations, so we force
+    ' an unprotected editing state for the temporary downloaded master.
+    On Error Resume Next
+    masterWb.Unprotect Password:=""
+    For Each ws In masterWb.Worksheets
+        ws.Unprotect Password:=""
+    Next ws
+    On Error GoTo 0
+End Sub
 
 Private Function ValidateBackupWorkbook(backupPath As String) As Boolean
     Dim backupWb As Workbook

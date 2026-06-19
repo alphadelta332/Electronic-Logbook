@@ -40,10 +40,17 @@ Sub AddToLogbook()
     Dim totalsWereOn As Boolean
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
+    Dim logbookWasProtected As Boolean
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
         Set tbl = wsLog.ListObjects("Logbook")
+        logbookWasProtected = wsLog.ProtectContents
+        If logbookWasProtected Then
+            On Error Resume Next
+            wsLog.Unprotect Password:=ProtectionPassword()
+            On Error GoTo Cleanup
+        End If
         If Not ListColumnExists(tbl, "IPC") Or _
            Not ListColumnExists(tbl, "OPC") Or _
            Not ListColumnExists(tbl, "FlightReview") Or _
@@ -321,10 +328,24 @@ Sub AddToLogbook()
             End If
         End If
 
-    '--- 4l. Aircraft Type Engine Class History Check
+    '--- 4l. Single and Multi Engine Hours in Same Entry Check
         If Not suppressWarnings Then
             Dim currentSingleEngineHours As Double
             Dim currentMultiEngineHours As Double
+
+            currentSingleEngineHours = SumNewEntryFields(NewEntrySingleEngineFieldNames())
+            currentMultiEngineHours = SumNewEntryFields(NewEntryMultiEngineFieldNames())
+
+            If currentSingleEngineHours > 0 And currentMultiEngineHours > 0 Then
+                response = MsgBox("Warning: This entry records both Single Engine and Multi Engine hours. Continue?", _
+                                  vbOKCancel + vbExclamation, _
+                                  "Mixed Engine Class Hours")
+                If response = vbCancel Then GoTo Cleanup
+            End If
+        End If
+
+    '--- 4m. Aircraft Type Engine Class History Check
+        If Not suppressWarnings Then
             Dim hasSingleEngineHistory As Boolean
             Dim hasMultiEngineHistory As Boolean
 
@@ -353,8 +374,7 @@ Sub AddToLogbook()
             End If
         End If
 
-    '--- 4m. Duplicate Entry Check
-        'Warn if an entry with the same Date, Type, Reg and Details already exists in the logbook
+    '--- Shared indexes for Type/Registration history and duplicate checks
         Dim dateCol     As Long
         Dim detailsCol  As Long
         Dim typeCol     As Long
@@ -366,6 +386,41 @@ Sub AddToLogbook()
         detailsCol = tbl.ListColumns("Details").Index
         typeCol = tbl.ListColumns("Type").Index
         regCol = tbl.ListColumns("Reg").Index
+
+    '--- 4n. Aircraft Type and Registration Mismatch History Check
+        If Not suppressWarnings Then
+            Dim currentType As String
+            Dim currentReg As String
+            Dim hasRegWithDifferentType As Boolean
+
+            currentType = LCase$(Trim$(CStr(NewEntryValue("neType"))))
+            currentReg = LCase$(Trim$(CStr(NewEntryValue("neReg"))))
+
+            If currentType <> "" And currentReg <> "" Then
+                hasRegWithDifferentType = False
+
+                For rr = 1 To tbl.DataBodyRange.Rows.Count
+                    If LCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rr, regCol).Value))) = currentReg Then
+                        If LCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rr, typeCol).Value))) <> "" And _
+                           LCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rr, typeCol).Value))) <> currentType Then
+                            hasRegWithDifferentType = True
+                        End If
+                    End If
+
+                    If hasRegWithDifferentType Then Exit For
+                Next rr
+
+                If hasRegWithDifferentType Then
+                    response = MsgBox("Warning: This Registration has previously been logged with a different aircraft Type. Continue?", _
+                                      vbOKCancel + vbExclamation, _
+                                      "Type/Registration Mismatch")
+                    If response = vbCancel Then GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4o. Duplicate Entry Check
+        'Warn if an entry with the same Date, Type, Reg and Details already exists in the logbook
         dupFound = False
 
         For rr = 1 To tbl.DataBodyRange.Rows.Count
@@ -480,7 +535,17 @@ Sub AddToLogbook()
 
         diagStep = "Step 6b: Update Chart"
         WriteCrumb diagStep
+        On Error Resume Next
         UpdateHoursOverTimeChart ThisWorkbook
+        If Err.Number <> 0 Then
+            Dim chartErrNum As Long
+            Dim chartErrDesc As String
+            chartErrNum = Err.Number
+            chartErrDesc = Err.Description
+            Err.Clear
+            WriteDebugLog "UpdateHoursOverTimeChart", chartErrNum, chartErrDesc, diagStep
+        End If
+        On Error GoTo Cleanup
 
     '===============================
     ' STEP 7: RESET INPUT FORM
@@ -562,6 +627,12 @@ Cleanup:
         Application.Calculation = xlCalculationAutomatic
         Application.CutCopyMode = False
 
+        If logbookWasProtected Then
+            On Error Resume Next
+            ProtectLogbookSheetForRuntime wsLog
+            On Error GoTo 0
+        End If
+
         '--- Report any unexpected error (errNum 0 means clean exit via GoTo Cleanup on cancel)
         If errNum <> 0 Then
             On Error Resume Next
@@ -574,6 +645,13 @@ Cleanup:
 
         Exit Sub
 
+End Sub
+
+Private Sub ProtectLogbookSheetForRuntime(ws As Worksheet)
+    ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+               UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
+               AllowFormattingCells:=True, AllowUsingPivotTables:=True, _
+               AllowInsertingRows:=True, AllowDeletingRows:=True
 End Sub
 
 Public Function RefreshTodayValue() As Boolean
@@ -1459,10 +1537,13 @@ Public Sub UpdateHoursOverTimeChart(wb As Workbook)
     Dim rnhRange As Range
     Dim rng      As Range
     Dim lastRow  As Long
+    Dim chartObj As ChartObject
+    Dim chartSer As Series
 
     Set wsCharts = wb.Sheets("Charts")
     Set wsData = wb.Sheets("ChartData")
     Set rnhRange = wb.Names("RunningTotalHours").RefersToRange
+    Set chartObj = wsCharts.ChartObjects("HoursOverTime")
 
     lastRow = wsData.cells(wsData.Rows.Count, rnhRange.Columns(1).Column).End(xlUp).row
     If lastRow < 2 Then Exit Sub
@@ -1470,8 +1551,28 @@ Public Sub UpdateHoursOverTimeChart(wb As Workbook)
         wsData.cells(2, rnhRange.Columns(1).Column), _
         wsData.cells(lastRow, rnhRange.Columns(2).Column))
 
-    wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).XValues = rng.Columns(1)
-    wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).Values = rng.Columns(2)
+    On Error Resume Next
+
+    If chartObj.Chart.SeriesCollection.Count = 0 Then
+        chartObj.Chart.SeriesCollection.NewSeries
+    End If
+
+    Set chartSer = chartObj.Chart.SeriesCollection(1)
+    chartSer.XValues = rng.Columns(1)
+    chartSer.Values = rng.Columns(2)
+
+    ' Fallback for chart states where direct XValues/Values assignment fails.
+    If Err.Number <> 0 Then
+        Err.Clear
+        chartObj.Chart.SetSourceData Source:=rng
+        If chartObj.Chart.SeriesCollection.Count > 0 Then
+            Set chartSer = chartObj.Chart.SeriesCollection(1)
+            chartSer.XValues = rng.Columns(1)
+            chartSer.Values = rng.Columns(2)
+        End If
+    End If
+
+    On Error GoTo 0
 End Sub
 
 Public Sub MarkRoutesDirty(Optional wb As Workbook = Nothing)
@@ -3143,6 +3244,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     Set wb = ThisWorkbook
 
     UnprotectWorkbookForEditing
+    EnsurePrimarySheetOrder wb
 
     For Each ws In wb.Worksheets
         On Error Resume Next
@@ -3175,9 +3277,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     For Each ws In wb.Worksheets
         On Error Resume Next
         If LCase$(ws.Name) = "logbook" Then
-            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
-                       UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
-                       AllowFormattingCells:=True, AllowUsingPivotTables:=True
+            ProtectLogbookSheetForRuntime ws
         Else
             ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                        UserInterfaceOnly:=True, AllowUsingPivotTables:=True
@@ -3197,6 +3297,46 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     Set wsLog = Nothing
     Set wsCharts = Nothing
     Set wb = Nothing
+End Sub
+
+Private Sub EnsurePrimarySheetOrder(wb As Workbook)
+    Dim wsHelp As Worksheet
+    Dim wsLast As Worksheet
+    Dim wsActive As Worksheet
+    Dim activeAddress As String
+
+    On Error Resume Next
+    If TypeName(ActiveSheet) = "Worksheet" Then Set wsActive = ActiveSheet
+    If Not wsActive Is Nothing Then
+        If wsActive.Parent Is wb Then
+            activeAddress = ActiveCell.Address(False, False)
+        Else
+            Set wsActive = Nothing
+        End If
+    End If
+    On Error GoTo 0
+
+    On Error Resume Next
+    Set wsHelp = wb.Worksheets("Help")
+    On Error GoTo 0
+
+    If wsHelp Is Nothing Then Exit Sub
+
+    Set wsLast = wb.Worksheets(wb.Worksheets.Count)
+
+    On Error Resume Next
+    If wsHelp.Index <> wsLast.Index Then
+        wsHelp.Move After:=wsLast
+    End If
+    If Not wsActive Is Nothing Then
+        wsActive.Activate
+        If activeAddress <> "" Then wsActive.Range(activeAddress).Select
+    End If
+    On Error GoTo 0
+
+    Set wsHelp = Nothing
+    Set wsLast = Nothing
+    Set wsActive = Nothing
 End Sub
 
 Private Sub UnprotectWorkbookForEditing()

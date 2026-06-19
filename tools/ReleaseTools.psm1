@@ -127,7 +127,18 @@ function Set-WorkbookNameValue {
     try {
         $Workbook.Names.Item($Name).RefersToRange.Value2 = $Value
     } catch {
-        throw "Named range '$Name' not found in $($Workbook.Name)."
+        # If the workbook/sheet is protected, writing through RefersToRange can fail
+        # even when the name exists. Retry after unprotecting with the default blank
+        # password used by release-mode workbook protection.
+        try {
+            $Workbook.Unprotect("")
+            foreach ($ws in $Workbook.Worksheets) {
+                $ws.Unprotect("")
+            }
+            $Workbook.Names.Item($Name).RefersToRange.Value2 = $Value
+        } catch {
+            throw "Could not set named range '$Name' in $($Workbook.Name). The name may be missing or protected."
+        }
     }
 }
 

@@ -56,6 +56,8 @@ public sealed class ExcelWorkbookMigrator
             sourceWorkbook = excel.Workbooks.Open(request.SourcePath, 0, true);
             step = "opening master copy";
             outputWorkbook = excel.Workbooks.Open(request.OutputPath, 0, false);
+            step = "preparing master copy for migration";
+            UnprotectWorkbookForMigration((object)outputWorkbook);
             excel.Calculation = XlCalculationManual;
 
             step = "reading source validation data";
@@ -191,6 +193,39 @@ public sealed class ExcelWorkbookMigrator
         }
 
         return request;
+    }
+
+    private static void UnprotectWorkbookForMigration(object workbookObject)
+    {
+        dynamic workbook = workbookObject;
+
+        // Release workbooks can be saved in a protected state.
+        // Migration needs table resize/copy operations, so force an editable
+        // state in the temporary output workbook.
+        try
+        {
+            workbook.Unprotect("");
+        }
+        catch
+        {
+            // Continue: some workbook states may not require workbook-level unprotect.
+        }
+
+        foreach (dynamic worksheet in workbook.Worksheets)
+        {
+            try
+            {
+                worksheet.Unprotect("");
+            }
+            catch
+            {
+                // Continue: migration will surface a specific failure if protection remains.
+            }
+            finally
+            {
+                ReleaseComObject(worksheet);
+            }
+        }
     }
 
     private static void CopyLogbook(object sourceWorkbookObject, object outputWorkbookObject)
