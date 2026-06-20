@@ -8,12 +8,16 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
-### [1.4.0] - 2026-06-14
+### [1.4.0] - 2026-06-20
 - Hardened GitHub release protections and automated release checks
 - Added release asset checksums and machine-readable integrity metadata
 - Added automated VBA source-quality and workbook/source consistency checks
 - Improved release preparation tooling and workbook maintainability
 - Added an early external updater prototype that creates and validates a separate updated copy
+- Added runtime workbook protection with development/release toggles
+- Added automatic redacted diagnostics capture when starting a bug report
+- Hardened update migration against protected-sheet failures and staging/backup validation gaps
+- Improved Hours Over Time chart update resilience so entry saves are not blocked by chart wiring issues
 
 ### [1.3.1] - 2026-06-14
 - Added an anonymous bug report form that can be opened directly from the logbook
@@ -155,6 +159,20 @@ To enable:
 This is a one-time setting per machine.
 
 Only enable macros and VBA project access for workbooks downloaded from this repository's GitHub Releases page. Do not run modified copies from untrusted sources.
+
+### 3a. Workbook protection behaviour
+
+The release workbook may run in protected mode to reduce accidental edits. Intended input areas remain editable, including New Entry (`ne*`) fields, supported override/settings cells, and editable Logbook table data.
+
+For development workflows, protection can be toggled with macros:
+
+1. `DisableProtectionForDevelopment`
+2. `EnableProtectionForRelease`
+
+Preparation scripts also attempt to call these macros automatically:
+
+- `PrepareForTesting.ps1` disables protection mode when available.
+- `PrepareForRelease.ps1` enables protection mode when available.
 
 ### 4. First open -- build the Routes table
 

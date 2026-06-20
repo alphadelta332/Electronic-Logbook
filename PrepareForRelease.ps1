@@ -29,10 +29,12 @@ Write-Host "Version source: version.txt = $version"
 Write-Host ""
 
 Set-LogbookWorkbookState -WorkbookPath $WorkbookPath -Branch "main" -Version $version
+Invoke-WorkbookMacro -WorkbookPath $WorkbookPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
 
 if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPath)) {
     Write-Host ""
     Set-LogbookWorkbookState -WorkbookPath $WorkingCopyPath -Branch "main"
+    Invoke-WorkbookMacro -WorkbookPath $WorkingCopyPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
 } elseif (-not $SkipWorkingCopy) {
     Write-Host ""
     Write-Host "No working-copy workbook configured. Add release.local.json or pass -WorkingCopyPath to include it." -ForegroundColor Yellow
@@ -40,6 +42,7 @@ if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPat
 
 Write-Host ""
 Write-Host "Master workbook state set to branch 'main' and version '$version'." -ForegroundColor Green
+Write-Host "Release protection mode enabled when the macro is available." -ForegroundColor Green
 Write-Host "Working copy branch set to 'main' when configured; its LogbookVersion is left unchanged." -ForegroundColor Green
 Write-Host "Next steps:"
 Write-Host "  1. Run GenerateReadmePDF.ps1 if README.md changed"

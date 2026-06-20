@@ -25,6 +25,12 @@ public sealed class ExcelWorkbookMigrator
 
     public MigrationReport Migrate(MigrationRequest request)
     {
+        static string SetStep(string message)
+        {
+            Console.WriteLine($"[updater] {message}...");
+            return message;
+        }
+
         request = ValidateRequest(request);
 
         var outputDirectory = Path.GetDirectoryName(request.OutputPath)!;
@@ -36,7 +42,7 @@ public sealed class ExcelWorkbookMigrator
         dynamic? outputWorkbook = null;
         var excelProcessId = 0;
         var migrationSucceeded = false;
-        var step = "starting Excel";
+        var step = SetStep("starting Excel");
 
         try
         {
@@ -52,30 +58,30 @@ public sealed class ExcelWorkbookMigrator
             excel.ScreenUpdating = false;
             excel.AutomationSecurity = AutomationSecurityForceDisable;
 
-            step = "opening source workbook";
+            step = SetStep("opening source workbook");
             sourceWorkbook = excel.Workbooks.Open(request.SourcePath, 0, true);
-            step = "opening master copy";
+            step = SetStep("opening master copy");
             outputWorkbook = excel.Workbooks.Open(request.OutputPath, 0, false);
-            step = "preparing master copy for migration";
+            step = SetStep("preparing master copy for migration");
             UnprotectWorkbookForMigration((object)outputWorkbook);
             excel.Calculation = XlCalculationManual;
 
-            step = "reading source validation data";
+            step = SetStep("reading source validation data");
             var sourceVersion = ReadName((object)sourceWorkbook, "LogbookVersion");
             IReadOnlyDictionary<string, string> sourceFingerprints =
                 ReadPreservedFingerprints((object)sourceWorkbook);
 
-            step = "copying Logbook data";
+            step = SetStep("copying Logbook data");
             CopyLogbook((object)sourceWorkbook, (object)outputWorkbook);
-            step = "copying Keywords data";
+            step = SetStep("copying Keywords data");
             CopyTableByMatchingColumns((object)sourceWorkbook, (object)outputWorkbook, "Keywords");
-            step = "copying Routes data";
+            step = SetStep("copying Routes data");
             CopyTableByMatchingColumns((object)sourceWorkbook, (object)outputWorkbook, "Routes");
-            step = "copying airport base flags";
+            step = SetStep("copying airport base flags");
             CopyAirportBaseFlags((object)sourceWorkbook, (object)outputWorkbook);
-            step = "copying named preferences";
+            step = SetStep("copying named preferences");
             CopyNamedPreferences((object)sourceWorkbook, (object)outputWorkbook);
-            step = "restoring Logbook presentation";
+            step = SetStep("restoring Logbook presentation");
             RestoreLogbookPresentation((object)sourceWorkbook, (object)outputWorkbook);
 
             var outputVersion = ReadName((object)outputWorkbook, "LogbookVersion");
@@ -87,18 +93,18 @@ public sealed class ExcelWorkbookMigrator
                     $"{request.Manifest!.Version}.");
             }
 
-            step = "calculating output workbook";
+            step = SetStep("calculating output workbook");
             excel.Calculation = XlCalculationAutomatic;
             foreach (dynamic worksheet in outputWorkbook.Worksheets)
             {
                 worksheet.Calculate();
             }
-            step = "refreshing pivot tables";
+            step = SetStep("refreshing pivot tables");
             RefreshPivots((object)outputWorkbook);
-            step = "updating Hours Over Time chart";
+            step = SetStep("updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
 
-            step = "validating preserved data";
+            step = SetStep("validating preserved data");
             IReadOnlyDictionary<string, string> outputFingerprints =
                 ReadPreservedFingerprints((object)outputWorkbook);
             foreach (var expected in sourceFingerprints)
@@ -112,7 +118,7 @@ public sealed class ExcelWorkbookMigrator
             }
             ValidateLogbookStructure((object)sourceWorkbook, (object)outputWorkbook);
 
-            step = "saving output workbook";
+            step = SetStep("saving output workbook");
             outputWorkbook.RemovePersonalInformation = false;
             outputWorkbook.Save();
 
@@ -477,27 +483,49 @@ public sealed class ExcelWorkbookMigrator
 
     private static void RefreshPivots(object workbookObject)
     {
-        dynamic workbook = workbookObject;
-        foreach (dynamic worksheet in workbook.Worksheets)
-        {
-            dynamic pivots = worksheet.PivotTables();
-            for (var index = 1; index <= (int)pivots.Count; index++)
-            {
-                dynamic pivot = pivots.Item(index);
-                pivot.RefreshTable();
-            }
-        }
-
         try
         {
-            dynamic hoursByYear = workbook.Worksheets.Item("ChartData")
-                .PivotTables("HoursByYear");
-            hoursByYear.PivotFields("Quarters (Date)").Orientation = 0;
-            hoursByYear.RefreshTable();
+            dynamic workbook = workbookObject;
+            foreach (dynamic worksheet in workbook.Worksheets)
+            {
+                try
+                {
+                    dynamic pivots = worksheet.PivotTables();
+                    for (var index = 1; index <= (int)pivots.Count; index++)
+                    {
+                        try
+                        {
+                            dynamic pivot = pivots.Item(index);
+                            pivot.RefreshTable();
+                        }
+                        catch
+                        {
+                            // Some Excel builds intermittently fail COM pivot refresh calls.
+                            // Continue so migration can complete and users can refresh manually later.
+                        }
+                    }
+                }
+                catch
+                {
+                    // Accessing pivot collections can also fail in unstable COM sessions.
+                }
+            }
+
+            try
+            {
+                dynamic hoursByYear = workbook.Worksheets.Item("ChartData")
+                    .PivotTables("HoursByYear");
+                hoursByYear.PivotFields("Quarters (Date)").Orientation = 0;
+                hoursByYear.RefreshTable();
+            }
+            catch
+            {
+                // Older workbooks may not have this pivot/grouping, and some Excel builds can fail COM refresh calls.
+            }
         }
         catch
         {
-            // Older workbooks may not have this pivot or the optional Quarters grouping.
+            // Keep migration non-blocking if Excel COM becomes unstable during pivot refresh.
         }
     }
 

@@ -29,10 +29,12 @@ Write-Host "Version source: version.txt = $version"
 Write-Host ""
 
 Set-LogbookWorkbookState -WorkbookPath $WorkbookPath -Branch "dev" -Version $version
+Invoke-WorkbookMacro -WorkbookPath $WorkbookPath -MacroName "DisableProtectionForDevelopment" -IgnoreMissing
 
 if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPath)) {
     Write-Host ""
     Set-LogbookWorkbookState -WorkbookPath $WorkingCopyPath -Branch "dev"
+    Invoke-WorkbookMacro -WorkbookPath $WorkingCopyPath -MacroName "DisableProtectionForDevelopment" -IgnoreMissing
 } elseif (-not $SkipWorkingCopy) {
     Write-Host ""
     Write-Host "No working-copy workbook configured. Add release.local.json or pass -WorkingCopyPath to include it." -ForegroundColor Yellow
@@ -40,4 +42,5 @@ if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPat
 
 Write-Host ""
 Write-Host "Master workbook state set to branch 'dev' and version '$version'." -ForegroundColor Green
+Write-Host "Development protection mode disabled when the macro is available." -ForegroundColor Green
 Write-Host "Working copy branch set to 'dev' when configured; its LogbookVersion is left unchanged." -ForegroundColor Green

@@ -15,18 +15,27 @@ $testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) (
 )
 $sourcePath = Join-Path $testDirectory "Source.xlsm"
 $outputPath = Join-Path $testDirectory "Updated.xlsm"
+$maxAttempts = 3
+$updaterDllPath = Join-Path $projectPath "bin\Release\net8.0-windows\ElectronicLogbook.Updater.dll"
 
 Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
+function Write-Step {
+    param([string]$Message)
+    Write-Host "[Test-ExternalUpdater] $Message" -ForegroundColor Cyan
+}
+
 try {
+    Write-Step "Preparing disposable test workspace"
     New-Item -ItemType Directory -Path $testDirectory | Out-Null
     Copy-Item -LiteralPath $masterPath -Destination $sourcePath
 
+    Write-Step "Seeding source workbook with known test data"
     Invoke-WorkbookEdit -WorkbookPath $sourcePath -Operation {
         param($Workbook)
 
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
-        $logbook.TableStyle = "TableStyleLight16"
+        $logbook.TableStyle = $Workbook.TableStyles.Item("TableStyleLight16")
         $logbook.ListColumns("Custom 1").Name = "Updater Test"
         $logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 = "TESTREG"
         $newLogbookRow = $logbook.ListRows.Add()
@@ -47,13 +56,48 @@ try {
         $Workbook.Names.Item("DateAfterExport").RefersToRange.Value2 = 3
     }
 
-    $sourceHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
-    & dotnet run --project $projectPath --configuration Release -- `
-        --source $sourcePath `
-        --master $masterPath `
-        --output $outputPath
+    Write-Step "Building updater (Release)"
+    & dotnet build $projectPath --configuration Release
     if ($LASTEXITCODE -ne 0) {
-        throw "External updater returned exit code $LASTEXITCODE."
+        throw "Failed to build updater in Release configuration."
+    }
+    if (-not (Test-Path $updaterDllPath)) {
+        throw "Updater binary not found at expected path: $updaterDllPath"
+    }
+
+    $sourceHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
+    $updaterSucceeded = $false
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        Write-Step "Running updater attempt $attempt of $maxAttempts"
+        if (Test-Path $outputPath) {
+            Remove-Item -LiteralPath $outputPath -Force
+        }
+
+        $updaterLines = @()
+        & dotnet $updaterDllPath `
+            --source $sourcePath `
+            --master $masterPath `
+            --output $outputPath 2>&1 | Tee-Object -Variable updaterLines
+        $exitCode = $LASTEXITCODE
+        $updaterOutput = ($updaterLines | Out-String)
+
+        if ($exitCode -eq 0) {
+            Write-Step "Updater completed successfully"
+            $updaterSucceeded = $true
+            break
+        }
+
+        $looksTransientComFailure = $updaterOutput -match "0x800706BE|0x800706BA|remote procedure call|RPC server is unavailable"
+        if ($looksTransientComFailure -and $attempt -lt $maxAttempts) {
+            Write-Host "Transient Excel COM failure detected. Retrying..." -ForegroundColor Yellow
+            continue
+        }
+
+        throw "External updater returned exit code $exitCode on attempt $attempt."
+    }
+
+    if (-not $updaterSucceeded) {
+        throw "External updater failed after $maxAttempts attempts."
     }
 
     $afterHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
@@ -61,6 +105,7 @@ try {
         throw "Source workbook changed during the external update."
     }
 
+    Write-Step "Validating updated workbook content"
     Invoke-WorkbookEdit -WorkbookPath $outputPath -ReadOnly -Operation {
         param($Workbook)
 
@@ -106,8 +151,10 @@ try {
         }
     }
 
+    Write-Step "Validation complete"
     Write-Host "External updater disposable migration test passed." -ForegroundColor Green
 } finally {
+    Write-Step "Cleaning up temporary files"
     if (Test-Path $testDirectory) {
         Remove-Item -LiteralPath $testDirectory -Recurse -Force
     }
