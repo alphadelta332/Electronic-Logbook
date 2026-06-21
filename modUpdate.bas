@@ -374,7 +374,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Validating backup file"
     UpdateStatus "Validating backup..."
-    If Not ValidateBackupWorkbook(oldPath) Then
+    If Not ValidateBackupWorkbook(oldPath, ThisWorkbook) Then
         Application.Calculation = xlCalculationAutomatic
         Application.ScreenUpdating = True
         Application.EnableEvents = True
@@ -496,32 +496,33 @@ Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
     On Error GoTo 0
 End Sub
 
-Private Function ValidateBackupWorkbook(backupPath As String) As Boolean
-    Dim backupWb As Workbook
-    Dim prevSec  As MsoAutomationSecurity
+Private Function ValidateBackupWorkbook(backupPath As String, Optional backupWb As Workbook = Nothing) As Boolean
+    If backupWb Is Nothing Then Set backupWb = ThisWorkbook
 
-    prevSec = Application.AutomationSecurity
-    Application.AutomationSecurity = msoAutomationSecurityForceDisable
-
+    ' Validate the workbook that is already open after SaveAs.
+    ' Re-opening the same path here can block on file locks/OneDrive sync.
     On Error GoTo Fail
-    Set backupWb = Workbooks.Open(backupPath, ReadOnly:=True, UpdateLinks:=False)
 
-    On Error Resume Next
     Dim t As ListObject
     Set t = backupWb.Sheets("Logbook").ListObjects("Logbook")
-    On Error GoTo Fail
     If t Is Nothing Then GoTo Fail
 
-    backupWb.Close SaveChanges:=False
-    Set backupWb = Nothing
-    Application.AutomationSecurity = prevSec
+    ' Confirm the backup file exists on disk and is non-empty.
+    If Dir$(backupPath) = "" Then
+        Err.Raise vbObjectError + 921, , "Backup file not found after SaveAs."
+    End If
+
+    Dim backupSize As Long
+    backupSize = FileLen(backupPath)
+    If backupSize <= 0 Then
+        Err.Raise vbObjectError + 922, , "Backup file is empty after SaveAs."
+    End If
+
     ValidateBackupWorkbook = True
     Exit Function
 
 Fail:
     On Error Resume Next
-    If Not backupWb Is Nothing Then backupWb.Close SaveChanges:=False
-    Application.AutomationSecurity = prevSec
     Application.Run "WriteDebugLog", "modUpdate.ValidateBackupWorkbook", Err.Number, Err.Description, "Validating backup file"
     On Error GoTo 0
     ValidateBackupWorkbook = False
