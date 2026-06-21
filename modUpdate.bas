@@ -178,6 +178,8 @@ Private Sub RunUpdate(newVersion As String)
     Dim diagStep      As String
     Dim finalHandoffStarted As Boolean
     Dim usedSaveCopyFallback As Boolean
+    Dim finalReady As Boolean
+    Dim readinessNote As String
     Dim sessionId     As String
     Dim expectedRows  As Long
     Dim expectedTotalHours As Double
@@ -421,10 +423,23 @@ Private Sub RunUpdate(newVersion As String)
     Kill localSavePath
     On Error GoTo 0
 
+    diagStep = "Waiting for final workbook readiness"
+    UpdateStatus "Finalizing updated file..."
+    finalReady = WaitForUpdatedWorkbookReady(updatedPath, newVersion, 90)
+
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
     Application.EnableEvents = True
     UpdateStatus ""
+
+    If finalReady Then
+        readinessNote = vbCrLf & vbCrLf & _
+                        "Ready to open: the updated workbook was verified after handoff."
+    Else
+        readinessNote = vbCrLf & vbCrLf & _
+                        "OneDrive is still finalizing this file. Do not open it yet." & vbCrLf & _
+                        "Wait for sync to finish (pending icon clears), then open from Explorer."
+    End If
 
         If usedSaveCopyFallback Then
          MsgBox "Update complete with OneDrive fallback." & vbCrLf & vbCrLf & _
@@ -433,7 +448,7 @@ Private Sub RunUpdate(newVersion As String)
              updatedPath & vbCrLf & vbCrLf & _
              "Backup copy saved as:" & vbCrLf & vbCrLf & _
              oldPath & vbCrLf & vbCrLf & _
-             "Please close this workbook and open the updated file above.", _
+             "Please close this workbook and open the updated file above." & readinessNote, _
              vbInformation, "Update Ready"
         Else
          MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
@@ -442,7 +457,7 @@ Private Sub RunUpdate(newVersion As String)
              oldPath & vbCrLf & vbCrLf & _
              "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
              "Please verify that your total hours, " & _
-             "Charts page, and Currency + Recency page match what you had before.", _
+               "Charts page, and Currency + Recency page match what you had before." & readinessNote, _
              vbInformation, "Update Ready"
         End If
     Exit Sub
@@ -534,6 +549,87 @@ Private Sub ReplaceFileWithRetry(ByVal sourcePath As String, ByVal targetPath As
 
     Err.Raise vbObjectError + 930, "modUpdate.RunUpdate", _
               "Could not write updated workbook to original filename."
+End Sub
+
+Private Function WaitForUpdatedWorkbookReady(ByVal workbookPath As String, ByVal expectedVersion As String, ByVal timeoutSeconds As Long) As Boolean
+    Dim startedAt As Date
+    Dim priorSize As Long
+    Dim priorStamp As Date
+    Dim stablePasses As Long
+    Dim currentSize As Long
+    Dim currentStamp As Date
+
+    startedAt = Now
+    priorSize = -1
+    priorStamp = 0
+    stablePasses = 0
+
+    Do
+        If Dir$(workbookPath) <> "" Then
+            On Error Resume Next
+            currentSize = FileLen(workbookPath)
+            currentStamp = FileDateTime(workbookPath)
+            If Err.Number <> 0 Then
+                Err.Clear
+                currentSize = -1
+                currentStamp = 0
+            End If
+            On Error GoTo 0
+
+            If currentSize > 0 Then
+                If currentSize = priorSize And currentStamp = priorStamp Then
+                    stablePasses = stablePasses + 1
+                Else
+                    stablePasses = 0
+                End If
+
+                priorSize = currentSize
+                priorStamp = currentStamp
+
+                If stablePasses >= 1 Then
+                    If CanOpenWorkbookVersion(workbookPath, expectedVersion) Then
+                        WaitForUpdatedWorkbookReady = True
+                        Exit Function
+                    End If
+                End If
+            End If
+        End If
+
+        If DateDiff("s", startedAt, Now) >= timeoutSeconds Then Exit Do
+        UpdateStatus "Finalizing updated file... (" & CStr(DateDiff("s", startedAt, Now)) & "s)"
+        WaitOneSecond
+    Loop
+
+    WaitForUpdatedWorkbookReady = False
+End Function
+
+Private Function CanOpenWorkbookVersion(ByVal workbookPath As String, ByVal expectedVersion As String) As Boolean
+    Dim openedWb As Workbook
+    Dim openedVersion As String
+
+    On Error GoTo Fail
+    Set openedWb = Workbooks.Open(Filename:=workbookPath, ReadOnly:=True, UpdateLinks:=False, AddToMru:=False)
+    openedVersion = Trim$(CStr(openedWb.Names("LogbookVersion").RefersToRange.Value))
+    openedWb.Close SaveChanges:=False
+    Set openedWb = Nothing
+
+    CanOpenWorkbookVersion = (StrComp(openedVersion, expectedVersion, vbTextCompare) = 0)
+    Exit Function
+
+Fail:
+    On Error Resume Next
+    If Not openedWb Is Nothing Then openedWb.Close SaveChanges:=False
+    Set openedWb = Nothing
+    On Error GoTo 0
+    CanOpenWorkbookVersion = False
+End Function
+
+Private Sub WaitOneSecond()
+    Dim target As Date
+    target = DateAdd("s", 1, Now)
+    Do While Now < target
+        DoEvents
+    Loop
 End Sub
 
 Private Function BuildOldWorkbookPath(folderPath As String, workbookName As String) As String
