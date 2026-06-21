@@ -171,11 +171,13 @@ Private Sub RunUpdate(newVersion As String)
     Dim originalName  As String
     Dim canonicalName As String
     Dim oldPath       As String
+    Dim updatedPath   As String
     Dim masterWb      As Workbook
     Dim errMsg        As String
     Dim errNum        As Long
     Dim diagStep      As String
     Dim finalHandoffStarted As Boolean
+    Dim usedSaveCopyFallback As Boolean
     Dim sessionId     As String
     Dim expectedRows  As Long
     Dim expectedTotalHours As Double
@@ -199,6 +201,7 @@ Private Sub RunUpdate(newVersion As String)
     originalName = ThisWorkbook.Name
     canonicalName = CanonicalWorkbookName(originalName)
     savePath = localPath & "\" & canonicalName
+    updatedPath = savePath
     oldPath = BuildOldWorkbookPath(localPath, canonicalName)
 
     diagStep = "Downloading master workbook"
@@ -371,7 +374,25 @@ Private Sub RunUpdate(newVersion As String)
     UpdateStatus "Renaming previous logbook..."
     finalHandoffStarted = True
     Application.DisplayAlerts = False
+    On Error Resume Next
     ThisWorkbook.SaveAs Filename:=oldPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' OneDrive/AutoSave workbooks can reject SaveAs during handoff.
+        ' Fallback: preserve a backup copy without renaming the open workbook.
+        ThisWorkbook.SaveCopyAs Filename:=oldPath
+        If Err.Number <> 0 Then
+            Dim renameErr As String
+            renameErr = Err.Description
+            Err.Clear
+            Application.DisplayAlerts = True
+            On Error GoTo UpdateFailed
+            Err.Raise vbObjectError + 931, "modUpdate.RunUpdate", _
+                      "Could not create backup old-copy file. " & renameErr
+        End If
+        usedSaveCopyFallback = True
+    End If
+    On Error GoTo UpdateFailed
     Application.DisplayAlerts = True
 
     diagStep = "Validating backup file"
@@ -390,7 +411,12 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Moving updated file to original filename"
     UpdateStatus "Saving updated logbook..."
-    ReplaceFileWithRetry localSavePath, savePath
+    If usedSaveCopyFallback Then
+        updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
+    Else
+        updatedPath = savePath
+    End If
+    ReplaceFileWithRetry localSavePath, updatedPath
     On Error Resume Next
     Kill localSavePath
     On Error GoTo 0
@@ -400,14 +426,25 @@ Private Sub RunUpdate(newVersion As String)
     Application.EnableEvents = True
     UpdateStatus ""
 
-    MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
-           savePath & vbCrLf & vbCrLf & _
-           "Your previous logbook has been saved as:" & vbCrLf & vbCrLf & _
-           oldPath & vbCrLf & vbCrLf & _
-           "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
-           "Please verify that your total hours, " & _
-           "Charts page, and Currency + Recency page match what you had before.", _
-           vbInformation, "Update Ready"
+        If usedSaveCopyFallback Then
+         MsgBox "Update complete with OneDrive fallback." & vbCrLf & vbCrLf & _
+             "Your current open workbook could not be renamed while AutoSave/OneDrive locking was active." & vbCrLf & vbCrLf & _
+             "Updated workbook saved as:" & vbCrLf & vbCrLf & _
+             updatedPath & vbCrLf & vbCrLf & _
+             "Backup copy saved as:" & vbCrLf & vbCrLf & _
+             oldPath & vbCrLf & vbCrLf & _
+             "Please close this workbook and open the updated file above.", _
+             vbInformation, "Update Ready"
+        Else
+         MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
+             updatedPath & vbCrLf & vbCrLf & _
+             "Your previous logbook has been saved as:" & vbCrLf & vbCrLf & _
+             oldPath & vbCrLf & vbCrLf & _
+             "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
+             "Please verify that your total hours, " & _
+             "Charts page, and Currency + Recency page match what you had before.", _
+             vbInformation, "Update Ready"
+        End If
     Exit Sub
 
 UpdateFailed:
@@ -536,6 +573,37 @@ Private Function BuildOldWorkbookPath(folderPath As String, workbookName As Stri
     Loop While Dir(candidate) <> ""
 
     BuildOldWorkbookPath = candidate
+End Function
+
+Private Function BuildUpdatedWorkbookPath(folderPath As String, workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim candidate As String
+    Dim counter As Long
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+        extension = Mid$(workbookName, dotPos)
+    Else
+        baseName = workbookName
+        extension = ""
+    End If
+
+    candidate = folderPath & "\" & baseName & "_Updated" & extension
+    If Dir$(candidate) = "" Then
+        BuildUpdatedWorkbookPath = candidate
+        Exit Function
+    End If
+
+    counter = 1
+    Do
+        candidate = folderPath & "\" & baseName & "_Updated_" & counter & extension
+        counter = counter + 1
+    Loop While Dir$(candidate) <> ""
+
+    BuildUpdatedWorkbookPath = candidate
 End Function
 
 Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
