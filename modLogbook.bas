@@ -86,30 +86,30 @@ Sub AddToLogbook()
 
     '--- 3a. Date Validity Check
         'Check 1: Ensure the date field doesn't contain a formula error (e.g. invalid month string)
-        If IsError(Range("neDate").Value) Then
+        If IsError(NewEntryValue("neDate")) Then
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
         'Check 2: Ensure the resolved value is actually a recognisable date
-        If Not IsDate(Range("neDate").Value) Then
+        If Not IsDate(NewEntryValue("neDate")) Then
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
         'Check 3: Ensure the date is not in the future
-        If Range("neDate").Value > todayDate Then
+        If CDate(NewEntryValue("neDate")) > todayDate Then
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
-        entryDate = CDate(Range("neDate").Value)
+        entryDate = CDate(NewEntryValue("neDate"))
 
     '--- 3b. Registration Check (skipped for sim entries)
-        If Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "" Then
+        If NewEntryNumericValue("neIfrSim") = 0 Then
 
             'Check 1: Aircraft registration must not be blank
-            If Range("neReg").Value = "" Then
+            If CStr(NewEntryValue("neReg")) = "" Then
                 MsgBox "ERROR: Registration cannot be blank.", vbCritical
                 GoTo Cleanup
             End If
@@ -173,17 +173,19 @@ Sub AddToLogbook()
         Dim suppressWarnings As Boolean
         suppressWarnings = False
 
-        If Range("suppressWarningsUntil").Value <> "" Then
-            If IsDate(Range("suppressWarningsUntil").Value) Then
-                If Now < CDate(Range("suppressWarningsUntil").Value) Then suppressWarnings = True
+        Dim suppressUntilValue As Variant
+        suppressUntilValue = GetWorkbookNameValue(ThisWorkbook, "suppressWarningsUntil", vbNullString)
+        If CStr(suppressUntilValue) <> "" Then
+            If IsDate(suppressUntilValue) Then
+                If Now < CDate(suppressUntilValue) Then suppressWarnings = True
             End If
         End If
 
     '--- 4b. No Landings Recorded (Non-Sim Entries Only)
         If Not suppressWarnings Then
-            If Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "" Then
-                If (Range("neLandingsDay").Value = 0 Or Range("neLandingsDay").Value = "") And _
-                   (Range("neLandingsNight").Value = 0 Or Range("neLandingsNight").Value = "") Then
+            If NewEntryNumericValue("neIfrSim") = 0 Then
+                If NewEntryNumericValue("neLandingsDay") = 0 And _
+                   NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: No Landings Recorded. Proceed?", vbOKCancel + vbExclamation, "No Landings")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -196,7 +198,7 @@ Sub AddToLogbook()
             latestLogbookDate = GetLatestLogbookEntryDate(tbl)
 
             If latestLogbookDate <> 0 Then
-                If CDate(Range("neDate").Value) < latestLogbookDate Then
+                If CDate(NewEntryValue("neDate")) < latestLogbookDate Then
                     response = MsgBox("Warning: This entry is dated before the latest existing Logbook entry (" & _
                                       Format(latestLogbookDate, "dd mmm yyyy") & "). Continue?", _
                                       vbOKCancel + vbExclamation, "Earlier Than Latest Logbook Entry")
@@ -215,14 +217,14 @@ Sub AddToLogbook()
         If Not suppressWarnings Then
             'Check 1: Day hours recorded but no day landings
             If dayHours > 0 Then
-                If Range("neLandingsDay").Value = 0 Or Range("neLandingsDay").Value = "" Then
+                If NewEntryNumericValue("neLandingsDay") = 0 Then
                     response = MsgBox("Warning: Day hours recorded, but no Day Landings recorded. Continue?", vbOKCancel + vbExclamation, "Day Hours Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
             End If
 
             'Check 2: Day landings recorded but no day hours
-            If Range("neLandingsDay").Value > 0 Then
+            If NewEntryNumericValue("neLandingsDay") > 0 Then
                 If dayHours = 0 Then
                     response = MsgBox("Warning: Day Landings recorded, but no Day hours recorded. Continue?", vbOKCancel + vbExclamation, "Day Landings Warning")
                     If response = vbCancel Then GoTo Cleanup
@@ -240,14 +242,14 @@ Sub AddToLogbook()
         If Not suppressWarnings Then
             'Check 1: Night hours recorded but no night landings
             If nightHours > 0 Then
-                If Range("neLandingsNight").Value = 0 Or Range("neLandingsNight").Value = "" Then
+                If NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: Night hours recorded, but no Night Landings recorded. Continue?", vbOKCancel + vbExclamation, "Night Hours Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
             End If
 
             'Check 2: Night landings recorded but no night hours
-            If Range("neLandingsNight").Value > 0 Then
+            If NewEntryNumericValue("neLandingsNight") > 0 Then
                 If nightHours = 0 Then
                     response = MsgBox("Warning: Night Landings recorded, but no Night hours recorded. Continue?", vbOKCancel + vbExclamation, "Night Landings Warning")
                     If response = vbCancel Then GoTo Cleanup
@@ -282,8 +284,8 @@ Sub AddToLogbook()
     '--- 4g. OPC Without Instrument Hours / Approaches Check
         If Not suppressWarnings Then
             If opcDetected And Not currencyExcluded Then
-                If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
-                   (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") And _
+                     If NewEntryNumericValue("neIfrIf") = 0 And _
+                         NewEntryNumericValue("neIfrSim") = 0 And _
                    CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
                     response = MsgBox("OPC detected but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
                     If response = vbCancel Then GoTo Cleanup
@@ -294,8 +296,8 @@ Sub AddToLogbook()
     '--- 4h. Approaches Without Instrument Hours Check
         If Not suppressWarnings Then
             If CountPositiveNewEntryFields(NewEntryApproachFieldNames()) > 0 Then
-                If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
-                   (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") Then
+                     If NewEntryNumericValue("neIfrIf") = 0 And _
+                         NewEntryNumericValue("neIfrSim") = 0 Then
                     response = MsgBox("Warning: Approaches recorded with no Instrument hours. Continue?", vbOKCancel + vbExclamation, "Approaches Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -305,7 +307,7 @@ Sub AddToLogbook()
     '--- 4i. High Landings vs Hours Check
         'Total landings (day + night) should not exceed 6x total flight hours
         If Not suppressWarnings Then
-            If (Range("neLandingsDay").Value + Range("neLandingsNight").Value) > _
+            If (NewEntryNumericValue("neLandingsDay") + NewEntryNumericValue("neLandingsNight")) > _
                 6 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Landings seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Landings Warning")
                 If response = vbCancel Then GoTo Cleanup
@@ -433,9 +435,9 @@ Sub AddToLogbook()
         dupFound = False
 
         For rr = 1 To tbl.DataBodyRange.Rows.Count
-            If tbl.DataBodyRange.cells(rr, dateCol).Value = Range("neDate").Value And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, typeCol).Value)) = LCase(Trim(Range("neType").Value)) And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, regCol).Value)) = LCase(Trim(Range("neReg").Value)) And _
+                If tbl.DataBodyRange.cells(rr, dateCol).Value = NewEntryValue("neDate") And _
+                    LCase(Trim(tbl.DataBodyRange.cells(rr, typeCol).Value)) = LCase(Trim(CStr(NewEntryValue("neType")))) And _
+                    LCase(Trim(tbl.DataBodyRange.cells(rr, regCol).Value)) = LCase(Trim(CStr(NewEntryValue("neReg")))) And _
                LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(NewEntryValue("neDetails"))) Then
                 dupFound = True
                 Exit For
@@ -469,7 +471,9 @@ Sub AddToLogbook()
         Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
 
     '--- Copy Year, Month, Day
-        newRow.Range.cells(1, 2).Resize(1, 3).Value = Range("neYear", "neDay").Value
+        newRow.Range.Cells(1, 2).Value = NewEntryValue("neYear")
+        newRow.Range.Cells(1, 3).Value = NewEntryValue("neMonth")
+        newRow.Range.Cells(1, 4).Value = NewEntryValue("neDay")
 
     '--- 5b. Fill Down Formula Columns from Previous Row
         diagStep = "Step 5b: Fill Formulas"
@@ -565,7 +569,7 @@ Sub AddToLogbook()
         On Error Resume Next
 
     '--- 7a. Reset Date Fields
-        Select Case Range("DateAfterExport").Value
+        Select Case Val(CStr(GetWorkbookNameValue(ThisWorkbook, "DateAfterExport", 1)))
             Case 1
                 ResetNewEntryDateFields DateAdd("d", 1, entryDate)
             Case 3
@@ -647,8 +651,9 @@ Cleanup:
             On Error Resume Next
             WriteDebugLog "AddToLogbook", errNum, errDesc, diagStep
             On Error GoTo 0
-            MsgBox "An unexpected error occurred and the entry may not have been saved." & vbNewLine & vbNewLine & _
+                 MsgBox "An unexpected error occurred and the entry may not have been saved." & vbNewLine & vbNewLine & _
                    "Error " & errNum & ": " & errDesc & vbNewLine & vbNewLine & _
+                     "Step: " & diagStep & vbNewLine & vbNewLine & _
                    "Please check the logbook before adding another entry.", vbCritical, "Unexpected Error"
         End If
 
