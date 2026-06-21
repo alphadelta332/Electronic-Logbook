@@ -5,10 +5,10 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="Electronic Logbook Updater"
-        Height="700"
-        Width="980"
-        MinHeight="680"
-        MinWidth="940"
+        Height="540"
+        Width="760"
+        MinHeight="520"
+        MinWidth="720"
         WindowStartupLocation="CenterScreen">
     <Grid Margin="20">
         <Grid.RowDefinitions>
@@ -55,7 +55,6 @@
                     <TextBlock x:Name="CheckMasterOrRepoText" Text="[ ] Update channel availability" />
                     <TextBlock x:Name="CheckDiskText" Text="[ ] Disk space" />
                 </UniformGrid>
-                <Button Margin="0,14,0,0" Width="160" HorizontalAlignment="Left" x:Name="RunPreflightButton" Content="Run checks" Click="RunPreflightButton_OnClick" />
                 <TextBlock Margin="0,8,0,0" x:Name="PreflightSummaryText" Text="Checks have not run yet." />
             </StackPanel>
 
@@ -68,9 +67,12 @@
             <StackPanel Grid.Row="0" x:Name="UpdatingPanel" Visibility="Collapsed">
                 <TextBlock Text="Updating" FontSize="20" FontWeight="SemiBold" />
                 <TextBlock Margin="0,8,0,0" x:Name="UpdatingPhaseText" Text="Waiting to start..." />
-                <ProgressBar Margin="0,12,0,0" Height="16" x:Name="UpdateProgressBar" IsIndeterminate="True" Minimum="0" Maximum="100" Value="0" />
-                <TextBox Margin="0,12,0,0" x:Name="UpdateLogTextBox" Height="280" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="Wrap" IsReadOnly="True" />
-                <TextBlock Margin="0,8,0,0" x:Name="CancelHintText" Text="Cancel is honored at phase boundaries." />
+                <Border Margin="0,10,0,0" Padding="10" CornerRadius="4" Background="#FFF8E1" BorderBrush="#EAB308" BorderThickness="1">
+                    <TextBlock TextWrapping="Wrap" Foreground="#7C2D12" FontWeight="SemiBold"
+                               Text="Warning: Do not use the clipboard while the logbook is updating." />
+                </Border>
+                <ProgressBar Margin="0,12,0,0" Height="16" x:Name="UpdateProgressBar" IsIndeterminate="False" Minimum="0" Maximum="100" Value="0" />
+                <TextBox Margin="0,12,0,0" x:Name="UpdateLogTextBox" Height="220" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="Wrap" IsReadOnly="True" />
             </StackPanel>
 
             <StackPanel Grid.Row="0" x:Name="CompletePanel" Visibility="Collapsed">

@@ -665,7 +665,8 @@ End Sub
 Private Sub ProtectLogbookSheetForRuntime(ws As Worksheet)
     ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
-               AllowFormattingCells:=True, AllowUsingPivotTables:=True, _
+               AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True, _
+               AllowUsingPivotTables:=True, _
                AllowInsertingRows:=True, AllowDeletingRows:=True
 End Sub
 
@@ -3864,6 +3865,10 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
         On Error Resume Next
         If LCase$(ws.Name) = "logbook" Then
             ProtectLogbookSheetForRuntime ws
+        ElseIf LCase$(ws.Name) = "stats" Then
+            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                       UserInterfaceOnly:=True, AllowUsingPivotTables:=True, _
+                       AllowFormattingColumns:=True, AllowFormattingRows:=True
         Else
             ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                        UserInterfaceOnly:=True, AllowUsingPivotTables:=True

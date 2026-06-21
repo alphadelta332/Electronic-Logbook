@@ -1,7 +1,10 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Windows;
 using ElectronicLogbook.Updater;
 
@@ -22,6 +25,26 @@ public partial class MainWindow : Window
     ];
 
     private readonly RunContext _context;
+    private readonly IReadOnlyDictionary<string, int> _phaseProgress = new Dictionary<string, int>(StringComparer.Ordinal)
+    {
+        [UpdaterPhaseIds.StartExcel] = 5,
+        [UpdaterPhaseIds.OpenSourceWorkbook] = 10,
+        [UpdaterPhaseIds.OpenMasterCopy] = 15,
+        [UpdaterPhaseIds.PrepareMasterCopy] = 20,
+        [UpdaterPhaseIds.ReadSourceValidationData] = 25,
+        [UpdaterPhaseIds.CopyLogbookData] = 40,
+        [UpdaterPhaseIds.CopyKeywordsData] = 50,
+        [UpdaterPhaseIds.CopyRoutesData] = 58,
+        [UpdaterPhaseIds.CopyAirportBaseFlags] = 64,
+        [UpdaterPhaseIds.CopyNamedPreferences] = 70,
+        [UpdaterPhaseIds.RestoreLogbookPresentation] = 76,
+        [UpdaterPhaseIds.CalculateOutputWorkbook] = 82,
+        [UpdaterPhaseIds.RefreshPivotTables] = 88,
+        [UpdaterPhaseIds.UpdateHoursOverTimeChart] = 92,
+        [UpdaterPhaseIds.ValidatePreservedData] = 96,
+        [UpdaterPhaseIds.SaveOutputWorkbook] = 99,
+        [UpdaterPhaseIds.Completed] = 100
+    };
 
     private int _stepIndex;
     private bool _isUpdating;
@@ -38,8 +61,6 @@ public partial class MainWindow : Window
 
         _context = ResolveRunContext();
         _lastOutputPath = _context.OutputPath;
-
-        InstalledVersionText.Text = "Installed version: detected from source workbook during update";
 
         UpdateWizardView();
         _ = InitializeAvailabilityAsync();
@@ -81,12 +102,25 @@ public partial class MainWindow : Window
     {
         FooterStatusText.Text = "Checking update channel...";
 
+        var installedVersion = await Task.Run(() => TryReadWorkbookVersion(_context.SourcePath));
+        InstalledVersionText.Text = string.IsNullOrWhiteSpace(installedVersion)
+            ? "Installed version: unknown"
+            : $"Installed version: {installedVersion}";
+
         if (_context.IsLocalMasterMode)
         {
-            LatestVersionText.Text = "Update channel: local master";
+            var masterVersion = await Task.Run(() => TryReadWorkbookVersion(_context.MasterPath!));
+            LatestVersionText.Text = string.IsNullOrWhiteSpace(masterVersion)
+                ? "Update channel: local master (version unavailable)"
+                : $"Update channel: local master ({masterVersion})";
             LastCheckedText.Text = $"Configured: {DateTime.Now:G}";
-            AvailableVersionText.Text = "Using local master build";
-            ReleaseSummaryText.Text = "Release notes are not queried in local-master mode.";
+            AvailableVersionText.Text = string.IsNullOrWhiteSpace(masterVersion)
+                ? "Using local master build"
+                : $"Local master version: {masterVersion}";
+            ReleaseSummaryText.Text = await GetDevBranchReadmeSummaryAsync(
+                _context.Repository,
+                installedVersion,
+                masterVersion);
         }
         else
         {
@@ -116,6 +150,147 @@ public partial class MainWindow : Window
             AvailableVersionText.Text = "Could not fetch release details.";
             ReleaseSummaryText.Text = ex.Message;
         }
+    }
+
+    private static async Task<string> GetDevBranchReadmeSummaryAsync(
+        string repository,
+        string? installedVersion,
+        string? targetVersion)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
+            {
+                return "Could not load dev-branch README notes: repository format is invalid.";
+            }
+
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("ElectronicLogbook-UpdaterWizard/0.1");
+            var url = $"https://raw.githubusercontent.com/{repository}/dev/README.md";
+            var markdown = await client.GetStringAsync(url);
+            if (string.IsNullOrWhiteSpace(markdown))
+            {
+                return "Dev-branch README is empty.";
+            }
+
+            return ExtractChangelogDelta(markdown, installedVersion, targetVersion);
+        }
+        catch (Exception ex)
+        {
+            return $"Could not load dev-branch README notes: {ex.Message}";
+        }
+    }
+
+    private static string ExtractChangelogDelta(
+        string readmeMarkdown,
+        string? installedVersion,
+        string? targetVersion)
+    {
+        var normalized = readmeMarkdown.Replace("\r\n", "\n");
+        var changelogIndex = normalized.IndexOf("## Changelog", StringComparison.OrdinalIgnoreCase);
+        if (changelogIndex < 0)
+        {
+            return "No changelog section found in dev-branch README.";
+        }
+
+        var tail = normalized[changelogIndex..];
+        var nextSectionIndex = tail.IndexOf("\n## ", StringComparison.Ordinal);
+        var changelogSection = nextSectionIndex > 0 ? tail[..nextSectionIndex] : tail;
+
+        var entryMatches = Regex.Matches(
+            changelogSection,
+            "(?ms)^### \\[(?<version>\\d+\\.\\d+\\.\\d+)\\].*?(?=^### \\[|\\z)");
+
+        if (entryMatches.Count == 0)
+        {
+            return "No versioned changelog entries found in dev-branch README.";
+        }
+
+        var installed = TryParseSemVer(installedVersion);
+        var target = TryParseSemVer(targetVersion);
+
+        var included = new List<string>();
+        foreach (Match match in entryMatches)
+        {
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var versionText = match.Groups["version"].Value;
+            var entryVersion = TryParseSemVer(versionText);
+            if (entryVersion is null)
+            {
+                continue;
+            }
+
+            var entryVersionValue = entryVersion.Value;
+
+            var afterInstalled = installed is null || CompareSemVer(entryVersionValue, installed) > 0;
+            var upToTarget = target is null || CompareSemVer(entryVersionValue, target) <= 0;
+            if (afterInstalled && upToTarget)
+            {
+                included.Add(match.Value.Trim());
+            }
+        }
+
+        if (included.Count == 0)
+        {
+            return targetVersion is null
+                ? "No newer changelog entries were found from your installed version."
+                : $"No changelog entries found between {installedVersion ?? "current"} and {targetVersion}.";
+        }
+
+        var merged = string.Join("\n\n", included);
+        const int maxChars = 1200;
+        if (merged.Length > maxChars)
+        {
+            merged = merged[..maxChars] + "...";
+        }
+
+        return merged;
+    }
+
+    private static (int Major, int Minor, int Patch)? TryParseSemVer(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(value.Trim(), "^(?:v)?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)$");
+        if (!match.Success)
+        {
+            return null;
+        }
+
+        return (
+            int.Parse(match.Groups["major"].Value, CultureInfo.InvariantCulture),
+            int.Parse(match.Groups["minor"].Value, CultureInfo.InvariantCulture),
+            int.Parse(match.Groups["patch"].Value, CultureInfo.InvariantCulture));
+    }
+
+    private static int CompareSemVer((int Major, int Minor, int Patch) left, (int Major, int Minor, int Patch)? right)
+    {
+        if (right is null)
+        {
+            return 1;
+        }
+
+        var rightValue = right.Value;
+        var major = left.Major.CompareTo(rightValue.Major);
+        if (major != 0)
+        {
+            return major;
+        }
+
+        var minor = left.Minor.CompareTo(rightValue.Minor);
+        if (minor != 0)
+        {
+            return minor;
+        }
+
+        return left.Patch.CompareTo(rightValue.Patch);
     }
 
     private static async Task<(string Tag, string Summary)> GetLatestReleaseInfoAsync(string repository)
@@ -233,6 +408,24 @@ public partial class MainWindow : Window
         UpdateWizardView();
     }
 
+    private async Task RunPreflightAndAdvanceAsync()
+    {
+        await RunPreflightAsync();
+        if (_preflightPassed)
+        {
+            _stepIndex = 3;
+            UpdateWizardView();
+            return;
+        }
+
+        MessageBox.Show(
+            this,
+            "Preflight checks failed. Fix the issue and try again.",
+            "Preflight failed",
+            MessageBoxButton.OK,
+            MessageBoxImage.Error);
+    }
+
     private void BackButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (_isUpdating || _stepIndex <= 0)
@@ -252,17 +445,25 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_stepIndex == 2 && !_preflightPassed)
-        {
-            MessageBox.Show(this, "Run preflight checks and resolve failures first.", "Preflight required", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
         if (_stepIndex == 3)
         {
             _stepIndex = 4;
             UpdateWizardView();
             await StartUpdateAsync();
+            return;
+        }
+
+        if (_stepIndex == 1)
+        {
+            _stepIndex = 2;
+            UpdateWizardView();
+            await RunPreflightAndAdvanceAsync();
+            return;
+        }
+
+        if (_stepIndex == 2)
+        {
+            await RunPreflightAndAdvanceAsync();
             return;
         }
 
@@ -295,7 +496,7 @@ public partial class MainWindow : Window
         _isUpdating = true;
         _updateCts = new CancellationTokenSource();
         FooterStatusText.Text = "Updating...";
-        UpdateProgressBar.IsIndeterminate = true;
+        UpdateProgressBar.IsIndeterminate = false;
         UpdateProgressBar.Value = 0;
         UpdateLogTextBox.Clear();
 
@@ -409,16 +610,15 @@ public partial class MainWindow : Window
         Dispatcher.Invoke(() =>
         {
             UpdatingPhaseText.Text = progressEvent.Message;
-            AppendLog($"[{progressEvent.PhaseId}] {progressEvent.Message}");
+            AppendLog(progressEvent.Message);
 
             if (progressEvent.Percent.HasValue)
             {
-                UpdateProgressBar.IsIndeterminate = false;
                 UpdateProgressBar.Value = progressEvent.Percent.Value;
             }
-            else
+            else if (_phaseProgress.TryGetValue(progressEvent.PhaseId, out var phasePercent))
             {
-                UpdateProgressBar.IsIndeterminate = true;
+                UpdateProgressBar.Value = phasePercent;
             }
         });
     }
@@ -441,6 +641,64 @@ public partial class MainWindow : Window
             FileName = _lastOutputPath,
             UseShellExecute = true
         });
+    }
+
+    private static string? TryReadWorkbookVersion(string workbookPath)
+    {
+        if (!File.Exists(workbookPath))
+        {
+            return null;
+        }
+
+        dynamic? excel = null;
+        dynamic? workbook = null;
+
+        try
+        {
+            var excelType = Type.GetTypeFromProgID("Excel.Application");
+            if (excelType is null)
+            {
+                return null;
+            }
+
+            excel = Activator.CreateInstance(excelType);
+            if (excel is null)
+            {
+                return null;
+            }
+
+            dynamic excelApp = excel;
+            excelApp.Visible = false;
+            excelApp.DisplayAlerts = false;
+            excelApp.EnableEvents = false;
+
+            workbook = excelApp.Workbooks.Open(workbookPath, 0, true);
+            dynamic versionName = workbook.Names.Item("LogbookVersion");
+            dynamic versionRange = versionName.RefersToRange;
+            var value = Convert.ToString(versionRange.Value2, CultureInfo.InvariantCulture);
+
+            return string.IsNullOrWhiteSpace(value)
+                ? null
+                : value.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            try { workbook?.Close(false); } catch { }
+            try { excel?.Quit(); } catch { }
+
+            if (workbook is not null)
+            {
+                try { Marshal.FinalReleaseComObject(workbook); } catch { }
+            }
+            if (excel is not null)
+            {
+                try { Marshal.FinalReleaseComObject(excel); } catch { }
+            }
+        }
     }
 
     private static RunContext ResolveRunContext()
