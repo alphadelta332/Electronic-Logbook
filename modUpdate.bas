@@ -169,6 +169,7 @@ Private Sub RunUpdate(newVersion As String)
     Dim localSavePath As String
     Dim localPath     As String
     Dim originalName  As String
+    Dim canonicalName As String
     Dim oldPath       As String
     Dim masterWb      As Workbook
     Dim errMsg        As String
@@ -196,8 +197,9 @@ Private Sub RunUpdate(newVersion As String)
     ' the local sync folder, so FileCopy always targets a real FS path.
     localPath = ResolveLocalPath(ThisWorkbook)
     originalName = ThisWorkbook.Name
-    savePath = localPath & "\" & originalName
-    oldPath = BuildOldWorkbookPath(localPath, originalName)
+    canonicalName = CanonicalWorkbookName(originalName)
+    savePath = localPath & "\" & canonicalName
+    oldPath = BuildOldWorkbookPath(localPath, canonicalName)
 
     diagStep = "Downloading master workbook"
     UpdateStatus "Downloading update (version " & newVersion & ")..."
@@ -388,8 +390,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Moving updated file to original filename"
     UpdateStatus "Saving updated logbook..."
-    If Dir(savePath) <> "" Then Kill savePath
-    FileCopy localSavePath, savePath
+    ReplaceFileWithRetry localSavePath, savePath
     On Error Resume Next
     Kill localSavePath
     On Error GoTo 0
@@ -441,6 +442,61 @@ UpdateFailed:
            "Error " & errNum & ": " & errMsg & vbCrLf & vbCrLf & _
            failureNote, _
            vbCritical, "Update Failed"
+End Sub
+
+Private Function CanonicalWorkbookName(ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim markerPos As Long
+    Dim suffix As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+        extension = Mid$(workbookName, dotPos)
+    Else
+        baseName = workbookName
+        extension = ""
+    End If
+
+    markerPos = InStrRev(baseName, "_Old")
+    If markerPos > 0 Then
+        suffix = Mid$(baseName, markerPos + 4)
+        ' Treat names ending in _Old, _Old_<timestamp>, or _Old_<timestamp>_<n>
+        If suffix = "" Or Left$(suffix, 1) = "_" Then
+            baseName = Left$(baseName, markerPos - 1)
+        End If
+    End If
+
+    CanonicalWorkbookName = baseName & extension
+End Function
+
+Private Sub ReplaceFileWithRetry(ByVal sourcePath As String, ByVal targetPath As String)
+    Dim attempt As Long
+
+    For attempt = 1 To 5
+        On Error Resume Next
+        If Dir$(targetPath) <> "" Then Kill targetPath
+        Err.Clear
+
+        FileCopy sourcePath, targetPath
+        If Err.Number = 0 Then
+            If Dir$(targetPath) <> "" Then
+                If FileLen(targetPath) > 0 Then
+                    On Error GoTo 0
+                    Exit Sub
+                End If
+            End If
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+        DoEvents
+    Next attempt
+
+    Err.Raise vbObjectError + 930, "modUpdate.RunUpdate", _
+              "Could not write updated workbook to original filename."
 End Sub
 
 Private Function BuildOldWorkbookPath(folderPath As String, workbookName As String) As String
