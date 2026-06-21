@@ -1,8 +1,24 @@
 Attribute VB_Name = "modLogbook"
+Option Explicit
+
 Public Const ROUTE_DEFINITION_VERSION As Long = 3
+Private mProtectionDisabledForSession As Boolean
+Private Const NEW_ENTRY_ACTIVE_SHEET As String = "New Entry"
+Private Const NEW_ENTRY_UNUSED_SHEET As String = "New Entry Unused Layout"
+Private Const NEW_ENTRY_SWAP_TEMP_SHEET As String = "New Entry Swap Temp"
+Private mApplyingNewEntryLayout As Boolean
 
 Sub AddToLogbook()
 
+    Dim previousDisplayStatusBar As Boolean
+    Dim previousStatusBar As Variant
+
+    On Error GoTo Cleanup
+
+    ' Ensure unqualified Range() calls resolve against this workbook/session.
+    On Error Resume Next
+    ThisWorkbook.Activate
+    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Activate
     On Error GoTo Cleanup
 
     '--- Save workbook before making any changes (safeguard against mid-run crashes)
@@ -16,6 +32,9 @@ Sub AddToLogbook()
         Application.ScreenUpdating = False      ' Prevent screen flicker
         Application.EnableEvents = False        ' Prevent event triggers during execution
         Application.Calculation = xlCalculationManual   ' Disable auto-calc for speed
+        previousDisplayStatusBar = Application.DisplayStatusBar
+        previousStatusBar = Application.StatusBar
+        SetAddToLogbookStatus "Starting checks"
 
     '===============================
     ' STEP 2: DECLARE VARIABLES
@@ -37,10 +56,17 @@ Sub AddToLogbook()
     Dim totalsWereOn As Boolean
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
+    Dim logbookWasProtected As Boolean
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
         Set tbl = wsLog.ListObjects("Logbook")
+        logbookWasProtected = wsLog.ProtectContents
+        If logbookWasProtected Then
+            On Error Resume Next
+            wsLog.Unprotect Password:=ProtectionPassword()
+            On Error GoTo Cleanup
+        End If
         If Not ListColumnExists(tbl, "IPC") Or _
            Not ListColumnExists(tbl, "OPC") Or _
            Not ListColumnExists(tbl, "FlightReview") Or _
@@ -53,11 +79,12 @@ Sub AddToLogbook()
             GoTo Cleanup
         End If
         RefreshTodayValue
-        todayDate = Range("today").Value
-        ipcDetected = KeywordDetected(CStr(Range("neDetails").Value), "IPC")
-        opcDetected = KeywordDetected(CStr(Range("neDetails").Value), "OPC")
+        SetAddToLogbookStatus "Validating entry"
+        todayDate = CDate(GetWorkbookNameValue(ThisWorkbook, "today", Date))
+        ipcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "IPC")
+        opcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "OPC")
         flightReviewDetected = ipcDetected Or _
-                               KeywordDetected(CStr(Range("neDetails").Value), "Flight Review")
+                               KeywordDetected(CStr(NewEntryValue("neDetails")), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -67,30 +94,30 @@ Sub AddToLogbook()
 
     '--- 3a. Date Validity Check
         'Check 1: Ensure the date field doesn't contain a formula error (e.g. invalid month string)
-        If IsError(Range("neDate").Value) Then
+        If IsError(NewEntryValue("neDate")) Then
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
         'Check 2: Ensure the resolved value is actually a recognisable date
-        If Not IsDate(Range("neDate").Value) Then
+        If Not IsDate(NewEntryValue("neDate")) Then
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
         'Check 3: Ensure the date is not in the future
-        If Range("neDate").Value > todayDate Then
+        If CDate(NewEntryValue("neDate")) > todayDate Then
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
-        entryDate = CDate(Range("neDate").Value)
+        entryDate = CDate(NewEntryValue("neDate"))
 
     '--- 3b. Registration Check (skipped for sim entries)
-        If Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "" Then
+        If NewEntryNumericValue("neIfrSim") = 0 Then
 
             'Check 1: Aircraft registration must not be blank
-            If Range("neReg").Value = "" Then
+            If CStr(NewEntryValue("neReg")) = "" Then
                 MsgBox "ERROR: Registration cannot be blank.", vbCritical
                 GoTo Cleanup
             End If
@@ -98,14 +125,13 @@ Sub AddToLogbook()
         End If
 
     '--- 3c. Zero Hours Check
-        If Application.WorksheetFunction.CountIf( _
-            Range("neSeIcusDay", "neIfrSim"), ">0") = 0 Then
+        If CountPositiveNewEntryFields(NewEntryFlightHourFieldNames()) = 0 Then
             MsgBox "ERROR: Total hours cannot be zero.", vbCritical
             GoTo Cleanup
         End If
 
     '--- 3d. IFR Hours vs Total Hours Check
-        If Range("neIfrIf").Value > Application.WorksheetFunction.Sum(Range("neSeIcusDay", "neCopilotNight")) Then
+        If NewEntryNumericValue("neIfrIf") > SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
             MsgBox "ERROR: In Flight Instrument Hours cannot be greater than Total Hours.", vbCritical
             GoTo Cleanup
         End If
@@ -120,34 +146,35 @@ Sub AddToLogbook()
         fieldNames = Array("Year", "Month", "Day", "Type", "PIC")
 
         For i = 0 To UBound(requiredFields)
-            If Range(requiredFields(i)).Value = "" Then
+            If NewEntryValue(CStr(requiredFields(i))) = "" Then
                 MsgBox "ERROR: " & fieldNames(i) & " cannot be blank.", vbCritical
                 GoTo Cleanup
             End If
         Next i
 
         'Check 2: Details field must not be blank (checked separately as it falls outside the loop range)
-        If Range("neDetails").Value = "" Then
+        If NewEntryValue("neDetails") = "" Then
             MsgBox "ERROR: Details cannot be blank.", vbCritical
             GoTo Cleanup
         End If
 
     '--- 3f. Non-Numeric Value Check (Hours, Landings, Approaches)
-        Dim checkCell As Range
+        Dim checkField As Variant
 
-        For Each checkCell In Range("neSI1", "neCircling")
-            If checkCell.Value <> "" Then
-                If Not IsNumeric(checkCell.Value) Then
+        For Each checkField In NewEntryNumericFieldNames()
+            If NewEntryValue(CStr(checkField)) <> "" Then
+                If Not IsNumeric(NewEntryValue(CStr(checkField))) Then
                     MsgBox "ERROR: Non-numerical value found in Hours, Landings, or Approaches.", vbCritical
                     GoTo Cleanup
                 End If
             End If
-        Next checkCell
+        Next checkField
 
     '===============================
     ' STEP 4: WARNING CHECKS (CONTINUE OR CANCEL)
     '===============================
         diagStep = "Step 4: Warning Checks"
+        SetAddToLogbookStatus "Running warnings"
     ' All warnings use vbOKCancel: OK = proceed, Cancel = go back.
     ' Warnings can be suppressed for 24 hours via the dedicated sheet button (ToggleSuppressWarnings).
 
@@ -155,17 +182,19 @@ Sub AddToLogbook()
         Dim suppressWarnings As Boolean
         suppressWarnings = False
 
-        If Range("suppressWarningsUntil").Value <> "" Then
-            If IsDate(Range("suppressWarningsUntil").Value) Then
-                If Now < CDate(Range("suppressWarningsUntil").Value) Then suppressWarnings = True
+        Dim suppressUntilValue As Variant
+        suppressUntilValue = GetWorkbookNameValue(ThisWorkbook, "suppressWarningsUntil", vbNullString)
+        If CStr(suppressUntilValue) <> "" Then
+            If IsDate(suppressUntilValue) Then
+                If Now < CDate(suppressUntilValue) Then suppressWarnings = True
             End If
         End If
 
     '--- 4b. No Landings Recorded (Non-Sim Entries Only)
         If Not suppressWarnings Then
-            If Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "" Then
-                If (Range("neLandingsDay").Value = 0 Or Range("neLandingsDay").Value = "") And _
-                   (Range("neLandingsNight").Value = 0 Or Range("neLandingsNight").Value = "") Then
+            If NewEntryNumericValue("neIfrSim") = 0 Then
+                If NewEntryNumericValue("neLandingsDay") = 0 And _
+                   NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: No Landings Recorded. Proceed?", vbOKCancel + vbExclamation, "No Landings")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -178,7 +207,7 @@ Sub AddToLogbook()
             latestLogbookDate = GetLatestLogbookEntryDate(tbl)
 
             If latestLogbookDate <> 0 Then
-                If CDate(Range("neDate").Value) < latestLogbookDate Then
+                If CDate(NewEntryValue("neDate")) < latestLogbookDate Then
                     response = MsgBox("Warning: This entry is dated before the latest existing Logbook entry (" & _
                                       Format(latestLogbookDate, "dd mmm yyyy") & "). Continue?", _
                                       vbOKCancel + vbExclamation, "Earlier Than Latest Logbook Entry")
@@ -189,22 +218,22 @@ Sub AddToLogbook()
 
     '--- 4d. Day Hours vs Day Landings Cross-Check
         Dim dayHours As Double
-        dayHours = Application.WorksheetFunction.Sum( _
-            Range("neSeIcusDay"), Range("neSeDualDay"), Range("neSeCommandDay"), _
-            Range("neMeIcusDay"), Range("neMeDualDay"), Range("neMeCommandDay"), _
-            Range("neCopilotDay"))
+        dayHours = SumNewEntryFields(Array( _
+            "neSeIcusDay", "neSeDualDay", "neSeCommandDay", _
+            "neMeIcusDay", "neMeDualDay", "neMeCommandDay", _
+            "neCopilotDay"))
 
         If Not suppressWarnings Then
             'Check 1: Day hours recorded but no day landings
             If dayHours > 0 Then
-                If Range("neLandingsDay").Value = 0 Or Range("neLandingsDay").Value = "" Then
+                If NewEntryNumericValue("neLandingsDay") = 0 Then
                     response = MsgBox("Warning: Day hours recorded, but no Day Landings recorded. Continue?", vbOKCancel + vbExclamation, "Day Hours Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
             End If
 
             'Check 2: Day landings recorded but no day hours
-            If Range("neLandingsDay").Value > 0 Then
+            If NewEntryNumericValue("neLandingsDay") > 0 Then
                 If dayHours = 0 Then
                     response = MsgBox("Warning: Day Landings recorded, but no Day hours recorded. Continue?", vbOKCancel + vbExclamation, "Day Landings Warning")
                     If response = vbCancel Then GoTo Cleanup
@@ -214,22 +243,22 @@ Sub AddToLogbook()
 
     '--- 4e. Night Hours vs Night Landings Cross-Check
         Dim nightHours As Double
-        nightHours = Application.WorksheetFunction.Sum( _
-            Range("neSeIcusNight"), Range("neSeDualNight"), Range("neSeCommandNight"), _
-            Range("neMeIcusNight"), Range("neMeDualNight"), Range("neMeCommandNight"), _
-            Range("neCopilotNight"))
+        nightHours = SumNewEntryFields(Array( _
+            "neSeIcusNight", "neSeDualNight", "neSeCommandNight", _
+            "neMeIcusNight", "neMeDualNight", "neMeCommandNight", _
+            "neCopilotNight"))
 
         If Not suppressWarnings Then
             'Check 1: Night hours recorded but no night landings
             If nightHours > 0 Then
-                If Range("neLandingsNight").Value = 0 Or Range("neLandingsNight").Value = "" Then
+                If NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: Night hours recorded, but no Night Landings recorded. Continue?", vbOKCancel + vbExclamation, "Night Hours Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
             End If
 
             'Check 2: Night landings recorded but no night hours
-            If Range("neLandingsNight").Value > 0 Then
+            If NewEntryNumericValue("neLandingsNight") > 0 Then
                 If nightHours = 0 Then
                     response = MsgBox("Warning: Night Landings recorded, but no Night hours recorded. Continue?", vbOKCancel + vbExclamation, "Night Landings Warning")
                     If response = vbCancel Then GoTo Cleanup
@@ -264,9 +293,9 @@ Sub AddToLogbook()
     '--- 4g. OPC Without Instrument Hours / Approaches Check
         If Not suppressWarnings Then
             If opcDetected And Not currencyExcluded Then
-                If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
-                   (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") And _
-                   Application.WorksheetFunction.CountIf(Range("neILS", "neCircling"), ">0") = 0 Then
+                     If NewEntryNumericValue("neIfrIf") = 0 And _
+                         NewEntryNumericValue("neIfrSim") = 0 And _
+                   CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
                     response = MsgBox("OPC detected but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -275,9 +304,9 @@ Sub AddToLogbook()
 
     '--- 4h. Approaches Without Instrument Hours Check
         If Not suppressWarnings Then
-            If Application.WorksheetFunction.CountIf(Range("neILS", "neCircling"), ">0") > 0 Then
-                If (Range("neIfrIf").Value = 0 Or Range("neIfrIf").Value = "") And _
-                   (Range("neIfrSim").Value = 0 Or Range("neIfrSim").Value = "") Then
+            If CountPositiveNewEntryFields(NewEntryApproachFieldNames()) > 0 Then
+                     If NewEntryNumericValue("neIfrIf") = 0 And _
+                         NewEntryNumericValue("neIfrSim") = 0 Then
                     response = MsgBox("Warning: Approaches recorded with no Instrument hours. Continue?", vbOKCancel + vbExclamation, "Approaches Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
@@ -287,8 +316,8 @@ Sub AddToLogbook()
     '--- 4i. High Landings vs Hours Check
         'Total landings (day + night) should not exceed 6x total flight hours
         If Not suppressWarnings Then
-            If (Range("neLandingsDay").Value + Range("neLandingsNight").Value) > _
-                6 * Application.WorksheetFunction.Sum(Range("neSeIcusDay", "neCopilotNight")) Then
+            If (NewEntryNumericValue("neLandingsDay") + NewEntryNumericValue("neLandingsNight")) > _
+                6 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Landings seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Landings Warning")
                 If response = vbCancel Then GoTo Cleanup
             End If
@@ -297,8 +326,8 @@ Sub AddToLogbook()
     '--- 4j. High Approaches vs Hours Check
         'Total approaches should not exceed 3x total flight hours
         If Not suppressWarnings Then
-            If Application.WorksheetFunction.Sum(Range("neILS", "neCircling")) > _
-                3 * Application.WorksheetFunction.Sum(Range("neSeIcusDay", "neCopilotNight")) Then
+            If SumNewEntryFields(NewEntryApproachFieldNames()) > _
+                3 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Approaches seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Approaches Warning")
                 If response = vbCancel Then GoTo Cleanup
             End If
@@ -306,21 +335,66 @@ Sub AddToLogbook()
 
     '--- 4k. Dual / ICUS / Copilot Without Other Crew Check
         If Not suppressWarnings Then
-            If Range("neOtherCrew").Value = "" Then
-                If Application.WorksheetFunction.Sum( _
-                    Range("neSeIcusDay"), Range("neSeIcusNight"), _
-                    Range("neSeDualDay"), Range("neSeDualNight"), _
-                    Range("neMeIcusDay"), Range("neMeIcusNight"), _
-                    Range("neMeDualDay"), Range("neMeDualNight"), _
-                    Range("neCopilotDay"), Range("neCopilotNight")) > 0 Then
+            If NewEntryValue("neOtherCrew") = "" Then
+                If SumNewEntryFields(Array( _
+                    "neSeIcusDay", "neSeIcusNight", _
+                    "neSeDualDay", "neSeDualNight", _
+                    "neMeIcusDay", "neMeIcusNight", _
+                    "neMeDualDay", "neMeDualNight", _
+                    "neCopilotDay", "neCopilotNight")) > 0 Then
                     response = MsgBox("Warning: Dual, ICUS, or Copilot hours recorded, but no Other Pilot or Crew recorded. Continue?", vbOKCancel + vbExclamation, "Other Crew Warning")
                     If response = vbCancel Then GoTo Cleanup
                 End If
             End If
         End If
 
-    '--- 4l. Duplicate Entry Check
-        'Warn if an entry with the same Date, Type, Reg and Details already exists in the logbook
+    '--- 4l. Single and Multi Engine Hours in Same Entry Check
+        If Not suppressWarnings Then
+            Dim currentSingleEngineHours As Double
+            Dim currentMultiEngineHours As Double
+
+            currentSingleEngineHours = SumNewEntryFields(NewEntrySingleEngineFieldNames())
+            currentMultiEngineHours = SumNewEntryFields(NewEntryMultiEngineFieldNames())
+
+            If currentSingleEngineHours > 0 And currentMultiEngineHours > 0 Then
+                response = MsgBox("Warning: This entry records both Single Engine and Multi Engine hours. Continue?", _
+                                  vbOKCancel + vbExclamation, _
+                                  "Mixed Engine Class Hours")
+                If response = vbCancel Then GoTo Cleanup
+            End If
+        End If
+
+    '--- 4m. Aircraft Type Engine Class History Check
+        If Not suppressWarnings Then
+            Dim hasSingleEngineHistory As Boolean
+            Dim hasMultiEngineHistory As Boolean
+
+            currentSingleEngineHours = SumNewEntryFields(NewEntrySingleEngineFieldNames())
+            currentMultiEngineHours = SumNewEntryFields(NewEntryMultiEngineFieldNames())
+
+            If currentSingleEngineHours > 0 Or currentMultiEngineHours > 0 Then
+                hasSingleEngineHistory = AircraftTypeHasEngineClassHours(tbl, _
+                                                                         CStr(NewEntryValue("neType")), _
+                                                                         NewEntrySingleEngineColumnNames())
+                hasMultiEngineHistory = AircraftTypeHasEngineClassHours(tbl, _
+                                                                        CStr(NewEntryValue("neType")), _
+                                                                        NewEntryMultiEngineColumnNames())
+
+                If currentSingleEngineHours > 0 And currentMultiEngineHours = 0 And hasMultiEngineHistory Then
+                    response = MsgBox("Warning: This type has previously been logged with Multi Engine hours, but this entry records Single Engine hours. Continue?", _
+                                      vbOKCancel + vbExclamation, _
+                                      "Aircraft Type Engine Class")
+                    If response = vbCancel Then GoTo Cleanup
+                ElseIf currentMultiEngineHours > 0 And currentSingleEngineHours = 0 And hasSingleEngineHistory Then
+                    response = MsgBox("Warning: This type has previously been logged with Single Engine hours, but this entry records Multi Engine hours. Continue?", _
+                                      vbOKCancel + vbExclamation, _
+                                      "Aircraft Type Engine Class")
+                    If response = vbCancel Then GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- Shared indexes for Type/Registration history and duplicate checks
         Dim dateCol     As Long
         Dim detailsCol  As Long
         Dim typeCol     As Long
@@ -332,13 +406,48 @@ Sub AddToLogbook()
         detailsCol = tbl.ListColumns("Details").Index
         typeCol = tbl.ListColumns("Type").Index
         regCol = tbl.ListColumns("Reg").Index
+
+    '--- 4n. Aircraft Type and Registration Mismatch History Check
+        If Not suppressWarnings Then
+            Dim currentType As String
+            Dim currentReg As String
+            Dim hasRegWithDifferentType As Boolean
+
+            currentType = LCase$(Trim$(CStr(NewEntryValue("neType"))))
+            currentReg = LCase$(Trim$(CStr(NewEntryValue("neReg"))))
+
+            If currentType <> "" And currentReg <> "" Then
+                hasRegWithDifferentType = False
+
+                For rr = 1 To tbl.DataBodyRange.Rows.Count
+                    If LCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rr, regCol).Value))) = currentReg Then
+                        If LCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rr, typeCol).Value))) <> "" And _
+                           LCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rr, typeCol).Value))) <> currentType Then
+                            hasRegWithDifferentType = True
+                        End If
+                    End If
+
+                    If hasRegWithDifferentType Then Exit For
+                Next rr
+
+                If hasRegWithDifferentType Then
+                    response = MsgBox("Warning: This Registration has previously been logged with a different aircraft Type. Continue?", _
+                                      vbOKCancel + vbExclamation, _
+                                      "Type/Registration Mismatch")
+                    If response = vbCancel Then GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4o. Duplicate Entry Check
+        'Warn if an entry with the same Date, Type, Reg and Details already exists in the logbook
         dupFound = False
 
         For rr = 1 To tbl.DataBodyRange.Rows.Count
-            If tbl.DataBodyRange.cells(rr, dateCol).Value = Range("neDate").Value And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, typeCol).Value)) = LCase(Trim(Range("neType").Value)) And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, regCol).Value)) = LCase(Trim(Range("neReg").Value)) And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(Range("neDetails").Value)) Then
+                If tbl.DataBodyRange.cells(rr, dateCol).Value = NewEntryValue("neDate") And _
+                    LCase(Trim(tbl.DataBodyRange.cells(rr, typeCol).Value)) = LCase(Trim(CStr(NewEntryValue("neType")))) And _
+                    LCase(Trim(tbl.DataBodyRange.cells(rr, regCol).Value)) = LCase(Trim(CStr(NewEntryValue("neReg")))) And _
+               LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(NewEntryValue("neDetails"))) Then
                 dupFound = True
                 Exit For
             End If
@@ -356,6 +465,7 @@ Sub AddToLogbook()
     '===============================
         diagStep = "Step 5a: Add Row"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Writing entry"
 
     '--- 5a. Add a clean table row without inheriting direct visual formats
         Dim fmtCol As Long
@@ -371,7 +481,9 @@ Sub AddToLogbook()
         Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
 
     '--- Copy Year, Month, Day
-        newRow.Range.cells(1, 2).Resize(1, 3).Value = Range("neYear", "neDay").Value
+        newRow.Range.Cells(1, 2).Value = NewEntryValue("neYear")
+        newRow.Range.Cells(1, 3).Value = NewEntryValue("neMonth")
+        newRow.Range.Cells(1, 4).Value = NewEntryValue("neDay")
 
     '--- 5b. Fill Down Formula Columns from Previous Row
         diagStep = "Step 5b: Fill Formulas"
@@ -390,9 +502,7 @@ Sub AddToLogbook()
     '--- 5c. Copy Remaining Data (Type through Circling)
         diagStep = "Step 5c: Copy Data"
         WriteCrumb diagStep
-        Dim dataCols As Long
-        dataCols = Range("neType", "neCircling").Columns.Count
-        newRow.Range.cells(1, 5).Resize(1, dataCols).Value = Range("neType", "neCircling").Value
+        CopyNewEntryFieldsToLogbookRow newRow.Range
 
     '--- 5d. Record Currency Detection Exclusion
         With newRow.Range.Cells(1, tbl.ListColumns("CurrencyExclusions").Index)
@@ -429,6 +539,7 @@ Sub AddToLogbook()
     '--- 5g. Sort Logbook by Date
         diagStep = "Step 5g: Sort Logbook"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Sorting logbook"
         Application.Calculate
         SortLogbookByDate tbl
 
@@ -442,13 +553,20 @@ Sub AddToLogbook()
     '===============================
     ' STEP 6: UPDATE CHART DATA
     '===============================
-        diagStep = "Step 6a: Calculate"
-        WriteCrumb diagStep
-        Application.Calculate
-
         diagStep = "Step 6b: Update Chart"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Updating chart"
+        On Error Resume Next
         UpdateHoursOverTimeChart ThisWorkbook
+        If Err.Number <> 0 Then
+            Dim chartErrNum As Long
+            Dim chartErrDesc As String
+            chartErrNum = Err.Number
+            chartErrDesc = Err.Description
+            Err.Clear
+            WriteDebugLog "UpdateHoursOverTimeChart", chartErrNum, chartErrDesc, diagStep
+        End If
+        On Error GoTo Cleanup
 
     '===============================
     ' STEP 7: RESET INPUT FORM
@@ -456,10 +574,11 @@ Sub AddToLogbook()
     ' Entry is already saved - errors here must not surface as failures to the user.
         diagStep = "Step 7: Reset Form"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Resetting form"
         On Error Resume Next
 
     '--- 7a. Reset Date Fields
-        Select Case Range("DateAfterExport").Value
+        Select Case Val(CStr(GetWorkbookNameValue(ThisWorkbook, "DateAfterExport", 1)))
             Case 1
                 ResetNewEntryDateFields DateAdd("d", 1, entryDate)
             Case 3
@@ -467,11 +586,10 @@ Sub AddToLogbook()
         End Select
 
     '--- 7b. Reset PIC to Default
-        Range("nePIC").Value = "Self"
+        SetNewEntryValue "nePIC", "Self"
 
     '--- 7c. Clear Remaining Input Fields
-        Union(Range("neType", "neReg"), Range("neOtherCrew", "neDetails"), _
-              Range("neSI1", "neCircling")).ClearContents
+        ClearNewEntryFields NewEntryClearFieldNames()
 
     '--- 7d. Update Hidden Rows
         UpdateHiddenRows ThisWorkbook
@@ -483,6 +601,7 @@ Sub AddToLogbook()
     '===============================
         diagStep = "Step 8a: Add Routes"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Updating routes"
         On Error Resume Next
         Call AddNewRoutes
         On Error GoTo Cleanup
@@ -490,15 +609,10 @@ Sub AddToLogbook()
         '--- Refresh all pivot tables in the workbook
         diagStep = "Step 8b: Refresh Pivots"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Refreshing summaries"
         DoEvents
-        Dim ws  As Worksheet
-        Dim pt  As PivotTable
         On Error Resume Next
-        For Each ws In ThisWorkbook.Worksheets
-            For Each pt In ws.PivotTables
-                pt.RefreshTable
-            Next pt
-        Next ws
+        RefreshWorkbookPivotCaches ThisWorkbook
         FixHoursByYearPivotLayout ThisWorkbook
         On Error GoTo Cleanup
 
@@ -506,6 +620,7 @@ Sub AddToLogbook()
     ' STEP 9: SUCCESS MESSAGE
     '===============================
         diagStep = "Step 9: Success"
+        SetAddToLogbookStatus "Done"
 
         MsgBox "Entry successfully added to Logbook!", vbInformation
 
@@ -530,19 +645,50 @@ Cleanup:
         Application.EnableEvents = True
         Application.Calculation = xlCalculationAutomatic
         Application.CutCopyMode = False
+        If previousDisplayStatusBar Then
+            If VarType(previousStatusBar) = vbString Then
+                Application.StatusBar = CStr(previousStatusBar)
+            Else
+                Application.StatusBar = False
+            End If
+        Else
+            Application.StatusBar = False
+        End If
+        Application.DisplayStatusBar = previousDisplayStatusBar
+
+        If logbookWasProtected Then
+            On Error Resume Next
+            ProtectLogbookSheetForRuntime wsLog
+            On Error GoTo 0
+        End If
 
         '--- Report any unexpected error (errNum 0 means clean exit via GoTo Cleanup on cancel)
         If errNum <> 0 Then
             On Error Resume Next
             WriteDebugLog "AddToLogbook", errNum, errDesc, diagStep
             On Error GoTo 0
-            MsgBox "An unexpected error occurred and the entry may not have been saved." & vbNewLine & vbNewLine & _
+                 MsgBox "An unexpected error occurred and the entry may not have been saved." & vbNewLine & vbNewLine & _
                    "Error " & errNum & ": " & errDesc & vbNewLine & vbNewLine & _
+                     "Step: " & diagStep & vbNewLine & vbNewLine & _
                    "Please check the logbook before adding another entry.", vbCritical, "Unexpected Error"
         End If
 
         Exit Sub
 
+End Sub
+
+Private Sub SetAddToLogbookStatus(ByVal stepText As String)
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Electronic Logbook: " & stepText
+    DoEvents
+End Sub
+
+Private Sub ProtectLogbookSheetForRuntime(ws As Worksheet)
+    ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+               UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
+               AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True, _
+               AllowUsingPivotTables:=True, _
+               AllowInsertingRows:=True, AllowDeletingRows:=True
 End Sub
 
 Public Function RefreshTodayValue() As Boolean
@@ -1125,10 +1271,21 @@ Private Sub ResetNewEntryDateFields(ByVal targetDate As Date)
 End Sub
 
 Private Sub RefreshDateCalculationFormulas(ByVal tbl As ListObject)
+    Dim dateRange As Range
+
     Range("neDate").Formula = NewEntryDateFormula()
 
     If Not tbl.DataBodyRange Is Nothing Then
-        tbl.ListColumns("Date").DataBodyRange.Formula = LogbookDateFormula()
+        Set dateRange = tbl.ListColumns("Date").DataBodyRange
+
+        ' Keep this as a repair step only; avoid rewriting the whole column every entry.
+        If dateRange.Rows.Count = 1 Then
+            If Not dateRange.Cells(1, 1).HasFormula Then
+                dateRange.Formula = LogbookDateFormula()
+            End If
+        ElseIf Not dateRange.Cells(dateRange.Rows.Count, 1).HasFormula Then
+            dateRange.Formula = LogbookDateFormula()
+        End If
     End If
 End Sub
 
@@ -1145,6 +1302,25 @@ Private Sub SortLogbookByDate(ByVal tbl As ListObject)
         .MatchCase = False
         .Apply
     End With
+End Sub
+
+Private Sub RefreshWorkbookPivotCaches(ByVal wb As Workbook)
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+    Dim refreshedCaches As Object
+    Dim cacheKey As String
+
+    Set refreshedCaches = CreateObject("Scripting.Dictionary")
+
+    For Each ws In wb.Worksheets
+        For Each pt In ws.PivotTables
+            cacheKey = CStr(pt.PivotCache.Index)
+            If Not refreshedCaches.Exists(cacheKey) Then
+                pt.PivotCache.Refresh
+                refreshedCaches.Add cacheKey, True
+            End If
+        Next pt
+    Next ws
 End Sub
 
 Private Function NewEntryDateFormula() As String
@@ -1171,6 +1347,173 @@ Private Function LogbookDateFormula() As String
         "NA())"
 End Function
 
+Private Function NewEntryCell(ByVal fieldName As String) As Range
+    Dim inputCell As Range
+    Dim nm As Name
+
+    Set nm = FindNameByBase(fieldName)
+    If nm Is Nothing Then
+        Err.Raise 1004, "NewEntryCell", "Named range not found: " & fieldName
+    End If
+
+    Set inputCell = nm.RefersToRange
+
+    If inputCell.MergeCells Then
+        Set NewEntryCell = inputCell.MergeArea.Cells(1, 1)
+    Else
+        Set NewEntryCell = inputCell
+    End If
+End Function
+
+Private Function NewEntryValue(ByVal fieldName As String) As Variant
+    NewEntryValue = NewEntryCell(fieldName).Value
+End Function
+
+Private Function NewEntryNumericValue(ByVal fieldName As String) As Double
+    If NewEntryValue(fieldName) = "" Then
+        NewEntryNumericValue = 0
+    ElseIf Not IsNumeric(NewEntryValue(fieldName)) Then
+        NewEntryNumericValue = 0
+    Else
+        NewEntryNumericValue = CDbl(NewEntryValue(fieldName))
+    End If
+End Function
+
+Private Sub SetNewEntryValue(ByVal fieldName As String, ByVal value As Variant)
+    NewEntryCell(fieldName).Value = value
+End Sub
+
+Private Sub ClearNewEntryFields(ByVal fieldNames As Variant)
+    Dim fieldName As Variant
+    Dim clearedAreas As Object
+    Dim clearArea As Range
+    Dim areaKey As String
+
+    Set clearedAreas = CreateObject("Scripting.Dictionary")
+    For Each fieldName In fieldNames
+        Set clearArea = NewEntryCell(CStr(fieldName))
+        If clearArea.MergeCells Then Set clearArea = clearArea.MergeArea
+        areaKey = clearArea.Worksheet.Name & "!" & clearArea.Address(External:=False)
+        If Not clearedAreas.Exists(areaKey) Then
+            clearArea.ClearContents
+            clearedAreas.Add areaKey, True
+        End If
+    Next fieldName
+End Sub
+
+Private Function SumNewEntryFields(ByVal fieldNames As Variant) As Double
+    Dim fieldName As Variant
+
+    For Each fieldName In fieldNames
+        SumNewEntryFields = SumNewEntryFields + NewEntryNumericValue(CStr(fieldName))
+    Next fieldName
+End Function
+
+Private Function CountPositiveNewEntryFields(ByVal fieldNames As Variant) As Long
+    Dim fieldName As Variant
+
+    For Each fieldName In fieldNames
+        If NewEntryNumericValue(CStr(fieldName)) > 0 Then
+            CountPositiveNewEntryFields = CountPositiveNewEntryFields + 1
+        End If
+    Next fieldName
+End Function
+
+Private Sub CopyNewEntryFieldsToLogbookRow(ByVal rowRange As Range)
+    Dim fieldNames As Variant
+    Dim i As Long
+
+    fieldNames = NewEntryLogbookFieldNames()
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        rowRange.Cells(1, 5 + i).Value = NewEntryValue(CStr(fieldNames(i)))
+    Next i
+End Sub
+
+Private Function NewEntryLogbookFieldNames() As Variant
+    NewEntryLogbookFieldNames = Array( _
+        "neType", "neReg", "nePIC", "neOtherCrew", "neDetails", _
+        "neSI1", "neSI2", "neSI3", "neSI4", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
+        "neLandingsDay", "neLandingsNight", _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntryNumericFieldNames() As Variant
+    NewEntryNumericFieldNames = Array( _
+        "neSI1", "neSI2", "neSI3", "neSI4", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
+        "neLandingsDay", "neLandingsNight", _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntryFlightTimeFieldNames() As Variant
+    NewEntryFlightTimeFieldNames = Array( _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight")
+End Function
+
+Private Function NewEntrySingleEngineFieldNames() As Variant
+    NewEntrySingleEngineFieldNames = Array( _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight")
+End Function
+
+Private Function NewEntryMultiEngineFieldNames() As Variant
+    NewEntryMultiEngineFieldNames = Array( _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight")
+End Function
+
+Private Function NewEntryFlightHourFieldNames() As Variant
+    NewEntryFlightHourFieldNames = Array( _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrSim")
+End Function
+
+Private Function NewEntryApproachFieldNames() As Variant
+    NewEntryApproachFieldNames = Array( _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
+Private Function NewEntrySingleEngineColumnNames() As Variant
+    NewEntrySingleEngineColumnNames = Array( _
+        "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+        "SeCommandDay", "SeCommandNight")
+End Function
+
+Private Function NewEntryMultiEngineColumnNames() As Variant
+    NewEntryMultiEngineColumnNames = Array( _
+        "MeIcusDay", "MeIcusNight", "MeDualDay", "MeDualNight", _
+        "MeCommandDay", "MeCommandNight")
+End Function
+
+Private Function NewEntryClearFieldNames() As Variant
+    NewEntryClearFieldNames = Array( _
+        "neType", "neReg", "neOtherCrew", "neDetails", _
+        "neSI1", "neSI2", "neSI3", "neSI4", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
+        "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
+        "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
+        "neLandingsDay", "neLandingsNight", _
+        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+End Function
+
 Private Function GetLatestLogbookEntryDate(ByVal tbl As ListObject) As Date
     Dim dateCol As Long
     Dim dateCell As Range
@@ -1190,6 +1533,42 @@ Private Function GetLatestLogbookEntryDate(ByVal tbl As ListObject) As Date
     End If
 
     GetLatestLogbookEntryDate = latestDate
+End Function
+
+Private Function AircraftTypeHasEngineClassHours(ByVal tbl As ListObject, _
+                                                 ByVal aircraftType As String, _
+                                                 ByVal hourColumnNames As Variant) As Boolean
+    Dim typeCol As Long
+    Dim rowIndex As Long
+    Dim normalizedType As String
+
+    If tbl.DataBodyRange Is Nothing Then Exit Function
+
+    normalizedType = LCase(Trim(aircraftType))
+    If normalizedType = "" Then Exit Function
+
+    typeCol = tbl.ListColumns("Type").Index
+
+    For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
+        If LCase(Trim(CStr(tbl.DataBodyRange.Cells(rowIndex, typeCol).Value))) = normalizedType Then
+            If SumLogbookRowColumns(tbl, rowIndex, hourColumnNames) > 0 Then
+                AircraftTypeHasEngineClassHours = True
+                Exit Function
+            End If
+        End If
+    Next rowIndex
+End Function
+
+Private Function SumLogbookRowColumns(ByVal tbl As ListObject, _
+                                      ByVal rowIndex As Long, _
+                                      ByVal columnNames As Variant) As Double
+    Dim columnName As Variant
+    Dim cellValue As Variant
+
+    For Each columnName In columnNames
+        cellValue = tbl.DataBodyRange.Cells(rowIndex, tbl.ListColumns(CStr(columnName)).Index).Value
+        If IsNumeric(cellValue) Then SumLogbookRowColumns = SumLogbookRowColumns + CDbl(cellValue)
+    Next columnName
 End Function
 
 Private Function IsLogbookRowSimOnly(ByVal tbl As ListObject, ByVal rowIndex As Long) As Boolean
@@ -1232,10 +1611,13 @@ Public Sub UpdateHoursOverTimeChart(wb As Workbook)
     Dim rnhRange As Range
     Dim rng      As Range
     Dim lastRow  As Long
+    Dim chartObj As ChartObject
+    Dim chartSer As Series
 
     Set wsCharts = wb.Sheets("Charts")
     Set wsData = wb.Sheets("ChartData")
     Set rnhRange = wb.Names("RunningTotalHours").RefersToRange
+    Set chartObj = wsCharts.ChartObjects("HoursOverTime")
 
     lastRow = wsData.cells(wsData.Rows.Count, rnhRange.Columns(1).Column).End(xlUp).row
     If lastRow < 2 Then Exit Sub
@@ -1243,8 +1625,28 @@ Public Sub UpdateHoursOverTimeChart(wb As Workbook)
         wsData.cells(2, rnhRange.Columns(1).Column), _
         wsData.cells(lastRow, rnhRange.Columns(2).Column))
 
-    wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).XValues = rng.Columns(1)
-    wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).Values = rng.Columns(2)
+    On Error Resume Next
+
+    If chartObj.Chart.SeriesCollection.Count = 0 Then
+        chartObj.Chart.SeriesCollection.NewSeries
+    End If
+
+    Set chartSer = chartObj.Chart.SeriesCollection(1)
+    chartSer.XValues = rng.Columns(1)
+    chartSer.Values = rng.Columns(2)
+
+    ' Fallback for chart states where direct XValues/Values assignment fails.
+    If Err.Number <> 0 Then
+        Err.Clear
+        chartObj.Chart.SetSourceData Source:=rng
+        If chartObj.Chart.SeriesCollection.Count > 0 Then
+            Set chartSer = chartObj.Chart.SeriesCollection(1)
+            chartSer.XValues = rng.Columns(1)
+            chartSer.Values = rng.Columns(2)
+        End If
+    End If
+
+    On Error GoTo 0
 End Sub
 
 Public Sub MarkRoutesDirty(Optional wb As Workbook = Nothing)
@@ -1269,8 +1671,172 @@ Public Sub RebuildRoutesTableNow()
     RebuildRoutesTable ThisWorkbook
 End Sub
 
+Public Sub BackupCurrentWorkbook()
+    Dim localPath As String
+    Dim canonicalName As String
+    Dim backupPath As String
+
+    On Error GoTo Fail
+    localPath = ResolveLocalPath(ThisWorkbook)
+    canonicalName = RecoveryCanonicalWorkbookName(ThisWorkbook.Name)
+    backupPath = BuildRecoveryPath(localPath, canonicalName, "Backup")
+
+    ThisWorkbook.SaveCopyAs backupPath
+    MsgBox "Backup created successfully:" & vbCrLf & vbCrLf & backupPath, _
+           vbInformation, "Backup Complete"
+    Exit Sub
+
+Fail:
+    MsgBox "Could not create a backup copy." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Backup Failed"
+End Sub
+
+Public Sub RestorePreviousVersion()
+    Dim localPath As String
+    Dim canonicalName As String
+    Dim latestOldPath As String
+    Dim restoredPath As String
+    Dim oldPattern As String
+
+    On Error GoTo Fail
+    localPath = ResolveLocalPath(ThisWorkbook)
+    canonicalName = RecoveryCanonicalWorkbookName(ThisWorkbook.Name)
+    latestOldPath = FindLatestOldBackupPath(localPath, canonicalName)
+
+    If latestOldPath = "" Then
+         oldPattern = BuildOldPattern(canonicalName)
+        MsgBox "No previous-version backup was found in this folder." & vbCrLf & vbCrLf & _
+             "Expected pattern: " & oldPattern, _
+               vbExclamation, "Restore Previous Version"
+        Exit Sub
+    End If
+
+    restoredPath = BuildRecoveryPath(localPath, canonicalName, "Restored")
+    FileCopy latestOldPath, restoredPath
+    Workbooks.Open restoredPath, ReadOnly:=False
+
+    MsgBox "A restored workbook copy has been created and opened:" & vbCrLf & vbCrLf & _
+           restoredPath & vbCrLf & vbCrLf & _
+           "Review it, then keep/rename it as needed.", _
+           vbInformation, "Restore Copy Ready"
+    Exit Sub
+
+Fail:
+    MsgBox "Could not prepare the restored workbook copy." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Restore Failed"
+End Sub
+
+Private Function RecoveryCanonicalWorkbookName(ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim markerPos As Long
+    Dim suffix As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+        extension = Mid$(workbookName, dotPos)
+    Else
+        baseName = workbookName
+        extension = ""
+    End If
+
+    markerPos = InStrRev(baseName, "_Old")
+    If markerPos > 0 Then
+        suffix = Mid$(baseName, markerPos + 4)
+        If suffix = "" Or Left$(suffix, 1) = "_" Then
+            baseName = Left$(baseName, markerPos - 1)
+        End If
+    End If
+
+    RecoveryCanonicalWorkbookName = baseName & extension
+End Function
+
+Private Function BuildOldPattern(ByVal canonicalName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+
+    dotPos = InStrRev(canonicalName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(canonicalName, dotPos - 1)
+        extension = Mid$(canonicalName, dotPos)
+    Else
+        baseName = canonicalName
+        extension = ".xlsm"
+    End If
+
+    BuildOldPattern = baseName & "_Old_*" & extension
+End Function
+
+Private Function BuildRecoveryPath(ByVal localPath As String, ByVal canonicalName As String, ByVal marker As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim timestamp As String
+    Dim candidate As String
+    Dim suffix As Long
+
+    dotPos = InStrRev(canonicalName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(canonicalName, dotPos - 1)
+        extension = Mid$(canonicalName, dotPos)
+    Else
+        baseName = canonicalName
+        extension = ".xlsm"
+    End If
+
+    timestamp = Format(Now, "yyyymmdd-hhmmss")
+    candidate = localPath & "\" & baseName & "_" & marker & "_" & timestamp & extension
+    suffix = 1
+    Do While Dir$(candidate) <> ""
+        candidate = localPath & "\" & baseName & "_" & marker & "_" & timestamp & "_" & suffix & extension
+        suffix = suffix + 1
+    Loop
+
+    BuildRecoveryPath = candidate
+End Function
+
+Private Function FindLatestOldBackupPath(ByVal localPath As String, ByVal canonicalName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim pattern As String
+    Dim candidate As String
+    Dim latestPath As String
+    Dim latestStamp As Date
+    Dim currentStamp As Date
+
+    dotPos = InStrRev(canonicalName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(canonicalName, dotPos - 1)
+        extension = Mid$(canonicalName, dotPos)
+    Else
+        baseName = canonicalName
+        extension = ".xlsm"
+    End If
+
+    pattern = baseName & "_Old_*" & extension
+    candidate = Dir$(localPath & "\" & pattern)
+    Do While candidate <> ""
+        currentStamp = FileDateTime(localPath & "\" & candidate)
+        If latestPath = "" Or currentStamp > latestStamp Then
+            latestStamp = currentStamp
+            latestPath = localPath & "\" & candidate
+        End If
+        candidate = Dir$
+    Loop
+
+    FindLatestOldBackupPath = latestPath
+End Function
+
 Public Sub CheckRoutesTableOnOpen(Optional wb As Workbook = Nothing)
     If wb Is Nothing Then Set wb = ThisWorkbook
+
+    If ShouldSkipRoutesPromptOnOpen(wb) Then Exit Sub
 
     If RoutesBuiltState(wb) = "" Then
         If MsgBox("Your Routes table needs to be built for the first time." & vbCrLf & vbCrLf & _
@@ -1292,6 +1858,49 @@ Public Sub CheckRoutesTableOnOpen(Optional wb As Workbook = Nothing)
         End If
     End If
 End Sub
+
+Private Function ShouldSkipRoutesPromptOnOpen(wb As Workbook) As Boolean
+    Dim branchValue As String
+
+    If ShouldSuppressOpenPrompts() Then
+        ShouldSkipRoutesPromptOnOpen = True
+        Exit Function
+    End If
+
+    branchValue = LCase$(Trim$(CStr(GetWorkbookNameValue(wb, "GitHubBranch", ""))))
+    If branchValue <> "" And branchValue <> "main" Then
+        ShouldSkipRoutesPromptOnOpen = True
+        Exit Function
+    End If
+
+    ShouldSkipRoutesPromptOnOpen = False
+End Function
+
+Private Function ShouldSuppressOpenPrompts() As Boolean
+    Dim flagValue As String
+
+    On Error Resume Next
+
+    ' Automation sessions (for example, COM-driven tooling) should not block on MsgBox prompts.
+    If Application.Visible = False Then
+        ShouldSuppressOpenPrompts = True
+        Exit Function
+    End If
+
+    If Application.UserControl = False Then
+        ShouldSuppressOpenPrompts = True
+        Exit Function
+    End If
+
+    flagValue = LCase$(Trim$(Environ$("ELB_SUPPRESS_OPEN_PROMPTS")))
+    If flagValue = "1" Or flagValue = "true" Or flagValue = "yes" Then
+        ShouldSuppressOpenPrompts = True
+        Exit Function
+    End If
+
+    On Error GoTo 0
+    ShouldSuppressOpenPrompts = False
+End Function
 
 Public Function EnsureRoutesReadyForExport(Optional wb As Workbook = Nothing) As Boolean
     If wb Is Nothing Then Set wb = ThisWorkbook
@@ -2007,6 +2616,8 @@ End Sub
 Public Sub ReportBug()
     Const BUG_REPORT_FORM_URL As String = _
         "https://docs.google.com/forms/d/e/1FAIpQLScCSzixoAFcyIBE6FI-wl1xMofomKPTePtUcwrUK7II7z_V9w/viewform"
+    Dim diagnosticsPath As String
+    Dim diagnosticsCreated As Boolean
 
     On Error GoTo Fail
     If InStr(1, BUG_REPORT_FORM_URL, "REPLACE_WITH_FORM_ID", vbTextCompare) > 0 Then
@@ -2015,7 +2626,18 @@ Public Sub ReportBug()
         Exit Sub
     End If
 
+    diagnosticsCreated = ExportDiagnosticsInternal(False, diagnosticsPath)
+
     ThisWorkbook.FollowHyperlink Address:=BUG_REPORT_FORM_URL, NewWindow:=True
+
+    If diagnosticsCreated Then
+        MsgBox "The bug form has been opened." & vbCrLf & vbCrLf & _
+               "A diagnostics snapshot was also generated at:" & vbCrLf & diagnosticsPath & vbCrLf & vbCrLf & _
+               "Attach it only if requested.", vbInformation, "Bug Report Started"
+    Else
+        MsgBox "The bug form has been opened, but diagnostics export failed." & vbCrLf & vbCrLf & _
+               "You can still submit your report manually.", vbExclamation, "Bug Report Started"
+    End If
     Exit Sub
 
 Fail:
@@ -2272,9 +2894,6 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
 
     Dim fDate    As String
     Dim fType    As String
-    Dim fReg     As String
-    Dim fPIC     As String
-    Dim fDetails As String
     Dim fIpcDetected As String
     Dim fOpcDetected As String
     Dim fFlightReviewDetected As String
@@ -2282,24 +2901,14 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     Dim fCrumb   As String
     fDate    = CStr(Range("neDate").Value)
     fType    = CStr(Range("neType").Value)
-    fReg     = CStr(Range("neReg").Value)
-    fPIC     = CStr(Range("nePIC").Value)
-    fDetails = CStr(Range("neDetails").Value)
-    If KeywordDetected(fDetails, "IPC") Then
-        fIpcDetected = "Yes"
-    Else
-        fIpcDetected = "No"
-    End If
-    If KeywordDetected(fDetails, "OPC") Then
-        fOpcDetected = "Yes"
-    Else
-        fOpcDetected = "No"
-    End If
-    If KeywordDetected(fDetails, "IPC") Or KeywordDetected(fDetails, "Flight Review") Then
-        fFlightReviewDetected = "Yes"
-    Else
-        fFlightReviewDetected = "No"
-    End If
+    ' Evaluate keyword detection flags without retaining the personal Details text.
+    Dim detailsVal As String
+    detailsVal = CStr(Range("neDetails").Value)
+    fIpcDetected          = IIf(KeywordDetected(detailsVal, "IPC"), "Yes", "No")
+    fOpcDetected          = IIf(KeywordDetected(detailsVal, "OPC"), "Yes", "No")
+    fFlightReviewDetected = IIf(KeywordDetected(detailsVal, "IPC") Or _
+                                KeywordDetected(detailsVal, "Flight Review"), "Yes", "No")
+    detailsVal = ""   ' Clear from memory immediately
     fRows    = CStr(ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
 
     ' Read the last crash breadcrumb if one exists
@@ -2326,10 +2935,19 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, ""
         Print #fileNum, "-- ENVIRONMENT ----------------------------------"
         Print #fileNum, "Excel        : " & Application.Version & " / " & Application.OperatingSystem
-        Print #fileNum, "User         : " & Environ("USERNAME")
         Print #fileNum, "Workbook     : " & ThisWorkbook.Name
-        Print #fileNum, "WB path      : " & ThisWorkbook.Path
-        Print #fileNum, "Resolved path: " & ResolveLocalPath(ThisWorkbook)
+        Dim pathType As String
+        If InStr(1, ThisWorkbook.Path, "OneDrive", vbTextCompare) > 0 Or _
+           InStr(1, ThisWorkbook.Path, "sharepoint", vbTextCompare) > 0 Then
+            pathType = "OneDrive/SharePoint"
+        ElseIf Left(ThisWorkbook.Path, 2) = "\\" Then
+            pathType = "Network"
+        ElseIf Len(ThisWorkbook.Path) > 0 Then
+            pathType = "Local"
+        Else
+            pathType = "Unknown"
+        End If
+        Print #fileNum, "WB location  : " & pathType
         Print #fileNum, "Log saved to : " & logPath
         Print #fileNum, "AutoSave     : " & ThisWorkbook.AutoSaveOn
         Print #fileNum, "LB Version   : " & version
@@ -2337,9 +2955,6 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "-- ENTRY STATE ----------------------------------"
         Print #fileNum, "Date         : " & fDate
         Print #fileNum, "Type         : " & fType
-        Print #fileNum, "Reg          : " & fReg
-        Print #fileNum, "PIC          : " & fPIC
-        Print #fileNum, "Details      : " & fDetails
         Print #fileNum, "IPC detected : " & fIpcDetected
         Print #fileNum, "OPC detected : " & fOpcDetected
         Print #fileNum, "FR detected  : " & fFlightReviewDetected
@@ -2349,6 +2964,150 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
 
     On Error GoTo 0
 End Sub
+
+' ==============================================================
+' EXPORT DIAGNOSTICS
+' ==============================================================
+' Generates a redacted diagnostics snapshot for support purposes.
+' Contains structural/version information only -- no personal data,
+' flight records, names, registrations, or file paths.
+
+Public Sub ExportDiagnostics()
+    Dim outPath As String
+    If ExportDiagnosticsInternal(True, outPath) Then Exit Sub
+End Sub
+
+Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean = True, _
+                                           Optional ByRef exportedPath As String = "") As Boolean
+    On Error Resume Next
+
+    Dim logDir   As String
+    Dim outPath  As String
+    Dim fileNum  As Integer
+    Dim version  As String
+    Dim wb       As Workbook
+    Set wb = ThisWorkbook
+
+    ' Write alongside the workbook; fall back to Documents if path unavailable.
+    logDir = ResolveLocalPath(wb)
+    If logDir = "" Or Left(logDir, 4) = "http" Then
+        logDir = Environ("USERPROFILE") & "\Documents\Electronic Logbook"
+    End If
+    If Dir(logDir, vbDirectory) = "" Then MkDir logDir
+    outPath = logDir & "\diagnostics_" & Format(Now, "yyyymmdd_hhmmss") & ".txt"
+    exportedPath = outPath
+
+    version = Trim(CStr(wb.Names("LogbookVersion").RefersToRange.Value))
+    If version = "" Then version = "Unknown"
+
+    Dim pathType As String
+    If InStr(1, wb.Path, "OneDrive", vbTextCompare) > 0 Or _
+       InStr(1, wb.Path, "sharepoint", vbTextCompare) > 0 Then
+        pathType = "OneDrive/SharePoint"
+    ElseIf Left(wb.Path, 2) = "\\" Then
+        pathType = "Network"
+    ElseIf Len(wb.Path) > 0 Then
+        pathType = "Local"
+    Else
+        pathType = "Unknown"
+    End If
+
+    Dim tbl       As ListObject
+    Dim rowCount  As String
+    Dim colNames  As String
+    Dim c         As ListColumn
+    Set tbl = wb.Sheets("Logbook").ListObjects("Logbook")
+    If Not tbl Is Nothing Then
+        rowCount = CStr(tbl.DataBodyRange.Rows.Count)
+        For Each c In tbl.ListColumns
+            colNames = colNames & c.Name & ", "
+        Next c
+        If Len(colNames) > 2 Then colNames = Left(colNames, Len(colNames) - 2)
+    End If
+
+    ' Named range inventory (non-sensitive values only).
+    Dim gitBranch  As String
+    Dim dateReset  As String
+    Dim routesVer  As String
+    Dim routesBlt  As String
+    Dim routesDrty As String
+    gitBranch  = Trim(CStr(wb.Names("GitHubBranch").RefersToRange.Value))
+    dateReset  = Trim(CStr(wb.Names("DateAfterExport").RefersToRange.Value))
+    routesVer  = Trim(CStr(wb.Names("RoutesDefinitionVersion").RefersToRange.Value))
+    routesBlt  = Trim(CStr(wb.Names("RoutesBuilt").RefersToRange.Value))
+    routesDrty = Trim(CStr(wb.Names("RoutesDirty").RefersToRange.Value))
+
+    ' Keywords table row count.
+    Dim kwCount As String
+    Dim kwTbl   As ListObject
+    Set kwTbl = wb.Sheets("Settings").ListObjects("Keywords")
+    If Not kwTbl Is Nothing Then
+        If Not kwTbl.DataBodyRange Is Nothing Then
+            kwCount = CStr(kwTbl.DataBodyRange.Rows.Count)
+        Else
+            kwCount = "0"
+        End If
+    End If
+
+    ' Warning suppression state (active/inactive, not the timestamp).
+    Dim suppressState As String
+    suppressState = "Inactive"
+    Dim suppressVal As Variant
+    suppressVal = wb.Names("suppressWarningsUntil").RefersToRange.Value
+    If suppressVal <> "" Then
+        If IsDate(suppressVal) Then
+            If Now < CDate(suppressVal) Then suppressState = "Active"
+        End If
+    End If
+
+    fileNum = FreeFile
+    Open outPath For Output As #fileNum
+        Print #fileNum, "Electronic Logbook - Diagnostics Snapshot"
+        Print #fileNum, "Generated    : " & Format(Now, "yyyy-mm-dd hh:mm:ss")
+        Print #fileNum, String(50, "-")
+        Print #fileNum, ""
+        Print #fileNum, "-- WORKBOOK --------------------------------------"
+        Print #fileNum, "LB Version   : " & version
+        Print #fileNum, "GitHub Branch: " & gitBranch
+        Print #fileNum, "WB location  : " & pathType
+        Print #fileNum, "AutoSave     : " & wb.AutoSaveOn
+        Print #fileNum, ""
+        Print #fileNum, "-- ENVIRONMENT -----------------------------------"
+        Print #fileNum, "Excel        : " & Application.Version & " / " & Application.OperatingSystem
+        Print #fileNum, ""
+        Print #fileNum, "-- LOGBOOK TABLE ---------------------------------"
+        Print #fileNum, "Row count    : " & rowCount
+        Print #fileNum, "Columns      : " & colNames
+        Print #fileNum, ""
+        Print #fileNum, "-- NAMED PREFERENCES -----------------------------"
+        Print #fileNum, "Date reset   : " & dateReset
+        Print #fileNum, "Warn suppress: " & suppressState
+        Print #fileNum, "Routes built : " & routesBlt
+        Print #fileNum, "Routes dirty : " & routesDrty
+        Print #fileNum, "Routes ver   : " & routesVer
+        Print #fileNum, "Keywords     : " & kwCount & " row(s)"
+        Print #fileNum, ""
+        Print #fileNum, "-- NOTE ------------------------------------------"
+        Print #fileNum, "This file contains no personal data, flight records,"
+        Print #fileNum, "names, registrations, or file paths."
+    Close #fileNum
+    On Error GoTo 0
+
+    If Dir(outPath) <> "" Then
+        If showConfirmation Then
+            MsgBox "Diagnostics saved to:" & vbCrLf & vbCrLf & outPath & vbCrLf & vbCrLf & _
+                   "This file contains no personal data and is safe to share.", _
+                   vbInformation, "Diagnostics Exported"
+        End If
+        ExportDiagnosticsInternal = True
+    Else
+        If showConfirmation Then
+            MsgBox "Could not write the diagnostics file. Check folder permissions.", _
+                   vbExclamation, "Export Failed"
+        End If
+        ExportDiagnosticsInternal = False
+    End If
+End Function
 
 Public Sub ToggleSuppressWarnings()
     Dim isActive As Boolean
@@ -2426,6 +3185,524 @@ Public Sub RefreshSuppressWarningsButton()
         End If
     End If
 End Sub
+
+Public Sub InitializeNewEntryLayoutUI()
+    Dim desiredLayout As Long
+
+    desiredLayout = ResolveNewEntryLayoutId(GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))
+    ConfigureNewEntryLayoutControls
+    ApplyConfiguredNewEntryLayout desiredLayout
+End Sub
+
+Public Sub SetNewEntryLayoutFromButtons()
+    ApplyConfiguredNewEntryLayout ResolveNewEntryLayoutId( _
+        GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))
+End Sub
+
+Public Sub SetNewEntryLayout1()
+    SetCompactView
+End Sub
+
+Public Sub SetNewEntryLayout2()
+    SetGroupedView
+End Sub
+
+Public Sub SetGroupedView()
+    ApplyConfiguredNewEntryLayout 2
+End Sub
+
+Public Sub SetCompactView()
+    ApplyConfiguredNewEntryLayout 1
+End Sub
+
+Public Sub SetNewEntryLayoutCompactButton()
+    ApplyConfiguredNewEntryLayout 1
+End Sub
+
+Public Sub SetNewEntryLayoutGroupedButton()
+    ApplyConfiguredNewEntryLayout 2
+End Sub
+
+Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Variant)
+    Dim layoutId As Long
+    Dim desiredCompact As Boolean
+    Dim currentCompact As Boolean
+    Dim layoutChanged As Boolean
+    Dim fieldNames As Variant
+    Dim fieldValues() As Variant
+    Dim i As Long
+    Dim nameText As String
+    Dim previousScreenUpdating As Boolean
+    Dim previousEnableEvents As Boolean
+    Dim previousCalculation As XlCalculation
+
+    If mApplyingNewEntryLayout Then Exit Sub
+    mApplyingNewEntryLayout = True
+
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
+    previousCalculation = Application.Calculation
+
+    On Error GoTo CleanFail
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+
+    layoutId = ResolveNewEntryLayoutId(requestedLayout)
+    desiredCompact = (layoutId = 1)
+    currentCompact = IsCurrentNewEntryLayoutCompact()
+    layoutChanged = (desiredCompact <> currentCompact)
+
+    If layoutChanged Then
+        fieldNames = NewEntryLayoutFieldNames()
+        ReDim fieldValues(LBound(fieldNames) To UBound(fieldNames))
+
+        For i = LBound(fieldNames) To UBound(fieldNames)
+            nameText = CStr(fieldNames(i))
+            fieldValues(i) = GetWorkbookNameValue(ThisWorkbook, nameText, vbNullString)
+        Next i
+
+        SwapNewEntryLayoutBindings fieldNames
+
+        For i = LBound(fieldNames) To UBound(fieldNames)
+            SetWorkbookNameValue ThisWorkbook, CStr(fieldNames(i)), fieldValues(i)
+        Next i
+    End If
+
+    If CurrentConfiguredNewEntryLayoutId() <> layoutId Then
+        SetWorkbookNameValue ThisWorkbook, "NewEntryLayout", layoutId
+    End If
+
+    SyncNewEntryLayoutButtons layoutId
+
+    If layoutChanged Then
+        ConfigureNewEntryLayoutControls
+        EnforceNewEntrySheetRoles
+        ActivateNewEntrySheet
+    End If
+
+CleanExit:
+    Application.Calculation = previousCalculation
+    Application.EnableEvents = previousEnableEvents
+    Application.ScreenUpdating = previousScreenUpdating
+    mApplyingNewEntryLayout = False
+    Exit Sub
+
+CleanFail:
+    Resume CleanExit
+End Sub
+
+Public Sub ConfigureNewEntryLayoutControls()
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim layoutBtnA As Shape
+    Dim layoutBtnB As Shape
+    Dim compactBtn As Shape
+    Dim groupedBtn As Shape
+    Dim linkedCellName As String
+    Dim sheetName As Variant
+
+    For Each sheetName In Array(NEW_ENTRY_ACTIVE_SHEET, NEW_ENTRY_UNUSED_SHEET)
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(CStr(sheetName))
+        On Error GoTo 0
+        If ws Is Nothing Then GoTo NextSheet
+
+        For Each shp In ws.Shapes
+            If shp.Type = msoFormControl Then
+                Select Case shp.FormControlType
+                    Case xlGroupBox
+                        On Error Resume Next
+                        shp.Line.Visible = msoFalse
+                        shp.Fill.Visible = msoFalse
+                        shp.OnAction = vbNullString
+                        On Error GoTo 0
+                    Case xlOptionButton
+                        On Error Resume Next
+                        shp.Line.Visible = msoFalse
+                        linkedCellName = LCase$(Trim$(shp.ControlFormat.LinkedCell))
+                        If linkedCellName = "newentrylayout" _
+                            Or shp.OnAction = "SetNewEntryLayoutCompactButton" _
+                            Or shp.OnAction = "SetNewEntryLayoutGroupedButton" _
+                            Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutCompactButton" _
+                            Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutGroupedButton" _
+                            Or LCase$(shp.Name) = "setcompactview" _
+                            Or LCase$(shp.Name) = "setgroupedview" _
+                            Or LCase$(shp.Name) = "newentrylayoutcompactoption" _
+                            Or LCase$(shp.Name) = "newentrylayoutgroupedoption" Then
+                            shp.ControlFormat.LinkedCell = vbNullString
+                            If layoutBtnA Is Nothing Then
+                                Set layoutBtnA = shp
+                            ElseIf layoutBtnB Is Nothing Then
+                                Set layoutBtnB = shp
+                            End If
+                        End If
+                        On Error GoTo 0
+                End Select
+            End If
+        Next shp
+
+        If Not layoutBtnA Is Nothing And Not layoutBtnB Is Nothing Then
+            If layoutBtnA.Left <= layoutBtnB.Left Then
+                Set compactBtn = layoutBtnA
+                Set groupedBtn = layoutBtnB
+            Else
+                Set compactBtn = layoutBtnB
+                Set groupedBtn = layoutBtnA
+            End If
+
+            On Error Resume Next
+            compactBtn.Name = "NewEntryLayoutCompactOption"
+            groupedBtn.Name = "NewEntryLayoutGroupedOption"
+            compactBtn.OnAction = "SetNewEntryLayoutCompactButton"
+            groupedBtn.OnAction = "SetNewEntryLayoutGroupedButton"
+            On Error GoTo 0
+        End If
+
+        ConfigureNewEntryCommandButtons ws
+
+        RemoveRadioGroupOutlines ws
+
+NextSheet:
+        Set layoutBtnA = Nothing
+        Set layoutBtnB = Nothing
+        Set compactBtn = Nothing
+        Set groupedBtn = Nothing
+        Set ws = Nothing
+    Next sheetName
+End Sub
+
+Private Sub ConfigureNewEntryCommandButtons(ByVal ws As Worksheet)
+    Dim shp As Shape
+    Dim item As Shape
+    Dim actionName As String
+    Dim nameText As String
+    Dim labelText As String
+
+    For Each shp In ws.Shapes
+        actionName = vbNullString
+        nameText = LCase$(Trim$(shp.Name))
+        labelText = LCase$(Trim$(ShapeText(shp)))
+
+        If InStr(nameText, "addtologbook") > 0 Or (InStr(labelText, "add to") > 0 And InStr(labelText, "logbook") > 0) Then
+            actionName = "AddToLogbook"
+        ElseIf InStr(nameText, "reportabug") > 0 Or InStr(labelText, "report a bug") > 0 Then
+            actionName = "ReportBug"
+        ElseIf InStr(nameText, "suppresswarnings") > 0 Or InStr(labelText, "suppress warnings") > 0 Then
+            actionName = "ToggleSuppressWarnings"
+        End If
+
+        If Len(actionName) > 0 Then
+            On Error Resume Next
+            shp.OnAction = actionName
+            If shp.Type = msoGroup Then
+                For Each item In shp.GroupItems
+                    item.OnAction = actionName
+                Next item
+            End If
+            On Error GoTo 0
+        End If
+    Next shp
+End Sub
+
+Private Function ShapeText(ByVal shp As Shape) As String
+    Dim item As Shape
+
+    On Error Resume Next
+    ShapeText = CStr(shp.TextFrame.Characters.Text)
+
+    If Len(Trim$(ShapeText)) = 0 And shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            ShapeText = CStr(item.TextFrame.Characters.Text)
+            If Len(Trim$(ShapeText)) > 0 Then Exit For
+        Next item
+    End If
+
+    On Error GoTo 0
+End Function
+
+Private Sub RemoveRadioGroupOutlines(ByVal ws As Worksheet)
+    ' Attempt to suppress GroupBox borders. The etched/3D border is painted by
+    ' Windows at the OS level, so VBA Line properties may not fully hide it.
+    ' GroupBoxes must NOT be deleted - they provide independent grouping for the
+    ' two separate sets of option buttons on this sheet.
+    Dim shp As Shape
+    Dim bgColor As Long
+
+    On Error Resume Next
+    bgColor = ws.Range("A1").Interior.Color
+    If bgColor = 0 Then bgColor = RGB(255, 255, 255)
+    On Error GoTo 0
+
+    For Each shp In ws.Shapes
+        If shp.Type = msoFormControl Then
+            If shp.FormControlType = xlGroupBox Then
+                On Error Resume Next
+                shp.TextFrame.Characters.Text = ""
+                shp.Line.Visible = msoFalse
+                shp.Fill.Visible = msoFalse
+                shp.Line.ForeColor.RGB = bgColor
+                shp.Line.Transparency = 1
+                On Error GoTo 0
+            End If
+        End If
+    Next shp
+End Sub
+
+Private Sub SyncNewEntryLayoutButtons(ByVal layoutId As Long)
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim layoutBtnA As Shape
+    Dim layoutBtnB As Shape
+    Dim compactBtn As Shape
+    Dim groupedBtn As Shape
+    Dim linkedCellName As String
+    Dim sheetName As Variant
+    Dim compactAction As String
+    Dim groupedAction As String
+
+    For Each sheetName In Array(NEW_ENTRY_ACTIVE_SHEET, NEW_ENTRY_UNUSED_SHEET)
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(CStr(sheetName))
+        On Error GoTo 0
+        If ws Is Nothing Then GoTo NextSheet
+
+        For Each shp In ws.Shapes
+            If shp.Type = msoFormControl Then
+                If shp.FormControlType = xlOptionButton Then
+                    On Error Resume Next
+                    linkedCellName = LCase$(Trim$(shp.ControlFormat.LinkedCell))
+                    On Error GoTo 0
+                    If linkedCellName = "newentrylayout" _
+                        Or shp.OnAction = "SetNewEntryLayoutCompactButton" _
+                        Or shp.OnAction = "SetNewEntryLayoutGroupedButton" _
+                        Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutCompactButton" _
+                        Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutGroupedButton" _
+                        Or LCase$(shp.Name) = "newentrylayoutcompactoption" _
+                        Or LCase$(shp.Name) = "newentrylayoutgroupedoption" _
+                        Or LCase$(shp.Name) = "setcompactview" _
+                        Or LCase$(shp.Name) = "setgroupedview" Then
+                        If layoutBtnA Is Nothing Then
+                            Set layoutBtnA = shp
+                        ElseIf layoutBtnB Is Nothing Then
+                            Set layoutBtnB = shp
+                        End If
+                    End If
+                End If
+            End If
+        Next shp
+
+        If Not layoutBtnA Is Nothing And Not layoutBtnB Is Nothing Then
+            If layoutBtnA.Left <= layoutBtnB.Left Then
+                Set compactBtn = layoutBtnA
+                Set groupedBtn = layoutBtnB
+            Else
+                Set compactBtn = layoutBtnB
+                Set groupedBtn = layoutBtnA
+            End If
+
+            On Error Resume Next
+            compactAction = compactBtn.OnAction
+            groupedAction = groupedBtn.OnAction
+            compactBtn.OnAction = vbNullString
+            groupedBtn.OnAction = vbNullString
+
+            compactBtn.ControlFormat.Value = IIf(layoutId = 1, xlOn, xlOff)
+            groupedBtn.ControlFormat.Value = IIf(layoutId = 2, xlOn, xlOff)
+
+            compactBtn.OnAction = compactAction
+            groupedBtn.OnAction = groupedAction
+            On Error GoTo 0
+        End If
+
+NextSheet:
+        Set layoutBtnA = Nothing
+        Set layoutBtnB = Nothing
+        Set compactBtn = Nothing
+        Set groupedBtn = Nothing
+        Set ws = Nothing
+    Next sheetName
+End Sub
+
+Private Function CurrentConfiguredNewEntryLayoutId() As Long
+    CurrentConfiguredNewEntryLayoutId = ResolveNewEntryLayoutId( _
+        GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))
+End Function
+
+Private Function IsCurrentNewEntryLayoutCompact() As Boolean
+    Dim refersToText As String
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    refersToText = CStr(ThisWorkbook.Names("neSeIcusDay").RefersTo)
+    On Error GoTo 0
+
+    ' Layout marker: compact and grouped have different neSeIcusDay cells.
+    If InStr(1, refersToText, "$O$12", vbTextCompare) > 0 Then
+        IsCurrentNewEntryLayoutCompact = True
+        Exit Function
+    End If
+
+    If InStr(1, refersToText, "$C$18", vbTextCompare) > 0 Then
+        IsCurrentNewEntryLayoutCompact = False
+        Exit Function
+    End If
+
+    ' Fallback marker if cell addresses ever change: compact template has named
+    ' layout buttons, grouped template has generic option-button names.
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET)
+    If Not ws Is Nothing Then
+        IsCurrentNewEntryLayoutCompact = Not (ws.Shapes("SetGroupedView") Is Nothing)
+    End If
+    On Error GoTo 0
+End Function
+
+Private Sub SwapNewEntryLayoutBindings(ByVal fieldNames As Variant)
+    Dim i As Long
+    Dim nameText As String
+    Dim primaryName As Name
+    Dim secondaryName As Name
+    Dim primaryRef As String
+    Dim secondaryRef As String
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        nameText = CStr(fieldNames(i))
+        On Error Resume Next
+        Set primaryName = ThisWorkbook.Names(nameText)
+        On Error GoTo 0
+        Set secondaryName = FindNameByBase(nameText & "2")
+
+        If Not primaryName Is Nothing And Not secondaryName Is Nothing Then
+            primaryRef = primaryName.RefersTo
+            secondaryRef = secondaryName.RefersTo
+            primaryName.RefersTo = secondaryRef
+            secondaryName.RefersTo = primaryRef
+        End If
+
+        Set primaryName = Nothing
+        Set secondaryName = Nothing
+    Next i
+End Sub
+
+Private Function FindNameByBase(ByVal baseName As String) As Name
+    Dim nm As Name
+    Dim probe As String
+
+    probe = LCase$(baseName)
+
+    For Each nm In ThisWorkbook.Names
+        If LCase$(NameBaseText(nm.Name)) = probe Then
+            Set FindNameByBase = nm
+            Exit Function
+        End If
+    Next nm
+End Function
+
+Private Function NameBaseText(ByVal fullName As String) As String
+    If InStrRev(fullName, "!") > 0 Then
+        NameBaseText = Mid$(fullName, InStrRev(fullName, "!") + 1)
+    Else
+        NameBaseText = fullName
+    End If
+End Function
+
+Private Sub EnforceNewEntrySheetRoles()
+    Dim activeSheet As Worksheet
+    Dim inactiveSheet As Worksheet
+    Dim wbWasProtected As Boolean
+
+    Set activeSheet = ResolveSheetFromWorkbookName("neDate")
+    Set inactiveSheet = ResolveSheetFromNameBase("neDate2")
+    If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
+
+    wbWasProtected = ThisWorkbook.ProtectStructure
+    On Error Resume Next
+    If wbWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
+
+    If activeSheet.Name <> NEW_ENTRY_ACTIVE_SHEET Or inactiveSheet.Name <> NEW_ENTRY_UNUSED_SHEET Then
+        activeSheet.Name = NEW_ENTRY_SWAP_TEMP_SHEET
+        inactiveSheet.Name = NEW_ENTRY_UNUSED_SHEET
+        activeSheet.Name = NEW_ENTRY_ACTIVE_SHEET
+    End If
+
+    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Visible = xlSheetVisible
+    ThisWorkbook.Sheets(NEW_ENTRY_UNUSED_SHEET).Visible = xlSheetVeryHidden
+
+    If wbWasProtected Then
+        ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Function ResolveSheetFromWorkbookName(ByVal nameText As String) As Worksheet
+    Dim nm As Name
+    On Error Resume Next
+    Set nm = ThisWorkbook.Names(nameText)
+    On Error GoTo 0
+    If nm Is Nothing Then Exit Function
+
+    Set ResolveSheetFromWorkbookName = ResolveSheetFromRefersTo(nm.RefersTo)
+End Function
+
+Private Function ResolveSheetFromNameBase(ByVal baseName As String) As Worksheet
+    Dim nm As Name
+    Set nm = FindNameByBase(baseName)
+    If nm Is Nothing Then Exit Function
+
+    Set ResolveSheetFromNameBase = ResolveSheetFromRefersTo(nm.RefersTo)
+End Function
+
+Private Function ResolveSheetFromRefersTo(ByVal refersToText As String) As Worksheet
+    Dim bangPos As Long
+    Dim sheetToken As String
+
+    bangPos = InStr(refersToText, "!")
+    If bangPos <= 0 Then Exit Function
+
+    sheetToken = Left$(refersToText, bangPos - 1)
+    sheetToken = Replace(sheetToken, "=", "")
+    sheetToken = Replace(sheetToken, "'", "")
+
+    On Error Resume Next
+    Set ResolveSheetFromRefersTo = ThisWorkbook.Sheets(sheetToken)
+    On Error GoTo 0
+End Function
+
+Private Sub ActivateNewEntrySheet()
+    On Error Resume Next
+    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Activate
+    On Error GoTo 0
+End Sub
+
+Private Function ResolveNewEntryLayoutId(ByVal requestedLayout As Variant) As Long
+    Dim candidate As Variant
+
+    candidate = requestedLayout
+    If IsEmpty(candidate) Then
+        candidate = GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 2)
+    End If
+
+    If Not IsNumeric(candidate) Then
+        ResolveNewEntryLayoutId = 1
+        Exit Function
+    End If
+
+    If CLng(candidate) = 1 Then
+        ResolveNewEntryLayoutId = 1
+    Else
+        ResolveNewEntryLayoutId = 2
+    End If
+End Function
+
+Private Function NewEntryLayoutFieldNames() As Variant
+    NewEntryLayoutFieldNames = Array( _
+        "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "nePIC", "neOtherCrew", "neDetails", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", "neLandingsDay", "neLandingsNight", _
+        "neILS", "neRNAV", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", "neSI1", "neSI2", "neSI3", "neSI4")
+End Function
 
 Public Sub VerifyCurrencyChecks()
     Dim entryCount As Long
@@ -2732,6 +4009,203 @@ NextOD:
 
     ResolveLocalPath = Environ("USERPROFILE") & "\Documents"
     Set fso = Nothing
+End Function
+
+' ==============================================================
+' WORKBOOK PROTECTION
+' ==============================================================
+
+Public Sub EnsureWorkbookProtectionOnOpen()
+    If mProtectionDisabledForSession Then Exit Sub
+    ApplyWorkbookProtection False
+End Sub
+
+Public Sub EnableProtectionForRelease()
+    mProtectionDisabledForSession = False
+    ApplyWorkbookProtection True
+End Sub
+
+Public Sub DisableProtectionForDevelopment()
+    UnprotectWorkbookForEditing
+    mProtectionDisabledForSession = True
+    MsgBox "Workbook protection has been disabled for this Excel session." & vbCrLf & vbCrLf & _
+           "Close and reopen the workbook to re-enable protection automatically, or run EnableProtectionForRelease.", _
+           vbInformation, "Development Mode Enabled"
+End Sub
+
+Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False)
+    Dim wb As Workbook
+    Dim ws As Worksheet
+    Dim wsLog As Worksheet
+    Dim wsCharts As Worksheet
+    Dim tbl As ListObject
+
+    Set wb = ThisWorkbook
+
+    UnprotectWorkbookForEditing
+    EnsurePrimarySheetOrder wb
+
+    For Each ws In wb.Worksheets
+        On Error Resume Next
+        ws.Cells.Locked = True
+        On Error GoTo 0
+    Next ws
+
+    UnlockNamedRangesByPrefix wb, "ne"
+    UnlockNamedRangeIfPresent wb, "DateAfterExport"
+    UnlockNamedRangeIfPresent wb, "NewEntryLayout"
+    UnlockNamedRangeIfPresent wb, "FROverride"
+    UnlockNamedRangeIfPresent wb, "IPCOverride"
+    UnlockNamedRangeIfPresent wb, "OPCOverride"
+
+    On Error Resume Next
+    Set wsLog = wb.Sheets("Logbook")
+    On Error GoTo 0
+    If Not wsLog Is Nothing Then
+        On Error Resume Next
+        Set tbl = wsLog.ListObjects("Logbook")
+        On Error GoTo 0
+
+        If Not tbl Is Nothing Then
+            On Error Resume Next
+            If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.Locked = False
+            If Not tbl.HeaderRowRange Is Nothing Then tbl.HeaderRowRange.Locked = False
+            On Error GoTo 0
+        End If
+    End If
+
+    For Each ws In wb.Worksheets
+        On Error Resume Next
+        If LCase$(ws.Name) = "logbook" Then
+            ProtectLogbookSheetForRuntime ws
+        ElseIf LCase$(ws.Name) = "stats" Then
+            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                       UserInterfaceOnly:=True, AllowUsingPivotTables:=True, _
+                       AllowFormattingColumns:=True, AllowFormattingRows:=True
+        Else
+            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+                       UserInterfaceOnly:=True, AllowUsingPivotTables:=True
+        End If
+        On Error GoTo 0
+    Next ws
+
+    On Error Resume Next
+    wb.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    On Error GoTo 0
+
+    If showConfirmation Then
+        MsgBox "Workbook protection has been enabled for release mode.", vbInformation, "Protection Enabled"
+    End If
+
+    Set tbl = Nothing
+    Set wsLog = Nothing
+    Set wsCharts = Nothing
+    Set wb = Nothing
+End Sub
+
+Private Sub EnsurePrimarySheetOrder(wb As Workbook)
+    Dim wsHelp As Worksheet
+    Dim wsLast As Worksheet
+    Dim wsActive As Worksheet
+    Dim activeAddress As String
+
+    On Error Resume Next
+    If TypeName(ActiveSheet) = "Worksheet" Then Set wsActive = ActiveSheet
+    If Not wsActive Is Nothing Then
+        If wsActive.Parent Is wb Then
+            activeAddress = ActiveCell.Address(False, False)
+        Else
+            Set wsActive = Nothing
+        End If
+    End If
+    On Error GoTo 0
+
+    On Error Resume Next
+    Set wsHelp = wb.Worksheets("Help")
+    On Error GoTo 0
+
+    If wsHelp Is Nothing Then Exit Sub
+
+    Set wsLast = wb.Worksheets(wb.Worksheets.Count)
+
+    On Error Resume Next
+    If wsHelp.Index <> wsLast.Index Then
+        wsHelp.Move After:=wsLast
+    End If
+    If Not wsActive Is Nothing Then
+        wsActive.Activate
+        If activeAddress <> "" Then wsActive.Range(activeAddress).Select
+    End If
+    On Error GoTo 0
+
+    Set wsHelp = Nothing
+    Set wsLast = Nothing
+    Set wsActive = Nothing
+End Sub
+
+Private Sub UnprotectWorkbookForEditing()
+    Dim wb As Workbook
+    Dim ws As Worksheet
+
+    Set wb = ThisWorkbook
+
+    On Error Resume Next
+    wb.Unprotect Password:=ProtectionPassword()
+    For Each ws In wb.Worksheets
+        ws.Unprotect Password:=ProtectionPassword()
+    Next ws
+    On Error GoTo 0
+
+    Set wb = Nothing
+End Sub
+
+Private Sub UnlockNamedRangesByPrefix(wb As Workbook, prefix As String)
+    Dim nm As Name
+    Dim nmText As String
+    Dim baseName As String
+    Dim targetRange As Range
+
+    For Each nm In wb.Names
+        nmText = LCase$(nm.Name)
+        baseName = nmText
+
+        If InStrRev(baseName, "!") > 0 Then
+            baseName = Mid$(baseName, InStrRev(baseName, "!") + 1)
+        End If
+
+        If Left$(baseName, Len(prefix)) = LCase$(prefix) Then
+            On Error Resume Next
+            Set targetRange = nm.RefersToRange
+            If Not targetRange Is Nothing Then
+                targetRange.Locked = False
+                If targetRange.MergeCells Then
+                    targetRange.MergeArea.Locked = False
+                End If
+            End If
+            On Error GoTo 0
+            Set targetRange = Nothing
+        End If
+    Next nm
+End Sub
+
+Private Sub UnlockNamedRangeIfPresent(wb As Workbook, nameText As String)
+    Dim targetRange As Range
+    On Error Resume Next
+    Set targetRange = wb.Names(nameText).RefersToRange
+    If Not targetRange Is Nothing Then
+        targetRange.Locked = False
+        If targetRange.MergeCells Then
+            targetRange.MergeArea.Locked = False
+        End If
+    End If
+    On Error GoTo 0
+    Set targetRange = Nothing
+End Sub
+
+Private Function ProtectionPassword() As String
+    ' Keep blank by default to avoid password prompts during development.
+    ' Set a value here if you want password-protected unprotect operations.
+    ProtectionPassword = ""
 End Function
 
 Sub ShowDevSheets()

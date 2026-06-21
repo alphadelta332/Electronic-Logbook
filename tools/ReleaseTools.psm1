@@ -127,7 +127,18 @@ function Set-WorkbookNameValue {
     try {
         $Workbook.Names.Item($Name).RefersToRange.Value2 = $Value
     } catch {
-        throw "Named range '$Name' not found in $($Workbook.Name)."
+        # If the workbook/sheet is protected, writing through RefersToRange can fail
+        # even when the name exists. Retry after unprotecting with the default blank
+        # password used by release-mode workbook protection.
+        try {
+            $Workbook.Unprotect("")
+            foreach ($ws in $Workbook.Worksheets) {
+                $ws.Unprotect("")
+            }
+            $Workbook.Names.Item($Name).RefersToRange.Value2 = $Value
+        } catch {
+            throw "Could not set named range '$Name' in $($Workbook.Name). The name may be missing or protected."
+        }
     }
 }
 
@@ -174,4 +185,53 @@ function Assert-VbaProjectAccess {
     }
 }
 
-Export-ModuleMember -Function Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-LogbookWorkbookState, Assert-VbaProjectAccess
+function Invoke-WorkbookMacro {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkbookPath,
+        [Parameter(Mandatory)]
+        [string]$MacroName,
+        [switch]$Visible,
+        [switch]$IgnoreMissing
+    )
+
+    if (-not (Test-Path $WorkbookPath)) {
+        throw "Workbook not found: $WorkbookPath"
+    }
+
+    $resolvedPath = (Resolve-Path $WorkbookPath).Path
+    $excel = $null
+    $workbook = $null
+
+    try {
+        $excel = New-Object -ComObject Excel.Application
+        $excel.Visible = [bool]$Visible
+        $excel.DisplayAlerts = $false
+        $excel.EnableEvents = $false
+
+        # Enable macro execution for explicit release/testing macro calls.
+        try { $excel.AutomationSecurity = 1 } catch {}
+
+        $workbook = $excel.Workbooks.Open($resolvedPath, $false, $false)
+        $qualifiedMacro = "'$($workbook.Name)'!$MacroName"
+
+        try {
+            $excel.Run($qualifiedMacro)
+        } catch {
+            if ($IgnoreMissing) {
+                Write-Host "  Skipped macro '$MacroName' for $resolvedPath (not available or disabled)." -ForegroundColor Yellow
+                return
+            }
+
+            throw "Could not run macro '$MacroName' for $resolvedPath. $_"
+        }
+
+        $workbook.Save()
+        Write-Host "  Macro '$MacroName' executed for $resolvedPath" -ForegroundColor Green
+    } finally {
+        Close-ExcelComObjects -Excel $excel -Workbook $workbook -Save $false
+    }
+}
+
+Export-ModuleMember -Function Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-LogbookWorkbookState, Assert-VbaProjectAccess, Invoke-WorkbookMacro

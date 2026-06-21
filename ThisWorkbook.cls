@@ -1,3 +1,7 @@
+Option Explicit
+
+Private mHandlingNewEntryLayoutChange As Boolean
+
 Private Sub Workbook_Open()
     ' Restore any Application state left dirty by a previous crash.
     ' AddToLogbook disables these for performance; a hard crash bypasses Cleanup.
@@ -5,6 +9,9 @@ Private Sub Workbook_Open()
     Application.EnableEvents = True
     Application.Calculation = xlCalculationAutomatic
     Application.CutCopyMode = False
+
+    ' Re-apply protection each time the workbook opens.
+    EnsureWorkbookProtectionOnOpen
 
     ' Keep date-sensitive formulas current without a volatile TODAY() formula.
     RefreshTodayValue
@@ -14,6 +21,9 @@ Private Sub Workbook_Open()
 
     ' Check Status of SuppressWarnings
     RefreshSuppressWarningsButton
+
+    ' Apply the selected New Entry layout and keep layout radio controls configured.
+    InitializeNewEntryLayoutUI
 
     ' Reset split date entry fields to today on launch when configured.
     SetNewEntryDateToTodayOnOpen
@@ -30,6 +40,25 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     End If
 
 CleanExit:
+End Sub
+
+Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
+    Dim layoutCell As Range
+
+    If mHandlingNewEntryLayoutChange Then Exit Sub
+    If Target Is Nothing Then Exit Sub
+
+    On Error GoTo CleanExit
+    Set layoutCell = ThisWorkbook.Names("NewEntryLayout").RefersToRange
+    If layoutCell Is Nothing Then GoTo CleanExit
+
+    If Intersect(Target, layoutCell) Is Nothing Then GoTo CleanExit
+
+    mHandlingNewEntryLayoutChange = True
+    ApplyConfiguredNewEntryLayout layoutCell.Value
+
+CleanExit:
+    mHandlingNewEntryLayoutChange = False
 End Sub
 
 Private Sub SetNewEntryDateToTodayOnOpen()

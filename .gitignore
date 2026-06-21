@@ -7,7 +7,10 @@ release.local.json
 .env
 .env.*
 *.log
+diagnostics_*.txt
+**/bin/
+**/obj/
+**/TestResults/
+updater/dist/
 PUBLIC_RELEASE_EXCEL_HANDOVER.md
-PrepareForRelease.ps1
-PrepareForTesting.ps1
 regulations.txt

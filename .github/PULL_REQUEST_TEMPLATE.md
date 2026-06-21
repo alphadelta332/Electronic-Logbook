@@ -5,6 +5,8 @@
 - [ ] `README.pdf` was regenerated from `README.md`
 - [ ] `modBoot.bas`, `modLogbook.bas`, and `ThisWorkbook.cls` were imported into the workbook
 - [ ] `modUpdate.bas` was not embedded in the workbook
+- [ ] `tools/Test-VbaSourceQuality.ps1` passed
+- [ ] `tools/Test-WorkbookVbaParity.ps1` passed
 - [ ] Master workbook `GitHubBranch` is set correctly for this PR/release
 - [ ] Master workbook `LogbookVersion` matches `version.txt`
 - [ ] Master workbook `GitHubToken` is empty

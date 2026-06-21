@@ -8,6 +8,19 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.4.0] - 2026-06-20
+- Hardened GitHub release protections and automated release checks
+- Added release asset checksums and machine-readable integrity metadata
+- Added automated VBA source-quality and workbook/source consistency checks
+- Improved release preparation tooling and workbook maintainability
+- Added an early external updater prototype that creates and validates a separate updated copy
+- Added runtime workbook protection with development/release toggles
+- Added automatic redacted diagnostics capture when starting a bug report
+- Hardened update migration against protected-sheet failures and staging/backup validation gaps
+- Improved Hours Over Time chart update resilience so entry saves are not blocked by chart wiring issues
+- Added wizard-first update launch with legacy VBA fallback if the external updater is unavailable
+- Added in-place updater handoff with timestamped `_Old` backup retention and original filename preservation
+
 ### [1.3.1] - 2026-06-14
 - Added an anonymous bug report form that can be opened directly from the logbook
 
@@ -112,7 +125,10 @@ Initial release.
 
 ## Requirements
 
-- Microsoft Excel for Windows (2016 or later recommended)
+- Microsoft Excel for Windows
+  - Primary supported: Microsoft 365 on Windows 11
+  - Supported perpetual: Excel 2021 and newer
+  - Older versions are best-effort only
 - Macros must be enabled
 - For automatic updates: internet access on the machine running the logbook
 
@@ -148,6 +164,20 @@ To enable:
 This is a one-time setting per machine.
 
 Only enable macros and VBA project access for workbooks downloaded from this repository's GitHub Releases page. Do not run modified copies from untrusted sources.
+
+### 3a. Workbook protection behaviour
+
+The release workbook may run in protected mode to reduce accidental edits. Intended input areas remain editable, including New Entry (`ne*`) fields, supported override/settings cells, and editable Logbook table data.
+
+For development workflows, protection can be toggled with macros:
+
+1. `DisableProtectionForDevelopment`
+2. `EnableProtectionForRelease`
+
+Preparation scripts also attempt to call these macros automatically:
+
+- `PrepareForTesting.ps1` disables protection mode when available.
+- `PrepareForRelease.ps1` enables protection mode when available.
 
 ### 4. First open -- build the Routes table
 
@@ -231,11 +261,11 @@ When a new version is available, you will see a prompt when opening the file:
 
 Click **Yes** to update. The update process will:
 
-1. Download the latest master file from GitHub
-2. Inject your existing flight data into the new version
+1. Launch the external updater wizard when available (or use legacy VBA update as fallback)
+2. Build and validate a staged updated workbook from the latest master
 3. Rebuild all charts and pivot tables
-4. Rename your previous file to `[YourFilename]_Old.xlsm`
-5. Save the updated logbook using your original filename
+4. Rename your previous file to `[YourFilename]_Old_<timestamp>.xlsm`
+5. Keep the updated logbook on your original filename
 
 Once the update is complete, close the `_Old` file and reopen your logbook from the original filename.
 
@@ -258,6 +288,15 @@ The following data is carried across from your existing logbook to the updated v
 ### Manual update check
 
 You can check for updates at any time by running the `CheckForUpdateManual` macro from the Developer tab or by wiring it to a button on any sheet.
+
+### Backup and recovery actions
+
+The workbook now includes user-triggered safety actions you can run from the Developer tab or wire to buttons:
+
+- `BackupCurrentWorkbook` creates a timestamped backup copy beside your workbook.
+- `RestorePreviousVersion` finds the latest `_Old` backup, creates a restored copy, and opens it for review.
+- `RebuildRoutesTableNow` rebuilds the Routes table on demand.
+- `ExportDiagnostics` writes a redacted diagnostics snapshot for support.
 
 ---
 

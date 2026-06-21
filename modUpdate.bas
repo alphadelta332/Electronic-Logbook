@@ -12,6 +12,8 @@ Private Const ROUTE_CACHE_DEFINITION_VERSION As Long = 1
 Private Const GITHUB_USER  As String = "alphadelta332"
 Private Const GITHUB_REPO  As String = "Electronic-Logbook"
 Private Const MASTER_FILE  As String = "Electronic_Logbook_Master.xlsm"
+Private Const WIZARD_EXE_NAME As String = "ElectronicLogbook.Updater.Wizard.exe"
+Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-x64.zip"
 ' -------------------------------------------------------------
 
 ' ==============================================================
@@ -169,21 +171,80 @@ Private Sub RunUpdate(newVersion As String)
     Dim localSavePath As String
     Dim localPath     As String
     Dim originalName  As String
+    Dim canonicalName As String
     Dim oldPath       As String
+    Dim updatedPath   As String
     Dim masterWb      As Workbook
     Dim errMsg        As String
     Dim errNum        As Long
     Dim diagStep      As String
     Dim finalHandoffStarted As Boolean
+    Dim usedSaveCopyFallback As Boolean
+    Dim finalReady As Boolean
+    Dim readinessNote As String
+    Dim sessionId     As String
+    Dim expectedRows  As Long
+    Dim expectedTotalHours As Double
+    Dim expectedTotalKnown As Boolean
 
-    tempPath = Environ("TEMP") & "\LB_Master_Temp.xlsm"
+    ' Unique per-run filenames prevent stale leftovers from a prior failed update
+    ' from being silently used as the staging input.
+    sessionId = Format(Now, "yyyymmdd_hhmmss")
+    On Error Resume Next
+    expectedRows = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count
+    expectedTotalHours = GetLogbookTotalHours(ThisWorkbook)
+    expectedTotalKnown = (Err.Number = 0)
+    Err.Clear
+    On Error GoTo 0
+
+    tempPath = Environ("TEMP") & "\LB_Master_" & sessionId & ".xlsm"
     ' Resolve to the local folder the logbook is already in.
     ' ResolveLocalPath handles OneDrive cloud URLs by mapping them to
     ' the local sync folder, so FileCopy always targets a real FS path.
     localPath = ResolveLocalPath(ThisWorkbook)
     originalName = ThisWorkbook.Name
-    savePath = localPath & "\" & originalName
-    oldPath = BuildOldWorkbookPath(localPath, originalName)
+    canonicalName = CanonicalWorkbookName(originalName)
+    savePath = localPath & "\" & canonicalName
+    updatedPath = savePath
+    oldPath = BuildOldWorkbookPath(localPath, canonicalName)
+
+    ' Prefer the external wizard flow when available.
+    ' If launch fails for any reason, keep the legacy in-workbook update path.
+    Dim sourceWorkbookPath As String
+    Dim wizardReason As String
+    sourceWorkbookPath = localPath & "\" & originalName
+    If TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason) Then
+        UpdateStatus ""
+         MsgBox "The external updater wizard has started." & vbCrLf & vbCrLf & _
+             "This workbook will now close so the update can continue safely." & vbCrLf & vbCrLf & _
+             "After the wizard finishes, reopen your logbook from the same filename.", _
+             vbInformation, "Launching Updater Wizard"
+
+         Dim closeErr As Long
+         Dim closeMsg As String
+        On Error Resume Next
+        Application.DisplayAlerts = False
+        ThisWorkbook.Save
+        ThisWorkbook.Close SaveChanges:=True
+         closeErr = Err.Number
+         closeMsg = Err.Description
+        Application.DisplayAlerts = True
+        On Error GoTo 0
+
+         If closeErr <> 0 Then
+             MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
+                 "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
+                 "Close error: " & closeMsg, _
+                 vbExclamation, "Manual Close Required"
+         End If
+
+        Exit Sub
+    End If
+
+    If wizardReason <> "" Then
+        MsgBox "The external updater wizard was not available, so the classic updater will be used for this run." & vbCrLf & vbCrLf & _
+               "Reason: " & wizardReason, vbInformation, "Using Classic Updater"
+    End If
 
     diagStep = "Downloading master workbook"
     UpdateStatus "Downloading update (version " & newVersion & ")..."
@@ -203,6 +264,9 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Opening master workbook"
     Set masterWb = Workbooks.Open(tempPath, ReadOnly:=False, UpdateLinks:=False)
+
+    diagStep = "Unprotecting master workbook"
+    PrepareMasterWorkbookForMigration masterWb
 
     diagStep = "Copying Logbook data into master"
     UpdateStatus "Copying flight data..."
@@ -275,8 +339,26 @@ Private Sub RunUpdate(newVersion As String)
         Set chartRng = wsData.Range( _
             wsData.Cells(2, rnhRange.Columns(1).Column), _
             wsData.Cells(chartLast, rnhRange.Columns(2).Column))
-        wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).XValues = chartRng.Columns(1)
-        wsCharts.ChartObjects("HoursOverTime").Chart.SeriesCollection(1).Values  = chartRng.Columns(2)
+        On Error Resume Next
+        Dim hotChartObj As ChartObject
+        Dim hotSeries As Series
+        Set hotChartObj = wsCharts.ChartObjects("HoursOverTime")
+        If hotChartObj.Chart.SeriesCollection.Count = 0 Then
+            hotChartObj.Chart.SeriesCollection.NewSeries
+        End If
+        Set hotSeries = hotChartObj.Chart.SeriesCollection(1)
+        hotSeries.XValues = chartRng.Columns(1)
+        hotSeries.Values = chartRng.Columns(2)
+        If Err.Number <> 0 Then
+            Err.Clear
+            hotChartObj.Chart.SetSourceData Source:=chartRng
+            If hotChartObj.Chart.SeriesCollection.Count > 0 Then
+                Set hotSeries = hotChartObj.Chart.SeriesCollection(1)
+                hotSeries.XValues = chartRng.Columns(1)
+                hotSeries.Values = chartRng.Columns(2)
+            End If
+        End If
+        On Error GoTo UpdateFailed
         Set chartRng = Nothing
     End If
     Set wsCharts = Nothing
@@ -293,7 +375,7 @@ Private Sub RunUpdate(newVersion As String)
 
     ' Save to a local temp path first, then move to destination.
     ' Direct SaveAs to OneDrive paths is unreliable depending on sync state.
-    localSavePath = Environ("TEMP") & "\LB_Updated_Staging.xlsm"
+    localSavePath = Environ("TEMP") & "\LB_Updated_" & sessionId & ".xlsm"
     masterWb.Sheets(1).EnableCalculation = True
     Application.Calculation = xlCalculationAutomatic
     Application.DisplayAlerts = False
@@ -310,34 +392,114 @@ Private Sub RunUpdate(newVersion As String)
 
     If Dir(localPath, vbDirectory) = "" Then MkDir localPath
 
+    ' Validate the staged workbook before any destructive operations.
+    ' This is the last safe abort point: the original file has not been touched.
+    On Error GoTo 0
+    diagStep = "Validating staged update"
+    UpdateStatus "Validating update..."
+    If Not ValidateStagedUpdate(localSavePath, newVersion, expectedRows, expectedTotalHours, expectedTotalKnown) Then
+        On Error Resume Next
+        Kill localSavePath
+        On Error GoTo 0
+        Application.Calculation = xlCalculationAutomatic
+        Application.ScreenUpdating = True
+        Application.EnableEvents = True
+        UpdateStatus ""
+        MsgBox "The staged update failed validation. Your logbook has not been changed." & vbCrLf & vbCrLf & _
+               "Please try updating again. If the problem persists, use the Report a Bug button.", _
+               vbCritical, "Update Validation Failed"
+        Exit Sub
+    End If
+    On Error GoTo UpdateFailed
+
     diagStep = "Renaming current file to old copy"
     UpdateStatus "Renaming previous logbook..."
     finalHandoffStarted = True
     Application.DisplayAlerts = False
+    On Error Resume Next
     ThisWorkbook.SaveAs Filename:=oldPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
+    If Err.Number <> 0 Then
+        Err.Clear
+        ' OneDrive/AutoSave workbooks can reject SaveAs during handoff.
+        ' Fallback: preserve a backup copy without renaming the open workbook.
+        ThisWorkbook.SaveCopyAs Filename:=oldPath
+        If Err.Number <> 0 Then
+            Dim renameErr As String
+            renameErr = Err.Description
+            Err.Clear
+            Application.DisplayAlerts = True
+            On Error GoTo UpdateFailed
+            Err.Raise vbObjectError + 931, "modUpdate.RunUpdate", _
+                      "Could not create backup old-copy file. " & renameErr
+        End If
+        usedSaveCopyFallback = True
+    End If
+    On Error GoTo UpdateFailed
     Application.DisplayAlerts = True
+
+    diagStep = "Validating backup file"
+    UpdateStatus "Validating backup..."
+    If Not ValidateBackupWorkbook(oldPath, ThisWorkbook) Then
+        Application.Calculation = xlCalculationAutomatic
+        Application.ScreenUpdating = True
+        Application.EnableEvents = True
+        UpdateStatus ""
+        MsgBox "The previous-version backup could not be validated after save." & vbCrLf & vbCrLf & _
+               "Your workbook has been kept as:" & vbCrLf & oldPath & vbCrLf & vbCrLf & _
+               "The update was stopped before replacing the original filename.", _
+               vbCritical, "Backup Validation Failed"
+        Exit Sub
+    End If
 
     diagStep = "Moving updated file to original filename"
     UpdateStatus "Saving updated logbook..."
-    If Dir(savePath) <> "" Then Kill savePath
-    FileCopy localSavePath, savePath
+    If usedSaveCopyFallback Then
+        updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
+    Else
+        updatedPath = savePath
+    End If
+    ReplaceFileWithRetry localSavePath, updatedPath
     On Error Resume Next
     Kill localSavePath
     On Error GoTo 0
+
+    diagStep = "Waiting for final workbook readiness"
+    UpdateStatus "Finalizing updated file..."
+    finalReady = WaitForUpdatedWorkbookReady(updatedPath, newVersion, 90)
 
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
     Application.EnableEvents = True
     UpdateStatus ""
 
-    MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
-           savePath & vbCrLf & vbCrLf & _
-           "Your previous logbook has been saved as:" & vbCrLf & vbCrLf & _
-           oldPath & vbCrLf & vbCrLf & _
-           "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
-           "Please verify that your total hours, " & _
-           "Charts page, and Currency + Recency page match what you had before.", _
-           vbInformation, "Update Ready"
+    If finalReady Then
+        readinessNote = vbCrLf & vbCrLf & _
+                        "Ready to open: the updated workbook was verified after handoff."
+    Else
+        readinessNote = vbCrLf & vbCrLf & _
+                        "OneDrive is still finalizing this file. Do not open it yet." & vbCrLf & _
+                        "Wait for sync to finish (pending icon clears), then open from Explorer."
+    End If
+
+        If usedSaveCopyFallback Then
+         MsgBox "Update complete with OneDrive fallback." & vbCrLf & vbCrLf & _
+             "Your current open workbook could not be renamed while AutoSave/OneDrive locking was active." & vbCrLf & vbCrLf & _
+             "Updated workbook saved as:" & vbCrLf & vbCrLf & _
+             updatedPath & vbCrLf & vbCrLf & _
+             "Backup copy saved as:" & vbCrLf & vbCrLf & _
+             oldPath & vbCrLf & vbCrLf & _
+             "Please close this workbook and open the updated file above." & readinessNote, _
+             vbInformation, "Update Ready"
+        Else
+         MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
+             updatedPath & vbCrLf & vbCrLf & _
+             "Your previous logbook has been saved as:" & vbCrLf & vbCrLf & _
+             oldPath & vbCrLf & vbCrLf & _
+             "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
+             "Please verify that your total hours, " & _
+               "Charts page, and Currency + Recency page match what you had before." & readinessNote, _
+             vbInformation, "Update Ready"
+        End If
     Exit Sub
 
 UpdateFailed:
@@ -372,6 +534,142 @@ UpdateFailed:
            "Error " & errNum & ": " & errMsg & vbCrLf & vbCrLf & _
            failureNote, _
            vbCritical, "Update Failed"
+End Sub
+
+Private Function CanonicalWorkbookName(ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim markerPos As Long
+    Dim suffix As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+        extension = Mid$(workbookName, dotPos)
+    Else
+        baseName = workbookName
+        extension = ""
+    End If
+
+    markerPos = InStrRev(baseName, "_Old")
+    If markerPos > 0 Then
+        suffix = Mid$(baseName, markerPos + 4)
+        ' Treat names ending in _Old, _Old_<timestamp>, or _Old_<timestamp>_<n>
+        If suffix = "" Or Left$(suffix, 1) = "_" Then
+            baseName = Left$(baseName, markerPos - 1)
+        End If
+    End If
+
+    CanonicalWorkbookName = baseName & extension
+End Function
+
+Private Sub ReplaceFileWithRetry(ByVal sourcePath As String, ByVal targetPath As String)
+    Dim attempt As Long
+
+    For attempt = 1 To 5
+        On Error Resume Next
+        If Dir$(targetPath) <> "" Then Kill targetPath
+        Err.Clear
+
+        FileCopy sourcePath, targetPath
+        If Err.Number = 0 Then
+            If Dir$(targetPath) <> "" Then
+                If FileLen(targetPath) > 0 Then
+                    On Error GoTo 0
+                    Exit Sub
+                End If
+            End If
+        End If
+
+        Err.Clear
+        On Error GoTo 0
+        DoEvents
+    Next attempt
+
+    Err.Raise vbObjectError + 930, "modUpdate.RunUpdate", _
+              "Could not write updated workbook to original filename."
+End Sub
+
+Private Function WaitForUpdatedWorkbookReady(ByVal workbookPath As String, ByVal expectedVersion As String, ByVal timeoutSeconds As Long) As Boolean
+    Dim startedAt As Date
+    Dim priorSize As Long
+    Dim priorStamp As Date
+    Dim stablePasses As Long
+    Dim currentSize As Long
+    Dim currentStamp As Date
+
+    startedAt = Now
+    priorSize = -1
+    priorStamp = 0
+    stablePasses = 0
+
+    Do
+        If Dir$(workbookPath) <> "" Then
+            On Error Resume Next
+            currentSize = FileLen(workbookPath)
+            currentStamp = FileDateTime(workbookPath)
+            If Err.Number <> 0 Then
+                Err.Clear
+                currentSize = -1
+                currentStamp = 0
+            End If
+            On Error GoTo 0
+
+            If currentSize > 0 Then
+                If currentSize = priorSize And currentStamp = priorStamp Then
+                    stablePasses = stablePasses + 1
+                Else
+                    stablePasses = 0
+                End If
+
+                priorSize = currentSize
+                priorStamp = currentStamp
+
+                If stablePasses >= 1 Then
+                    If CanOpenWorkbookVersion(workbookPath, expectedVersion) Then
+                        WaitForUpdatedWorkbookReady = True
+                        Exit Function
+                    End If
+                End If
+            End If
+        End If
+
+        If DateDiff("s", startedAt, Now) >= timeoutSeconds Then Exit Do
+        UpdateStatus "Finalizing updated file... (" & CStr(DateDiff("s", startedAt, Now)) & "s)"
+        WaitOneSecond
+    Loop
+
+    WaitForUpdatedWorkbookReady = False
+End Function
+
+Private Function CanOpenWorkbookVersion(ByVal workbookPath As String, ByVal expectedVersion As String) As Boolean
+    Dim openedWb As Workbook
+    Dim openedVersion As String
+
+    On Error GoTo Fail
+    Set openedWb = Workbooks.Open(Filename:=workbookPath, ReadOnly:=True, UpdateLinks:=False, AddToMru:=False)
+    openedVersion = Trim$(CStr(openedWb.Names("LogbookVersion").RefersToRange.Value))
+    openedWb.Close SaveChanges:=False
+    Set openedWb = Nothing
+
+    CanOpenWorkbookVersion = (StrComp(openedVersion, expectedVersion, vbTextCompare) = 0)
+    Exit Function
+
+Fail:
+    On Error Resume Next
+    If Not openedWb Is Nothing Then openedWb.Close SaveChanges:=False
+    Set openedWb = Nothing
+    On Error GoTo 0
+    CanOpenWorkbookVersion = False
+End Function
+
+Private Sub WaitOneSecond()
+    Dim target As Date
+    target = DateAdd("s", 1, Now)
+    Do While Now < target
+        DoEvents
+    Loop
 End Sub
 
 Private Function BuildOldWorkbookPath(folderPath As String, workbookName As String) As String
@@ -411,6 +709,83 @@ Private Function BuildOldWorkbookPath(folderPath As String, workbookName As Stri
     Loop While Dir(candidate) <> ""
 
     BuildOldWorkbookPath = candidate
+End Function
+
+Private Function BuildUpdatedWorkbookPath(folderPath As String, workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim candidate As String
+    Dim counter As Long
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+        extension = Mid$(workbookName, dotPos)
+    Else
+        baseName = workbookName
+        extension = ""
+    End If
+
+    candidate = folderPath & "\" & baseName & "_Updated" & extension
+    If Dir$(candidate) = "" Then
+        BuildUpdatedWorkbookPath = candidate
+        Exit Function
+    End If
+
+    counter = 1
+    Do
+        candidate = folderPath & "\" & baseName & "_Updated_" & counter & extension
+        counter = counter + 1
+    Loop While Dir$(candidate) <> ""
+
+    BuildUpdatedWorkbookPath = candidate
+End Function
+
+Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
+    Dim ws As Worksheet
+
+    ' The release workbook can now be saved in a protected state.
+    ' Update migration needs table resize/copy operations, so we force
+    ' an unprotected editing state for the temporary downloaded master.
+    On Error Resume Next
+    masterWb.Unprotect Password:=""
+    For Each ws In masterWb.Worksheets
+        ws.Unprotect Password:=""
+    Next ws
+    On Error GoTo 0
+End Sub
+
+Private Function ValidateBackupWorkbook(backupPath As String, Optional backupWb As Workbook = Nothing) As Boolean
+    If backupWb Is Nothing Then Set backupWb = ThisWorkbook
+
+    ' Validate the workbook that is already open after SaveAs.
+    ' Re-opening the same path here can block on file locks/OneDrive sync.
+    On Error GoTo Fail
+
+    Dim t As ListObject
+    Set t = backupWb.Sheets("Logbook").ListObjects("Logbook")
+    If t Is Nothing Then GoTo Fail
+
+    ' Confirm the backup file exists on disk and is non-empty.
+    If Dir$(backupPath) = "" Then
+        Err.Raise vbObjectError + 921, , "Backup file not found after SaveAs."
+    End If
+
+    Dim backupSize As Long
+    backupSize = FileLen(backupPath)
+    If backupSize <= 0 Then
+        Err.Raise vbObjectError + 922, , "Backup file is empty after SaveAs."
+    End If
+
+    ValidateBackupWorkbook = True
+    Exit Function
+
+Fail:
+    On Error Resume Next
+    Application.Run "WriteDebugLog", "modUpdate.ValidateBackupWorkbook", Err.Number, Err.Description, "Validating backup file"
+    On Error GoTo 0
+    ValidateBackupWorkbook = False
 End Function
 
 ' ==============================================================
@@ -1283,37 +1658,36 @@ Private Sub RefreshAndRegroupPivots(masterWb As Workbook)
     End If
 
     ' Fix HoursByYear date grouping.
-    ' Mirrors the manual fix: remove Date, refresh, re-add, group.
+    ' Older workbooks can have slightly different grouped-field layouts,
+    ' so we use tolerant field operations and a yearly-layout fallback.
     On Error GoTo GroupFail
     Set pt = masterWb.Sheets("ChartData").PivotTables("HoursByYear")
+    On Error GoTo 0
 
-    ' Remove Date and refresh so cache rebuilds cleanly with valid dates
-    pt.PivotFields("Date").Orientation = xlHidden
+    ' Remove Date and refresh so cache rebuilds cleanly with valid dates.
+    ' This can fail on some grouped layouts, so continue with fallback logic.
+    TrySetPivotFieldOrientation pt, "Date", xlHidden
     DoEvents
     Application.Calculation = xlCalculationAutomatic
     pt.RefreshTable
     Application.Calculation = xlCalculationManual
     DoEvents
 
-    ' Re-add Date before grouping - LabelRange requires field to be in rows
-    pt.PivotFields("Date").Orientation = xlRowField
-    pt.PivotFields("Date").Position = 1
-    DoEvents
+    ' Re-add Date before grouping when available.
+    If TrySetPivotFieldOrientation(pt, "Date", xlRowField) Then
+        On Error Resume Next
+        pt.PivotFields("Date").Position = 1
+        On Error GoTo 0
+        DoEvents
 
-    ' LabelRange.Cells(1) is the header - Cells(2) is the first data cell
-    pt.PivotFields("Date").LabelRange.Cells(2).Group _
-        Start:=True, End:=True, _
-        Periods:=Array(False, False, False, False, True, False, True)
+        If Not TryGroupDateByMonthAndYear(pt) Then
+            ApplyHoursByYearPivotFallbackLayout pt
+            Exit Sub
+        End If
+    End If
 
-    ' Grouping hides the base Date field - re-add it as the day-level drill
-    On Error Resume Next
-    pt.PivotFields("Date").Orientation = xlRowField
-    On Error GoTo 0
-
-    ' Collapse to Year level so chart shows yearly bars by default
-    On Error Resume Next
-    pt.PivotFields("Years (Date)").ShowDetail = False
-    On Error GoTo 0
+    ' Keep yearly layout stable for the chart defaults.
+    ApplyHoursByYearPivotFallbackLayout pt
     Exit Sub
 
 GroupFail:
@@ -1327,6 +1701,60 @@ GroupFail:
            vbExclamation, "Pivot Grouping Warning"
     Err.Clear
 End Sub
+
+Private Sub ApplyHoursByYearPivotFallbackLayout(ByVal pt As PivotTable)
+    If pt Is Nothing Then Exit Sub
+
+    If PivotFieldExists(pt, "Years (Date)") Then
+        TrySetPivotFieldOrientation pt, "Years (Date)", xlRowField
+
+        On Error Resume Next
+        pt.PivotFields("Years (Date)").Position = 1
+        pt.PivotFields("Years (Date)").ShowDetail = False
+        On Error GoTo 0
+
+        TrySetPivotFieldOrientation pt, "Date", xlHidden
+        TrySetPivotFieldOrientation pt, "Months (Date)", xlHidden
+        TrySetPivotFieldOrientation pt, "Days (Date)", xlHidden
+        TrySetPivotFieldOrientation pt, "Quarters (Date)", xlHidden
+    Else
+        ' If grouped fields do not exist, leave Date as the active row field.
+        TrySetPivotFieldOrientation pt, "Date", xlRowField
+    End If
+End Sub
+
+Private Function TryGroupDateByMonthAndYear(ByVal pt As PivotTable) As Boolean
+    On Error GoTo GroupFailed
+
+    pt.PivotFields("Date").LabelRange.Cells(2).Group _
+        Start:=True, End:=True, _
+        Periods:=Array(False, False, False, False, True, False, True)
+
+    TryGroupDateByMonthAndYear = True
+    Exit Function
+
+GroupFailed:
+    TryGroupDateByMonthAndYear = False
+    Err.Clear
+End Function
+
+Private Function TrySetPivotFieldOrientation(ByVal pt As PivotTable, ByVal fieldName As String, ByVal orientation As XlPivotFieldOrientation) As Boolean
+    On Error GoTo SetFailed
+
+    pt.PivotFields(fieldName).Orientation = orientation
+    TrySetPivotFieldOrientation = True
+    Exit Function
+
+SetFailed:
+    TrySetPivotFieldOrientation = False
+    Err.Clear
+End Function
+
+Private Function PivotFieldExists(ByVal pt As PivotTable, ByVal fieldName As String) As Boolean
+    On Error Resume Next
+    PivotFieldExists = Not pt.PivotFields(fieldName) Is Nothing
+    On Error GoTo 0
+End Function
 
 ' ==============================================================
 ' GITHUB TOKEN
@@ -1423,6 +1851,232 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     Exit Function
 Fail:
     DownloadFile = False
+End Function
+
+Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, _
+                                                ByVal repository As String, _
+                                                Optional ByRef reason As String = "") As Boolean
+    Dim wizardPath As String
+    Dim commandLine As String
+    Dim quotedExe As String
+    Dim shellObj As Object
+
+    On Error GoTo Fail
+
+    wizardPath = ResolveWizardExecutablePath(repository)
+    If wizardPath = "" Then
+        If reason = "" Then reason = "No wizard asset was found in release assets."
+        Exit Function
+    End If
+    If Dir$(wizardPath) = "" Then
+        reason = "Wizard executable path could not be resolved."
+        Exit Function
+    End If
+
+    quotedExe = """" & wizardPath & """"
+    commandLine = quotedExe & " --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
+
+    Set shellObj = CreateObject("WScript.Shell")
+    shellObj.Run commandLine, 1, False
+    TryLaunchExternalUpdaterWizard = True
+    Exit Function
+
+Fail:
+    reason = Err.Description
+    TryLaunchExternalUpdaterWizard = False
+End Function
+
+Private Function ResolveWizardExecutablePath(ByVal repository As String) As String
+    Dim namedPath As String
+    Dim folderPath As String
+    Dim candidate As String
+    Dim tempFolder As String
+
+    On Error Resume Next
+    namedPath = Trim(CStr(ThisWorkbook.Names("UpdaterWizardPath").RefersToRange.Value))
+    On Error GoTo 0
+    If namedPath <> "" Then
+        If Dir$(namedPath) <> "" Then
+            ResolveWizardExecutablePath = namedPath
+            Exit Function
+        End If
+    End If
+
+    folderPath = ResolveLocalPath(ThisWorkbook)
+    candidate = folderPath & "\" & WIZARD_EXE_NAME
+    If Dir$(candidate) <> "" Then
+        ResolveWizardExecutablePath = candidate
+        Exit Function
+    End If
+
+    tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdater"
+    If Dir$(tempFolder, vbDirectory) = "" Then MkDir tempFolder
+
+    candidate = tempFolder & "\" & WIZARD_EXE_NAME
+    If Dir$(candidate) = "" Then
+        If Not DownloadLatestWizardPackage(repository, candidate, tempFolder) Then
+            ResolveWizardExecutablePath = ""
+            Exit Function
+        End If
+    End If
+
+    ResolveWizardExecutablePath = candidate
+End Function
+
+Private Function DownloadLatestWizardPackage(ByVal repository As String, _
+                                             ByVal destinationExePath As String, _
+                                             ByVal tempFolder As String) As Boolean
+    Dim downloadUrl As String
+    Dim lowerUrl As String
+    Dim zipPath As String
+
+    downloadUrl = FetchLatestWizardDownloadUrl(repository)
+    If downloadUrl = "" Then
+        DownloadLatestWizardPackage = False
+        Exit Function
+    End If
+
+    lowerUrl = LCase$(downloadUrl)
+    If Right$(lowerUrl, 4) = ".zip" Then
+        zipPath = tempFolder & "\" & WIZARD_ZIP_NAME
+        If Not DownloadFile(downloadUrl, zipPath) Then
+            DownloadLatestWizardPackage = False
+            Exit Function
+        End If
+        If Not ExtractZipArchive(zipPath, tempFolder) Then
+            DownloadLatestWizardPackage = False
+            Exit Function
+        End If
+
+        Dim extractedExe As String
+        extractedExe = FindFileByNameRecursive(tempFolder, WIZARD_EXE_NAME)
+        If extractedExe = "" Then
+            DownloadLatestWizardPackage = False
+            Exit Function
+        End If
+
+        On Error Resume Next
+        If Dir$(destinationExePath) <> "" Then Kill destinationExePath
+        Name extractedExe As destinationExePath
+        If Err.Number <> 0 Then
+            Err.Clear
+            FileCopy extractedExe, destinationExePath
+            If Err.Number <> 0 Then
+                DownloadLatestWizardPackage = False
+                Exit Function
+            End If
+        End If
+        On Error GoTo 0
+
+        DownloadLatestWizardPackage = (Dir$(destinationExePath) <> "")
+        Exit Function
+    End If
+
+    DownloadLatestWizardPackage = DownloadFile(downloadUrl, destinationExePath)
+End Function
+
+Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As String
+    Dim http As Object
+    Dim token As String
+    Dim body As String
+    Dim apiUrl As String
+
+    On Error GoTo Fail
+    apiUrl = "https://api.github.com/repos/" & repository & "/releases/latest"
+
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    http.Open "GET", apiUrl, False
+    http.setRequestHeader "Accept", "application/vnd.github+json"
+    http.setRequestHeader "Cache-Control", "no-cache"
+    http.setRequestHeader "Pragma", "no-cache"
+    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+    token = GetGitHubToken()
+    If token <> "" Then
+        http.setRequestHeader "Authorization", "token " & token
+    End If
+    http.send
+
+    If http.Status <> 200 Then GoTo Fail
+
+    body = http.responseText
+    FetchLatestWizardDownloadUrl = ExtractWizardDownloadUrl(body)
+    Exit Function
+Fail:
+    FetchLatestWizardDownloadUrl = ""
+End Function
+
+Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
+    Dim re As Object
+    Dim matches As Object
+    Dim value As String
+
+    On Error GoTo Fail
+    Set re = CreateObject("VBScript.RegExp")
+    re.Pattern = """browser_download_url""\s*:\s*""([^""]*ElectronicLogbook\.Updater\.Wizard[^""]*\.(exe|zip))"""
+    re.Global = False
+    re.IgnoreCase = True
+
+    If re.Test(jsonText) Then
+        Set matches = re.Execute(jsonText)
+        value = CStr(matches(0).SubMatches(0))
+        value = Replace(value, "\u0026", "&")
+        value = Replace(value, "\/", "/")
+        ExtractWizardDownloadUrl = value
+    End If
+    Exit Function
+Fail:
+    ExtractWizardDownloadUrl = ""
+End Function
+
+Private Function ExtractZipArchive(ByVal zipPath As String, ByVal destinationFolder As String) As Boolean
+    Dim shellObj As Object
+    Dim command As String
+    Dim escapedZip As String
+    Dim escapedDest As String
+    Dim exitCode As Long
+
+    On Error GoTo Fail
+    escapedZip = Replace(zipPath, "'", "''")
+    escapedDest = Replace(destinationFolder, "'", "''")
+
+    command = "powershell -NoProfile -ExecutionPolicy Bypass -Command ""Expand-Archive -LiteralPath '" & _
+              escapedZip & "' -DestinationPath '" & escapedDest & "' -Force"""
+
+    Set shellObj = CreateObject("WScript.Shell")
+    exitCode = shellObj.Run(command, 0, True)
+    ExtractZipArchive = (exitCode = 0)
+    Exit Function
+Fail:
+    ExtractZipArchive = False
+End Function
+
+Private Function FindFileByNameRecursive(ByVal rootFolder As String, ByVal fileName As String) As String
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(rootFolder) Then Exit Function
+
+    FindFileByNameRecursive = FindFileByNameRecursiveInner(fso.GetFolder(rootFolder), fileName)
+End Function
+
+Private Function FindFileByNameRecursiveInner(ByVal folderObj As Object, ByVal fileName As String) As String
+    Dim fileObj As Object
+    Dim subFolder As Object
+    Dim candidate As String
+
+    For Each fileObj In folderObj.Files
+        If StrComp(fileObj.Name, fileName, vbTextCompare) = 0 Then
+            FindFileByNameRecursiveInner = CStr(fileObj.Path)
+            Exit Function
+        End If
+    Next fileObj
+
+    For Each subFolder In folderObj.SubFolders
+        candidate = FindFileByNameRecursiveInner(subFolder, fileName)
+        If candidate <> "" Then
+            FindFileByNameRecursiveInner = candidate
+            Exit Function
+        End If
+    Next subFolder
 End Function
 
 Private Sub UpdateStatus(msg As String)
@@ -1562,4 +2216,131 @@ Private Function ExtractFirstSha(text As String) As String
     Exit Function
 Fail:
     ExtractFirstSha = ""
+End Function
+
+' ==============================================================
+' STAGED UPDATE VALIDATION
+' ==============================================================
+' Opens the staged workbook read-only and confirms it is safe to
+' use as a replacement before any destructive operations begin.
+' Returns True only when all checks pass; writes a debug entry
+' and returns False on any failure so the caller can abort cleanly.
+
+Private Function ValidateStagedUpdate(stagedPath As String, _
+                                      expectedVersion As String, _
+                                      expectedRows As Long, _
+                                      expectedTotalHours As Double, _
+                                      expectedTotalKnown As Boolean) As Boolean
+    Dim stagedWb   As Workbook
+    Dim tbl        As ListObject
+    Dim actualRows As Long
+    Dim actualVer  As String
+    Dim actualTotalHours As Double
+    Dim reqName    As Variant
+    Dim failReason As String
+    Dim prevSec    As MsoAutomationSecurity
+
+    ' Prevent macros in the staged file from running during validation.
+    prevSec = Application.AutomationSecurity
+    Application.AutomationSecurity = msoAutomationSecurityForceDisable
+
+    On Error GoTo ValidationFailed
+
+    Set stagedWb = Workbooks.Open(stagedPath, ReadOnly:=True, UpdateLinks:=False)
+
+    ' 1. Logbook table must exist.
+    On Error Resume Next
+    Set tbl = stagedWb.Sheets("Logbook").ListObjects("Logbook")
+    On Error GoTo ValidationFailed
+    If tbl Is Nothing Then
+        failReason = "Logbook table missing from staged file."
+        GoTo ValidationFailed
+    End If
+
+    ' 2. Row count must match the source workbook.
+    On Error Resume Next
+    actualRows = tbl.DataBodyRange.Rows.Count
+    On Error GoTo ValidationFailed
+    If expectedRows > 0 And actualRows <> expectedRows Then
+        failReason = "Row count mismatch: expected " & expectedRows & ", found " & actualRows & "."
+        GoTo ValidationFailed
+    End If
+
+    ' 3. Version stamp must match the target version.
+    On Error Resume Next
+    actualVer = Trim(CStr(stagedWb.Names("LogbookVersion").RefersToRange.Value))
+    On Error GoTo ValidationFailed
+    If actualVer <> expectedVersion Then
+        failReason = "Version mismatch: expected " & expectedVersion & ", found """ & actualVer & """."
+        GoTo ValidationFailed
+    End If
+
+    ' 4. Required names must exist in the staged workbook.
+    For Each reqName In Array("LogbookVersion", "GitHubBranch", "DateAfterExport", _
+                              "RoutesBuilt", "RoutesDirty", "RoutesDefinitionVersion", _
+                              "suppressWarningsUntil")
+        On Error Resume Next
+        Dim nm As Name
+        Set nm = stagedWb.Names(CStr(reqName))
+        On Error GoTo ValidationFailed
+        If nm Is Nothing Then
+            failReason = "Required name missing: " & CStr(reqName)
+            GoTo ValidationFailed
+        End If
+        Set nm = Nothing
+    Next reqName
+
+    ' 5. Keywords table must be present.
+    ' The table can live on different sheets across versions,
+    ' so find it by name instead of hard-coding a sheet.
+    Dim kw As ListObject
+    Set kw = FindListObject(stagedWb, "Keywords")
+    If kw Is Nothing Then
+        failReason = "Keywords table missing from staged file."
+        GoTo ValidationFailed
+    End If
+
+    ' 6. Total-hours sanity check when the source total is available.
+    If expectedTotalKnown Then
+        actualTotalHours = GetLogbookTotalHours(stagedWb)
+        If Abs(actualTotalHours - expectedTotalHours) > 0.01 Then
+            failReason = "Total-hours mismatch: expected " & expectedTotalHours & ", found " & actualTotalHours & "."
+            GoTo ValidationFailed
+        End If
+    End If
+
+    ' All checks passed.
+    stagedWb.Close SaveChanges:=False
+    Set stagedWb = Nothing
+    Application.AutomationSecurity = prevSec
+    ValidateStagedUpdate = True
+    Exit Function
+
+ValidationFailed:
+    Dim errN As Long
+    Dim errD As String
+    errN = Err.Number
+    errD = Err.Description
+    If failReason = "" Then failReason = errD
+    On Error Resume Next
+    If Not stagedWb Is Nothing Then stagedWb.Close SaveChanges:=False
+    Application.AutomationSecurity = prevSec
+    Application.Run "WriteDebugLog", "modUpdate.ValidateStagedUpdate", errN, failReason, "Validating staged update"
+    On Error GoTo 0
+    ValidateStagedUpdate = False
+End Function
+
+Private Function GetLogbookTotalHours(wb As Workbook) As Double
+    Dim tbl As ListObject
+    Set tbl = wb.Sheets("Logbook").ListObjects("Logbook")
+
+    If tbl Is Nothing Then Err.Raise vbObjectError + 900, , "Logbook table missing"
+    If tbl.DataBodyRange Is Nothing Then
+        GetLogbookTotalHours = 0
+        Exit Function
+    End If
+
+    Dim totalCol As Long
+    totalCol = tbl.ListColumns("Total").Index
+    GetLogbookTotalHours = Application.WorksheetFunction.Sum(tbl.ListColumns(totalCol).DataBodyRange)
 End Function

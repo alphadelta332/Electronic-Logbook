@@ -7,7 +7,7 @@ Contributions are welcome, but this project has a cautious release process becau
 - Open an issue first for large changes or changes to the workbook update process.
 - Keep VBA source changes paired with the corresponding workbook changes when applicable.
 - Do not include personal logbook data, private tokens, or machine-specific paths.
-- Run `tools/Test-ReleaseMetadata.ps1` before submitting.
+- Run `tools/Test-ReleaseMetadata.ps1` and `tools/Test-VbaSourceQuality.ps1` before submitting.
 - If you changed workbook content, export the VBA source after testing so the text files match the workbook.
 
 ## Release Changes
@@ -18,7 +18,20 @@ At minimum, run:
 
 ```powershell
 .\tools\Test-ReleaseMetadata.ps1
+.\tools\Test-VbaSourceQuality.ps1
 .\tools\Test-WorkbookPublicReadiness.ps1
+.\tools\Test-WorkbookVbaParity.ps1
 ```
 
 Then smoke test the prepared workbook manually in Excel.
+
+## External Updater
+
+Build and run the updater unit tests with:
+
+```powershell
+dotnet test ElectronicLogbook.Updater.sln --configuration Release
+```
+
+The updater is an experimental Windows-only prototype. It must never overwrite, rename, or
+delete the source workbook. See `updater/README.md` for its supported migration contract.

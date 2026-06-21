@@ -4,6 +4,11 @@
 param(
     [switch]$SkipVbaImport,
     [switch]$SkipPdf,
+    [switch]$SkipWorkbookPrep,
+    [switch]$SkipWorkingCopy,
+    [switch]$SkipWizardAsset,
+    [switch]$SkipVbaCompile,
+    [switch]$SkipVbaParity,
     [switch]$SkipPublicReadinessCheck,
     [switch]$SkipGitChecks
 )
@@ -40,6 +45,7 @@ if (-not $SkipGitChecks) {
 }
 
 & (Join-Path $PSScriptRoot "Test-ReleaseMetadata.ps1") -RepoRoot $repoRoot
+& (Join-Path $PSScriptRoot "Test-VbaSourceQuality.ps1") -RepoRoot $repoRoot
 
 if (-not $SkipVbaImport) {
     Write-Host ""
@@ -51,6 +57,26 @@ if (-not $SkipPdf) {
     & (Join-Path $repoRoot "GenerateReadmePDF.ps1") -RepoPath $repoRoot
 }
 
+if (-not $SkipWorkbookPrep) {
+    Write-Host ""
+    & (Join-Path $repoRoot "PrepareForRelease.ps1") -SkipWorkingCopy:$SkipWorkingCopy
+}
+
+if (-not $SkipWizardAsset) {
+    Write-Host ""
+    & (Join-Path $repoRoot "updater\Publish-WizardAsset.ps1")
+}
+
+if (-not $SkipVbaParity) {
+    Write-Host ""
+    & (Join-Path $PSScriptRoot "Test-WorkbookVbaParity.ps1") -RepoRoot $repoRoot
+}
+
+if (-not $SkipVbaCompile) {
+    Write-Host ""
+    & (Join-Path $PSScriptRoot "Test-VbaCompileDisposable.ps1")
+}
+
 if (-not $SkipPublicReadinessCheck) {
     Write-Host ""
     & (Join-Path $PSScriptRoot "Test-WorkbookPublicReadiness.ps1") -RepoRoot $repoRoot
@@ -59,10 +85,10 @@ if (-not $SkipPublicReadinessCheck) {
 Write-Host ""
 Write-Host "Automated release prep complete." -ForegroundColor Green
 Write-Host "Manual gates still required:"
-Write-Host "  1. Confirm workbook release metadata in Excel"
-Write-Host "  2. Test the updated copy in Excel"
-Write-Host "  3. Review git diff/status"
-Write-Host "  4. Commit to dev"
-Write-Host "  5. Open and merge PR from dev to main"
+Write-Host "  1. Test the updated copy in Excel"
+Write-Host "  2. Review git diff/status"
+Write-Host "  3. Commit to dev"
+Write-Host "  4. Open and merge PR from dev to main"
 $version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
-Write-Host "  6. Tag the release as v$version"
+Write-Host "  5. Tag the release as v$version"
+Write-Host "  6. Upload wizard asset(s) from updater\dist to the GitHub release"
