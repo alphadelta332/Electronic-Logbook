@@ -10,6 +10,9 @@ Private mApplyingNewEntryLayout As Boolean
 
 Sub AddToLogbook()
 
+    Dim previousDisplayStatusBar As Boolean
+    Dim previousStatusBar As Variant
+
     On Error GoTo Cleanup
 
     ' Ensure unqualified Range() calls resolve against this workbook/session.
@@ -54,8 +57,6 @@ Sub AddToLogbook()
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
     Dim logbookWasProtected As Boolean
-    Dim previousDisplayStatusBar As Boolean
-    Dim previousStatusBar As Variant
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
