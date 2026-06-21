@@ -11,6 +11,12 @@ Sub AddToLogbook()
 
     On Error GoTo Cleanup
 
+    ' Ensure unqualified Range() calls resolve against this workbook/session.
+    On Error Resume Next
+    ThisWorkbook.Activate
+    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Activate
+    On Error GoTo Cleanup
+
     '--- Save workbook before making any changes (safeguard against mid-run crashes)
     On Error Resume Next
     ThisWorkbook.Save
@@ -66,7 +72,7 @@ Sub AddToLogbook()
             GoTo Cleanup
         End If
         RefreshTodayValue
-        todayDate = Range("today").Value
+        todayDate = CDate(GetWorkbookNameValue(ThisWorkbook, "today", Date))
         ipcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "IPC")
         opcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "OPC")
         flightReviewDetected = ipcDetected Or _
@@ -1285,7 +1291,14 @@ End Function
 
 Private Function NewEntryCell(ByVal fieldName As String) As Range
     Dim inputCell As Range
-    Set inputCell = Range(fieldName)
+    Dim nm As Name
+
+    Set nm = FindNameByBase(fieldName)
+    If nm Is Nothing Then
+        Err.Raise 1004, "NewEntryCell", "Named range not found: " & fieldName
+    End If
+
+    Set inputCell = nm.RefersToRange
 
     If inputCell.MergeCells Then
         Set NewEntryCell = inputCell.MergeArea.Cells(1, 1)
@@ -1320,7 +1333,7 @@ Private Sub ClearNewEntryFields(ByVal fieldNames As Variant)
 
     Set clearedAreas = CreateObject("Scripting.Dictionary")
     For Each fieldName In fieldNames
-        Set clearArea = Range(CStr(fieldName))
+        Set clearArea = NewEntryCell(CStr(fieldName))
         If clearArea.MergeCells Then Set clearArea = clearArea.MergeArea
         areaKey = clearArea.Worksheet.Name & "!" & clearArea.Address(External:=False)
         If Not clearedAreas.Exists(areaKey) Then
@@ -3052,6 +3065,7 @@ Public Sub ConfigureNewEntryLayoutControls()
                         On Error Resume Next
                         shp.Line.Visible = msoFalse
                         shp.Fill.Visible = msoFalse
+                        shp.OnAction = vbNullString
                         On Error GoTo 0
                     Case xlOptionButton
                         On Error Resume Next
@@ -3095,6 +3109,8 @@ Public Sub ConfigureNewEntryLayoutControls()
             On Error GoTo 0
         End If
 
+        ConfigureNewEntryCommandButtons ws
+
         RemoveRadioGroupOutlines ws
 
 NextSheet:
@@ -3105,6 +3121,55 @@ NextSheet:
         Set ws = Nothing
     Next sheetName
 End Sub
+
+Private Sub ConfigureNewEntryCommandButtons(ByVal ws As Worksheet)
+    Dim shp As Shape
+    Dim item As Shape
+    Dim actionName As String
+    Dim nameText As String
+    Dim labelText As String
+
+    For Each shp In ws.Shapes
+        actionName = vbNullString
+        nameText = LCase$(Trim$(shp.Name))
+        labelText = LCase$(Trim$(ShapeText(shp)))
+
+        If InStr(nameText, "addtologbook") > 0 Or (InStr(labelText, "add to") > 0 And InStr(labelText, "logbook") > 0) Then
+            actionName = "AddToLogbook"
+        ElseIf InStr(nameText, "reportabug") > 0 Or InStr(labelText, "report a bug") > 0 Then
+            actionName = "ReportBug"
+        ElseIf InStr(nameText, "suppresswarnings") > 0 Or InStr(labelText, "suppress warnings") > 0 Then
+            actionName = "ToggleSuppressWarnings"
+        End If
+
+        If Len(actionName) > 0 Then
+            On Error Resume Next
+            shp.OnAction = actionName
+            If shp.Type = msoGroup Then
+                For Each item In shp.GroupItems
+                    item.OnAction = actionName
+                Next item
+            End If
+            On Error GoTo 0
+        End If
+    Next shp
+End Sub
+
+Private Function ShapeText(ByVal shp As Shape) As String
+    Dim item As Shape
+
+    On Error Resume Next
+    ShapeText = CStr(shp.TextFrame.Characters.Text)
+
+    If Len(Trim$(ShapeText)) = 0 And shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            ShapeText = CStr(item.TextFrame.Characters.Text)
+            If Len(Trim$(ShapeText)) > 0 Then Exit For
+        Next item
+    End If
+
+    On Error GoTo 0
+End Function
 
 Private Sub RemoveRadioGroupOutlines(ByVal ws As Worksheet)
     ' Attempt to suppress GroupBox borders. The etched/3D border is painted by
