@@ -48,6 +48,18 @@ public sealed class UpdaterOptionsTests : IDisposable
         Assert.Equal(Path.GetFullPath(_sourcePath), options.SourcePath);
         Assert.Equal(Path.GetFullPath(output), options.OutputPath);
         Assert.Equal(Path.GetFullPath(master), options.MasterPath);
+        Assert.False(options.InPlaceSwap);
+    }
+
+    [Fact]
+    public void ParseAcceptsInPlaceFlag()
+    {
+        var output = Path.Combine(_directory, "output.xlsm");
+
+        var options = UpdaterOptions.Parse(
+            ["--source", _sourcePath, "--output", output, "--inplace"]);
+
+        Assert.True(options.InPlaceSwap);
     }
 
     public void Dispose()

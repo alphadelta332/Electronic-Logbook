@@ -51,6 +51,7 @@ public partial class MainWindow : Window
     private bool _preflightPassed;
     private string? _latestTag;
     private string? _lastOutputPath;
+    private string? _lastBackupPath;
     private string? _lastReportPath;
     private string? _downloadDirectoryToCleanup;
     private CancellationTokenSource? _updateCts;
@@ -332,20 +333,23 @@ public partial class MainWindow : Window
         _preflightPassed = false;
 
         var source = _context.SourcePath;
-        var output = _context.OutputPath;
+        var stagedOutput = _context.UseInPlaceSwap
+            ? BuildStagedOutputPath(source)
+            : _context.OutputPath;
 
         var sourceOk = File.Exists(source) &&
-            string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase);
+            string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
+            !IsWorkbookLocked(source);
         CheckSourcePathText.Text = sourceOk
             ? "[OK] Source workbook exists and is .xlsm"
-            : "[FAIL] Source workbook missing or not .xlsm";
+            : "[FAIL] Source workbook missing, invalid, or currently open";
 
-        var outputDir = string.IsNullOrWhiteSpace(output)
+        var outputDir = string.IsNullOrWhiteSpace(stagedOutput)
             ? string.Empty
-            : (Path.GetDirectoryName(output) ?? string.Empty);
+            : (Path.GetDirectoryName(stagedOutput) ?? string.Empty);
         var outputDirExists = !string.IsNullOrWhiteSpace(outputDir) && Directory.Exists(outputDir);
-        var outputMissing = !File.Exists(output);
-        var outputExtOk = string.Equals(Path.GetExtension(output), ".xlsm", StringComparison.OrdinalIgnoreCase);
+        var outputMissing = !File.Exists(stagedOutput);
+        var outputExtOk = string.Equals(Path.GetExtension(stagedOutput), ".xlsm", StringComparison.OrdinalIgnoreCase);
         var writeAccess = false;
         if (outputDirExists)
         {
@@ -503,7 +507,9 @@ public partial class MainWindow : Window
         var progressSink = new WizardProgressSink(AppendProgressEvent);
 
         var source = _context.SourcePath;
-        var output = _context.OutputPath;
+        var stagedOutput = _context.UseInPlaceSwap
+            ? BuildStagedOutputPath(source)
+            : _context.OutputPath;
 
         try
         {
@@ -530,11 +536,14 @@ public partial class MainWindow : Window
             var report = await Task.Run(() => migrator.Migrate(new MigrationRequest(
                 source,
                 resolvedMaster,
-                output,
+                stagedOutput,
                 manifest)), _updateCts.Token);
 
-            _lastOutputPath = output;
-            _lastReportPath = Path.ChangeExtension(output, ".update-report.json");
+            _lastOutputPath = stagedOutput;
+            _lastBackupPath = null;
+            _lastReportPath = _context.UseInPlaceSwap
+                ? Path.ChangeExtension(source, ".update-report.json")
+                : Path.ChangeExtension(stagedOutput, ".update-report.json");
             if (DetailedLoggingCheckBox.IsChecked != false)
             {
                 await File.WriteAllTextAsync(
@@ -543,9 +552,24 @@ public partial class MainWindow : Window
                     _updateCts.Token);
             }
 
+            if (_context.UseInPlaceSwap)
+            {
+                AppendLog("Finalizing workbook handoff...");
+                var handoff = await Task.Run(
+                    () => WorkbookHandoff.ReplaceSourceWithUpdated(source, stagedOutput),
+                    _updateCts.Token);
+                _lastOutputPath = handoff.FinalWorkbookPath;
+                _lastBackupPath = handoff.BackupWorkbookPath;
+            }
+
             CompleteTitleText.Text = "Update Complete";
-            CompleteSummaryText.Text = "The updated workbook was created and validated.";
+            CompleteSummaryText.Text = _context.UseInPlaceSwap
+                ? "Update complete. The original filename now points to the updated workbook."
+                : "The updated workbook was created and validated.";
             CompleteOutputPathText.Text = $"Updated workbook: {_lastOutputPath}";
+            CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
+                ? string.Empty
+                : $"Backup workbook: {_lastBackupPath}";
             OpenUpdatedButton.IsEnabled = true;
             FooterStatusText.Text = "Update completed.";
 
@@ -556,6 +580,7 @@ public partial class MainWindow : Window
             CompleteTitleText.Text = "Update Cancelled";
             CompleteSummaryText.Text = "Update was cancelled before completion.";
             CompleteOutputPathText.Text = "Updated workbook: not created";
+            CompleteBackupPathText.Text = string.Empty;
             OpenUpdatedButton.IsEnabled = false;
             FooterStatusText.Text = "Update cancelled.";
             _stepIndex = 5;
@@ -565,6 +590,7 @@ public partial class MainWindow : Window
             CompleteTitleText.Text = "Update Failed";
             CompleteSummaryText.Text = ex.Message;
             CompleteOutputPathText.Text = "Updated workbook: not available";
+            CompleteBackupPathText.Text = string.Empty;
             OpenUpdatedButton.IsEnabled = false;
             FooterStatusText.Text = "Update failed.";
             AppendLog($"ERROR: {ex.Message}");
@@ -709,6 +735,7 @@ public partial class MainWindow : Window
         string? output = null;
         string? master = null;
         var repository = UpdaterOptions.DefaultRepository;
+        var useInPlaceSwap = true;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -727,6 +754,12 @@ public partial class MainWindow : Window
                 case "--repo":
                     repository = ReadOptionValue(args, ref index, arg);
                     break;
+                case "--inplace":
+                    useInPlaceSwap = true;
+                    break;
+                case "--no-inplace":
+                    useInPlaceSwap = false;
+                    break;
             }
         }
 
@@ -739,7 +772,8 @@ public partial class MainWindow : Window
             OutputPath: Path.GetFullPath(output),
             MasterPath: master,
             Repository: repository,
-            IsLocalMasterMode: !string.IsNullOrWhiteSpace(master));
+            IsLocalMasterMode: !string.IsNullOrWhiteSpace(master),
+            UseInPlaceSwap: useInPlaceSwap);
     }
 
     private static string GetDefaultSourcePath()
@@ -772,6 +806,32 @@ public partial class MainWindow : Window
         return Path.Combine(directory, $"{name}_Updated_{DateTime.Now:yyyyMMdd-HHmmss}.xlsm");
     }
 
+    private static string BuildStagedOutputPath(string sourcePath)
+    {
+        var directory = Path.GetDirectoryName(sourcePath);
+        var name = Path.GetFileNameWithoutExtension(sourcePath);
+        var extension = Path.GetExtension(sourcePath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            directory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+        }
+
+        return Path.Combine(directory, $"{name}_Updated_Staged_{DateTime.Now:yyyyMMdd-HHmmss}{extension}");
+    }
+
+    private static bool IsWorkbookLocked(string workbookPath)
+    {
+        try
+        {
+            using var stream = File.Open(workbookPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch
+        {
+            return true;
+        }
+    }
+
     private static string ReadOptionValue(IReadOnlyList<string> args, ref int index, string option)
     {
         index++;
@@ -796,5 +856,6 @@ public partial class MainWindow : Window
         string OutputPath,
         string? MasterPath,
         string Repository,
-        bool IsLocalMasterMode);
+        bool IsLocalMasterMode,
+        bool UseInPlaceSwap);
 }

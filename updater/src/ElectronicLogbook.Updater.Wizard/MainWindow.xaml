@@ -79,6 +79,7 @@
                 <TextBlock Text="Complete" FontSize="20" FontWeight="SemiBold" x:Name="CompleteTitleText" />
                 <TextBlock Margin="0,8,0,0" x:Name="CompleteSummaryText" TextWrapping="Wrap" />
                 <TextBlock Margin="0,12,0,0" x:Name="CompleteOutputPathText" TextWrapping="Wrap" />
+                <TextBlock Margin="0,6,0,0" x:Name="CompleteBackupPathText" TextWrapping="Wrap" />
                 <Button Margin="0,14,0,0" Width="180" HorizontalAlignment="Left" x:Name="OpenUpdatedButton" Content="Open updated workbook" Click="OpenUpdatedButton_OnClick" />
             </StackPanel>
 

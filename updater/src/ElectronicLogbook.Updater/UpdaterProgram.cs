@@ -17,7 +17,9 @@ public static class UpdaterProgram
             }
 
             Console.WriteLine("Electronic Logbook external updater prototype");
-            Console.WriteLine("The source workbook will not be modified.");
+            Console.WriteLine(options.InPlaceSwap
+                ? "In-place mode enabled: source filename will be replaced after validation."
+                : "The source workbook will not be modified.");
 
             var masterPath = options.MasterPath;
             ReleaseManifest? manifest = null;
@@ -39,13 +41,26 @@ public static class UpdaterProgram
                 options.OutputPath!,
                 manifest));
 
+            var finalWorkbookPath = options.OutputPath!;
+            string? backupWorkbookPath = null;
+            if (options.InPlaceSwap)
+            {
+                var handoff = WorkbookHandoff.ReplaceSourceWithUpdated(options.SourcePath!, options.OutputPath!);
+                finalWorkbookPath = handoff.FinalWorkbookPath;
+                backupWorkbookPath = handoff.BackupWorkbookPath;
+            }
+
             var reportPath = options.ReportPath ??
-                Path.ChangeExtension(options.OutputPath!, ".update-report.json");
+                Path.ChangeExtension(finalWorkbookPath, ".update-report.json");
             await File.WriteAllTextAsync(
                 reportPath,
                 JsonSerializer.Serialize(report, JsonDefaults.Indented));
 
-            Console.WriteLine($"Updated copy created: {options.OutputPath}");
+            Console.WriteLine($"Updated workbook: {finalWorkbookPath}");
+            if (!string.IsNullOrWhiteSpace(backupWorkbookPath))
+            {
+                Console.WriteLine($"Backup workbook: {backupWorkbookPath}");
+            }
             Console.WriteLine($"Validation report: {reportPath}");
             return 0;
         }

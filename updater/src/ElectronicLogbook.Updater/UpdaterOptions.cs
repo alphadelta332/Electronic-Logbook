@@ -6,6 +6,7 @@ public sealed record UpdaterOptions(
     string? MasterPath,
     string? ReportPath,
     string Repository,
+    bool InPlaceSwap,
     bool ShowHelp)
 {
     public const string DefaultRepository = "alphadelta332/Electronic-Logbook";
@@ -13,16 +14,19 @@ public sealed record UpdaterOptions(
     public const string HelpText =
         """
         Usage:
-          ElectronicLogbook.Updater --source <logbook.xlsm> --output <updated.xlsm> [options]
+                    ElectronicLogbook.Updater --source <logbook.xlsm> --output <updated.xlsm> [options]
 
         Options:
           --master <master.xlsm>   Use a local master workbook instead of GitHub latest release.
           --report <report.json>   Write the validation report to a specific path.
           --repo <owner/name>      GitHub repository. Defaults to alphadelta332/Electronic-Logbook.
+                    --inplace                Replace source filename with updated file and keep *_Old backup.
+                    --no-inplace             Disable in-place swap behavior.
           --help                   Show this help.
 
         Safety:
-          The source workbook is opened read-only and is never renamed, deleted, or overwritten.
+                    By default, the source workbook is replaced in-place after validation and a
+                    timestamped *_Old backup is created in the same folder.
           The output path must not already exist.
         """;
 
@@ -33,6 +37,7 @@ public sealed record UpdaterOptions(
         string? master = null;
         string? report = null;
         var repository = DefaultRepository;
+        var inPlaceSwap = false;
         var showHelp = false;
 
         for (var index = 0; index < args.Count; index++)
@@ -55,6 +60,12 @@ public sealed record UpdaterOptions(
                 case "--repo":
                     repository = ReadValue(args, ref index, arg);
                     break;
+                case "--inplace":
+                    inPlaceSwap = true;
+                    break;
+                case "--no-inplace":
+                    inPlaceSwap = false;
+                    break;
                 case "--help":
                 case "-h":
                     showHelp = true;
@@ -66,7 +77,7 @@ public sealed record UpdaterOptions(
 
         if (showHelp)
         {
-            return new(source, output, master, report, repository, true);
+            return new(source, output, master, report, repository, inPlaceSwap, true);
         }
 
         if (string.IsNullOrWhiteSpace(source) || string.IsNullOrWhiteSpace(output))
@@ -105,7 +116,7 @@ public sealed record UpdaterOptions(
             throw new UpdaterUsageException("--repo must use owner/name format.");
         }
 
-        return new(source, output, master, report, repository, false);
+        return new(source, output, master, report, repository, inPlaceSwap, false);
     }
 
     private static string ReadValue(IReadOnlyList<string> args, ref int index, string option)
