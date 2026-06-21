@@ -1397,37 +1397,36 @@ Private Sub RefreshAndRegroupPivots(masterWb As Workbook)
     End If
 
     ' Fix HoursByYear date grouping.
-    ' Mirrors the manual fix: remove Date, refresh, re-add, group.
+    ' Older workbooks can have slightly different grouped-field layouts,
+    ' so we use tolerant field operations and a yearly-layout fallback.
     On Error GoTo GroupFail
     Set pt = masterWb.Sheets("ChartData").PivotTables("HoursByYear")
+    On Error GoTo 0
 
-    ' Remove Date and refresh so cache rebuilds cleanly with valid dates
-    pt.PivotFields("Date").Orientation = xlHidden
+    ' Remove Date and refresh so cache rebuilds cleanly with valid dates.
+    ' This can fail on some grouped layouts, so continue with fallback logic.
+    TrySetPivotFieldOrientation pt, "Date", xlHidden
     DoEvents
     Application.Calculation = xlCalculationAutomatic
     pt.RefreshTable
     Application.Calculation = xlCalculationManual
     DoEvents
 
-    ' Re-add Date before grouping - LabelRange requires field to be in rows
-    pt.PivotFields("Date").Orientation = xlRowField
-    pt.PivotFields("Date").Position = 1
-    DoEvents
+    ' Re-add Date before grouping when available.
+    If TrySetPivotFieldOrientation(pt, "Date", xlRowField) Then
+        On Error Resume Next
+        pt.PivotFields("Date").Position = 1
+        On Error GoTo 0
+        DoEvents
 
-    ' LabelRange.Cells(1) is the header - Cells(2) is the first data cell
-    pt.PivotFields("Date").LabelRange.Cells(2).Group _
-        Start:=True, End:=True, _
-        Periods:=Array(False, False, False, False, True, False, True)
+        If Not TryGroupDateByMonthAndYear(pt) Then
+            ApplyHoursByYearPivotFallbackLayout pt
+            Exit Sub
+        End If
+    End If
 
-    ' Grouping hides the base Date field - re-add it as the day-level drill
-    On Error Resume Next
-    pt.PivotFields("Date").Orientation = xlRowField
-    On Error GoTo 0
-
-    ' Collapse to Year level so chart shows yearly bars by default
-    On Error Resume Next
-    pt.PivotFields("Years (Date)").ShowDetail = False
-    On Error GoTo 0
+    ' Keep yearly layout stable for the chart defaults.
+    ApplyHoursByYearPivotFallbackLayout pt
     Exit Sub
 
 GroupFail:
@@ -1441,6 +1440,60 @@ GroupFail:
            vbExclamation, "Pivot Grouping Warning"
     Err.Clear
 End Sub
+
+Private Sub ApplyHoursByYearPivotFallbackLayout(ByVal pt As PivotTable)
+    If pt Is Nothing Then Exit Sub
+
+    If PivotFieldExists(pt, "Years (Date)") Then
+        TrySetPivotFieldOrientation pt, "Years (Date)", xlRowField
+
+        On Error Resume Next
+        pt.PivotFields("Years (Date)").Position = 1
+        pt.PivotFields("Years (Date)").ShowDetail = False
+        On Error GoTo 0
+
+        TrySetPivotFieldOrientation pt, "Date", xlHidden
+        TrySetPivotFieldOrientation pt, "Months (Date)", xlHidden
+        TrySetPivotFieldOrientation pt, "Days (Date)", xlHidden
+        TrySetPivotFieldOrientation pt, "Quarters (Date)", xlHidden
+    Else
+        ' If grouped fields do not exist, leave Date as the active row field.
+        TrySetPivotFieldOrientation pt, "Date", xlRowField
+    End If
+End Sub
+
+Private Function TryGroupDateByMonthAndYear(ByVal pt As PivotTable) As Boolean
+    On Error GoTo GroupFailed
+
+    pt.PivotFields("Date").LabelRange.Cells(2).Group _
+        Start:=True, End:=True, _
+        Periods:=Array(False, False, False, False, True, False, True)
+
+    TryGroupDateByMonthAndYear = True
+    Exit Function
+
+GroupFailed:
+    TryGroupDateByMonthAndYear = False
+    Err.Clear
+End Function
+
+Private Function TrySetPivotFieldOrientation(ByVal pt As PivotTable, ByVal fieldName As String, ByVal orientation As XlPivotFieldOrientation) As Boolean
+    On Error GoTo SetFailed
+
+    pt.PivotFields(fieldName).Orientation = orientation
+    TrySetPivotFieldOrientation = True
+    Exit Function
+
+SetFailed:
+    TrySetPivotFieldOrientation = False
+    Err.Clear
+End Function
+
+Private Function PivotFieldExists(ByVal pt As PivotTable, ByVal fieldName As String) As Boolean
+    On Error Resume Next
+    PivotFieldExists = Not pt.PivotFields(fieldName) Is Nothing
+    On Error GoTo 0
+End Function
 
 ' ==============================================================
 ' GITHUB TOKEN
