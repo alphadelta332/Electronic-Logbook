@@ -6,6 +6,7 @@ Private mProtectionDisabledForSession As Boolean
 Private Const NEW_ENTRY_ACTIVE_SHEET As String = "New Entry"
 Private Const NEW_ENTRY_UNUSED_SHEET As String = "New Entry Unused Layout"
 Private Const NEW_ENTRY_SWAP_TEMP_SHEET As String = "New Entry Swap Temp"
+Private mApplyingNewEntryLayout As Boolean
 
 Sub AddToLogbook()
 
@@ -3012,39 +3013,69 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
     Dim layoutId As Long
     Dim desiredCompact As Boolean
     Dim currentCompact As Boolean
+    Dim layoutChanged As Boolean
     Dim fieldNames As Variant
     Dim fieldValues() As Variant
     Dim i As Long
     Dim nameText As String
-    Dim targetAddress As String
+    Dim previousScreenUpdating As Boolean
+    Dim previousEnableEvents As Boolean
+    Dim previousCalculation As XlCalculation
+
+    If mApplyingNewEntryLayout Then Exit Sub
+    mApplyingNewEntryLayout = True
+
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
+    previousCalculation = Application.Calculation
+
+    On Error GoTo CleanFail
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
 
     layoutId = ResolveNewEntryLayoutId(requestedLayout)
     desiredCompact = (layoutId = 1)
     currentCompact = IsCurrentNewEntryLayoutCompact()
-    fieldNames = NewEntryLayoutFieldNames()
-    ReDim fieldValues(LBound(fieldNames) To UBound(fieldNames))
+    layoutChanged = (desiredCompact <> currentCompact)
 
-    For i = LBound(fieldNames) To UBound(fieldNames)
-        nameText = CStr(fieldNames(i))
-        fieldValues(i) = GetWorkbookNameValue(ThisWorkbook, nameText, vbNullString)
-    Next i
+    If layoutChanged Then
+        fieldNames = NewEntryLayoutFieldNames()
+        ReDim fieldValues(LBound(fieldNames) To UBound(fieldNames))
 
-    If desiredCompact <> currentCompact Then
+        For i = LBound(fieldNames) To UBound(fieldNames)
+            nameText = CStr(fieldNames(i))
+            fieldValues(i) = GetWorkbookNameValue(ThisWorkbook, nameText, vbNullString)
+        Next i
+
         SwapNewEntryLayoutBindings fieldNames
+
+        For i = LBound(fieldNames) To UBound(fieldNames)
+            SetWorkbookNameValue ThisWorkbook, CStr(fieldNames(i)), fieldValues(i)
+        Next i
     End If
 
     If CurrentConfiguredNewEntryLayoutId() <> layoutId Then
         SetWorkbookNameValue ThisWorkbook, "NewEntryLayout", layoutId
     End If
 
-    For i = LBound(fieldNames) To UBound(fieldNames)
-        SetWorkbookNameValue ThisWorkbook, CStr(fieldNames(i)), fieldValues(i)
-    Next i
-
     SyncNewEntryLayoutButtons layoutId
-    ConfigureNewEntryLayoutControls
-    EnforceNewEntrySheetRoles
-    ActivateNewEntrySheet
+
+    If layoutChanged Then
+        ConfigureNewEntryLayoutControls
+        EnforceNewEntrySheetRoles
+        ActivateNewEntrySheet
+    End If
+
+CleanExit:
+    Application.Calculation = previousCalculation
+    Application.EnableEvents = previousEnableEvents
+    Application.ScreenUpdating = previousScreenUpdating
+    mApplyingNewEntryLayout = False
+    Exit Sub
+
+CleanFail:
+    Resume CleanExit
 End Sub
 
 Public Sub ConfigureNewEntryLayoutControls()
