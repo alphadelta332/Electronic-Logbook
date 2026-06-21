@@ -1804,10 +1804,10 @@ Private Function ValidateStagedUpdate(stagedPath As String, _
     Next reqName
 
     ' 5. Keywords table must be present.
-    On Error Resume Next
+    ' The table can live on different sheets across versions,
+    ' so find it by name instead of hard-coding a sheet.
     Dim kw As ListObject
-    Set kw = stagedWb.Sheets("Settings").ListObjects("Keywords")
-    On Error GoTo ValidationFailed
+    Set kw = FindListObject(stagedWb, "Keywords")
     If kw Is Nothing Then
         failReason = "Keywords table missing from staged file."
         GoTo ValidationFailed
