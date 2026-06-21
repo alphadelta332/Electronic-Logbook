@@ -29,6 +29,9 @@ Sub AddToLogbook()
         Application.ScreenUpdating = False      ' Prevent screen flicker
         Application.EnableEvents = False        ' Prevent event triggers during execution
         Application.Calculation = xlCalculationManual   ' Disable auto-calc for speed
+        previousDisplayStatusBar = Application.DisplayStatusBar
+        previousStatusBar = Application.StatusBar
+        SetAddToLogbookStatus "Starting checks"
 
     '===============================
     ' STEP 2: DECLARE VARIABLES
@@ -51,6 +54,8 @@ Sub AddToLogbook()
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
     Dim logbookWasProtected As Boolean
+    Dim previousDisplayStatusBar As Boolean
+    Dim previousStatusBar As Variant
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
@@ -73,6 +78,7 @@ Sub AddToLogbook()
             GoTo Cleanup
         End If
         RefreshTodayValue
+        SetAddToLogbookStatus "Validating entry"
         todayDate = CDate(GetWorkbookNameValue(ThisWorkbook, "today", Date))
         ipcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "IPC")
         opcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "OPC")
@@ -167,6 +173,7 @@ Sub AddToLogbook()
     ' STEP 4: WARNING CHECKS (CONTINUE OR CANCEL)
     '===============================
         diagStep = "Step 4: Warning Checks"
+        SetAddToLogbookStatus "Running warnings"
     ' All warnings use vbOKCancel: OK = proceed, Cancel = go back.
     ' Warnings can be suppressed for 24 hours via the dedicated sheet button (ToggleSuppressWarnings).
 
@@ -457,6 +464,7 @@ Sub AddToLogbook()
     '===============================
         diagStep = "Step 5a: Add Row"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Writing entry"
 
     '--- 5a. Add a clean table row without inheriting direct visual formats
         Dim fmtCol As Long
@@ -530,6 +538,7 @@ Sub AddToLogbook()
     '--- 5g. Sort Logbook by Date
         diagStep = "Step 5g: Sort Logbook"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Sorting logbook"
         Application.Calculate
         SortLogbookByDate tbl
 
@@ -543,12 +552,9 @@ Sub AddToLogbook()
     '===============================
     ' STEP 6: UPDATE CHART DATA
     '===============================
-        diagStep = "Step 6a: Calculate"
-        WriteCrumb diagStep
-        Application.Calculate
-
         diagStep = "Step 6b: Update Chart"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Updating chart"
         On Error Resume Next
         UpdateHoursOverTimeChart ThisWorkbook
         If Err.Number <> 0 Then
@@ -567,6 +573,7 @@ Sub AddToLogbook()
     ' Entry is already saved - errors here must not surface as failures to the user.
         diagStep = "Step 7: Reset Form"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Resetting form"
         On Error Resume Next
 
     '--- 7a. Reset Date Fields
@@ -593,6 +600,7 @@ Sub AddToLogbook()
     '===============================
         diagStep = "Step 8a: Add Routes"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Updating routes"
         On Error Resume Next
         Call AddNewRoutes
         On Error GoTo Cleanup
@@ -600,15 +608,10 @@ Sub AddToLogbook()
         '--- Refresh all pivot tables in the workbook
         diagStep = "Step 8b: Refresh Pivots"
         WriteCrumb diagStep
+        SetAddToLogbookStatus "Refreshing summaries"
         DoEvents
-        Dim ws  As Worksheet
-        Dim pt  As PivotTable
         On Error Resume Next
-        For Each ws In ThisWorkbook.Worksheets
-            For Each pt In ws.PivotTables
-                pt.RefreshTable
-            Next pt
-        Next ws
+        RefreshWorkbookPivotCaches ThisWorkbook
         FixHoursByYearPivotLayout ThisWorkbook
         On Error GoTo Cleanup
 
@@ -616,6 +619,7 @@ Sub AddToLogbook()
     ' STEP 9: SUCCESS MESSAGE
     '===============================
         diagStep = "Step 9: Success"
+        SetAddToLogbookStatus "Done"
 
         MsgBox "Entry successfully added to Logbook!", vbInformation
 
@@ -640,6 +644,16 @@ Cleanup:
         Application.EnableEvents = True
         Application.Calculation = xlCalculationAutomatic
         Application.CutCopyMode = False
+        If previousDisplayStatusBar Then
+            If VarType(previousStatusBar) = vbString Then
+                Application.StatusBar = CStr(previousStatusBar)
+            Else
+                Application.StatusBar = False
+            End If
+        Else
+            Application.StatusBar = False
+        End If
+        Application.DisplayStatusBar = previousDisplayStatusBar
 
         If logbookWasProtected Then
             On Error Resume Next
@@ -660,6 +674,12 @@ Cleanup:
 
         Exit Sub
 
+End Sub
+
+Private Sub SetAddToLogbookStatus(ByVal stepText As String)
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Electronic Logbook: " & stepText
+    DoEvents
 End Sub
 
 Private Sub ProtectLogbookSheetForRuntime(ws As Worksheet)
@@ -1250,10 +1270,21 @@ Private Sub ResetNewEntryDateFields(ByVal targetDate As Date)
 End Sub
 
 Private Sub RefreshDateCalculationFormulas(ByVal tbl As ListObject)
+    Dim dateRange As Range
+
     Range("neDate").Formula = NewEntryDateFormula()
 
     If Not tbl.DataBodyRange Is Nothing Then
-        tbl.ListColumns("Date").DataBodyRange.Formula = LogbookDateFormula()
+        Set dateRange = tbl.ListColumns("Date").DataBodyRange
+
+        ' Keep this as a repair step only; avoid rewriting the whole column every entry.
+        If dateRange.Rows.Count = 1 Then
+            If Not dateRange.Cells(1, 1).HasFormula Then
+                dateRange.Formula = LogbookDateFormula()
+            End If
+        ElseIf Not dateRange.Cells(dateRange.Rows.Count, 1).HasFormula Then
+            dateRange.Formula = LogbookDateFormula()
+        End If
     End If
 End Sub
 
@@ -1270,6 +1301,25 @@ Private Sub SortLogbookByDate(ByVal tbl As ListObject)
         .MatchCase = False
         .Apply
     End With
+End Sub
+
+Private Sub RefreshWorkbookPivotCaches(ByVal wb As Workbook)
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+    Dim refreshedCaches As Object
+    Dim cacheKey As String
+
+    Set refreshedCaches = CreateObject("Scripting.Dictionary")
+
+    For Each ws In wb.Worksheets
+        For Each pt In ws.PivotTables
+            cacheKey = CStr(pt.PivotCache.Index)
+            If Not refreshedCaches.Exists(cacheKey) Then
+                pt.PivotCache.Refresh
+                refreshedCaches.Add cacheKey, True
+            End If
+        Next pt
+    Next ws
 End Sub
 
 Private Function NewEntryDateFormula() As String
