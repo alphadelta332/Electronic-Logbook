@@ -63,6 +63,21 @@ Run the disposable Excel migration test locally with:
 - Does not yet provide a full visual-diff test or normalize every possible user-customized format.
 - The executable is not currently code-signed or distributed as a release asset.
 
+## Release Asset Packaging
+
+Build release-ready wizard assets with:
+
+```powershell
+.\updater\Publish-WizardAsset.ps1
+```
+
+This script outputs:
+
+- `updater/dist/ElectronicLogbook.Updater.Wizard.exe`
+- `updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip`
+
+Upload at least one of these assets to the GitHub release. The in-workbook launcher will use the `.exe` directly and can fall back to the `.zip` asset.
+
 ## Product Direction (Implemented)
 
 Confirmed product direction:

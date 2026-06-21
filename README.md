@@ -125,7 +125,10 @@ Initial release.
 
 ## Requirements
 
-- Microsoft Excel for Windows (2016 or later recommended)
+- Microsoft Excel for Windows
+  - Primary supported: Microsoft 365 on Windows 11
+  - Supported perpetual: Excel 2021 and newer
+  - Older versions are best-effort only
 - Macros must be enabled
 - For automatic updates: internet access on the machine running the logbook
 
@@ -285,6 +288,15 @@ The following data is carried across from your existing logbook to the updated v
 ### Manual update check
 
 You can check for updates at any time by running the `CheckForUpdateManual` macro from the Developer tab or by wiring it to a button on any sheet.
+
+### Backup and recovery actions
+
+The workbook now includes user-triggered safety actions you can run from the Developer tab or wire to buttons:
+
+- `BackupCurrentWorkbook` creates a timestamped backup copy beside your workbook.
+- `RestorePreviousVersion` finds the latest `_Old` backup, creates a restored copy, and opens it for review.
+- `RebuildRoutesTableNow` rebuilds the Routes table on demand.
+- `ExportDiagnostics` writes a redacted diagnostics snapshot for support.
 
 ---
 

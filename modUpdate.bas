@@ -13,6 +13,7 @@ Private Const GITHUB_USER  As String = "alphadelta332"
 Private Const GITHUB_REPO  As String = "Electronic-Logbook"
 Private Const MASTER_FILE  As String = "Electronic_Logbook_Master.xlsm"
 Private Const WIZARD_EXE_NAME As String = "ElectronicLogbook.Updater.Wizard.exe"
+Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-x64.zip"
 ' -------------------------------------------------------------
 
 ' ==============================================================
@@ -210,8 +211,9 @@ Private Sub RunUpdate(newVersion As String)
     ' Prefer the external wizard flow when available.
     ' If launch fails for any reason, keep the legacy in-workbook update path.
     Dim sourceWorkbookPath As String
+    Dim wizardReason As String
     sourceWorkbookPath = localPath & "\" & originalName
-    If TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO) Then
+    If TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason) Then
         UpdateStatus ""
          MsgBox "The external updater wizard has started." & vbCrLf & vbCrLf & _
              "This workbook will now close so the update can continue safely." & vbCrLf & vbCrLf & _
@@ -237,6 +239,11 @@ Private Sub RunUpdate(newVersion As String)
          End If
 
         Exit Sub
+    End If
+
+    If wizardReason <> "" Then
+        MsgBox "The external updater wizard was not available, so the classic updater will be used for this run." & vbCrLf & vbCrLf & _
+               "Reason: " & wizardReason, vbInformation, "Using Classic Updater"
     End If
 
     diagStep = "Downloading master workbook"
@@ -1846,7 +1853,9 @@ Fail:
     DownloadFile = False
 End Function
 
-Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, ByVal repository As String) As Boolean
+Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, _
+                                                ByVal repository As String, _
+                                                Optional ByRef reason As String = "") As Boolean
     Dim wizardPath As String
     Dim commandLine As String
     Dim quotedExe As String
@@ -1855,8 +1864,14 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     On Error GoTo Fail
 
     wizardPath = ResolveWizardExecutablePath(repository)
-    If wizardPath = "" Then Exit Function
-    If Dir$(wizardPath) = "" Then Exit Function
+    If wizardPath = "" Then
+        If reason = "" Then reason = "No wizard asset was found in release assets."
+        Exit Function
+    End If
+    If Dir$(wizardPath) = "" Then
+        reason = "Wizard executable path could not be resolved."
+        Exit Function
+    End If
 
     quotedExe = """" & wizardPath & """"
     commandLine = quotedExe & " --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
@@ -1867,6 +1882,7 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     Exit Function
 
 Fail:
+    reason = Err.Description
     TryLaunchExternalUpdaterWizard = False
 End Function
 
@@ -1898,7 +1914,7 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
 
     candidate = tempFolder & "\" & WIZARD_EXE_NAME
     If Dir$(candidate) = "" Then
-        If Not DownloadLatestWizardExecutable(repository, candidate) Then
+        If Not DownloadLatestWizardPackage(repository, candidate, tempFolder) Then
             ResolveWizardExecutablePath = ""
             Exit Function
         End If
@@ -1907,16 +1923,56 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
     ResolveWizardExecutablePath = candidate
 End Function
 
-Private Function DownloadLatestWizardExecutable(ByVal repository As String, ByVal destinationPath As String) As Boolean
+Private Function DownloadLatestWizardPackage(ByVal repository As String, _
+                                             ByVal destinationExePath As String, _
+                                             ByVal tempFolder As String) As Boolean
     Dim downloadUrl As String
+    Dim lowerUrl As String
+    Dim zipPath As String
 
     downloadUrl = FetchLatestWizardDownloadUrl(repository)
     If downloadUrl = "" Then
-        DownloadLatestWizardExecutable = False
+        DownloadLatestWizardPackage = False
         Exit Function
     End If
 
-    DownloadLatestWizardExecutable = DownloadFile(downloadUrl, destinationPath)
+    lowerUrl = LCase$(downloadUrl)
+    If Right$(lowerUrl, 4) = ".zip" Then
+        zipPath = tempFolder & "\" & WIZARD_ZIP_NAME
+        If Not DownloadFile(downloadUrl, zipPath) Then
+            DownloadLatestWizardPackage = False
+            Exit Function
+        End If
+        If Not ExtractZipArchive(zipPath, tempFolder) Then
+            DownloadLatestWizardPackage = False
+            Exit Function
+        End If
+
+        Dim extractedExe As String
+        extractedExe = FindFileByNameRecursive(tempFolder, WIZARD_EXE_NAME)
+        If extractedExe = "" Then
+            DownloadLatestWizardPackage = False
+            Exit Function
+        End If
+
+        On Error Resume Next
+        If Dir$(destinationExePath) <> "" Then Kill destinationExePath
+        Name extractedExe As destinationExePath
+        If Err.Number <> 0 Then
+            Err.Clear
+            FileCopy extractedExe, destinationExePath
+            If Err.Number <> 0 Then
+                DownloadLatestWizardPackage = False
+                Exit Function
+            End If
+        End If
+        On Error GoTo 0
+
+        DownloadLatestWizardPackage = (Dir$(destinationExePath) <> "")
+        Exit Function
+    End If
+
+    DownloadLatestWizardPackage = DownloadFile(downloadUrl, destinationExePath)
 End Function
 
 Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As String
@@ -1956,7 +2012,7 @@ Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
 
     On Error GoTo Fail
     Set re = CreateObject("VBScript.RegExp")
-    re.Pattern = """browser_download_url""\s*:\s*""([^""]*ElectronicLogbook\.Updater\.Wizard\.exe)"""
+    re.Pattern = """browser_download_url""\s*:\s*""([^""]*ElectronicLogbook\.Updater\.Wizard[^""]*\.(exe|zip))"""
     re.Global = False
     re.IgnoreCase = True
 
@@ -1970,6 +2026,57 @@ Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
     Exit Function
 Fail:
     ExtractWizardDownloadUrl = ""
+End Function
+
+Private Function ExtractZipArchive(ByVal zipPath As String, ByVal destinationFolder As String) As Boolean
+    Dim shellObj As Object
+    Dim command As String
+    Dim escapedZip As String
+    Dim escapedDest As String
+    Dim exitCode As Long
+
+    On Error GoTo Fail
+    escapedZip = Replace(zipPath, "'", "''")
+    escapedDest = Replace(destinationFolder, "'", "''")
+
+    command = "powershell -NoProfile -ExecutionPolicy Bypass -Command ""Expand-Archive -LiteralPath '" & _
+              escapedZip & "' -DestinationPath '" & escapedDest & "' -Force"""
+
+    Set shellObj = CreateObject("WScript.Shell")
+    exitCode = shellObj.Run(command, 0, True)
+    ExtractZipArchive = (exitCode = 0)
+    Exit Function
+Fail:
+    ExtractZipArchive = False
+End Function
+
+Private Function FindFileByNameRecursive(ByVal rootFolder As String, ByVal fileName As String) As String
+    Dim fso As Object
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(rootFolder) Then Exit Function
+
+    FindFileByNameRecursive = FindFileByNameRecursiveInner(fso.GetFolder(rootFolder), fileName)
+End Function
+
+Private Function FindFileByNameRecursiveInner(ByVal folderObj As Object, ByVal fileName As String) As String
+    Dim fileObj As Object
+    Dim subFolder As Object
+    Dim candidate As String
+
+    For Each fileObj In folderObj.Files
+        If StrComp(fileObj.Name, fileName, vbTextCompare) = 0 Then
+            FindFileByNameRecursiveInner = CStr(fileObj.Path)
+            Exit Function
+        End If
+    Next fileObj
+
+    For Each subFolder In folderObj.SubFolders
+        candidate = FindFileByNameRecursiveInner(subFolder, fileName)
+        If candidate <> "" Then
+            FindFileByNameRecursiveInner = candidate
+            Exit Function
+        End If
+    Next subFolder
 End Function
 
 Private Sub UpdateStatus(msg As String)

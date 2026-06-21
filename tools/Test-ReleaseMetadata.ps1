@@ -19,6 +19,7 @@ $requiredTooling = @(
     "PrepareForTesting.ps1",
     "tools\ReleaseChecklist.ps1",
     "tools\Test-VbaSourceQuality.ps1",
+    "tools\Test-VbaCompileDisposable.ps1",
     "tools\Test-WorkbookPublicReadiness.ps1",
     "tools\Test-WorkbookVbaParity.ps1"
 )

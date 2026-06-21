@@ -16,7 +16,7 @@ jobs:
   publish:
     name: Publish GitHub release assets
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Check out repository
@@ -42,10 +42,14 @@ jobs:
       - name: Build release integrity files
         shell: pwsh
         run: |
+          ./updater/Publish-WizardAsset.ps1
+
           $version = (Get-Content version.txt -Raw).Trim()
           $assets = @(
             Get-Item Electronic_Logbook_Master.xlsm
             Get-Item README.pdf
+            Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.exe
+            Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
           )
 
           $manifestAssets = foreach ($asset in $assets) {
@@ -73,6 +77,8 @@ jobs:
           gh release create $env:GITHUB_REF_NAME `
             Electronic_Logbook_Master.xlsm `
             README.pdf `
+            updater/dist/ElectronicLogbook.Updater.Wizard.exe `
+            updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
             SHA256SUMS.txt `
             release-manifest.json `
             --title $env:GITHUB_REF_NAME `

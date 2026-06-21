@@ -1620,6 +1620,168 @@ Public Sub RebuildRoutesTableNow()
     RebuildRoutesTable ThisWorkbook
 End Sub
 
+Public Sub BackupCurrentWorkbook()
+    Dim localPath As String
+    Dim canonicalName As String
+    Dim backupPath As String
+
+    On Error GoTo Fail
+    localPath = ResolveLocalPath(ThisWorkbook)
+    canonicalName = RecoveryCanonicalWorkbookName(ThisWorkbook.Name)
+    backupPath = BuildRecoveryPath(localPath, canonicalName, "Backup")
+
+    ThisWorkbook.SaveCopyAs backupPath
+    MsgBox "Backup created successfully:" & vbCrLf & vbCrLf & backupPath, _
+           vbInformation, "Backup Complete"
+    Exit Sub
+
+Fail:
+    MsgBox "Could not create a backup copy." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Backup Failed"
+End Sub
+
+Public Sub RestorePreviousVersion()
+    Dim localPath As String
+    Dim canonicalName As String
+    Dim latestOldPath As String
+    Dim restoredPath As String
+    Dim oldPattern As String
+
+    On Error GoTo Fail
+    localPath = ResolveLocalPath(ThisWorkbook)
+    canonicalName = RecoveryCanonicalWorkbookName(ThisWorkbook.Name)
+    latestOldPath = FindLatestOldBackupPath(localPath, canonicalName)
+
+    If latestOldPath = "" Then
+         oldPattern = BuildOldPattern(canonicalName)
+        MsgBox "No previous-version backup was found in this folder." & vbCrLf & vbCrLf & _
+             "Expected pattern: " & oldPattern, _
+               vbExclamation, "Restore Previous Version"
+        Exit Sub
+    End If
+
+    restoredPath = BuildRecoveryPath(localPath, canonicalName, "Restored")
+    FileCopy latestOldPath, restoredPath
+    Workbooks.Open restoredPath, ReadOnly:=False
+
+    MsgBox "A restored workbook copy has been created and opened:" & vbCrLf & vbCrLf & _
+           restoredPath & vbCrLf & vbCrLf & _
+           "Review it, then keep/rename it as needed.", _
+           vbInformation, "Restore Copy Ready"
+    Exit Sub
+
+Fail:
+    MsgBox "Could not prepare the restored workbook copy." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, _
+           vbCritical, "Restore Failed"
+End Sub
+
+Private Function RecoveryCanonicalWorkbookName(ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim markerPos As Long
+    Dim suffix As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+        extension = Mid$(workbookName, dotPos)
+    Else
+        baseName = workbookName
+        extension = ""
+    End If
+
+    markerPos = InStrRev(baseName, "_Old")
+    If markerPos > 0 Then
+        suffix = Mid$(baseName, markerPos + 4)
+        If suffix = "" Or Left$(suffix, 1) = "_" Then
+            baseName = Left$(baseName, markerPos - 1)
+        End If
+    End If
+
+    RecoveryCanonicalWorkbookName = baseName & extension
+End Function
+
+Private Function BuildOldPattern(ByVal canonicalName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+
+    dotPos = InStrRev(canonicalName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(canonicalName, dotPos - 1)
+        extension = Mid$(canonicalName, dotPos)
+    Else
+        baseName = canonicalName
+        extension = ".xlsm"
+    End If
+
+    BuildOldPattern = baseName & "_Old_*" & extension
+End Function
+
+Private Function BuildRecoveryPath(ByVal localPath As String, ByVal canonicalName As String, ByVal marker As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim timestamp As String
+    Dim candidate As String
+    Dim suffix As Long
+
+    dotPos = InStrRev(canonicalName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(canonicalName, dotPos - 1)
+        extension = Mid$(canonicalName, dotPos)
+    Else
+        baseName = canonicalName
+        extension = ".xlsm"
+    End If
+
+    timestamp = Format(Now, "yyyymmdd-hhmmss")
+    candidate = localPath & "\" & baseName & "_" & marker & "_" & timestamp & extension
+    suffix = 1
+    Do While Dir$(candidate) <> ""
+        candidate = localPath & "\" & baseName & "_" & marker & "_" & timestamp & "_" & suffix & extension
+        suffix = suffix + 1
+    Loop
+
+    BuildRecoveryPath = candidate
+End Function
+
+Private Function FindLatestOldBackupPath(ByVal localPath As String, ByVal canonicalName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+    Dim extension As String
+    Dim pattern As String
+    Dim candidate As String
+    Dim latestPath As String
+    Dim latestStamp As Date
+    Dim currentStamp As Date
+
+    dotPos = InStrRev(canonicalName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(canonicalName, dotPos - 1)
+        extension = Mid$(canonicalName, dotPos)
+    Else
+        baseName = canonicalName
+        extension = ".xlsm"
+    End If
+
+    pattern = baseName & "_Old_*" & extension
+    candidate = Dir$(localPath & "\" & pattern)
+    Do While candidate <> ""
+        currentStamp = FileDateTime(localPath & "\" & candidate)
+        If latestPath = "" Or currentStamp > latestStamp Then
+            latestStamp = currentStamp
+            latestPath = localPath & "\" & candidate
+        End If
+        candidate = Dir$
+    Loop
+
+    FindLatestOldBackupPath = latestPath
+End Function
+
 Public Sub CheckRoutesTableOnOpen(Optional wb As Workbook = Nothing)
     If wb Is Nothing Then Set wb = ThisWorkbook
 

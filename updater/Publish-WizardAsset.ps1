@@ -1,0 +1,48 @@
+[CmdletBinding()]
+param(
+    [string]$OutputDirectory,
+    [switch]$SkipBuild
+)
+
+$ErrorActionPreference = "Stop"
+
+$repoRoot = Split-Path $PSScriptRoot -Parent
+$projectPath = Join-Path $repoRoot "updater\src\ElectronicLogbook.Updater.Wizard\ElectronicLogbook.Updater.Wizard.csproj"
+
+if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+    $OutputDirectory = Join-Path $repoRoot "updater\dist"
+}
+
+if (-not (Test-Path $OutputDirectory)) {
+    New-Item -ItemType Directory -Path $OutputDirectory | Out-Null
+}
+
+$publishDir = Join-Path $repoRoot "updater\src\ElectronicLogbook.Updater.Wizard\bin\Release\net8.0-windows\win-x64\publish-single-file"
+$assetExe = Join-Path $OutputDirectory "ElectronicLogbook.Updater.Wizard.exe"
+$assetZip = Join-Path $OutputDirectory "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+
+if (-not $SkipBuild) {
+    dotnet publish $projectPath -c Release -r win-x64 --self-contained true `
+        /p:PublishSingleFile=true `
+        /p:IncludeNativeLibrariesForSelfExtract=true `
+        /p:EnableCompressionInSingleFile=true `
+        /p:PublishTrimmed=false `
+        -o $publishDir
+}
+
+$publishedExe = Join-Path $publishDir "ElectronicLogbook.Updater.Wizard.exe"
+if (-not (Test-Path $publishedExe)) {
+    throw "Wizard publish output not found: $publishedExe"
+}
+
+Copy-Item $publishedExe $assetExe -Force
+if (Test-Path $assetZip) {
+    Remove-Item $assetZip -Force
+}
+
+Compress-Archive -Path $publishedExe -DestinationPath $assetZip -Force
+
+Write-Host "Wizard assets ready:" -ForegroundColor Green
+Write-Host "  EXE: $assetExe"
+Write-Host "  ZIP: $assetZip"
+Write-Host "Upload at least one of these assets to the GitHub release." -ForegroundColor Yellow

@@ -6,6 +6,8 @@ param(
     [switch]$SkipPdf,
     [switch]$SkipWorkbookPrep,
     [switch]$SkipWorkingCopy,
+    [switch]$SkipWizardAsset,
+    [switch]$SkipVbaCompile,
     [switch]$SkipVbaParity,
     [switch]$SkipPublicReadinessCheck,
     [switch]$SkipGitChecks
@@ -60,9 +62,19 @@ if (-not $SkipWorkbookPrep) {
     & (Join-Path $repoRoot "PrepareForRelease.ps1") -SkipWorkingCopy:$SkipWorkingCopy
 }
 
+if (-not $SkipWizardAsset) {
+    Write-Host ""
+    & (Join-Path $repoRoot "updater\Publish-WizardAsset.ps1")
+}
+
 if (-not $SkipVbaParity) {
     Write-Host ""
     & (Join-Path $PSScriptRoot "Test-WorkbookVbaParity.ps1") -RepoRoot $repoRoot
+}
+
+if (-not $SkipVbaCompile) {
+    Write-Host ""
+    & (Join-Path $PSScriptRoot "Test-VbaCompileDisposable.ps1")
 }
 
 if (-not $SkipPublicReadinessCheck) {
@@ -79,3 +91,4 @@ Write-Host "  3. Commit to dev"
 Write-Host "  4. Open and merge PR from dev to main"
 $version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
 Write-Host "  5. Tag the release as v$version"
+Write-Host "  6. Upload wizard asset(s) from updater\dist to the GitHub release"
