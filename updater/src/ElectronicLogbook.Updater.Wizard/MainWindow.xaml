@@ -1,0 +1,100 @@
+﻿<Window x:Class="ElectronicLogbook.Updater.Wizard.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="Electronic Logbook Updater"
+        Height="700"
+        Width="980"
+        MinHeight="680"
+        MinWidth="940"
+        WindowStartupLocation="CenterScreen">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" BorderThickness="0,0,0,1" BorderBrush="#D0D7DE" Padding="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="Electronic Logbook Update Wizard" FontSize="24" FontWeight="SemiBold" />
+                <TextBlock x:Name="StepHeaderText" Margin="0,6,0,0" FontSize="14" Foreground="#4B5563" Text="Step 1 of 6" />
+            </StackPanel>
+        </Border>
+
+        <Grid Grid.Row="1" Margin="0,14,0,14">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel Grid.Row="0" x:Name="WelcomePanel">
+                <TextBlock Text="Welcome" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="This wizard creates a separate updated workbook. Your source workbook is never overwritten." />
+                <TextBlock Margin="0,16,0,0" x:Name="InstalledVersionText" Text="Installed version: unknown" />
+                <TextBlock Margin="0,6,0,0" x:Name="LatestVersionText" Text="Update channel: checking..." />
+                <TextBlock Margin="0,6,0,0" x:Name="LastCheckedText" Text="Last checked: never" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="0" x:Name="AvailablePanel" Visibility="Collapsed">
+                <TextBlock Text="Update Available" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" x:Name="AvailableVersionText" Text="A newer version is available." />
+                <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" Text="The updater will create a separate updated workbook and keep your original workbook unchanged." />
+                <TextBlock Margin="0,12,0,0" x:Name="ReleaseSummaryText" TextWrapping="Wrap" Text="Release notes preview unavailable." />
+            </StackPanel>
+
+            <StackPanel Grid.Row="0" x:Name="PreflightPanel" Visibility="Collapsed">
+                <TextBlock Text="Preflight Checks" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="All checks must pass before update starts." />
+                <UniformGrid Margin="0,14,0,0" Rows="4" Columns="1">
+                    <TextBlock x:Name="CheckSourcePathText" Text="[ ] Source workbook path" />
+                    <TextBlock x:Name="CheckOutputPathText" Text="[ ] Output path and write access" />
+                    <TextBlock x:Name="CheckMasterOrRepoText" Text="[ ] Update channel availability" />
+                    <TextBlock x:Name="CheckDiskText" Text="[ ] Disk space" />
+                </UniformGrid>
+                <Button Margin="0,14,0,0" Width="160" HorizontalAlignment="Left" x:Name="RunPreflightButton" Content="Run checks" Click="RunPreflightButton_OnClick" />
+                <TextBlock Margin="0,8,0,0" x:Name="PreflightSummaryText" Text="Checks have not run yet." />
+            </StackPanel>
+
+            <StackPanel Grid.Row="0" x:Name="ReadyPanel" Visibility="Collapsed">
+                <TextBlock Text="Ready to Update" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="Click Start to begin the update." />
+                <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write detailed diagnostic report beside output workbook" IsChecked="True" />
+            </StackPanel>
+
+            <StackPanel Grid.Row="0" x:Name="UpdatingPanel" Visibility="Collapsed">
+                <TextBlock Text="Updating" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock Margin="0,8,0,0" x:Name="UpdatingPhaseText" Text="Waiting to start..." />
+                <ProgressBar Margin="0,12,0,0" Height="16" x:Name="UpdateProgressBar" IsIndeterminate="True" Minimum="0" Maximum="100" Value="0" />
+                <TextBox Margin="0,12,0,0" x:Name="UpdateLogTextBox" Height="280" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" TextWrapping="Wrap" IsReadOnly="True" />
+                <TextBlock Margin="0,8,0,0" x:Name="CancelHintText" Text="Cancel is honored at phase boundaries." />
+            </StackPanel>
+
+            <StackPanel Grid.Row="0" x:Name="CompletePanel" Visibility="Collapsed">
+                <TextBlock Text="Complete" FontSize="20" FontWeight="SemiBold" x:Name="CompleteTitleText" />
+                <TextBlock Margin="0,8,0,0" x:Name="CompleteSummaryText" TextWrapping="Wrap" />
+                <TextBlock Margin="0,12,0,0" x:Name="CompleteOutputPathText" TextWrapping="Wrap" />
+                <Button Margin="0,14,0,0" Width="180" HorizontalAlignment="Left" x:Name="OpenUpdatedButton" Content="Open updated workbook" Click="OpenUpdatedButton_OnClick" />
+            </StackPanel>
+
+            <Border Grid.Row="1" Margin="0,20,0,0" BorderThickness="0,1,0,0" BorderBrush="#E5E7EB" />
+
+        </Grid>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" VerticalAlignment="Center" x:Name="FooterStatusText" Text="Ready" />
+            <Button Grid.Column="1" Width="100" Margin="10,0,0,0" x:Name="BackButton" Content="Back" Click="BackButton_OnClick" />
+            <Button Grid.Column="2" Width="100" Margin="10,0,0,0" x:Name="NextButton" Content="Next" Click="NextButton_OnClick" />
+            <Button Grid.Column="3" Width="100" Margin="10,0,0,0" x:Name="CancelButton" Content="Cancel" Click="CancelButton_OnClick" />
+        </Grid>
+    </Grid>
+</Window>

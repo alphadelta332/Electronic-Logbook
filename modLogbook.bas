@@ -3,6 +3,9 @@ Option Explicit
 
 Public Const ROUTE_DEFINITION_VERSION As Long = 3
 Private mProtectionDisabledForSession As Boolean
+Private Const NEW_ENTRY_ACTIVE_SHEET As String = "New Entry"
+Private Const NEW_ENTRY_UNUSED_SHEET As String = "New Entry Unused Layout"
+Private Const NEW_ENTRY_SWAP_TEMP_SHEET As String = "New Entry Swap Temp"
 
 Sub AddToLogbook()
 
@@ -1600,6 +1603,8 @@ End Sub
 Public Sub CheckRoutesTableOnOpen(Optional wb As Workbook = Nothing)
     If wb Is Nothing Then Set wb = ThisWorkbook
 
+    If ShouldSkipRoutesPromptOnOpen(wb) Then Exit Sub
+
     If RoutesBuiltState(wb) = "" Then
         If MsgBox("Your Routes table needs to be built for the first time." & vbCrLf & vbCrLf & _
                   "This scans your logbook and builds your route map data." & vbCrLf & _
@@ -1620,6 +1625,49 @@ Public Sub CheckRoutesTableOnOpen(Optional wb As Workbook = Nothing)
         End If
     End If
 End Sub
+
+Private Function ShouldSkipRoutesPromptOnOpen(wb As Workbook) As Boolean
+    Dim branchValue As String
+
+    If ShouldSuppressOpenPrompts() Then
+        ShouldSkipRoutesPromptOnOpen = True
+        Exit Function
+    End If
+
+    branchValue = LCase$(Trim$(CStr(GetWorkbookNameValue(wb, "GitHubBranch", ""))))
+    If branchValue <> "" And branchValue <> "main" Then
+        ShouldSkipRoutesPromptOnOpen = True
+        Exit Function
+    End If
+
+    ShouldSkipRoutesPromptOnOpen = False
+End Function
+
+Private Function ShouldSuppressOpenPrompts() As Boolean
+    Dim flagValue As String
+
+    On Error Resume Next
+
+    ' Automation sessions (for example, COM-driven tooling) should not block on MsgBox prompts.
+    If Application.Visible = False Then
+        ShouldSuppressOpenPrompts = True
+        Exit Function
+    End If
+
+    If Application.UserControl = False Then
+        ShouldSuppressOpenPrompts = True
+        Exit Function
+    End If
+
+    flagValue = LCase$(Trim$(Environ$("ELB_SUPPRESS_OPEN_PROMPTS")))
+    If flagValue = "1" Or flagValue = "true" Or flagValue = "yes" Then
+        ShouldSuppressOpenPrompts = True
+        Exit Function
+    End If
+
+    On Error GoTo 0
+    ShouldSuppressOpenPrompts = False
+End Function
 
 Public Function EnsureRoutesReadyForExport(Optional wb As Workbook = Nothing) As Boolean
     If wb Is Nothing Then Set wb = ThisWorkbook
@@ -2905,6 +2953,442 @@ Public Sub RefreshSuppressWarningsButton()
     End If
 End Sub
 
+Public Sub InitializeNewEntryLayoutUI()
+    Dim desiredLayout As Long
+
+    desiredLayout = ResolveNewEntryLayoutId(GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))
+    ConfigureNewEntryLayoutControls
+    ApplyConfiguredNewEntryLayout desiredLayout
+End Sub
+
+Public Sub SetNewEntryLayoutFromButtons()
+    ApplyConfiguredNewEntryLayout ResolveNewEntryLayoutId( _
+        GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))
+End Sub
+
+Public Sub SetNewEntryLayout1()
+    SetCompactView
+End Sub
+
+Public Sub SetNewEntryLayout2()
+    SetGroupedView
+End Sub
+
+Public Sub SetGroupedView()
+    ApplyConfiguredNewEntryLayout 2
+End Sub
+
+Public Sub SetCompactView()
+    ApplyConfiguredNewEntryLayout 1
+End Sub
+
+Public Sub SetNewEntryLayoutCompactButton()
+    ApplyConfiguredNewEntryLayout 1
+End Sub
+
+Public Sub SetNewEntryLayoutGroupedButton()
+    ApplyConfiguredNewEntryLayout 2
+End Sub
+
+Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Variant)
+    Dim layoutId As Long
+    Dim desiredCompact As Boolean
+    Dim currentCompact As Boolean
+    Dim fieldNames As Variant
+    Dim fieldValues() As Variant
+    Dim i As Long
+    Dim nameText As String
+    Dim targetAddress As String
+
+    layoutId = ResolveNewEntryLayoutId(requestedLayout)
+    desiredCompact = (layoutId = 1)
+    currentCompact = IsCurrentNewEntryLayoutCompact()
+    fieldNames = NewEntryLayoutFieldNames()
+    ReDim fieldValues(LBound(fieldNames) To UBound(fieldNames))
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        nameText = CStr(fieldNames(i))
+        fieldValues(i) = GetWorkbookNameValue(ThisWorkbook, nameText, vbNullString)
+    Next i
+
+    If desiredCompact <> currentCompact Then
+        SwapNewEntryLayoutBindings fieldNames
+    End If
+
+    If CurrentConfiguredNewEntryLayoutId() <> layoutId Then
+        SetWorkbookNameValue ThisWorkbook, "NewEntryLayout", layoutId
+    End If
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        SetWorkbookNameValue ThisWorkbook, CStr(fieldNames(i)), fieldValues(i)
+    Next i
+
+    SyncNewEntryLayoutButtons layoutId
+    ConfigureNewEntryLayoutControls
+    EnforceNewEntrySheetRoles
+    ActivateNewEntrySheet
+End Sub
+
+Public Sub ConfigureNewEntryLayoutControls()
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim layoutBtnA As Shape
+    Dim layoutBtnB As Shape
+    Dim compactBtn As Shape
+    Dim groupedBtn As Shape
+    Dim linkedCellName As String
+    Dim sheetName As Variant
+
+    For Each sheetName In Array(NEW_ENTRY_ACTIVE_SHEET, NEW_ENTRY_UNUSED_SHEET)
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(CStr(sheetName))
+        On Error GoTo 0
+        If ws Is Nothing Then GoTo NextSheet
+
+        For Each shp In ws.Shapes
+            If shp.Type = msoFormControl Then
+                Select Case shp.FormControlType
+                    Case xlGroupBox
+                        On Error Resume Next
+                        shp.Line.Visible = msoFalse
+                        shp.Fill.Visible = msoFalse
+                        On Error GoTo 0
+                    Case xlOptionButton
+                        On Error Resume Next
+                        shp.Line.Visible = msoFalse
+                        linkedCellName = LCase$(Trim$(shp.ControlFormat.LinkedCell))
+                        If linkedCellName = "newentrylayout" _
+                            Or shp.OnAction = "SetNewEntryLayoutCompactButton" _
+                            Or shp.OnAction = "SetNewEntryLayoutGroupedButton" _
+                            Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutCompactButton" _
+                            Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutGroupedButton" _
+                            Or LCase$(shp.Name) = "setcompactview" _
+                            Or LCase$(shp.Name) = "setgroupedview" _
+                            Or LCase$(shp.Name) = "newentrylayoutcompactoption" _
+                            Or LCase$(shp.Name) = "newentrylayoutgroupedoption" Then
+                            shp.ControlFormat.LinkedCell = vbNullString
+                            If layoutBtnA Is Nothing Then
+                                Set layoutBtnA = shp
+                            ElseIf layoutBtnB Is Nothing Then
+                                Set layoutBtnB = shp
+                            End If
+                        End If
+                        On Error GoTo 0
+                End Select
+            End If
+        Next shp
+
+        If Not layoutBtnA Is Nothing And Not layoutBtnB Is Nothing Then
+            If layoutBtnA.Left <= layoutBtnB.Left Then
+                Set compactBtn = layoutBtnA
+                Set groupedBtn = layoutBtnB
+            Else
+                Set compactBtn = layoutBtnB
+                Set groupedBtn = layoutBtnA
+            End If
+
+            On Error Resume Next
+            compactBtn.Name = "NewEntryLayoutCompactOption"
+            groupedBtn.Name = "NewEntryLayoutGroupedOption"
+            compactBtn.OnAction = "SetNewEntryLayoutCompactButton"
+            groupedBtn.OnAction = "SetNewEntryLayoutGroupedButton"
+            On Error GoTo 0
+        End If
+
+        RemoveRadioGroupOutlines ws
+
+NextSheet:
+        Set layoutBtnA = Nothing
+        Set layoutBtnB = Nothing
+        Set compactBtn = Nothing
+        Set groupedBtn = Nothing
+        Set ws = Nothing
+    Next sheetName
+End Sub
+
+Private Sub RemoveRadioGroupOutlines(ByVal ws As Worksheet)
+    ' Attempt to suppress GroupBox borders. The etched/3D border is painted by
+    ' Windows at the OS level, so VBA Line properties may not fully hide it.
+    ' GroupBoxes must NOT be deleted - they provide independent grouping for the
+    ' two separate sets of option buttons on this sheet.
+    Dim shp As Shape
+    Dim bgColor As Long
+
+    On Error Resume Next
+    bgColor = ws.Range("A1").Interior.Color
+    If bgColor = 0 Then bgColor = RGB(255, 255, 255)
+    On Error GoTo 0
+
+    For Each shp In ws.Shapes
+        If shp.Type = msoFormControl Then
+            If shp.FormControlType = xlGroupBox Then
+                On Error Resume Next
+                shp.TextFrame.Characters.Text = ""
+                shp.Line.Visible = msoFalse
+                shp.Fill.Visible = msoFalse
+                shp.Line.ForeColor.RGB = bgColor
+                shp.Line.Transparency = 1
+                On Error GoTo 0
+            End If
+        End If
+    Next shp
+End Sub
+
+Private Sub SyncNewEntryLayoutButtons(ByVal layoutId As Long)
+    Dim ws As Worksheet
+    Dim shp As Shape
+    Dim layoutBtnA As Shape
+    Dim layoutBtnB As Shape
+    Dim compactBtn As Shape
+    Dim groupedBtn As Shape
+    Dim linkedCellName As String
+    Dim sheetName As Variant
+    Dim compactAction As String
+    Dim groupedAction As String
+
+    For Each sheetName In Array(NEW_ENTRY_ACTIVE_SHEET, NEW_ENTRY_UNUSED_SHEET)
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(CStr(sheetName))
+        On Error GoTo 0
+        If ws Is Nothing Then GoTo NextSheet
+
+        For Each shp In ws.Shapes
+            If shp.Type = msoFormControl Then
+                If shp.FormControlType = xlOptionButton Then
+                    On Error Resume Next
+                    linkedCellName = LCase$(Trim$(shp.ControlFormat.LinkedCell))
+                    On Error GoTo 0
+                    If linkedCellName = "newentrylayout" _
+                        Or shp.OnAction = "SetNewEntryLayoutCompactButton" _
+                        Or shp.OnAction = "SetNewEntryLayoutGroupedButton" _
+                        Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutCompactButton" _
+                        Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutGroupedButton" _
+                        Or LCase$(shp.Name) = "newentrylayoutcompactoption" _
+                        Or LCase$(shp.Name) = "newentrylayoutgroupedoption" _
+                        Or LCase$(shp.Name) = "setcompactview" _
+                        Or LCase$(shp.Name) = "setgroupedview" Then
+                        If layoutBtnA Is Nothing Then
+                            Set layoutBtnA = shp
+                        ElseIf layoutBtnB Is Nothing Then
+                            Set layoutBtnB = shp
+                        End If
+                    End If
+                End If
+            End If
+        Next shp
+
+        If Not layoutBtnA Is Nothing And Not layoutBtnB Is Nothing Then
+            If layoutBtnA.Left <= layoutBtnB.Left Then
+                Set compactBtn = layoutBtnA
+                Set groupedBtn = layoutBtnB
+            Else
+                Set compactBtn = layoutBtnB
+                Set groupedBtn = layoutBtnA
+            End If
+
+            On Error Resume Next
+            compactAction = compactBtn.OnAction
+            groupedAction = groupedBtn.OnAction
+            compactBtn.OnAction = vbNullString
+            groupedBtn.OnAction = vbNullString
+
+            compactBtn.ControlFormat.Value = IIf(layoutId = 1, xlOn, xlOff)
+            groupedBtn.ControlFormat.Value = IIf(layoutId = 2, xlOn, xlOff)
+
+            compactBtn.OnAction = compactAction
+            groupedBtn.OnAction = groupedAction
+            On Error GoTo 0
+        End If
+
+NextSheet:
+        Set layoutBtnA = Nothing
+        Set layoutBtnB = Nothing
+        Set compactBtn = Nothing
+        Set groupedBtn = Nothing
+        Set ws = Nothing
+    Next sheetName
+End Sub
+
+Private Function CurrentConfiguredNewEntryLayoutId() As Long
+    CurrentConfiguredNewEntryLayoutId = ResolveNewEntryLayoutId( _
+        GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))
+End Function
+
+Private Function IsCurrentNewEntryLayoutCompact() As Boolean
+    Dim refersToText As String
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    refersToText = CStr(ThisWorkbook.Names("neSeIcusDay").RefersTo)
+    On Error GoTo 0
+
+    ' Layout marker: compact and grouped have different neSeIcusDay cells.
+    If InStr(1, refersToText, "$O$12", vbTextCompare) > 0 Then
+        IsCurrentNewEntryLayoutCompact = True
+        Exit Function
+    End If
+
+    If InStr(1, refersToText, "$C$18", vbTextCompare) > 0 Then
+        IsCurrentNewEntryLayoutCompact = False
+        Exit Function
+    End If
+
+    ' Fallback marker if cell addresses ever change: compact template has named
+    ' layout buttons, grouped template has generic option-button names.
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET)
+    If Not ws Is Nothing Then
+        IsCurrentNewEntryLayoutCompact = Not (ws.Shapes("SetGroupedView") Is Nothing)
+    End If
+    On Error GoTo 0
+End Function
+
+Private Sub SwapNewEntryLayoutBindings(ByVal fieldNames As Variant)
+    Dim i As Long
+    Dim nameText As String
+    Dim primaryName As Name
+    Dim secondaryName As Name
+    Dim primaryRef As String
+    Dim secondaryRef As String
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        nameText = CStr(fieldNames(i))
+        On Error Resume Next
+        Set primaryName = ThisWorkbook.Names(nameText)
+        On Error GoTo 0
+        Set secondaryName = FindNameByBase(nameText & "2")
+
+        If Not primaryName Is Nothing And Not secondaryName Is Nothing Then
+            primaryRef = primaryName.RefersTo
+            secondaryRef = secondaryName.RefersTo
+            primaryName.RefersTo = secondaryRef
+            secondaryName.RefersTo = primaryRef
+        End If
+
+        Set primaryName = Nothing
+        Set secondaryName = Nothing
+    Next i
+End Sub
+
+Private Function FindNameByBase(ByVal baseName As String) As Name
+    Dim nm As Name
+    Dim probe As String
+
+    probe = LCase$(baseName)
+
+    For Each nm In ThisWorkbook.Names
+        If LCase$(NameBaseText(nm.Name)) = probe Then
+            Set FindNameByBase = nm
+            Exit Function
+        End If
+    Next nm
+End Function
+
+Private Function NameBaseText(ByVal fullName As String) As String
+    If InStrRev(fullName, "!") > 0 Then
+        NameBaseText = Mid$(fullName, InStrRev(fullName, "!") + 1)
+    Else
+        NameBaseText = fullName
+    End If
+End Function
+
+Private Sub EnforceNewEntrySheetRoles()
+    Dim activeSheet As Worksheet
+    Dim inactiveSheet As Worksheet
+    Dim wbWasProtected As Boolean
+
+    Set activeSheet = ResolveSheetFromWorkbookName("neDate")
+    Set inactiveSheet = ResolveSheetFromNameBase("neDate2")
+    If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
+
+    wbWasProtected = ThisWorkbook.ProtectStructure
+    On Error Resume Next
+    If wbWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
+
+    If activeSheet.Name <> NEW_ENTRY_ACTIVE_SHEET Or inactiveSheet.Name <> NEW_ENTRY_UNUSED_SHEET Then
+        activeSheet.Name = NEW_ENTRY_SWAP_TEMP_SHEET
+        inactiveSheet.Name = NEW_ENTRY_UNUSED_SHEET
+        activeSheet.Name = NEW_ENTRY_ACTIVE_SHEET
+    End If
+
+    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Visible = xlSheetVisible
+    ThisWorkbook.Sheets(NEW_ENTRY_UNUSED_SHEET).Visible = xlSheetVeryHidden
+
+    If wbWasProtected Then
+        ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Function ResolveSheetFromWorkbookName(ByVal nameText As String) As Worksheet
+    Dim nm As Name
+    On Error Resume Next
+    Set nm = ThisWorkbook.Names(nameText)
+    On Error GoTo 0
+    If nm Is Nothing Then Exit Function
+
+    Set ResolveSheetFromWorkbookName = ResolveSheetFromRefersTo(nm.RefersTo)
+End Function
+
+Private Function ResolveSheetFromNameBase(ByVal baseName As String) As Worksheet
+    Dim nm As Name
+    Set nm = FindNameByBase(baseName)
+    If nm Is Nothing Then Exit Function
+
+    Set ResolveSheetFromNameBase = ResolveSheetFromRefersTo(nm.RefersTo)
+End Function
+
+Private Function ResolveSheetFromRefersTo(ByVal refersToText As String) As Worksheet
+    Dim bangPos As Long
+    Dim sheetToken As String
+
+    bangPos = InStr(refersToText, "!")
+    If bangPos <= 0 Then Exit Function
+
+    sheetToken = Left$(refersToText, bangPos - 1)
+    sheetToken = Replace(sheetToken, "=", "")
+    sheetToken = Replace(sheetToken, "'", "")
+
+    On Error Resume Next
+    Set ResolveSheetFromRefersTo = ThisWorkbook.Sheets(sheetToken)
+    On Error GoTo 0
+End Function
+
+Private Sub ActivateNewEntrySheet()
+    On Error Resume Next
+    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Activate
+    On Error GoTo 0
+End Sub
+
+Private Function ResolveNewEntryLayoutId(ByVal requestedLayout As Variant) As Long
+    Dim candidate As Variant
+
+    candidate = requestedLayout
+    If IsEmpty(candidate) Then
+        candidate = GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 2)
+    End If
+
+    If Not IsNumeric(candidate) Then
+        ResolveNewEntryLayoutId = 1
+        Exit Function
+    End If
+
+    If CLng(candidate) = 1 Then
+        ResolveNewEntryLayoutId = 1
+    Else
+        ResolveNewEntryLayoutId = 2
+    End If
+End Function
+
+Private Function NewEntryLayoutFieldNames() As Variant
+    NewEntryLayoutFieldNames = Array( _
+        "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "nePIC", "neOtherCrew", "neDetails", _
+        "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", "neSeCommandDay", "neSeCommandNight", _
+        "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", "neMeCommandDay", "neMeCommandNight", _
+        "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", "neLandingsDay", "neLandingsNight", _
+        "neILS", "neRNAV", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", "neSI1", "neSI2", "neSI3", "neSI4")
+End Function
+
 Public Sub VerifyCurrencyChecks()
     Dim entryCount As Long
 
@@ -3254,6 +3738,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
 
     UnlockNamedRangesByPrefix wb, "ne"
     UnlockNamedRangeIfPresent wb, "DateAfterExport"
+    UnlockNamedRangeIfPresent wb, "NewEntryLayout"
     UnlockNamedRangeIfPresent wb, "FROverride"
     UnlockNamedRangeIfPresent wb, "IPCOverride"
     UnlockNamedRangeIfPresent wb, "OPCOverride"

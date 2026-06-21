@@ -56,3 +56,103 @@ Run the disposable Excel migration test locally with:
 - Does not yet provide a full visual-diff test or normalize every possible user-customized format.
 - Does not replace the existing in-workbook updater.
 - The executable is not currently code-signed or distributed as a release asset.
+
+## Planned Installer-Style Wizard
+
+Confirmed product direction:
+
+- Wizard flow UI (not a single blank progress bar)
+- Locked update experience while migration is running
+- Auto-check for updates at startup
+- User-triggered update start (no automatic install)
+- Explicit recovery/rollback actions in the completion screen
+
+Planned wizard pages:
+
+1. Welcome and current version
+2. Update available and release notes summary
+3. Preflight checks (Excel lock, write access, space, network)
+4. Ready to update confirmation
+5. Updating (live phase/status log)
+6. Complete (open updated copy/report) or failure recovery
+
+## Progress Event Contract (UI Integration)
+
+The migration engine now supports a progress sink via `IUpdaterProgressSink` and emits structured events:
+
+- `phase-started`
+- `phase-failed`
+- `update-completed`
+
+Stable phase IDs for UI mapping are defined in `UpdaterPhaseIds`.
+
+Current CLI wiring uses `ConsoleUpdaterProgressSink`, so terminal output remains visible while a future wizard can subscribe to the same events for rich UI status updates.
+
+## Wizard MVP (Now Available)
+
+A first-pass Windows wizard app now exists at:
+
+- `updater/src/ElectronicLogbook.Updater.Wizard`
+
+Run it with:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater.Wizard
+```
+
+Current MVP behavior:
+
+1. 6-step wizard shell (Welcome, Available, Preflight, Ready, Updating, Complete)
+2. Auto-check for latest GitHub release metadata on startup
+3. User-triggered update start from the Ready page
+4. Locked update navigation while migration runs
+5. Live phase/status log wired from engine progress events
+6. Local-master mode and release-download mode support
+7. End-user fields are read-only; source/output/channel are resolved automatically
+
+Optional launch arguments are supported for integration/testing:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater.Wizard -- `
+  --source "C:\Path\My Logbook.xlsm" `
+  --output "C:\Path\My Logbook_Updated.xlsm" `
+  --master "C:\Path\Electronic_Logbook_Master.xlsm"
+```
+
+If `--master` is omitted, release mode is used and `--repo owner/name` can be supplied.
+
+## Recommended Dev Testing Setup
+
+Use one wizard app for both end-user and dev testing. Do not create a separate dev wizard UI.
+
+- End-user flow: launch in release mode.
+- Dev flow: launch with `--master` to force a local master workbook.
+
+Helper scripts:
+
+- `updater/Run-Wizard-Dev.ps1`
+  - default mode uses local `Electronic_Logbook_Master.xlsm`
+  - optional `-UseReleaseChannel` switch tests release mode
+- `updater/Run-Wizard-Release.ps1`
+  - explicit release-mode launcher
+
+Example local-master dev run:
+
+```powershell
+.\updater\Run-Wizard-Dev.ps1 `
+  -SourcePath "D:\Alex PC\OneDrive\WorkUni\Logbook\Electronic Logbook - Working Copy.xlsm"
+```
+
+Example release-channel run:
+
+```powershell
+.\updater\Run-Wizard-Release.ps1 `
+  -SourcePath "D:\Alex PC\OneDrive\WorkUni\Logbook\Electronic Logbook - Working Copy.xlsm"
+```
+
+This is an MVP implementation and intentionally does not yet include:
+
+- polished installer theming
+- file picker dialogs
+- full cancellation semantics within Excel COM migration internals
+- packaged installer distribution

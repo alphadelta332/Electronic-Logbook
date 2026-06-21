@@ -31,7 +31,8 @@ public static class UpdaterProgram
                 Console.WriteLine($"Verified release {manifest.Version} ({manifest.Tag}).");
             }
 
-            var migrator = new ExcelWorkbookMigrator();
+            var progressSink = new ConsoleUpdaterProgressSink();
+            var migrator = new ExcelWorkbookMigrator(progressSink);
             var report = migrator.Migrate(new MigrationRequest(
                 options.SourcePath!,
                 masterPath,

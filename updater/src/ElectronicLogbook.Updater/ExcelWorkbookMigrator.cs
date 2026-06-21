@@ -23,11 +23,26 @@ public sealed class ExcelWorkbookMigrator
         "suppressWarningsUntil"
     ];
 
+    private readonly IUpdaterProgressSink? _progressSink;
+
+    public ExcelWorkbookMigrator(IUpdaterProgressSink? progressSink = null)
+    {
+        _progressSink = progressSink;
+    }
+
     public MigrationReport Migrate(MigrationRequest request)
     {
-        static string SetStep(string message)
+        string phaseId = UpdaterPhaseIds.StartExcel;
+
+        string SetStep(string newPhaseId, string message)
         {
-            Console.WriteLine($"[updater] {message}...");
+            phaseId = newPhaseId;
+            _progressSink?.Report(new UpdaterProgressEvent(
+                UpdaterProgressEventTypes.PhaseStarted,
+                phaseId,
+                message,
+                Percent: null,
+                DateTimeOffset.UtcNow));
             return message;
         }
 
@@ -42,7 +57,7 @@ public sealed class ExcelWorkbookMigrator
         dynamic? outputWorkbook = null;
         var excelProcessId = 0;
         var migrationSucceeded = false;
-        var step = SetStep("starting Excel");
+        var step = SetStep(UpdaterPhaseIds.StartExcel, "starting Excel");
 
         try
         {
@@ -58,30 +73,30 @@ public sealed class ExcelWorkbookMigrator
             excel.ScreenUpdating = false;
             excel.AutomationSecurity = AutomationSecurityForceDisable;
 
-            step = SetStep("opening source workbook");
+            step = SetStep(UpdaterPhaseIds.OpenSourceWorkbook, "opening source workbook");
             sourceWorkbook = excel.Workbooks.Open(request.SourcePath, 0, true);
-            step = SetStep("opening master copy");
+            step = SetStep(UpdaterPhaseIds.OpenMasterCopy, "opening master copy");
             outputWorkbook = excel.Workbooks.Open(request.OutputPath, 0, false);
-            step = SetStep("preparing master copy for migration");
+            step = SetStep(UpdaterPhaseIds.PrepareMasterCopy, "preparing master copy for migration");
             UnprotectWorkbookForMigration((object)outputWorkbook);
             excel.Calculation = XlCalculationManual;
 
-            step = SetStep("reading source validation data");
+            step = SetStep(UpdaterPhaseIds.ReadSourceValidationData, "reading source validation data");
             var sourceVersion = ReadName((object)sourceWorkbook, "LogbookVersion");
             IReadOnlyDictionary<string, string> sourceFingerprints =
                 ReadPreservedFingerprints((object)sourceWorkbook);
 
-            step = SetStep("copying Logbook data");
+            step = SetStep(UpdaterPhaseIds.CopyLogbookData, "copying Logbook data");
             CopyLogbook((object)sourceWorkbook, (object)outputWorkbook);
-            step = SetStep("copying Keywords data");
+            step = SetStep(UpdaterPhaseIds.CopyKeywordsData, "copying Keywords data");
             CopyTableByMatchingColumns((object)sourceWorkbook, (object)outputWorkbook, "Keywords");
-            step = SetStep("copying Routes data");
+            step = SetStep(UpdaterPhaseIds.CopyRoutesData, "copying Routes data");
             CopyTableByMatchingColumns((object)sourceWorkbook, (object)outputWorkbook, "Routes");
-            step = SetStep("copying airport base flags");
+            step = SetStep(UpdaterPhaseIds.CopyAirportBaseFlags, "copying airport base flags");
             CopyAirportBaseFlags((object)sourceWorkbook, (object)outputWorkbook);
-            step = SetStep("copying named preferences");
+            step = SetStep(UpdaterPhaseIds.CopyNamedPreferences, "copying named preferences");
             CopyNamedPreferences((object)sourceWorkbook, (object)outputWorkbook);
-            step = SetStep("restoring Logbook presentation");
+            step = SetStep(UpdaterPhaseIds.RestoreLogbookPresentation, "restoring Logbook presentation");
             RestoreLogbookPresentation((object)sourceWorkbook, (object)outputWorkbook);
 
             var outputVersion = ReadName((object)outputWorkbook, "LogbookVersion");
@@ -93,18 +108,18 @@ public sealed class ExcelWorkbookMigrator
                     $"{request.Manifest!.Version}.");
             }
 
-            step = SetStep("calculating output workbook");
+            step = SetStep(UpdaterPhaseIds.CalculateOutputWorkbook, "calculating output workbook");
             excel.Calculation = XlCalculationAutomatic;
             foreach (dynamic worksheet in outputWorkbook.Worksheets)
             {
                 worksheet.Calculate();
             }
-            step = SetStep("refreshing pivot tables");
+            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "refreshing pivot tables");
             RefreshPivots((object)outputWorkbook);
-            step = SetStep("updating Hours Over Time chart");
+            step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
 
-            step = SetStep("validating preserved data");
+            step = SetStep(UpdaterPhaseIds.ValidatePreservedData, "validating preserved data");
             IReadOnlyDictionary<string, string> outputFingerprints =
                 ReadPreservedFingerprints((object)outputWorkbook);
             foreach (var expected in sourceFingerprints)
@@ -118,9 +133,16 @@ public sealed class ExcelWorkbookMigrator
             }
             ValidateLogbookStructure((object)sourceWorkbook, (object)outputWorkbook);
 
-            step = SetStep("saving output workbook");
+            step = SetStep(UpdaterPhaseIds.SaveOutputWorkbook, "saving output workbook");
             outputWorkbook.RemovePersonalInformation = false;
             outputWorkbook.Save();
+
+            _progressSink?.Report(new UpdaterProgressEvent(
+                UpdaterProgressEventTypes.UpdateCompleted,
+                UpdaterPhaseIds.Completed,
+                "migration completed",
+                Percent: 100,
+                DateTimeOffset.UtcNow));
 
             dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
             var logbookRows = (int)outputLogbook.ListRows.Count;
@@ -138,6 +160,13 @@ public sealed class ExcelWorkbookMigrator
         }
         catch (Exception ex)
         {
+            _progressSink?.Report(new UpdaterProgressEvent(
+                UpdaterProgressEventTypes.PhaseFailed,
+                phaseId,
+                ex.Message,
+                Percent: null,
+                DateTimeOffset.UtcNow));
+
             CloseWorkbook(outputWorkbook);
             outputWorkbook = null;
             CloseWorkbook(sourceWorkbook);
