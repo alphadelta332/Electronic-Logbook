@@ -74,13 +74,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME `
-            Electronic_Logbook_Master.xlsm `
-            README.pdf `
-            updater/dist/ElectronicLogbook.Updater.Wizard.exe `
-            updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
-            SHA256SUMS.txt `
-            release-manifest.json `
-            --title $env:GITHUB_REF_NAME `
-            --generate-notes `
-            --verify-tag
+          $releaseArgs = @(
+            "release"
+            "create"
+            $env:GITHUB_REF_NAME
+            "Electronic_Logbook_Master.xlsm"
+            "README.pdf"
+            "updater/dist/ElectronicLogbook.Updater.Wizard.exe"
+            "updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip"
+            "SHA256SUMS.txt"
+            "release-manifest.json"
+            "--title"
+            $env:GITHUB_REF_NAME
+            "--generate-notes"
+            "--verify-tag"
+          )
+
+          gh @releaseArgs

@@ -1976,6 +1976,15 @@ Public Sub BuildRoutesTable(wb As Workbook)
         Dim tblLog      As ListObject
         Dim tblAirports As ListObject
         Dim tblRoutes   As ListObject
+        Dim protectionWasActive As Boolean
+        Dim errNum As Long
+        Dim errDesc As String
+        Dim errSource As String
+
+        On Error GoTo Fail
+        If wb Is Nothing Then Set wb = ThisWorkbook
+        protectionWasActive = WorkbookProtectionIsActive(wb)
+        If protectionWasActive Then UnprotectWorkbookForEditing wb
 
         Set wsLog = wb.Sheets("Logbook")
         Set wsRoutes = wb.Sheets("Routes")
@@ -2123,7 +2132,36 @@ NextRow:
 
 Done:
         MarkRoutesClean wb
+        If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, wb
+        Exit Sub
+
+Fail:
+        errNum = Err.Number
+        errDesc = Err.Description
+        errSource = Err.Source
+        If protectionWasActive And Not mProtectionDisabledForSession Then
+            On Error Resume Next
+            ApplyWorkbookProtection False, wb
+            On Error GoTo 0
+        End If
+        Err.Raise errNum, errSource, errDesc
 End Sub
+
+Private Function WorkbookProtectionIsActive(wb As Workbook) As Boolean
+    Dim ws As Worksheet
+
+    If wb.ProtectStructure Or wb.ProtectWindows Then
+        WorkbookProtectionIsActive = True
+        Exit Function
+    End If
+
+    For Each ws In wb.Worksheets
+        If ws.ProtectContents Then
+            WorkbookProtectionIsActive = True
+            Exit Function
+        End If
+    Next ws
+End Function
 
 Sub AddNewRoutes()
 
@@ -4033,16 +4071,20 @@ Public Sub DisableProtectionForDevelopment()
            vbInformation, "Development Mode Enabled"
 End Sub
 
-Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False)
+Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False, Optional targetWorkbook As Workbook = Nothing)
     Dim wb As Workbook
     Dim ws As Worksheet
     Dim wsLog As Worksheet
     Dim wsCharts As Worksheet
     Dim tbl As ListObject
 
-    Set wb = ThisWorkbook
+    If targetWorkbook Is Nothing Then
+        Set wb = ThisWorkbook
+    Else
+        Set wb = targetWorkbook
+    End If
 
-    UnprotectWorkbookForEditing
+    UnprotectWorkbookForEditing wb
     EnsurePrimarySheetOrder wb
 
     For Each ws In wb.Worksheets
@@ -4143,11 +4185,15 @@ Private Sub EnsurePrimarySheetOrder(wb As Workbook)
     Set wsActive = Nothing
 End Sub
 
-Private Sub UnprotectWorkbookForEditing()
+Private Sub UnprotectWorkbookForEditing(Optional targetWorkbook As Workbook = Nothing)
     Dim wb As Workbook
     Dim ws As Worksheet
 
-    Set wb = ThisWorkbook
+    If targetWorkbook Is Nothing Then
+        Set wb = ThisWorkbook
+    Else
+        Set wb = targetWorkbook
+    End If
 
     On Error Resume Next
     wb.Unprotect Password:=ProtectionPassword()
