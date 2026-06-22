@@ -8,6 +8,9 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.4.1] - 2026-06-22
+- Fixed route table rebuilds being blocked by workbook protection
+
 ### [1.4.0] - 2026-06-20
 - Hardened GitHub release protections and automated release checks
 - Added release asset checksums and machine-readable integrity metadata

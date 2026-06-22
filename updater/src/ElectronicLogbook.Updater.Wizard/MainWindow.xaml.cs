@@ -48,6 +48,8 @@ public partial class MainWindow : Window
 
     private int _stepIndex;
     private bool _isUpdating;
+    private bool _isCheckingAvailability = true;
+    private bool _availabilityReady;
     private bool _preflightPassed;
     private string? _latestTag;
     private string? _lastOutputPath;
@@ -89,8 +91,8 @@ public partial class MainWindow : Window
     {
         return _stepIndex switch
         {
-            0 => true,
-            1 => true,
+            0 => _availabilityReady && !_isCheckingAvailability,
+            1 => _availabilityReady && !_isCheckingAvailability,
             2 => _preflightPassed,
             3 => true,
             4 => false,
@@ -101,23 +103,40 @@ public partial class MainWindow : Window
 
     private async Task InitializeAvailabilityAsync()
     {
+        _isCheckingAvailability = true;
+        _availabilityReady = false;
         FooterStatusText.Text = "Checking update channel...";
+        UpdateWizardView();
 
         var installedVersion = await Task.Run(() => TryReadWorkbookVersion(_context.SourcePath));
         InstalledVersionText.Text = string.IsNullOrWhiteSpace(installedVersion)
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
-        if (_context.IsLocalMasterMode)
+        var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
+        var identifiedUpdateChannel = false;
+
+        if (_context.UsesProvidedMaster)
         {
             var masterVersion = await Task.Run(() => TryReadWorkbookVersion(_context.MasterPath!));
+            identifiedUpdateChannel = !string.IsNullOrWhiteSpace(masterVersion);
+            var channelName = _context.Channel switch
+            {
+                UpdateChannel.Development => "Development",
+                UpdateChannel.LocalMaster => "Local Master",
+                _ => "Local Master"
+            };
             LatestVersionText.Text = string.IsNullOrWhiteSpace(masterVersion)
-                ? "Update channel: local master (version unavailable)"
-                : $"Update channel: local master ({masterVersion})";
+                ? $"Update channel: {channelName} (version unavailable)"
+                : $"Update channel: {channelName} ({masterVersion})";
             LastCheckedText.Text = $"Configured: {DateTime.Now:G}";
-            AvailableVersionText.Text = string.IsNullOrWhiteSpace(masterVersion)
-                ? "Using local master build"
-                : $"Local master version: {masterVersion}";
+            AvailableVersionText.Text = _context.Channel == UpdateChannel.Development
+                ? (string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using development build"
+                    : $"Development version: {masterVersion}")
+                : (string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using local master build"
+                    : $"Local master version: {masterVersion}");
             ReleaseSummaryText.Text = await GetDevBranchReadmeSummaryAsync(
                 _context.Repository,
                 installedVersion,
@@ -125,31 +144,38 @@ public partial class MainWindow : Window
         }
         else
         {
-            await CheckForReleaseAvailabilityAsync();
+            identifiedUpdateChannel = await CheckForReleaseAvailabilityAsync();
         }
 
-        FooterStatusText.Text = "Ready";
+        _availabilityReady = identifiedInstalledVersion && identifiedUpdateChannel;
+        _isCheckingAvailability = false;
+        FooterStatusText.Text = _availabilityReady
+            ? "Ready"
+            : "Could not identify installed version or update channel.";
+        UpdateWizardView();
     }
 
-    private async Task CheckForReleaseAvailabilityAsync()
+    private async Task<bool> CheckForReleaseAvailabilityAsync()
     {
         try
         {
             var (tag, summary) = await GetLatestReleaseInfoAsync(_context.Repository);
             _latestTag = tag;
-            LatestVersionText.Text = $"Update channel: latest release ({tag})";
+            LatestVersionText.Text = $"Update channel: Stable ({tag})";
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
-            AvailableVersionText.Text = $"Latest available release: {tag}";
+            AvailableVersionText.Text = $"Stable version: {tag}";
             ReleaseSummaryText.Text = string.IsNullOrWhiteSpace(summary)
                 ? "No release notes summary was returned by GitHub."
                 : summary;
+            return true;
         }
         catch (Exception ex)
         {
-            LatestVersionText.Text = "Update channel: release check failed";
+            LatestVersionText.Text = "Update channel: Stable check failed";
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
             AvailableVersionText.Text = "Could not fetch release details.";
             ReleaseSummaryText.Text = ex.Message;
+            return false;
         }
     }
 
@@ -337,12 +363,13 @@ public partial class MainWindow : Window
             ? BuildStagedOutputPath(source)
             : _context.OutputPath;
 
-        var sourceOk = File.Exists(source) &&
-            string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
-            !IsWorkbookLocked(source);
+        CheckSourcePathText.Text = "[ ] Waiting for source workbook to close...";
+        FooterStatusText.Text = "Waiting for source workbook to close...";
+        var sourceCheck = await WaitForSourceWorkbookAsync(source);
+        var sourceOk = sourceCheck.IsOk;
         CheckSourcePathText.Text = sourceOk
-            ? "[OK] Source workbook exists and is .xlsm"
-            : "[FAIL] Source workbook missing, invalid, or currently open";
+            ? "[OK] Source workbook exists, is .xlsm, and is closed"
+            : $"[FAIL] {sourceCheck.Message}";
 
         var outputDir = string.IsNullOrWhiteSpace(stagedOutput)
             ? string.Empty
@@ -371,16 +398,16 @@ public partial class MainWindow : Window
             ? "[OK] Output path is writable and output file does not exist"
             : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists";
 
-        var channelOk = _context.IsLocalMasterMode
+        var channelOk = _context.UsesProvidedMaster
             ? File.Exists(_context.MasterPath!)
             : (!string.IsNullOrWhiteSpace(_context.Repository) && _context.Repository.Contains('/'));
         CheckMasterOrRepoText.Text = channelOk
-            ? (_context.IsLocalMasterMode
-                ? "[OK] Local master workbook is available"
-                : "[OK] Release repository format is valid")
-            : (_context.IsLocalMasterMode
-                ? "[FAIL] Local master workbook is missing"
-                : "[FAIL] Repository format is invalid");
+            ? (_context.UsesProvidedMaster
+                ? $"[OK] {_context.ChannelDisplayName} master workbook is available"
+                : "[OK] Stable repository format is valid")
+            : (_context.UsesProvidedMaster
+                ? $"[FAIL] {_context.ChannelDisplayName} master workbook is missing"
+                : "[FAIL] Stable repository format is invalid");
 
         var diskOk = false;
         if (outputDirExists)
@@ -516,20 +543,26 @@ public partial class MainWindow : Window
             string resolvedMaster;
             ReleaseManifest? manifest = null;
 
-            if (_context.IsLocalMasterMode)
+            if (_context.UsesProvidedMaster)
             {
                 resolvedMaster = _context.MasterPath!;
-                AppendLog($"Using local master workbook: {resolvedMaster}");
+                AppendLog($"Using {_context.ChannelDisplayName} master workbook: {resolvedMaster}");
             }
             else
             {
-                AppendLog($"Resolving latest release from {_context.Repository}...");
+                AppendLog($"Resolving stable release from {_context.Repository}...");
                 var releaseClient = new ReleaseClient();
                 var release = await releaseClient.GetLatestReleaseAsync(_context.Repository, _updateCts.Token);
                 _downloadDirectoryToCleanup = release.DownloadDirectory;
                 resolvedMaster = release.MasterWorkbookPath;
                 manifest = release.Manifest;
                 AppendLog($"Using release {manifest.Version} ({manifest.Tag})");
+            }
+
+            var sourceCheck = await WaitForSourceWorkbookAsync(source);
+            if (!sourceCheck.IsOk)
+            {
+                throw new InvalidOperationException(sourceCheck.Message);
             }
 
             var migrator = new ExcelWorkbookMigrator(progressSink);
@@ -562,16 +595,23 @@ public partial class MainWindow : Window
                 _lastBackupPath = handoff.BackupWorkbookPath;
             }
 
+            AppendLog("Waiting for workbook file to settle...");
+            var finalWorkbookReady = await WaitForFileToSettleAsync(_lastOutputPath, _updateCts.Token);
+
             CompleteTitleText.Text = "Update Complete";
-            CompleteSummaryText.Text = _context.UseInPlaceSwap
-                ? "Update complete. The original filename now points to the updated workbook."
-                : "The updated workbook was created and validated.";
+            CompleteSummaryText.Text = finalWorkbookReady
+                ? (_context.UseInPlaceSwap
+                    ? "Update complete. The original filename now points to the updated workbook."
+                    : "The updated workbook was created and validated.")
+                : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.";
             CompleteOutputPathText.Text = $"Updated workbook: {_lastOutputPath}";
             CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
                 ? string.Empty
                 : $"Backup workbook: {_lastBackupPath}";
-            OpenUpdatedButton.IsEnabled = true;
-            FooterStatusText.Text = "Update completed.";
+            OpenUpdatedButton.IsEnabled = finalWorkbookReady;
+            FooterStatusText.Text = finalWorkbookReady
+                ? "Update completed."
+                : "Update completed. Wait for sync before opening.";
 
             _stepIndex = 5;
         }
@@ -735,6 +775,7 @@ public partial class MainWindow : Window
         string? output = null;
         string? master = null;
         var repository = UpdaterOptions.DefaultRepository;
+        UpdateChannel? channel = null;
         var useInPlaceSwap = true;
 
         for (var index = 0; index < args.Length; index++)
@@ -754,6 +795,9 @@ public partial class MainWindow : Window
                 case "--repo":
                     repository = ReadOptionValue(args, ref index, arg);
                     break;
+                case "--channel":
+                    channel = ParseUpdateChannel(ReadOptionValue(args, ref index, arg));
+                    break;
                 case "--inplace":
                     useInPlaceSwap = true;
                     break;
@@ -766,14 +810,31 @@ public partial class MainWindow : Window
         source ??= GetDefaultSourcePath();
         output ??= BuildDefaultOutputPath(source);
         master = string.IsNullOrWhiteSpace(master) ? null : Path.GetFullPath(master);
+        channel ??= string.IsNullOrWhiteSpace(master)
+            ? UpdateChannel.Stable
+            : UpdateChannel.LocalMaster;
 
         return new RunContext(
             SourcePath: Path.GetFullPath(source),
             OutputPath: Path.GetFullPath(output),
             MasterPath: master,
             Repository: repository,
-            IsLocalMasterMode: !string.IsNullOrWhiteSpace(master),
+            Channel: channel.Value,
             UseInPlaceSwap: useInPlaceSwap);
+    }
+
+    private static UpdateChannel ParseUpdateChannel(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "stable" => UpdateChannel.Stable,
+            "development" => UpdateChannel.Development,
+            "dev" => UpdateChannel.Development,
+            "local-master" => UpdateChannel.LocalMaster,
+            "localmaster" => UpdateChannel.LocalMaster,
+            "local" => UpdateChannel.LocalMaster,
+            _ => throw new InvalidOperationException($"Unknown update channel: {value}.")
+        };
     }
 
     private static string GetDefaultSourcePath()
@@ -832,6 +893,77 @@ public partial class MainWindow : Window
         }
     }
 
+    private static async Task<PreflightCheckResult> WaitForSourceWorkbookAsync(string source)
+    {
+        if (!File.Exists(source))
+        {
+            return new(false, $"Source workbook not found: {source}");
+        }
+
+        if (!string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase))
+        {
+            return new(false, $"Source workbook must be an .xlsm file: {source}");
+        }
+
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            if (!IsWorkbookLocked(source))
+            {
+                return new(true, "Source workbook is ready.");
+            }
+
+            await Task.Delay(1000);
+        }
+
+        return new(false, $"Source workbook is still open or locked: {source}");
+    }
+
+    private static async Task<bool> WaitForFileToSettleAsync(string path, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return false;
+        }
+
+        long? lastLength = null;
+        DateTime? lastWriteTime = null;
+        var stableSamples = 0;
+
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var info = new FileInfo(path);
+                using var stream = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+                if (lastLength == info.Length && lastWriteTime == info.LastWriteTimeUtc)
+                {
+                    stableSamples++;
+                    if (stableSamples >= 3)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    stableSamples = 0;
+                    lastLength = info.Length;
+                    lastWriteTime = info.LastWriteTimeUtc;
+                }
+            }
+            catch
+            {
+                stableSamples = 0;
+            }
+
+            await Task.Delay(1000, cancellationToken);
+        }
+
+        return false;
+    }
+
     private static string ReadOptionValue(IReadOnlyList<string> args, ref int index, string option)
     {
         index++;
@@ -851,11 +983,31 @@ public partial class MainWindow : Window
         }
     }
 
+    private sealed record PreflightCheckResult(bool IsOk, string Message);
+
+    private enum UpdateChannel
+    {
+        Stable,
+        Development,
+        LocalMaster
+    }
+
     private sealed record RunContext(
         string SourcePath,
         string OutputPath,
         string? MasterPath,
         string Repository,
-        bool IsLocalMasterMode,
-        bool UseInPlaceSwap);
+        UpdateChannel Channel,
+        bool UseInPlaceSwap)
+    {
+        public bool UsesProvidedMaster => !string.IsNullOrWhiteSpace(MasterPath);
+
+        public string ChannelDisplayName => Channel switch
+        {
+            UpdateChannel.Stable => "Stable",
+            UpdateChannel.Development => "Development",
+            UpdateChannel.LocalMaster => "Local Master",
+            _ => "Stable"
+        };
+    }
 }

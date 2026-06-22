@@ -212,31 +212,45 @@ Private Sub RunUpdate(newVersion As String)
     ' If launch fails for any reason, keep the legacy in-workbook update path.
     Dim sourceWorkbookPath As String
     Dim wizardReason As String
+    Dim wizardMasterPath As String
     sourceWorkbookPath = localPath & "\" & originalName
-    If TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason) Then
-        UpdateStatus ""
-         MsgBox "The external updater wizard has started." & vbCrLf & vbCrLf & _
-             "This workbook will now close so the update can continue safely." & vbCrLf & vbCrLf & _
-             "After the wizard finishes, reopen your logbook from the same filename.", _
-             vbInformation, "Launching Updater Wizard"
+    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+        wizardMasterPath = tempPath
+        If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), wizardMasterPath) Then
+            wizardReason = "Could not prepare the development master workbook for the updater wizard."
+            wizardMasterPath = ""
+        End If
+    ElseIf Not LatestReleaseMatchesVersion(GITHUB_USER & "/" & GITHUB_REPO, newVersion) Then
+        wizardReason = "Release wizard assets for version " & newVersion & " are not published yet."
+    End If
 
-         Dim closeErr As Long
-         Dim closeMsg As String
+    If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
+        UpdateStatus ""
+
+        Dim closeErr As Long
+        Dim closeMsg As String
+        Dim shouldQuitExcel As Boolean
+
+        shouldQuitExcel = (Application.Workbooks.Count <= 1)
         On Error Resume Next
         Application.DisplayAlerts = False
         ThisWorkbook.Save
-        ThisWorkbook.Close SaveChanges:=True
-         closeErr = Err.Number
-         closeMsg = Err.Description
+        If shouldQuitExcel Then
+            Application.Quit
+        Else
+            ThisWorkbook.Close SaveChanges:=False
+        End If
+        closeErr = Err.Number
+        closeMsg = Err.Description
         Application.DisplayAlerts = True
         On Error GoTo 0
 
-         If closeErr <> 0 Then
-             MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
-                 "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
-                 "Close error: " & closeMsg, _
-                 vbExclamation, "Manual Close Required"
-         End If
+        If closeErr <> 0 Then
+            MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
+                "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
+                "Close error: " & closeMsg, _
+                vbExclamation, "Manual Close Required"
+        End If
 
         Exit Sub
     End If
@@ -1817,7 +1831,8 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     Dim stream As Object
 
     On Error GoTo Fail
-    Set http = CreateObject("MSXML2.XMLHTTP")
+    Set http = CreateDownloadHttpRequest()
+    If http Is Nothing Then GoTo Fail
     http.Open "GET", url, False
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
@@ -1831,7 +1846,8 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     If http.Status <> 200 And token <> "" Then
         ' Retry without auth so a revoked PAT in GitHubToken does not block
         ' public update downloads.
-        Set http = CreateObject("MSXML2.XMLHTTP")
+        Set http = CreateDownloadHttpRequest()
+        If http Is Nothing Then GoTo Fail
         http.Open "GET", url, False
         http.setRequestHeader "Cache-Control", "no-cache"
         http.setRequestHeader "Pragma", "no-cache"
@@ -1853,9 +1869,20 @@ Fail:
     DownloadFile = False
 End Function
 
+Private Function CreateDownloadHttpRequest() As Object
+    On Error Resume Next
+    Set CreateDownloadHttpRequest = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    If CreateDownloadHttpRequest Is Nothing Then
+        Set CreateDownloadHttpRequest = CreateObject("MSXML2.XMLHTTP")
+    End If
+    On Error GoTo 0
+End Function
+
 Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, _
                                                 ByVal repository As String, _
-                                                Optional ByRef reason As String = "") As Boolean
+                                                Optional ByRef reason As String = "", _
+                                                Optional ByVal masterWorkbookPath As String = "", _
+                                                Optional ByVal targetVersion As String = "") As Boolean
     Dim wizardPath As String
     Dim commandLine As String
     Dim quotedExe As String
@@ -1863,7 +1890,7 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
 
     On Error GoTo Fail
 
-    wizardPath = ResolveWizardExecutablePath(repository)
+    wizardPath = ResolveWizardExecutablePath(repository, targetVersion)
     If wizardPath = "" Then
         If reason = "" Then reason = "No wizard asset was found in release assets."
         Exit Function
@@ -1875,6 +1902,12 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
 
     quotedExe = """" & wizardPath & """"
     commandLine = quotedExe & " --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
+    If masterWorkbookPath <> "" Then
+        commandLine = commandLine & " --master """ & masterWorkbookPath & """"
+        If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+            commandLine = commandLine & " --channel development"
+        End If
+    End If
 
     Set shellObj = CreateObject("WScript.Shell")
     shellObj.Run commandLine, 1, False
@@ -1886,7 +1919,8 @@ Fail:
     TryLaunchExternalUpdaterWizard = False
 End Function
 
-Private Function ResolveWizardExecutablePath(ByVal repository As String) As String
+Private Function ResolveWizardExecutablePath(ByVal repository As String, _
+                                             Optional ByVal targetVersion As String = "") As String
     Dim namedPath As String
     Dim folderPath As String
     Dim candidate As String
@@ -1909,7 +1943,27 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
         Exit Function
     End If
 
+    candidate = folderPath & "\updater\dist\" & WIZARD_EXE_NAME
+    If Dir$(candidate) <> "" Then
+        ResolveWizardExecutablePath = candidate
+        Exit Function
+    End If
+
+    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+        tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+        candidate = tempFolder & "\" & WIZARD_EXE_NAME
+        If Dir$(candidate) <> "" Then
+            ResolveWizardExecutablePath = candidate
+        Else
+            ResolveWizardExecutablePath = ""
+        End If
+        Exit Function
+    End If
+
     tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdater"
+    If targetVersion <> "" Then
+        tempFolder = tempFolder & "_" & SafePathSegment(targetVersion)
+    End If
     If Dir$(tempFolder, vbDirectory) = "" Then MkDir tempFolder
 
     candidate = tempFolder & "\" & WIZARD_EXE_NAME
@@ -1923,35 +1977,73 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
     ResolveWizardExecutablePath = candidate
 End Function
 
+Private Function SafePathSegment(ByVal value As String) As String
+    Dim result As String
+    Dim i As Long
+    Dim ch As String
+
+    result = ""
+    For i = 1 To Len(value)
+        ch = Mid$(value, i, 1)
+        If (ch >= "0" And ch <= "9") Or _
+           (ch >= "A" And ch <= "Z") Or _
+           (ch >= "a" And ch <= "z") Or _
+           ch = "." Or ch = "-" Or ch = "_" Then
+            result = result & ch
+        Else
+            result = result & "_"
+        End If
+    Next i
+
+    If result = "" Then result = "current"
+    SafePathSegment = result
+End Function
+
 Private Function DownloadLatestWizardPackage(ByVal repository As String, _
                                              ByVal destinationExePath As String, _
                                              ByVal tempFolder As String) As Boolean
     Dim downloadUrl As String
-    Dim lowerUrl As String
-    Dim zipPath As String
 
     downloadUrl = FetchLatestWizardDownloadUrl(repository)
-    If downloadUrl = "" Then
-        DownloadLatestWizardPackage = False
+    If downloadUrl <> "" Then
+        If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
+            DownloadLatestWizardPackage = True
+            Exit Function
+        End If
+    End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/latest/download/" & WIZARD_EXE_NAME
+    If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
+        DownloadLatestWizardPackage = True
         Exit Function
     End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/latest/download/" & WIZARD_ZIP_NAME
+    DownloadLatestWizardPackage = TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder)
+End Function
+
+Private Function TryDownloadWizardFromUrl(ByVal downloadUrl As String, _
+                                          ByVal destinationExePath As String, _
+                                          ByVal tempFolder As String) As Boolean
+    Dim lowerUrl As String
+    Dim zipPath As String
 
     lowerUrl = LCase$(downloadUrl)
     If Right$(lowerUrl, 4) = ".zip" Then
         zipPath = tempFolder & "\" & WIZARD_ZIP_NAME
         If Not DownloadFile(downloadUrl, zipPath) Then
-            DownloadLatestWizardPackage = False
+            TryDownloadWizardFromUrl = False
             Exit Function
         End If
         If Not ExtractZipArchive(zipPath, tempFolder) Then
-            DownloadLatestWizardPackage = False
+            TryDownloadWizardFromUrl = False
             Exit Function
         End If
 
         Dim extractedExe As String
         extractedExe = FindFileByNameRecursive(tempFolder, WIZARD_EXE_NAME)
         If extractedExe = "" Then
-            DownloadLatestWizardPackage = False
+            TryDownloadWizardFromUrl = False
             Exit Function
         End If
 
@@ -1962,17 +2054,17 @@ Private Function DownloadLatestWizardPackage(ByVal repository As String, _
             Err.Clear
             FileCopy extractedExe, destinationExePath
             If Err.Number <> 0 Then
-                DownloadLatestWizardPackage = False
+                TryDownloadWizardFromUrl = False
                 Exit Function
             End If
         End If
         On Error GoTo 0
 
-        DownloadLatestWizardPackage = (Dir$(destinationExePath) <> "")
+        TryDownloadWizardFromUrl = (Dir$(destinationExePath) <> "")
         Exit Function
     End If
 
-    DownloadLatestWizardPackage = DownloadFile(downloadUrl, destinationExePath)
+    TryDownloadWizardFromUrl = DownloadFile(downloadUrl, destinationExePath)
 End Function
 
 Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As String
@@ -1996,6 +2088,18 @@ Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As Str
     End If
     http.send
 
+    If http.Status <> 200 And token <> "" Then
+        ' Retry without auth so a revoked PAT in GitHubToken does not block
+        ' public release asset discovery.
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", apiUrl, False
+        http.setRequestHeader "Accept", "application/vnd.github+json"
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
+
     If http.Status <> 200 Then GoTo Fail
 
     body = http.responseText
@@ -2003,6 +2107,57 @@ Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As Str
     Exit Function
 Fail:
     FetchLatestWizardDownloadUrl = ""
+End Function
+
+Private Function LatestReleaseMatchesVersion(ByVal repository As String, ByVal version As String) As Boolean
+    Dim tag As String
+
+    tag = FetchLatestReleaseTag(repository)
+    If tag = "" Then
+        LatestReleaseMatchesVersion = False
+    Else
+        LatestReleaseMatchesVersion = (LCase$(tag) = LCase$("v" & version))
+    End If
+End Function
+
+Private Function FetchLatestReleaseTag(ByVal repository As String) As String
+    Dim http As Object
+    Dim token As String
+    Dim body As String
+    Dim apiUrl As String
+
+    On Error GoTo Fail
+    apiUrl = "https://api.github.com/repos/" & repository & "/releases/latest"
+
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    http.Open "GET", apiUrl, False
+    http.setRequestHeader "Accept", "application/vnd.github+json"
+    http.setRequestHeader "Cache-Control", "no-cache"
+    http.setRequestHeader "Pragma", "no-cache"
+    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+    token = GetGitHubToken()
+    If token <> "" Then
+        http.setRequestHeader "Authorization", "token " & token
+    End If
+    http.send
+
+    If http.Status <> 200 And token <> "" Then
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", apiUrl, False
+        http.setRequestHeader "Accept", "application/vnd.github+json"
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
+
+    If http.Status <> 200 Then GoTo Fail
+
+    body = http.responseText
+    FetchLatestReleaseTag = ExtractJsonStringValue(body, "tag_name")
+    Exit Function
+Fail:
+    FetchLatestReleaseTag = ""
 End Function
 
 Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
@@ -2026,6 +2181,30 @@ Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
     Exit Function
 Fail:
     ExtractWizardDownloadUrl = ""
+End Function
+
+Private Function ExtractJsonStringValue(ByVal jsonText As String, ByVal propertyName As String) As String
+    Dim re As Object
+    Dim matches As Object
+    Dim patternName As String
+
+    On Error GoTo Fail
+    patternName = propertyName
+
+    Set re = CreateObject("VBScript.RegExp")
+    re.Pattern = """" & patternName & """\s*:\s*""([^""]*)"""
+    re.Global = False
+    re.IgnoreCase = True
+
+    If re.Test(jsonText) Then
+        Set matches = re.Execute(jsonText)
+        ExtractJsonStringValue = CStr(matches(0).SubMatches(0))
+        ExtractJsonStringValue = Replace(ExtractJsonStringValue, "\u0026", "&")
+        ExtractJsonStringValue = Replace(ExtractJsonStringValue, "\/", "/")
+    End If
+    Exit Function
+Fail:
+    ExtractJsonStringValue = ""
 End Function
 
 Private Function ExtractZipArchive(ByVal zipPath As String, ByVal destinationFolder As String) As Boolean

@@ -10,6 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Resource Include="..\..\..\img\icon.png" Link="Assets\icon.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\ElectronicLogbook.Updater\ElectronicLogbook.Updater.csproj" />
   </ItemGroup>
 
