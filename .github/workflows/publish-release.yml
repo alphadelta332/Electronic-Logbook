@@ -45,6 +45,17 @@ jobs:
           ./updater/Publish-WizardAsset.ps1
 
           $version = (Get-Content version.txt -Raw).Trim()
+          $readme = Get-Content README.md -Raw
+          $releaseNotesPattern = "(?ms)^### \[$([regex]::Escape($version))\].*?(?=^### \[|\z)"
+          $releaseNotesMatch = [regex]::Match($readme, $releaseNotesPattern)
+          if (-not $releaseNotesMatch.Success) {
+            throw "README.md changelog does not contain release notes for $version."
+          }
+          [System.IO.File]::WriteAllText(
+            (Join-Path $PWD "release-notes.md"),
+            $releaseNotesMatch.Value.Trim(),
+            [System.Text.UTF8Encoding]::new($false))
+
           $assets = @(
             Get-Item Electronic_Logbook_Master.xlsm
             Get-Item README.pdf
@@ -86,7 +97,8 @@ jobs:
             "release-manifest.json"
             "--title"
             $env:GITHUB_REF_NAME
-            "--generate-notes"
+            "--notes-file"
+            "release-notes.md"
             "--verify-tag"
           )
 
