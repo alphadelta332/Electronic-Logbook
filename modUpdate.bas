@@ -224,28 +224,24 @@ Private Sub RunUpdate(newVersion As String)
 
     If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath) Then
         UpdateStatus ""
-         MsgBox "The external updater wizard has started." & vbCrLf & vbCrLf & _
-             "This workbook will now close so the update can continue safely." & vbCrLf & vbCrLf & _
-             "After the wizard finishes, reopen your logbook from the same filename.", _
-             vbInformation, "Launching Updater Wizard"
 
-         Dim closeErr As Long
-         Dim closeMsg As String
+        Dim closeErr As Long
+        Dim closeMsg As String
         On Error Resume Next
         Application.DisplayAlerts = False
         ThisWorkbook.Save
         ThisWorkbook.Close SaveChanges:=True
-         closeErr = Err.Number
-         closeMsg = Err.Description
+        closeErr = Err.Number
+        closeMsg = Err.Description
         Application.DisplayAlerts = True
         On Error GoTo 0
 
-         If closeErr <> 0 Then
-             MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
-                 "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
-                 "Close error: " & closeMsg, _
-                 vbExclamation, "Manual Close Required"
-         End If
+        If closeErr <> 0 Then
+            MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
+                "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
+                "Close error: " & closeMsg, _
+                vbExclamation, "Manual Close Required"
+        End If
 
         Exit Sub
     End If

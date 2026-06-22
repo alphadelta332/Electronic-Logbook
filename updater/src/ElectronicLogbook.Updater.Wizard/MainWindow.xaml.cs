@@ -347,17 +347,13 @@ public partial class MainWindow : Window
             ? BuildStagedOutputPath(source)
             : _context.OutputPath;
 
-        if (File.Exists(source) && IsWorkbookLocked(source))
-        {
-            await Task.Delay(1500);
-        }
-
-        var sourceOk = File.Exists(source) &&
-            string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
-            !IsWorkbookLocked(source);
+        CheckSourcePathText.Text = "[ ] Waiting for source workbook to close...";
+        FooterStatusText.Text = "Waiting for source workbook to close...";
+        var sourceCheck = await WaitForSourceWorkbookAsync(source);
+        var sourceOk = sourceCheck.IsOk;
         CheckSourcePathText.Text = sourceOk
-            ? "[OK] Source workbook exists and is .xlsm"
-            : "[FAIL] Source workbook missing, invalid, or currently open";
+            ? "[OK] Source workbook exists, is .xlsm, and is closed"
+            : $"[FAIL] {sourceCheck.Message}";
 
         var outputDir = string.IsNullOrWhiteSpace(stagedOutput)
             ? string.Empty
@@ -545,6 +541,12 @@ public partial class MainWindow : Window
                 resolvedMaster = release.MasterWorkbookPath;
                 manifest = release.Manifest;
                 AppendLog($"Using release {manifest.Version} ({manifest.Tag})");
+            }
+
+            var sourceCheck = await WaitForSourceWorkbookAsync(source);
+            if (!sourceCheck.IsOk)
+            {
+                throw new InvalidOperationException(sourceCheck.Message);
             }
 
             var migrator = new ExcelWorkbookMigrator(progressSink);
@@ -868,6 +870,31 @@ public partial class MainWindow : Window
         }
     }
 
+    private static async Task<PreflightCheckResult> WaitForSourceWorkbookAsync(string source)
+    {
+        if (!File.Exists(source))
+        {
+            return new(false, $"Source workbook not found: {source}");
+        }
+
+        if (!string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase))
+        {
+            return new(false, $"Source workbook must be an .xlsm file: {source}");
+        }
+
+        for (var attempt = 0; attempt < 30; attempt++)
+        {
+            if (!IsWorkbookLocked(source))
+            {
+                return new(true, "Source workbook is ready.");
+            }
+
+            await Task.Delay(1000);
+        }
+
+        return new(false, $"Source workbook is still open or locked: {source}");
+    }
+
     private static string ReadOptionValue(IReadOnlyList<string> args, ref int index, string option)
     {
         index++;
@@ -886,6 +913,8 @@ public partial class MainWindow : Window
             onEvent(progressEvent);
         }
     }
+
+    private sealed record PreflightCheckResult(bool IsOk, string Message);
 
     private enum UpdateChannel
     {
