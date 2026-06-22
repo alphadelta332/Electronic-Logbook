@@ -220,9 +220,11 @@ Private Sub RunUpdate(newVersion As String)
             wizardReason = "Could not prepare the development master workbook for the updater wizard."
             wizardMasterPath = ""
         End If
+    ElseIf Not LatestReleaseMatchesVersion(GITHUB_USER & "/" & GITHUB_REPO, newVersion) Then
+        wizardReason = "Release wizard assets for version " & newVersion & " are not published yet."
     End If
 
-    If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath) Then
+    If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
         UpdateStatus ""
 
         Dim closeErr As Long
@@ -1879,7 +1881,8 @@ End Function
 Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, _
                                                 ByVal repository As String, _
                                                 Optional ByRef reason As String = "", _
-                                                Optional ByVal masterWorkbookPath As String = "") As Boolean
+                                                Optional ByVal masterWorkbookPath As String = "", _
+                                                Optional ByVal targetVersion As String = "") As Boolean
     Dim wizardPath As String
     Dim commandLine As String
     Dim quotedExe As String
@@ -1887,7 +1890,7 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
 
     On Error GoTo Fail
 
-    wizardPath = ResolveWizardExecutablePath(repository)
+    wizardPath = ResolveWizardExecutablePath(repository, targetVersion)
     If wizardPath = "" Then
         If reason = "" Then reason = "No wizard asset was found in release assets."
         Exit Function
@@ -1916,7 +1919,8 @@ Fail:
     TryLaunchExternalUpdaterWizard = False
 End Function
 
-Private Function ResolveWizardExecutablePath(ByVal repository As String) As String
+Private Function ResolveWizardExecutablePath(ByVal repository As String, _
+                                             Optional ByVal targetVersion As String = "") As String
     Dim namedPath As String
     Dim folderPath As String
     Dim candidate As String
@@ -1957,6 +1961,9 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
     End If
 
     tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdater"
+    If targetVersion <> "" Then
+        tempFolder = tempFolder & "_" & SafePathSegment(targetVersion)
+    End If
     If Dir$(tempFolder, vbDirectory) = "" Then MkDir tempFolder
 
     candidate = tempFolder & "\" & WIZARD_EXE_NAME
@@ -1968,6 +1975,28 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
     End If
 
     ResolveWizardExecutablePath = candidate
+End Function
+
+Private Function SafePathSegment(ByVal value As String) As String
+    Dim result As String
+    Dim i As Long
+    Dim ch As String
+
+    result = ""
+    For i = 1 To Len(value)
+        ch = Mid$(value, i, 1)
+        If (ch >= "0" And ch <= "9") Or _
+           (ch >= "A" And ch <= "Z") Or _
+           (ch >= "a" And ch <= "z") Or _
+           ch = "." Or ch = "-" Or ch = "_" Then
+            result = result & ch
+        Else
+            result = result & "_"
+        End If
+    Next i
+
+    If result = "" Then result = "current"
+    SafePathSegment = result
 End Function
 
 Private Function DownloadLatestWizardPackage(ByVal repository As String, _
@@ -2080,6 +2109,57 @@ Fail:
     FetchLatestWizardDownloadUrl = ""
 End Function
 
+Private Function LatestReleaseMatchesVersion(ByVal repository As String, ByVal version As String) As Boolean
+    Dim tag As String
+
+    tag = FetchLatestReleaseTag(repository)
+    If tag = "" Then
+        LatestReleaseMatchesVersion = False
+    Else
+        LatestReleaseMatchesVersion = (LCase$(tag) = LCase$("v" & version))
+    End If
+End Function
+
+Private Function FetchLatestReleaseTag(ByVal repository As String) As String
+    Dim http As Object
+    Dim token As String
+    Dim body As String
+    Dim apiUrl As String
+
+    On Error GoTo Fail
+    apiUrl = "https://api.github.com/repos/" & repository & "/releases/latest"
+
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    http.Open "GET", apiUrl, False
+    http.setRequestHeader "Accept", "application/vnd.github+json"
+    http.setRequestHeader "Cache-Control", "no-cache"
+    http.setRequestHeader "Pragma", "no-cache"
+    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+    token = GetGitHubToken()
+    If token <> "" Then
+        http.setRequestHeader "Authorization", "token " & token
+    End If
+    http.send
+
+    If http.Status <> 200 And token <> "" Then
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", apiUrl, False
+        http.setRequestHeader "Accept", "application/vnd.github+json"
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
+
+    If http.Status <> 200 Then GoTo Fail
+
+    body = http.responseText
+    FetchLatestReleaseTag = ExtractJsonStringValue(body, "tag_name")
+    Exit Function
+Fail:
+    FetchLatestReleaseTag = ""
+End Function
+
 Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
     Dim re As Object
     Dim matches As Object
@@ -2101,6 +2181,30 @@ Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
     Exit Function
 Fail:
     ExtractWizardDownloadUrl = ""
+End Function
+
+Private Function ExtractJsonStringValue(ByVal jsonText As String, ByVal propertyName As String) As String
+    Dim re As Object
+    Dim matches As Object
+    Dim patternName As String
+
+    On Error GoTo Fail
+    patternName = propertyName
+
+    Set re = CreateObject("VBScript.RegExp")
+    re.Pattern = """" & patternName & """\s*:\s*""([^""]*)"""
+    re.Global = False
+    re.IgnoreCase = True
+
+    If re.Test(jsonText) Then
+        Set matches = re.Execute(jsonText)
+        ExtractJsonStringValue = CStr(matches(0).SubMatches(0))
+        ExtractJsonStringValue = Replace(ExtractJsonStringValue, "\u0026", "&")
+        ExtractJsonStringValue = Replace(ExtractJsonStringValue, "\/", "/")
+    End If
+    Exit Function
+Fail:
+    ExtractJsonStringValue = ""
 End Function
 
 Private Function ExtractZipArchive(ByVal zipPath As String, ByVal destinationFolder As String) As Boolean
