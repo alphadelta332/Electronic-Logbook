@@ -108,16 +108,26 @@ public partial class MainWindow : Window
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
-        if (_context.IsLocalMasterMode)
+        if (_context.UsesProvidedMaster)
         {
             var masterVersion = await Task.Run(() => TryReadWorkbookVersion(_context.MasterPath!));
+            var channelName = _context.Channel switch
+            {
+                UpdateChannel.Development => "Development",
+                UpdateChannel.LocalMaster => "Local Master",
+                _ => "Local Master"
+            };
             LatestVersionText.Text = string.IsNullOrWhiteSpace(masterVersion)
-                ? "Update channel: local master (version unavailable)"
-                : $"Update channel: local master ({masterVersion})";
+                ? $"Update channel: {channelName} (version unavailable)"
+                : $"Update channel: {channelName} ({masterVersion})";
             LastCheckedText.Text = $"Configured: {DateTime.Now:G}";
-            AvailableVersionText.Text = string.IsNullOrWhiteSpace(masterVersion)
-                ? "Using local master build"
-                : $"Local master version: {masterVersion}";
+            AvailableVersionText.Text = _context.Channel == UpdateChannel.Development
+                ? (string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using development build"
+                    : $"Development version: {masterVersion}")
+                : (string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using local master build"
+                    : $"Local master version: {masterVersion}");
             ReleaseSummaryText.Text = await GetDevBranchReadmeSummaryAsync(
                 _context.Repository,
                 installedVersion,
@@ -137,16 +147,16 @@ public partial class MainWindow : Window
         {
             var (tag, summary) = await GetLatestReleaseInfoAsync(_context.Repository);
             _latestTag = tag;
-            LatestVersionText.Text = $"Update channel: latest release ({tag})";
+            LatestVersionText.Text = $"Update channel: Stable ({tag})";
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
-            AvailableVersionText.Text = $"Latest available release: {tag}";
+            AvailableVersionText.Text = $"Stable version: {tag}";
             ReleaseSummaryText.Text = string.IsNullOrWhiteSpace(summary)
                 ? "No release notes summary was returned by GitHub."
                 : summary;
         }
         catch (Exception ex)
         {
-            LatestVersionText.Text = "Update channel: release check failed";
+            LatestVersionText.Text = "Update channel: Stable check failed";
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
             AvailableVersionText.Text = "Could not fetch release details.";
             ReleaseSummaryText.Text = ex.Message;
@@ -337,6 +347,11 @@ public partial class MainWindow : Window
             ? BuildStagedOutputPath(source)
             : _context.OutputPath;
 
+        if (File.Exists(source) && IsWorkbookLocked(source))
+        {
+            await Task.Delay(1500);
+        }
+
         var sourceOk = File.Exists(source) &&
             string.Equals(Path.GetExtension(source), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
             !IsWorkbookLocked(source);
@@ -371,16 +386,16 @@ public partial class MainWindow : Window
             ? "[OK] Output path is writable and output file does not exist"
             : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists";
 
-        var channelOk = _context.IsLocalMasterMode
+        var channelOk = _context.UsesProvidedMaster
             ? File.Exists(_context.MasterPath!)
             : (!string.IsNullOrWhiteSpace(_context.Repository) && _context.Repository.Contains('/'));
         CheckMasterOrRepoText.Text = channelOk
-            ? (_context.IsLocalMasterMode
-                ? "[OK] Local master workbook is available"
-                : "[OK] Release repository format is valid")
-            : (_context.IsLocalMasterMode
-                ? "[FAIL] Local master workbook is missing"
-                : "[FAIL] Repository format is invalid");
+            ? (_context.UsesProvidedMaster
+                ? $"[OK] {_context.ChannelDisplayName} master workbook is available"
+                : "[OK] Stable repository format is valid")
+            : (_context.UsesProvidedMaster
+                ? $"[FAIL] {_context.ChannelDisplayName} master workbook is missing"
+                : "[FAIL] Stable repository format is invalid");
 
         var diskOk = false;
         if (outputDirExists)
@@ -516,14 +531,14 @@ public partial class MainWindow : Window
             string resolvedMaster;
             ReleaseManifest? manifest = null;
 
-            if (_context.IsLocalMasterMode)
+            if (_context.UsesProvidedMaster)
             {
                 resolvedMaster = _context.MasterPath!;
-                AppendLog($"Using local master workbook: {resolvedMaster}");
+                AppendLog($"Using {_context.ChannelDisplayName} master workbook: {resolvedMaster}");
             }
             else
             {
-                AppendLog($"Resolving latest release from {_context.Repository}...");
+                AppendLog($"Resolving stable release from {_context.Repository}...");
                 var releaseClient = new ReleaseClient();
                 var release = await releaseClient.GetLatestReleaseAsync(_context.Repository, _updateCts.Token);
                 _downloadDirectoryToCleanup = release.DownloadDirectory;
@@ -735,6 +750,7 @@ public partial class MainWindow : Window
         string? output = null;
         string? master = null;
         var repository = UpdaterOptions.DefaultRepository;
+        UpdateChannel? channel = null;
         var useInPlaceSwap = true;
 
         for (var index = 0; index < args.Length; index++)
@@ -754,6 +770,9 @@ public partial class MainWindow : Window
                 case "--repo":
                     repository = ReadOptionValue(args, ref index, arg);
                     break;
+                case "--channel":
+                    channel = ParseUpdateChannel(ReadOptionValue(args, ref index, arg));
+                    break;
                 case "--inplace":
                     useInPlaceSwap = true;
                     break;
@@ -766,14 +785,31 @@ public partial class MainWindow : Window
         source ??= GetDefaultSourcePath();
         output ??= BuildDefaultOutputPath(source);
         master = string.IsNullOrWhiteSpace(master) ? null : Path.GetFullPath(master);
+        channel ??= string.IsNullOrWhiteSpace(master)
+            ? UpdateChannel.Stable
+            : UpdateChannel.LocalMaster;
 
         return new RunContext(
             SourcePath: Path.GetFullPath(source),
             OutputPath: Path.GetFullPath(output),
             MasterPath: master,
             Repository: repository,
-            IsLocalMasterMode: !string.IsNullOrWhiteSpace(master),
+            Channel: channel.Value,
             UseInPlaceSwap: useInPlaceSwap);
+    }
+
+    private static UpdateChannel ParseUpdateChannel(string value)
+    {
+        return value.Trim().ToLowerInvariant() switch
+        {
+            "stable" => UpdateChannel.Stable,
+            "development" => UpdateChannel.Development,
+            "dev" => UpdateChannel.Development,
+            "local-master" => UpdateChannel.LocalMaster,
+            "localmaster" => UpdateChannel.LocalMaster,
+            "local" => UpdateChannel.LocalMaster,
+            _ => throw new InvalidOperationException($"Unknown update channel: {value}.")
+        };
     }
 
     private static string GetDefaultSourcePath()
@@ -851,11 +887,29 @@ public partial class MainWindow : Window
         }
     }
 
+    private enum UpdateChannel
+    {
+        Stable,
+        Development,
+        LocalMaster
+    }
+
     private sealed record RunContext(
         string SourcePath,
         string OutputPath,
         string? MasterPath,
         string Repository,
-        bool IsLocalMasterMode,
-        bool UseInPlaceSwap);
+        UpdateChannel Channel,
+        bool UseInPlaceSwap)
+    {
+        public bool UsesProvidedMaster => !string.IsNullOrWhiteSpace(MasterPath);
+
+        public string ChannelDisplayName => Channel switch
+        {
+            UpdateChannel.Stable => "Stable",
+            UpdateChannel.Development => "Development",
+            UpdateChannel.LocalMaster => "Local Master",
+            _ => "Stable"
+        };
+    }
 }

@@ -1898,6 +1898,9 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     commandLine = quotedExe & " --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
     If masterWorkbookPath <> "" Then
         commandLine = commandLine & " --master """ & masterWorkbookPath & """"
+        If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+            commandLine = commandLine & " --channel development"
+        End If
     End If
 
     Set shellObj = CreateObject("WScript.Shell")
@@ -1930,6 +1933,23 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String) As Stri
     candidate = folderPath & "\" & WIZARD_EXE_NAME
     If Dir$(candidate) <> "" Then
         ResolveWizardExecutablePath = candidate
+        Exit Function
+    End If
+
+    candidate = folderPath & "\updater\dist\" & WIZARD_EXE_NAME
+    If Dir$(candidate) <> "" Then
+        ResolveWizardExecutablePath = candidate
+        Exit Function
+    End If
+
+    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+        tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+        candidate = tempFolder & "\" & WIZARD_EXE_NAME
+        If Dir$(candidate) <> "" Then
+            ResolveWizardExecutablePath = candidate
+        Else
+            ResolveWizardExecutablePath = ""
+        End If
         Exit Function
     End If
 

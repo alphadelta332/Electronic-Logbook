@@ -24,7 +24,7 @@ if (-not (Test-Path $SourcePath)) {
     throw "Source workbook not found: $SourcePath"
 }
 
-Write-Host "Launching wizard in RELEASE channel mode" -ForegroundColor Yellow
+Write-Host "Launching wizard in STABLE channel mode" -ForegroundColor Yellow
 Write-Host "  repo: $Repository" -ForegroundColor Yellow
 Write-Host "  source: $SourcePath" -ForegroundColor Yellow
 Write-Host "  output: $OutputPath" -ForegroundColor Yellow

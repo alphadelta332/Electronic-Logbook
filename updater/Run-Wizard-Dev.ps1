@@ -39,7 +39,7 @@ $args = @(
 
 if ($UseReleaseChannel) {
     $args += @("--repo", $Repository)
-    Write-Host "Launching wizard in RELEASE channel mode" -ForegroundColor Yellow
+    Write-Host "Launching wizard in STABLE channel mode" -ForegroundColor Yellow
     Write-Host "  repo: $Repository" -ForegroundColor Yellow
 } else {
     if (-not (Test-Path $MasterPath)) {
