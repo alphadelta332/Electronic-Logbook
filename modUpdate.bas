@@ -212,8 +212,17 @@ Private Sub RunUpdate(newVersion As String)
     ' If launch fails for any reason, keep the legacy in-workbook update path.
     Dim sourceWorkbookPath As String
     Dim wizardReason As String
+    Dim wizardMasterPath As String
     sourceWorkbookPath = localPath & "\" & originalName
-    If TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason) Then
+    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+        wizardMasterPath = tempPath
+        If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), wizardMasterPath) Then
+            wizardReason = "Could not prepare the development master workbook for the updater wizard."
+            wizardMasterPath = ""
+        End If
+    End If
+
+    If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath) Then
         UpdateStatus ""
          MsgBox "The external updater wizard has started." & vbCrLf & vbCrLf & _
              "This workbook will now close so the update can continue safely." & vbCrLf & vbCrLf & _
@@ -1855,7 +1864,8 @@ End Function
 
 Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, _
                                                 ByVal repository As String, _
-                                                Optional ByRef reason As String = "") As Boolean
+                                                Optional ByRef reason As String = "", _
+                                                Optional ByVal masterWorkbookPath As String = "") As Boolean
     Dim wizardPath As String
     Dim commandLine As String
     Dim quotedExe As String
@@ -1875,6 +1885,9 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
 
     quotedExe = """" & wizardPath & """"
     commandLine = quotedExe & " --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
+    If masterWorkbookPath <> "" Then
+        commandLine = commandLine & " --master """ & masterWorkbookPath & """"
+    End If
 
     Set shellObj = CreateObject("WScript.Shell")
     shellObj.Run commandLine, 1, False
@@ -1995,6 +2008,18 @@ Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As Str
         http.setRequestHeader "Authorization", "token " & token
     End If
     http.send
+
+    If http.Status <> 200 And token <> "" Then
+        ' Retry without auth so a revoked PAT in GitHubToken does not block
+        ' public release asset discovery.
+        Set http = CreateObject("MSXML2.XMLHTTP")
+        http.Open "GET", apiUrl, False
+        http.setRequestHeader "Accept", "application/vnd.github+json"
+        http.setRequestHeader "Cache-Control", "no-cache"
+        http.setRequestHeader "Pragma", "no-cache"
+        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+        http.send
+    End If
 
     If http.Status <> 200 Then GoTo Fail
 
