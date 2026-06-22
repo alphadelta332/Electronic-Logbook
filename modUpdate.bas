@@ -1826,7 +1826,8 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     Dim stream As Object
 
     On Error GoTo Fail
-    Set http = CreateObject("MSXML2.XMLHTTP")
+    Set http = CreateDownloadHttpRequest()
+    If http Is Nothing Then GoTo Fail
     http.Open "GET", url, False
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
@@ -1840,7 +1841,8 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     If http.Status <> 200 And token <> "" Then
         ' Retry without auth so a revoked PAT in GitHubToken does not block
         ' public update downloads.
-        Set http = CreateObject("MSXML2.XMLHTTP")
+        Set http = CreateDownloadHttpRequest()
+        If http Is Nothing Then GoTo Fail
         http.Open "GET", url, False
         http.setRequestHeader "Cache-Control", "no-cache"
         http.setRequestHeader "Pragma", "no-cache"
@@ -1860,6 +1862,15 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     Exit Function
 Fail:
     DownloadFile = False
+End Function
+
+Private Function CreateDownloadHttpRequest() As Object
+    On Error Resume Next
+    Set CreateDownloadHttpRequest = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    If CreateDownloadHttpRequest Is Nothing Then
+        Set CreateDownloadHttpRequest = CreateObject("MSXML2.XMLHTTP")
+    End If
+    On Error GoTo 0
 End Function
 
 Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As String, _
@@ -1940,31 +1951,47 @@ Private Function DownloadLatestWizardPackage(ByVal repository As String, _
                                              ByVal destinationExePath As String, _
                                              ByVal tempFolder As String) As Boolean
     Dim downloadUrl As String
-    Dim lowerUrl As String
-    Dim zipPath As String
 
     downloadUrl = FetchLatestWizardDownloadUrl(repository)
-    If downloadUrl = "" Then
-        DownloadLatestWizardPackage = False
+    If downloadUrl <> "" Then
+        If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
+            DownloadLatestWizardPackage = True
+            Exit Function
+        End If
+    End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/latest/download/" & WIZARD_EXE_NAME
+    If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
+        DownloadLatestWizardPackage = True
         Exit Function
     End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/latest/download/" & WIZARD_ZIP_NAME
+    DownloadLatestWizardPackage = TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder)
+End Function
+
+Private Function TryDownloadWizardFromUrl(ByVal downloadUrl As String, _
+                                          ByVal destinationExePath As String, _
+                                          ByVal tempFolder As String) As Boolean
+    Dim lowerUrl As String
+    Dim zipPath As String
 
     lowerUrl = LCase$(downloadUrl)
     If Right$(lowerUrl, 4) = ".zip" Then
         zipPath = tempFolder & "\" & WIZARD_ZIP_NAME
         If Not DownloadFile(downloadUrl, zipPath) Then
-            DownloadLatestWizardPackage = False
+            TryDownloadWizardFromUrl = False
             Exit Function
         End If
         If Not ExtractZipArchive(zipPath, tempFolder) Then
-            DownloadLatestWizardPackage = False
+            TryDownloadWizardFromUrl = False
             Exit Function
         End If
 
         Dim extractedExe As String
         extractedExe = FindFileByNameRecursive(tempFolder, WIZARD_EXE_NAME)
         If extractedExe = "" Then
-            DownloadLatestWizardPackage = False
+            TryDownloadWizardFromUrl = False
             Exit Function
         End If
 
@@ -1975,17 +2002,17 @@ Private Function DownloadLatestWizardPackage(ByVal repository As String, _
             Err.Clear
             FileCopy extractedExe, destinationExePath
             If Err.Number <> 0 Then
-                DownloadLatestWizardPackage = False
+                TryDownloadWizardFromUrl = False
                 Exit Function
             End If
         End If
         On Error GoTo 0
 
-        DownloadLatestWizardPackage = (Dir$(destinationExePath) <> "")
+        TryDownloadWizardFromUrl = (Dir$(destinationExePath) <> "")
         Exit Function
     End If
 
-    DownloadLatestWizardPackage = DownloadFile(downloadUrl, destinationExePath)
+    TryDownloadWizardFromUrl = DownloadFile(downloadUrl, destinationExePath)
 End Function
 
 Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As String
