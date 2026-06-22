@@ -48,6 +48,8 @@ public partial class MainWindow : Window
 
     private int _stepIndex;
     private bool _isUpdating;
+    private bool _isCheckingAvailability = true;
+    private bool _availabilityReady;
     private bool _preflightPassed;
     private string? _latestTag;
     private string? _lastOutputPath;
@@ -89,8 +91,8 @@ public partial class MainWindow : Window
     {
         return _stepIndex switch
         {
-            0 => true,
-            1 => true,
+            0 => _availabilityReady && !_isCheckingAvailability,
+            1 => _availabilityReady && !_isCheckingAvailability,
             2 => _preflightPassed,
             3 => true,
             4 => false,
@@ -101,16 +103,23 @@ public partial class MainWindow : Window
 
     private async Task InitializeAvailabilityAsync()
     {
+        _isCheckingAvailability = true;
+        _availabilityReady = false;
         FooterStatusText.Text = "Checking update channel...";
+        UpdateWizardView();
 
         var installedVersion = await Task.Run(() => TryReadWorkbookVersion(_context.SourcePath));
         InstalledVersionText.Text = string.IsNullOrWhiteSpace(installedVersion)
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
+        var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
+        var identifiedUpdateChannel = false;
+
         if (_context.UsesProvidedMaster)
         {
             var masterVersion = await Task.Run(() => TryReadWorkbookVersion(_context.MasterPath!));
+            identifiedUpdateChannel = !string.IsNullOrWhiteSpace(masterVersion);
             var channelName = _context.Channel switch
             {
                 UpdateChannel.Development => "Development",
@@ -135,13 +144,18 @@ public partial class MainWindow : Window
         }
         else
         {
-            await CheckForReleaseAvailabilityAsync();
+            identifiedUpdateChannel = await CheckForReleaseAvailabilityAsync();
         }
 
-        FooterStatusText.Text = "Ready";
+        _availabilityReady = identifiedInstalledVersion && identifiedUpdateChannel;
+        _isCheckingAvailability = false;
+        FooterStatusText.Text = _availabilityReady
+            ? "Ready"
+            : "Could not identify installed version or update channel.";
+        UpdateWizardView();
     }
 
-    private async Task CheckForReleaseAvailabilityAsync()
+    private async Task<bool> CheckForReleaseAvailabilityAsync()
     {
         try
         {
@@ -153,6 +167,7 @@ public partial class MainWindow : Window
             ReleaseSummaryText.Text = string.IsNullOrWhiteSpace(summary)
                 ? "No release notes summary was returned by GitHub."
                 : summary;
+            return true;
         }
         catch (Exception ex)
         {
@@ -160,6 +175,7 @@ public partial class MainWindow : Window
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
             AvailableVersionText.Text = "Could not fetch release details.";
             ReleaseSummaryText.Text = ex.Message;
+            return false;
         }
     }
 
