@@ -579,16 +579,23 @@ public partial class MainWindow : Window
                 _lastBackupPath = handoff.BackupWorkbookPath;
             }
 
+            AppendLog("Waiting for workbook file to settle...");
+            var finalWorkbookReady = await WaitForFileToSettleAsync(_lastOutputPath, _updateCts.Token);
+
             CompleteTitleText.Text = "Update Complete";
-            CompleteSummaryText.Text = _context.UseInPlaceSwap
-                ? "Update complete. The original filename now points to the updated workbook."
-                : "The updated workbook was created and validated.";
+            CompleteSummaryText.Text = finalWorkbookReady
+                ? (_context.UseInPlaceSwap
+                    ? "Update complete. The original filename now points to the updated workbook."
+                    : "The updated workbook was created and validated.")
+                : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.";
             CompleteOutputPathText.Text = $"Updated workbook: {_lastOutputPath}";
             CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
                 ? string.Empty
                 : $"Backup workbook: {_lastBackupPath}";
-            OpenUpdatedButton.IsEnabled = true;
-            FooterStatusText.Text = "Update completed.";
+            OpenUpdatedButton.IsEnabled = finalWorkbookReady;
+            FooterStatusText.Text = finalWorkbookReady
+                ? "Update completed."
+                : "Update completed. Wait for sync before opening.";
 
             _stepIndex = 5;
         }
@@ -893,6 +900,52 @@ public partial class MainWindow : Window
         }
 
         return new(false, $"Source workbook is still open or locked: {source}");
+    }
+
+    private static async Task<bool> WaitForFileToSettleAsync(string path, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        {
+            return false;
+        }
+
+        long? lastLength = null;
+        DateTime? lastWriteTime = null;
+        var stableSamples = 0;
+
+        for (var attempt = 0; attempt < 15; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            try
+            {
+                var info = new FileInfo(path);
+                using var stream = File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+                if (lastLength == info.Length && lastWriteTime == info.LastWriteTimeUtc)
+                {
+                    stableSamples++;
+                    if (stableSamples >= 3)
+                    {
+                        return true;
+                    }
+                }
+                else
+                {
+                    stableSamples = 0;
+                    lastLength = info.Length;
+                    lastWriteTime = info.LastWriteTimeUtc;
+                }
+            }
+            catch
+            {
+                stableSamples = 0;
+            }
+
+            await Task.Delay(1000, cancellationToken);
+        }
+
+        return false;
     }
 
     private static string ReadOptionValue(IReadOnlyList<string> args, ref int index, string option)

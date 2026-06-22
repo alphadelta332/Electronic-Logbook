@@ -227,10 +227,17 @@ Private Sub RunUpdate(newVersion As String)
 
         Dim closeErr As Long
         Dim closeMsg As String
+        Dim shouldQuitExcel As Boolean
+
+        shouldQuitExcel = (Application.Workbooks.Count <= 1)
         On Error Resume Next
         Application.DisplayAlerts = False
         ThisWorkbook.Save
-        ThisWorkbook.Close SaveChanges:=True
+        If shouldQuitExcel Then
+            Application.Quit
+        Else
+            ThisWorkbook.Close SaveChanges:=False
+        End If
         closeErr = Err.Number
         closeMsg = Err.Description
         Application.DisplayAlerts = True
