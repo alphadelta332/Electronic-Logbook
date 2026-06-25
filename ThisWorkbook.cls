@@ -30,6 +30,9 @@ Private Sub Workbook_Open()
 
     ' Prompt only when the routes cache is missing or was built with an old parser.
     CheckRoutesTableOnOpen ThisWorkbook
+
+    ' Always start interactive sessions on the primary entry field.
+    NavigateToDefaultOpenView
 End Sub
 
 Private Sub Workbook_SheetActivate(ByVal Sh As Object)
@@ -38,6 +41,19 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     If Sh.Name = "Currency + Recency" Then
         If RefreshTodayValue() Then Sh.Calculate
     End If
+
+CleanExit:
+End Sub
+
+Private Sub NavigateToDefaultOpenView()
+    Dim targetCell As Range
+
+    On Error GoTo CleanExit
+
+    ThisWorkbook.Worksheets("New Entry").Activate
+    Set targetCell = ThisWorkbook.Names("neDay").RefersToRange
+    If targetCell.MergeCells Then Set targetCell = targetCell.MergeArea.Cells(1, 1)
+    Application.Goto targetCell, True
 
 CleanExit:
 End Sub
