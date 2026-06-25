@@ -53,7 +53,9 @@ Private Sub NavigateToDefaultOpenView()
     ThisWorkbook.Worksheets("New Entry").Activate
     Set targetCell = ThisWorkbook.Names("neDay").RefersToRange
     If targetCell.MergeCells Then Set targetCell = targetCell.MergeArea.Cells(1, 1)
-    Application.Goto targetCell, True
+    targetCell.Select
+    ActiveWindow.ScrollRow = 1
+    ActiveWindow.ScrollColumn = 1
 
 CleanExit:
 End Sub
