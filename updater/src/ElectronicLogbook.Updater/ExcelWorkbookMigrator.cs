@@ -135,6 +135,7 @@ public sealed class ExcelWorkbookMigrator
 
             step = SetStep(UpdaterPhaseIds.SaveOutputWorkbook, "saving output workbook");
             outputWorkbook.RemovePersonalInformation = false;
+            ActivatePrimaryWorksheetForSave((object)outputWorkbook);
             outputWorkbook.Save();
 
             _progressSink?.Report(new UpdaterProgressEvent(
@@ -376,6 +377,21 @@ public sealed class ExcelWorkbookMigrator
             {
                 // Preferences added in newer versions may not exist in old workbooks.
             }
+        }
+    }
+
+    private static void ActivatePrimaryWorksheetForSave(object workbookObject)
+    {
+        dynamic workbook = workbookObject;
+        workbook.Activate();
+
+        try
+        {
+            workbook.Worksheets.Item("New Entry").Activate();
+        }
+        catch
+        {
+            workbook.Worksheets.Item(1).Activate();
         }
     }
 

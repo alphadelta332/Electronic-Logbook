@@ -8,6 +8,13 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.4.2] - 2026-06-25
+- Improved protected Logbook row deletion for removing placeholder entries
+- Reduced Add To Logbook sorting work when new entries are already in date order
+- Fixed updated workbooks reopening with sheet tabs scrolled behind the tab navigation button
+- Updated Logbook totals formatting to follow the selected table palette
+- Added scripted upload support for updater wizard release assets
+
 ### [1.4.1] - 2026-06-22
 - Fixed route table rebuilds being blocked by workbook protection
 

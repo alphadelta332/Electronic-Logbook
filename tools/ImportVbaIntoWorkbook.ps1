@@ -62,7 +62,6 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
             throw "VBA UserForm source not found: $formPath"
         }
 
-        $formName = [System.IO.Path]::GetFileNameWithoutExtension($formFile)
         $components.Import($formPath) | Out-Null
         Write-Host "  Imported $formFile"
     }

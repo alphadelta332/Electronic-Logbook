@@ -66,7 +66,7 @@ public partial class MainWindow : Window
         _lastOutputPath = _context.OutputPath;
 
         UpdateWizardView();
-        _ = InitializeAvailabilityAsync();
+        _ = InitialiseAvailabilityAsync();
     }
 
     private void UpdateWizardView()
@@ -101,7 +101,7 @@ public partial class MainWindow : Window
         };
     }
 
-    private async Task InitializeAvailabilityAsync()
+    private async Task InitialiseAvailabilityAsync()
     {
         _isCheckingAvailability = true;
         _availabilityReady = false;
@@ -213,14 +213,14 @@ public partial class MainWindow : Window
         string? installedVersion,
         string? targetVersion)
     {
-        var normalized = readmeMarkdown.Replace("\r\n", "\n");
-        var changelogIndex = normalized.IndexOf("## Changelog", StringComparison.OrdinalIgnoreCase);
+        var Normalised = readmeMarkdown.Replace("\r\n", "\n");
+        var changelogIndex = Normalised.IndexOf("## Changelog", StringComparison.OrdinalIgnoreCase);
         if (changelogIndex < 0)
         {
             return "No changelog section found in dev-branch README.";
         }
 
-        var tail = normalized[changelogIndex..];
+        var tail = Normalised[changelogIndex..];
         var nextSectionIndex = tail.IndexOf("\n## ", StringComparison.Ordinal);
         var changelogSection = nextSectionIndex > 0 ? tail[..nextSectionIndex] : tail;
 
@@ -587,7 +587,7 @@ public partial class MainWindow : Window
 
             if (_context.UseInPlaceSwap)
             {
-                AppendLog("Finalizing workbook handoff...");
+                AppendLog("finalising workbook handoff...");
                 var handoff = await Task.Run(
                     () => WorkbookHandoff.ReplaceSourceWithUpdated(source, stagedOutput),
                     _updateCts.Token);

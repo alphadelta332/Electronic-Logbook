@@ -45,4 +45,4 @@ Compress-Archive -Path $publishedExe -DestinationPath $assetZip -Force
 Write-Host "Wizard assets ready:" -ForegroundColor Green
 Write-Host "  EXE: $assetExe"
 Write-Host "  ZIP: $assetZip"
-Write-Host "Upload at least one of these assets to the GitHub release." -ForegroundColor Yellow
+Write-Host "After the release tag exists, upload with updater\Upload-WizardAsset.ps1." -ForegroundColor Yellow

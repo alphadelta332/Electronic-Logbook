@@ -303,7 +303,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
-    NormalizeLogbookFormatting masterWb
+    NormaliseLogbookFormatting masterWb
 
     diagStep = "Updating hidden rows"
     Dim wsLog     As Worksheet
@@ -386,6 +386,7 @@ Private Sub RunUpdate(newVersion As String)
     On Error Resume Next
     masterWb.RemovePersonalInformation = False
     On Error GoTo UpdateFailed
+    ActivatePrimarySheetForSave masterWb
 
     ' Save to a local temp path first, then move to destination.
     ' Direct SaveAs to OneDrive paths is unreliable depending on sync state.
@@ -478,7 +479,7 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo 0
 
     diagStep = "Waiting for final workbook readiness"
-    UpdateStatus "Finalizing updated file..."
+    UpdateStatus "finalising updated file..."
     finalReady = WaitForUpdatedWorkbookReady(updatedPath, newVersion, 90)
 
     Application.Calculation = xlCalculationAutomatic
@@ -491,7 +492,7 @@ Private Sub RunUpdate(newVersion As String)
                         "Ready to open: the updated workbook was verified after handoff."
     Else
         readinessNote = vbCrLf & vbCrLf & _
-                        "OneDrive is still finalizing this file. Do not open it yet." & vbCrLf & _
+                        "OneDrive is still finalising this file. Do not open it yet." & vbCrLf & _
                         "Wait for sync to finish (pending icon clears), then open from Explorer."
     End If
 
@@ -650,7 +651,7 @@ Private Function WaitForUpdatedWorkbookReady(ByVal workbookPath As String, ByVal
         End If
 
         If DateDiff("s", startedAt, Now) >= timeoutSeconds Then Exit Do
-        UpdateStatus "Finalizing updated file... (" & CStr(DateDiff("s", startedAt, Now)) & "s)"
+        UpdateStatus "finalising updated file... (" & CStr(DateDiff("s", startedAt, Now)) & "s)"
         WaitOneSecond
     Loop
 
@@ -767,6 +768,17 @@ Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
     For Each ws In masterWb.Worksheets
         ws.Unprotect Password:=""
     Next ws
+    On Error GoTo 0
+End Sub
+
+Private Sub ActivatePrimarySheetForSave(masterWb As Workbook)
+    On Error Resume Next
+    masterWb.Activate
+    masterWb.Worksheets("New Entry").Activate
+    If Err.Number <> 0 Then
+        Err.Clear
+        masterWb.Worksheets(1).Activate
+    End If
     On Error GoTo 0
 End Sub
 
@@ -1273,20 +1285,20 @@ Fail:
     Err.Clear
 End Sub
 
-Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
+Private Sub NormaliseLogbookFormatting(masterWb As Workbook)
     Dim lo As ListObject
 
     Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
-    NormalizeLogbookDataFormatting lo
-    NormalizeLogbookDataBorders lo
-    NormalizeLogbookTotalsFormatting lo
+    NormaliseLogbookDataFormatting lo
+    NormaliseLogbookDataBorders lo
+    NormaliseLogbookTotalsFormatting lo
     ApplyLogbookPalette masterWb, lo
     ApplyLogbookTotalsRowBorders lo
     ApplyLogbookTotalsFormatting masterWb, lo
     ApplyVisibleLogbookOutsideBorder lo
 End Sub
 
-Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
+Private Sub NormaliseLogbookDataFormatting(lo As ListObject)
     Dim templateRow As Range
     Dim dataColumn As Range
     Dim colIndex As Long
@@ -1311,7 +1323,7 @@ Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
     Next colIndex
 End Sub
 
-Private Sub NormalizeLogbookDataBorders(lo As ListObject)
+Private Sub NormaliseLogbookDataBorders(lo As ListObject)
     Dim templateRow As Range
     Dim dataColumn As Range
     Dim colIndex As Long
@@ -1506,7 +1518,7 @@ Private Sub ApplyLogbookTotalsRowBorders(lo As ListObject)
     SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
 End Sub
 
-Private Sub NormalizeLogbookTotalsFormatting(lo As ListObject)
+Private Sub NormaliseLogbookTotalsFormatting(lo As ListObject)
     Dim totalsRange            As Range
     Dim tableStyleName         As String
     Dim tableFontName          As String
@@ -1557,7 +1569,6 @@ Private Sub NormalizeLogbookTotalsFormatting(lo As ListObject)
 End Sub
 
 Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
-    Const MASTER_TOTALS_FILL_COLOR As Long = 14277081
     Dim ws As Worksheet
     Dim totalsBlock As Range
     Dim topRow As Range
@@ -1568,6 +1579,7 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
+    Dim secondaryColor As Long
 
     If Not lo.ShowTotals Then Exit Sub
 
@@ -1581,6 +1593,7 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
     tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
+    secondaryColor = LogbookSecondaryFillColor(lo)
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
@@ -1597,8 +1610,8 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     topRow.Cells(1, 3).Font.Bold = True
 
     bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = MASTER_TOTALS_FILL_COLOR
-    bottomRow.Font.Color = vbBlack
+    bottomRow.Interior.Color = secondaryColor
+    bottomRow.Font.Color = ContrastingTextColor(secondaryColor)
     bottomRow.Font.Bold = True
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
@@ -1621,6 +1634,10 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
     cellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
+
+Private Function LogbookSecondaryFillColor(lo As ListObject) As Long
+    LogbookSecondaryFillColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+End Function
 
 Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
     Dim visibleRange As Range

@@ -30,11 +30,13 @@ Write-Host ""
 
 Set-LogbookWorkbookState -WorkbookPath $WorkbookPath -Branch "main" -Version $version
 Invoke-WorkbookMacro -WorkbookPath $WorkbookPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
+Set-WorkbookOpenView -WorkbookPath $WorkbookPath
 
 if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPath)) {
     Write-Host ""
     Set-LogbookWorkbookState -WorkbookPath $WorkingCopyPath -Branch "main"
     Invoke-WorkbookMacro -WorkbookPath $WorkingCopyPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
+    Set-WorkbookOpenView -WorkbookPath $WorkingCopyPath
 } elseif (-not $SkipWorkingCopy) {
     Write-Host ""
     Write-Host "No working-copy workbook configured. Add release.local.json or pass -WorkingCopyPath to include it." -ForegroundColor Yellow

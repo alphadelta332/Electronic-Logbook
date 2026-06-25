@@ -55,7 +55,7 @@ function Close-ExcelComObjects {
         [bool]$Save
     )
 
-    if ($Workbook -ne $null) {
+    if ($null -ne $Workbook) {
         try {
             if ($Save) {
                 $Workbook.Close($true)
@@ -66,7 +66,7 @@ function Close-ExcelComObjects {
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Workbook) | Out-Null
     }
 
-    if ($Excel -ne $null) {
+    if ($null -ne $Excel) {
         try { $Excel.Quit() } catch {}
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Excel) | Out-Null
     }
@@ -234,4 +234,33 @@ function Invoke-WorkbookMacro {
     }
 }
 
-Export-ModuleMember -Function Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-LogbookWorkbookState, Assert-VbaProjectAccess, Invoke-WorkbookMacro
+function Set-WorkbookOpenView {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkbookPath,
+        [string]$WorksheetName = "New Entry"
+    )
+
+    $targetWorksheetName = $WorksheetName
+    $operation = {
+        param($Workbook, $Excel)
+
+        $Workbook.Activate()
+        try {
+            $Workbook.Worksheets.Item($targetWorksheetName).Activate()
+        } catch {
+            $Workbook.Worksheets.Item(1).Activate()
+        }
+
+        $Workbook.Save()
+
+    }.GetNewClosure()
+
+    Write-Host "Setting open view: $WorkbookPath"
+    Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Operation $operation
+
+    Write-Host "  Active sheet = $targetWorksheetName" -ForegroundColor Green
+}
+
+Export-ModuleMember -Function Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-LogbookWorkbookState, Set-WorkbookOpenView, Assert-VbaProjectAccess, Invoke-WorkbookMacro
