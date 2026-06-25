@@ -3,7 +3,7 @@
 This is the Windows external updater used by the Electronic Logbook wizard flow.
 
 It creates a staged updated workbook from a clean master and preserved user data, then can
-finalize an in-place handoff that keeps the original filename and writes a timestamped
+finalise an in-place handoff that keeps the original filename and writes a timestamped
 `*_Old_yyyyMMdd-HHmmss.xlsm` backup.
 
 ## Preserved Data
@@ -41,7 +41,7 @@ dotnet run --project updater/src/ElectronicLogbook.Updater -- `
   --source "C:\Path\My Logbook.xlsm" `
   --output "C:\Path\My Logbook Updated.xlsm"
 
-# Optional: finalize by replacing the source filename and creating *_Old backup
+# Optional: finalise by replacing the source filename and creating *_Old backup
 dotnet run --project updater/src/ElectronicLogbook.Updater -- `
   --source "C:\Path\My Logbook.xlsm" `
   --output "C:\Path\My Logbook Updated.xlsm" `
@@ -60,7 +60,7 @@ Run the disposable Excel migration test locally with:
 
 - Requires Microsoft Excel for Windows.
 - Uses Excel COM automation and must run while the source workbook is closed.
-- Does not yet provide a full visual-diff test or normalize every possible user-customized format.
+- Does not yet provide a full visual-diff test or Normalise every possible user-customized format.
 - The executable is not currently code-signed or distributed as a release asset.
 
 ## Release Asset Packaging
@@ -77,6 +77,14 @@ This script outputs:
 - `updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip`
 
 Upload at least one of these assets to the GitHub release. The in-workbook launcher will use the `.exe` directly and can fall back to the `.zip` asset.
+
+After the release tag exists, upload the wizard assets with:
+
+```powershell
+.\updater\Upload-WizardAsset.ps1 -Tag v1.4.2
+```
+
+Add `-Clobber` if replacing an existing draft-release asset.
 
 ## Product Direction (Implemented)
 

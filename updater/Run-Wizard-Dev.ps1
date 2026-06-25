@@ -26,7 +26,7 @@ if (-not (Test-Path $SourcePath)) {
     throw "Source workbook not found: $SourcePath"
 }
 
-$args = @(
+$dotnetArgs = @(
     "run"
     "--project"
     $wizardProject
@@ -38,7 +38,7 @@ $args = @(
 )
 
 if ($UseReleaseChannel) {
-    $args += @("--repo", $Repository)
+    $dotnetArgs += @("--repo", $Repository)
     Write-Host "Launching wizard in STABLE channel mode" -ForegroundColor Yellow
     Write-Host "  repo: $Repository" -ForegroundColor Yellow
 } else {
@@ -46,7 +46,7 @@ if ($UseReleaseChannel) {
         throw "Local master workbook not found: $MasterPath"
     }
 
-    $args += @("--master", $MasterPath)
+    $dotnetArgs += @("--master", $MasterPath)
     Write-Host "Launching wizard in LOCAL MASTER mode" -ForegroundColor Cyan
     Write-Host "  master: $MasterPath" -ForegroundColor Cyan
 }
@@ -54,4 +54,4 @@ if ($UseReleaseChannel) {
 Write-Host "  source: $SourcePath" -ForegroundColor Cyan
 Write-Host "  output: $OutputPath" -ForegroundColor Cyan
 
-& dotnet @args
+& dotnet @dotnetArgs

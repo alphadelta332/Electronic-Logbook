@@ -91,4 +91,5 @@ Write-Host "  3. Commit to dev"
 Write-Host "  4. Open and merge PR from dev to main"
 $version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
 Write-Host "  5. Tag the release as v$version"
-Write-Host "  6. Upload wizard asset(s) from updater\dist to the GitHub release"
+Write-Host "  6. Upload wizard assets with:"
+Write-Host "     .\updater\Upload-WizardAsset.ps1 -Tag v$version"

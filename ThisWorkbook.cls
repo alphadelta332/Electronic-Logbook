@@ -23,7 +23,7 @@ Private Sub Workbook_Open()
     RefreshSuppressWarningsButton
 
     ' Apply the selected New Entry layout and keep layout radio controls configured.
-    InitializeNewEntryLayoutUI
+    InitialiseNewEntryLayoutUI
 
     ' Reset split date entry fields to today on launch when configured.
     SetNewEntryDateToTodayOnOpen

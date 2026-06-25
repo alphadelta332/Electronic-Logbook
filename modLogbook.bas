@@ -538,7 +538,7 @@ Sub AddToLogbook()
         tbl.ShowTableStyleColumnStripes = False
         tbl.ShowTotals = totalsWereOn
         totalsStateCaptured = False
-        NormalizeLogbookFormatting tbl
+        NormaliseLogbookFormatting tbl
 
     '--- 5g. Sort Logbook by Date
         diagStep = "Step 5g: Sort Logbook"
@@ -735,14 +735,14 @@ Private Sub ApplyLogbookCellDataFormatting(ByVal targetCell As Range, _
     End With
 End Sub
 
-Public Sub NormalizeLogbookTableFormatting(Optional ByVal showConfirmation As Boolean = True)
+Public Sub NormaliseLogbookTableFormatting(Optional ByVal showConfirmation As Boolean = True)
     Dim tbl As ListObject
 
     On Error GoTo Fail
 
     Application.ScreenUpdating = False
     Set tbl = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
-    NormalizeLogbookFormatting tbl
+    NormaliseLogbookFormatting tbl
     Application.ScreenUpdating = True
 
     If showConfirmation Then
@@ -757,17 +757,17 @@ Fail:
            vbCritical, "Formatting Reset Failed"
 End Sub
 
-Private Sub NormalizeLogbookFormatting(ByVal tbl As ListObject)
-    NormalizeLogbookDataFormatting tbl
-    NormalizeLogbookDataBorders tbl
-    NormalizeLogbookTotalsFormatting tbl
+Private Sub NormaliseLogbookFormatting(ByVal tbl As ListObject)
+    NormaliseLogbookDataFormatting tbl
+    NormaliseLogbookDataBorders tbl
+    NormaliseLogbookTotalsFormatting tbl
     ApplyLogbookPalette tbl
     ApplyLogbookTotalsRowBorders tbl
     ApplyLogbookTotalsFormatting tbl
     ApplyVisibleLogbookOutsideBorder tbl
 End Sub
 
-Private Sub NormalizeLogbookDataFormatting(ByVal tbl As ListObject)
+Private Sub NormaliseLogbookDataFormatting(ByVal tbl As ListObject)
     Dim templateRow As Range
     Dim dataColumn As Range
     Dim colIndex As Long
@@ -792,7 +792,7 @@ Private Sub NormalizeLogbookDataFormatting(ByVal tbl As ListObject)
     Next colIndex
 End Sub
 
-Private Sub NormalizeLogbookDataBorders(ByVal tbl As ListObject)
+Private Sub NormaliseLogbookDataBorders(ByVal tbl As ListObject)
     Dim templateRow As Range
     Dim dataColumn As Range
     Dim colIndex As Long
@@ -987,7 +987,7 @@ Private Sub ApplyLogbookTotalsRowBorders(ByVal tbl As ListObject)
     SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
 End Sub
 
-Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
+Private Sub NormaliseLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim totalsRange As Range
     Dim tableStyleName As String
     Dim tableFontName As String
@@ -1146,8 +1146,8 @@ Private Function KeywordDetected(ByVal details As String, ByVal keywordColumn As
     Dim tblKeywords As ListObject
     Dim keywordRange As Range
     Dim keywordCell As Range
-    Dim normalizedDetails As String
-    Dim normalizedKeyword As String
+    Dim NormalisedDetails As String
+    Dim NormalisedKeyword As String
 
     Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
     If tblKeywords Is Nothing Then Exit Function
@@ -1157,12 +1157,12 @@ Private Function KeywordDetected(ByVal details As String, ByVal keywordColumn As
     On Error GoTo 0
     If keywordRange Is Nothing Then Exit Function
 
-    normalizedDetails = NormalizeKeywordText(details, True)
+    NormalisedDetails = NormaliseKeywordText(details, True)
     For Each keywordCell In keywordRange.Cells
         If Not IsError(keywordCell.Value) Then
             If Trim$(CStr(keywordCell.Value)) <> "" Then
-                normalizedKeyword = NormalizeKeywordText(CStr(keywordCell.Value))
-                If InStr(1, normalizedDetails, normalizedKeyword, vbBinaryCompare) > 0 Then
+                NormalisedKeyword = NormaliseKeywordText(CStr(keywordCell.Value))
+                If InStr(1, NormalisedDetails, NormalisedKeyword, vbBinaryCompare) > 0 Then
                     KeywordDetected = True
                     Exit Function
                 End If
@@ -1171,7 +1171,7 @@ Private Function KeywordDetected(ByVal details As String, ByVal keywordColumn As
     Next keywordCell
 End Function
 
-Private Function NormalizeKeywordText(ByVal value As String, _
+Private Function NormaliseKeywordText(ByVal value As String, _
                                       Optional ByVal removeSeparator As Boolean = False) As String
     If removeSeparator Then value = Replace(value, "|", "")
     value = LCase$(value)
@@ -1181,7 +1181,7 @@ Private Function NormalizeKeywordText(ByVal value As String, _
     value = Replace(value, ",", "|")
     value = Replace(value, " ", "|")
     value = Replace(value, "&", "|")
-    NormalizeKeywordText = "|" & value & "|"
+    NormaliseKeywordText = "|" & value & "|"
 End Function
 
 Private Function DetectedCurrencyItemsText(ByVal ipcDetected As Boolean, _
@@ -1672,7 +1672,7 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
 
     If imported > 0 Then
         diagStep = "normalising Logbook formatting"
-        NormalizeLogbookFormatting tbl
+        NormaliseLogbookFormatting tbl
         RefreshDateCalculationFormulas tbl
         tbl.ListColumns("Date").DataBodyRange.Calculate
         SortLogbookByDate tbl
@@ -2346,9 +2346,9 @@ Private Function BuildExistingLogTenDuplicateKey(ByVal tbl As ListObject, ByVal 
     Else
         parts.Add ""
     End If
-    parts.Add NormalizeDuplicateText(CStr(tbl.ListColumns("Type").DataBodyRange.Cells(rowIndex, 1).Value))
-    parts.Add NormalizeDuplicateText(CStr(tbl.ListColumns("Reg").DataBodyRange.Cells(rowIndex, 1).Value))
-    parts.Add NormalizeDuplicateText(CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value))
+    parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Type").DataBodyRange.Cells(rowIndex, 1).Value))
+    parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Reg").DataBodyRange.Cells(rowIndex, 1).Value))
+    parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value))
 
     For Each columnName In LogTenDuplicateHourColumns()
         parts.Add FormatDuplicateNumber(tbl.ListColumns(CStr(columnName)).DataBodyRange.Cells(rowIndex, 1).Value)
@@ -2363,9 +2363,9 @@ Private Function BuildLogTenDuplicateKey(ByVal mapped As Object) As String
 
     Set parts = New Collection
     parts.Add Format$(CDate(mapped("Date")), "yyyy-mm-dd")
-    parts.Add NormalizeDuplicateText(CStr(mapped("Type")))
-    parts.Add NormalizeDuplicateText(CStr(mapped("Reg")))
-    parts.Add NormalizeDuplicateText(CStr(mapped("Details")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Type")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Reg")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Details")))
 
     For Each columnName In LogTenDuplicateHourColumns()
         parts.Add FormatDuplicateNumber(mapped(CStr(columnName)))
@@ -2389,8 +2389,8 @@ Private Function FormatDuplicateNumber(ByVal value As Variant) As String
     End If
 End Function
 
-Private Function NormalizeDuplicateText(ByVal value As String) As String
-    NormalizeDuplicateText = UCase$(Trim$(value))
+Private Function NormaliseDuplicateText(ByVal value As String) As String
+    NormaliseDuplicateText = UCase$(Trim$(value))
 End Function
 
 Private Function ParseLogTenHours(ByVal value As String) As Double
@@ -2683,17 +2683,17 @@ Private Function AircraftTypeHasEngineClassHours(ByVal tbl As ListObject, _
                                                  ByVal hourColumnNames As Variant) As Boolean
     Dim typeCol As Long
     Dim rowIndex As Long
-    Dim normalizedType As String
+    Dim NormalisedType As String
 
     If tbl.DataBodyRange Is Nothing Then Exit Function
 
-    normalizedType = LCase(Trim(aircraftType))
-    If normalizedType = "" Then Exit Function
+    NormalisedType = LCase(Trim(aircraftType))
+    If NormalisedType = "" Then Exit Function
 
     typeCol = tbl.ListColumns("Type").Index
 
     For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
-        If LCase(Trim(CStr(tbl.DataBodyRange.Cells(rowIndex, typeCol).Value))) = normalizedType Then
+        If LCase(Trim(CStr(tbl.DataBodyRange.Cells(rowIndex, typeCol).Value))) = NormalisedType Then
             If SumLogbookRowColumns(tbl, rowIndex, hourColumnNames) > 0 Then
                 AircraftTypeHasEngineClassHours = True
                 Exit Function
@@ -3076,7 +3076,7 @@ Public Sub DeleteSelectedLogbookRows()
         tbl.ListRows(CLng(rowIndexes(key))).Delete
     Next key
 
-    NormalizeLogbookFormatting tbl
+    NormaliseLogbookFormatting tbl
     UpdateHiddenRows ThisWorkbook
     MarkRoutesDirty ThisWorkbook
 
@@ -3547,19 +3547,19 @@ Private Function KeywordTableContainsToken(ByVal token As String) As Boolean
     Dim tblKeywords As ListObject
     Dim keywordColumn As ListColumn
     Dim keywordCell As Range
-    Dim normalizedToken As String
+    Dim NormalisedToken As String
 
     Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
     If tblKeywords Is Nothing Then Exit Function
 
-    normalizedToken = NormalizeKeywordText(token)
+    NormalisedToken = NormaliseKeywordText(token)
     For Each keywordColumn In tblKeywords.ListColumns
         If Not keywordColumn.DataBodyRange Is Nothing Then
             For Each keywordCell In keywordColumn.DataBodyRange.Cells
                 If Not IsError(keywordCell.Value) Then
                     If Trim$(CStr(keywordCell.Value)) <> "" Then
-                        If InStr(1, NormalizeKeywordText(CStr(keywordCell.Value)), _
-                                   normalizedToken, vbBinaryCompare) > 0 Then
+                        If InStr(1, NormaliseKeywordText(CStr(keywordCell.Value)), _
+                                   NormalisedToken, vbBinaryCompare) > 0 Then
                             KeywordTableContainsToken = True
                             Exit Function
                         End If
@@ -4466,7 +4466,7 @@ Public Sub RefreshSuppressWarningsButton()
     End If
 End Sub
 
-Public Sub InitializeNewEntryLayoutUI()
+Public Sub InitialiseNewEntryLayoutUI()
     Dim desiredLayout As Long
 
     desiredLayout = ResolveNewEntryLayoutId(GetWorkbookNameValue(ThisWorkbook, "NewEntryLayout", 1))

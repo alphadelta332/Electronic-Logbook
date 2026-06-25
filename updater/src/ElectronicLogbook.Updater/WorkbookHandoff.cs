@@ -62,7 +62,7 @@ public static class WorkbookHandoff
             }
 
             throw new InvalidOperationException(
-                $"Failed to finalize workbook handoff: {ex.Message}",
+                $"Failed to finalise workbook handoff: {ex.Message}",
                 ex);
         }
     }

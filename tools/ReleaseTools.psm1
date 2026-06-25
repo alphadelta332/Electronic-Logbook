@@ -55,7 +55,7 @@ function Close-ExcelComObjects {
         [bool]$Save
     )
 
-    if ($Workbook -ne $null) {
+    if ($null -ne $Workbook) {
         try {
             if ($Save) {
                 $Workbook.Close($true)
@@ -66,7 +66,7 @@ function Close-ExcelComObjects {
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Workbook) | Out-Null
     }
 
-    if ($Excel -ne $null) {
+    if ($null -ne $Excel) {
         try { $Excel.Quit() } catch {}
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($Excel) | Out-Null
     }

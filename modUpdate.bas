@@ -303,7 +303,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
-    NormalizeLogbookFormatting masterWb
+    NormaliseLogbookFormatting masterWb
 
     diagStep = "Updating hidden rows"
     Dim wsLog     As Worksheet
@@ -386,6 +386,7 @@ Private Sub RunUpdate(newVersion As String)
     On Error Resume Next
     masterWb.RemovePersonalInformation = False
     On Error GoTo UpdateFailed
+    ActivatePrimarySheetForSave masterWb
 
     ' Save to a local temp path first, then move to destination.
     ' Direct SaveAs to OneDrive paths is unreliable depending on sync state.
@@ -767,6 +768,17 @@ Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
     For Each ws In masterWb.Worksheets
         ws.Unprotect Password:=""
     Next ws
+    On Error GoTo 0
+End Sub
+
+Private Sub ActivatePrimarySheetForSave(masterWb As Workbook)
+    On Error Resume Next
+    masterWb.Activate
+    masterWb.Worksheets("New Entry").Activate
+    If Err.Number <> 0 Then
+        Err.Clear
+        masterWb.Worksheets(1).Activate
+    End If
     On Error GoTo 0
 End Sub
 
@@ -1273,20 +1285,20 @@ Fail:
     Err.Clear
 End Sub
 
-Private Sub NormalizeLogbookFormatting(masterWb As Workbook)
+Private Sub NormaliseLogbookFormatting(masterWb As Workbook)
     Dim lo As ListObject
 
     Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
-    NormalizeLogbookDataFormatting lo
-    NormalizeLogbookDataBorders lo
-    NormalizeLogbookTotalsFormatting lo
+    NormaliseLogbookDataFormatting lo
+    NormaliseLogbookDataBorders lo
+    NormaliseLogbookTotalsFormatting lo
     ApplyLogbookPalette masterWb, lo
     ApplyLogbookTotalsRowBorders lo
     ApplyLogbookTotalsFormatting masterWb, lo
     ApplyVisibleLogbookOutsideBorder lo
 End Sub
 
-Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
+Private Sub NormaliseLogbookDataFormatting(lo As ListObject)
     Dim templateRow As Range
     Dim dataColumn As Range
     Dim colIndex As Long
@@ -1311,7 +1323,7 @@ Private Sub NormalizeLogbookDataFormatting(lo As ListObject)
     Next colIndex
 End Sub
 
-Private Sub NormalizeLogbookDataBorders(lo As ListObject)
+Private Sub NormaliseLogbookDataBorders(lo As ListObject)
     Dim templateRow As Range
     Dim dataColumn As Range
     Dim colIndex As Long
@@ -1506,7 +1518,7 @@ Private Sub ApplyLogbookTotalsRowBorders(lo As ListObject)
     SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
 End Sub
 
-Private Sub NormalizeLogbookTotalsFormatting(lo As ListObject)
+Private Sub NormaliseLogbookTotalsFormatting(lo As ListObject)
     Dim totalsRange            As Range
     Dim tableStyleName         As String
     Dim tableFontName          As String
