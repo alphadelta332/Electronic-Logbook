@@ -253,6 +253,8 @@ function Set-WorkbookOpenView {
             $Workbook.Worksheets.Item(1).Activate()
         }
 
+        $Workbook.Save()
+
     }.GetNewClosure()
 
     Write-Host "Setting open view: $WorkbookPath"
