@@ -587,7 +587,7 @@ public partial class MainWindow : Window
 
             if (_context.UseInPlaceSwap)
             {
-                AppendLog("Finalizing workbook handoff...");
+                AppendLog("finalising workbook handoff...");
                 var handoff = await Task.Run(
                     () => WorkbookHandoff.ReplaceSourceWithUpdated(source, stagedOutput),
                     _updateCts.Token);

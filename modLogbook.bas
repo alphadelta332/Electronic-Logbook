@@ -6,6 +6,9 @@ Private mProtectionDisabledForSession As Boolean
 Private Const NEW_ENTRY_ACTIVE_SHEET As String = "New Entry"
 Private Const NEW_ENTRY_UNUSED_SHEET As String = "New Entry Unused Layout"
 Private Const NEW_ENTRY_SWAP_TEMP_SHEET As String = "New Entry Swap Temp"
+Private Const AIRCRAFT_TYPES_SHEET As String = "AircraftTypes"
+Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
+Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
 Private mApplyingNewEntryLayout As Boolean
 
 Sub AddToLogbook()
@@ -57,6 +60,8 @@ Sub AddToLogbook()
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
     Dim logbookWasProtected As Boolean
+    Dim latestLogbookDate As Date
+    Dim shouldSortLogbook As Boolean
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
@@ -112,6 +117,8 @@ Sub AddToLogbook()
         End If
 
         entryDate = CDate(NewEntryValue("neDate"))
+        latestLogbookDate = GetLatestLogbookEntryDate(tbl)
+        shouldSortLogbook = (latestLogbookDate <> 0 And entryDate < latestLogbookDate)
 
     '--- 3b. Registration Check (skipped for sim entries)
         If NewEntryNumericValue("neIfrSim") = 0 Then
@@ -203,9 +210,6 @@ Sub AddToLogbook()
 
     '--- 4c. Earlier Than Latest Existing Logbook Entry Check
         If Not suppressWarnings Then
-            Dim latestLogbookDate As Date
-            latestLogbookDate = GetLatestLogbookEntryDate(tbl)
-
             If latestLogbookDate <> 0 Then
                 If CDate(NewEntryValue("neDate")) < latestLogbookDate Then
                     response = MsgBox("Warning: This entry is dated before the latest existing Logbook entry (" & _
@@ -539,9 +543,13 @@ Sub AddToLogbook()
     '--- 5g. Sort Logbook by Date
         diagStep = "Step 5g: Sort Logbook"
         WriteCrumb diagStep
-        SetAddToLogbookStatus "Sorting logbook"
+        If shouldSortLogbook Then
+            SetAddToLogbookStatus "Sorting logbook"
+        Else
+            SetAddToLogbookStatus "finalising logbook"
+        End If
         Application.Calculate
-        SortLogbookByDate tbl
+        If shouldSortLogbook Then SortLogbookByDate tbl
 
     '--- Persist the entry now so it survives a crash in the chart/pivot steps below
         diagStep = "Step 5: Save Entry"
@@ -684,6 +692,7 @@ Private Sub SetAddToLogbookStatus(ByVal stepText As String)
 End Sub
 
 Private Sub ProtectLogbookSheetForRuntime(ws As Worksheet)
+    UnlockLogbookRowsForDeletion ws
     ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
                AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True, _
@@ -1029,7 +1038,6 @@ Private Sub NormalizeLogbookTotalsFormatting(ByVal tbl As ListObject)
 End Sub
 
 Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
-    Const MASTER_TOTALS_FILL_COLOR As Long = 14277081
     Dim ws As Worksheet
     Dim totalsBlock As Range
     Dim topRow As Range
@@ -1040,6 +1048,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
+    Dim secondaryColor As Long
 
     If Not tbl.ShowTotals Then Exit Sub
 
@@ -1053,6 +1062,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
     tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
+    secondaryColor = LogbookSecondaryFillColor(tbl)
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
@@ -1069,8 +1079,8 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     topRow.Cells(1, 3).Font.Bold = True
 
     bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = MASTER_TOTALS_FILL_COLOR
-    bottomRow.Font.Color = vbBlack
+    bottomRow.Interior.Color = secondaryColor
+    bottomRow.Font.Color = ContrastingTextColor(secondaryColor)
     bottomRow.Font.Bold = True
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
@@ -1093,6 +1103,10 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
     cellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
+
+Private Function LogbookSecondaryFillColor(ByVal tbl As ListObject) As Long
+    LogbookSecondaryFillColor = tbl.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+End Function
 
 Private Sub ApplyVisibleLogbookOutsideBorder(ByVal tbl As ListObject)
     Dim visibleRange As Range
@@ -1514,6 +1528,1135 @@ Private Function NewEntryClearFieldNames() As Variant
         "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
+' ==============================================================
+' LOGTEN IMPORT
+' ==============================================================
+
+Public Sub ImportFromLogTen()
+    Dim filePath As Variant
+    Dim importResult As Object
+
+    filePath = Application.GetOpenFilename( _
+        "LogTen exports (*.txt;*.tsv;*.csv),*.txt;*.tsv;*.csv,All files (*.*),*.*", _
+        , "Select LogTen Export")
+    If VarType(filePath) = vbBoolean Then Exit Sub
+
+    Set importResult = ImportFromLogTenFile(CStr(filePath))
+    If CBool(importResult("Completed")) Then
+        MsgBox CStr(importResult("Message")), vbInformation, "LogTen Import Complete"
+    Else
+        MsgBox CStr(importResult("Message")), vbExclamation, "LogTen Import Stopped"
+    End If
+End Sub
+
+Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
+    Dim previousScreenUpdating As Boolean
+    Dim previousEnableEvents As Boolean
+    Dim previousCalculation As XlCalculation
+    Dim previousDisplayStatusBar As Boolean
+    Dim previousStatusBar As Variant
+    Dim result As Object
+    Dim records As Collection
+    Dim headers As Object
+    Dim mappedRows As Collection
+    Dim aircraftTypes As Object
+    Dim unknownTypes As Object
+    Dim ignoredApproaches As Object
+    Dim errors As Collection
+    Dim blanks As Long
+    Dim oldFormatDetected As Boolean
+    Dim wsLog As Worksheet
+    Dim tbl As ListObject
+    Dim tableStyleName As String
+    Dim totalsWereOn As Boolean
+    Dim totalsStateCaptured As Boolean
+    Dim logbookWasProtected As Boolean
+    Dim rowItem As Object
+    Dim imported As Long
+    Dim duplicates As Long
+    Dim simRows As Long
+    Dim rowIndex As Long
+    Dim diagStep As String
+    Dim existingKeys As Object
+    Dim rowsToImport As Collection
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.Add "Completed", False
+    result.Add "Message", ""
+
+    On Error GoTo Fail
+
+    diagStep = "reading LogTen export"
+    Set records = ReadLogTenRecords(filePath, headers, blanks, oldFormatDetected)
+    If oldFormatDetected Then
+        result("Message") = "This looks like LogTen's default full export. Use the dynamic export format instead."
+        Set ImportFromLogTenFile = result
+        Exit Function
+    End If
+
+    If records.Count = 0 Then
+        result("Message") = "No importable LogTen rows were found."
+        Set ImportFromLogTenFile = result
+        Exit Function
+    End If
+
+    diagStep = "loading aircraft type table"
+    Set aircraftTypes = LoadAircraftTypeClasses()
+    Set unknownTypes = CreateObject("Scripting.Dictionary")
+    Set ignoredApproaches = CreateObject("Scripting.Dictionary")
+    Set errors = New Collection
+    Set mappedRows = New Collection
+
+    For rowIndex = 1 To records.Count
+        diagStep = "mapping row " & CStr(rowIndex + 1)
+        Set rowItem = MapLogTenRecord(records(rowIndex), rowIndex + 1, aircraftTypes, unknownTypes, ignoredApproaches, errors)
+        If Not rowItem Is Nothing Then mappedRows.Add rowItem
+    Next rowIndex
+
+    If unknownTypes.Count > 0 Or errors.Count > 0 Then
+        WriteLogTenImportReport mappedRows, errors, unknownTypes, ignoredApproaches, 0, 0, blanks, True
+        result("Message") = "The import was not written because validation found issues." & vbCrLf & vbCrLf & _
+                            "Unknown aircraft types: " & JoinDictionaryKeys(unknownTypes, ", ") & vbCrLf & _
+                            "Review the '" & LOGTEN_REPORT_SHEET & "' sheet for details."
+        Set ImportFromLogTenFile = result
+        Exit Function
+    End If
+
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
+    previousCalculation = Application.Calculation
+    previousDisplayStatusBar = Application.DisplayStatusBar
+    previousStatusBar = Application.StatusBar
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Electronic Logbook: importing LogTen export"
+
+    diagStep = "opening Logbook table"
+    Set wsLog = ThisWorkbook.Sheets("Logbook")
+    Set tbl = wsLog.ListObjects("Logbook")
+    logbookWasProtected = wsLog.ProtectContents
+    If logbookWasProtected Then wsLog.Unprotect Password:=ProtectionPassword()
+
+    tableStyleName = tbl.TableStyle.Name
+    totalsWereOn = tbl.ShowTotals
+    totalsStateCaptured = True
+    If totalsWereOn Then tbl.ShowTotals = False
+
+    diagStep = "checking duplicates"
+    Set existingKeys = BuildExistingLogTenDuplicateKeys(tbl)
+    Set rowsToImport = New Collection
+    For Each rowItem In mappedRows
+        If existingKeys.Exists(CStr(rowItem("DuplicateKey"))) Then
+            duplicates = duplicates + 1
+            rowItem("Status") = "Duplicate"
+        Else
+            existingKeys.Add CStr(rowItem("DuplicateKey")), True
+            rowsToImport.Add rowItem
+            If CDbl(rowItem("IfrSim")) > 0 And CStr(rowItem("Type")) = "SIM" Then simRows = simRows + 1
+            rowItem("Status") = "Imported"
+        End If
+    Next rowItem
+
+    diagStep = "writing imported rows"
+    imported = rowsToImport.Count
+    If imported > 0 Then AppendMappedLogTenRows tbl, rowsToImport
+
+    tbl.TableStyle = tableStyleName
+    tbl.ShowTableStyleRowStripes = True
+    tbl.ShowTableStyleColumnStripes = False
+    tbl.ShowTotals = totalsWereOn
+    totalsStateCaptured = False
+
+    If imported > 0 Then
+        diagStep = "normalising Logbook formatting"
+        NormalizeLogbookFormatting tbl
+        RefreshDateCalculationFormulas tbl
+        tbl.ListColumns("Date").DataBodyRange.Calculate
+        SortLogbookByDate tbl
+        UpdateHiddenRows ThisWorkbook
+        MarkRoutesDirty ThisWorkbook
+        ThisWorkbook.Save
+    End If
+
+    diagStep = "writing import report"
+    WriteLogTenImportReport mappedRows, errors, unknownTypes, ignoredApproaches, imported, duplicates, blanks, False
+
+    If logbookWasProtected Then ProtectLogbookSheetForRuntime wsLog
+    RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
+                                  previousDisplayStatusBar, previousStatusBar
+
+    result("Completed") = True
+    result("Message") = "Imported " & imported & " row(s)." & vbCrLf & _
+                        "Skipped duplicates: " & duplicates & vbCrLf & _
+                        "Blank rows ignored: " & blanks & vbCrLf & _
+                        "Simulator rows imported: " & simRows & vbCrLf & _
+                        "Ignored approach labels: " & JoinDictionaryKeys(ignoredApproaches, ", ")
+    Set ImportFromLogTenFile = result
+    Exit Function
+
+Fail:
+    Dim errNum As Long
+    Dim errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    If totalsStateCaptured Then tbl.ShowTotals = totalsWereOn
+    If logbookWasProtected Then ProtectLogbookSheetForRuntime wsLog
+    RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
+                                  previousDisplayStatusBar, previousStatusBar
+    result("Message") = "The LogTen import failed." & vbCrLf & vbCrLf & _
+                        "Step: " & diagStep & vbCrLf & _
+                        "Error " & errNum & ": " & errDesc
+    Set ImportFromLogTenFile = result
+End Function
+
+Public Sub ImportAircraftTypesFromCsv()
+    Dim filePath As Variant
+    Dim records As Collection
+    Dim headers As Object
+    Dim blanks As Long
+    Dim oldFormatDetected As Boolean
+    Dim tbl As ListObject
+    Dim rowRecord As Object
+    Dim designator As String
+    Dim descriptionCode As String
+    Dim imported As Long
+
+    filePath = Application.GetOpenFilename( _
+        "Aircraft type CSV (*.csv;*.txt;*.tsv),*.csv;*.txt;*.tsv,All files (*.*),*.*", _
+        , "Select Aircraft Type Designator CSV")
+    If VarType(filePath) = vbBoolean Then Exit Sub
+
+    On Error GoTo Fail
+    Set records = ReadDelimitedRecords(CStr(filePath), headers, blanks, oldFormatDetected)
+    Set tbl = EnsureAircraftTypesTable()
+
+    If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.Delete
+
+    For Each rowRecord In records
+        designator = FirstPresentField(rowRecord, Array("Designator", "Type Designator", "Aircraft Type", "AircraftType", "TYPE DESIGNATOR"))
+        descriptionCode = FirstPresentField(rowRecord, Array("DescriptionCode", "Description Code", "Description", "Aircraft Description", "DESCRIPTION"))
+        designator = UCase$(Trim$(designator))
+        descriptionCode = UCase$(Trim$(descriptionCode))
+
+        If designator <> "" And Len(descriptionCode) >= 2 Then
+            AddAircraftTypeRow tbl, designator, descriptionCode, "Imported"
+            imported = imported + 1
+        End If
+    Next rowRecord
+
+    If imported = 0 Then SeedAircraftTypes tbl
+    MsgBox "Imported " & imported & " aircraft type row(s).", vbInformation, "Aircraft Types Imported"
+    Exit Sub
+
+Fail:
+    MsgBox "Aircraft type import failed." & vbCrLf & vbCrLf & _
+           "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Aircraft Types Import"
+End Sub
+
+Private Sub RestoreImportApplicationState(ByVal screenUpdating As Boolean, _
+                                          ByVal enableEvents As Boolean, _
+                                          ByVal calculationMode As XlCalculation, _
+                                          ByVal displayStatusBar As Boolean, _
+                                          ByVal statusBarValue As Variant)
+    Application.ScreenUpdating = screenUpdating
+    Application.EnableEvents = enableEvents
+    Application.Calculation = calculationMode
+    Application.DisplayStatusBar = displayStatusBar
+    If displayStatusBar Then
+        If VarType(statusBarValue) = vbString Then
+            Application.StatusBar = CStr(statusBarValue)
+        Else
+            Application.StatusBar = False
+        End If
+    Else
+        Application.StatusBar = False
+    End If
+    Application.CutCopyMode = False
+End Sub
+
+Private Function ReadLogTenRecords(ByVal filePath As String, _
+                                   ByRef headers As Object, _
+                                   ByRef blankRows As Long, _
+                                   ByRef oldFormatDetected As Boolean) As Collection
+    Dim records As Collection
+    Set records = ReadDelimitedRecords(filePath, headers, blankRows, oldFormatDetected)
+
+    If headers.Exists("flight_flightdate") Then oldFormatDetected = True
+    If Not oldFormatDetected Then ValidateLogTenHeaders headers
+    Set ReadLogTenRecords = records
+End Function
+
+Private Function ReadDelimitedRecords(ByVal filePath As String, _
+                                      ByRef headers As Object, _
+                                      ByRef blankRows As Long, _
+                                      ByRef oldFormatDetected As Boolean) As Collection
+    Dim fso As Object
+    Dim stream As Object
+    Dim content As String
+    Dim lines As Variant
+    Dim headerFields As Variant
+    Dim fields As Variant
+    Dim delimiter As String
+    Dim lineIndex As Long
+    Dim colIndex As Long
+    Dim rowRecord As Object
+    Dim headerName As String
+    Dim records As Collection
+
+    Set records = New Collection
+    Set headers = CreateObject("Scripting.Dictionary")
+    headers.CompareMode = vbTextCompare
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FileExists(filePath) Then Err.Raise 53, "ReadDelimitedRecords", "File not found: " & filePath
+
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 2
+    stream.Charset = "utf-8"
+    stream.Open
+    stream.LoadFromFile filePath
+    content = stream.ReadText
+    stream.Close
+    content = Replace(content, ChrW$(&HFEFF), "")
+
+    content = Replace(content, vbCrLf, vbLf)
+    content = Replace(content, vbCr, vbLf)
+    lines = Split(content, vbLf)
+    If UBound(lines) < 0 Then
+        Set ReadDelimitedRecords = records
+        Exit Function
+    End If
+
+    delimiter = DetectDelimiter(CStr(lines(0)))
+    headerFields = ParseDelimitedLine(CStr(lines(0)), delimiter)
+    For colIndex = LBound(headerFields) To UBound(headerFields)
+        headerName = Trim$(CStr(headerFields(colIndex)))
+        If headerName <> "" Then headers(LCase$(headerName)) = colIndex
+    Next colIndex
+
+    If UBound(headerFields) > 100 Then oldFormatDetected = True
+
+    For lineIndex = 1 To UBound(lines)
+        If Trim$(CStr(lines(lineIndex))) = "" Then
+            blankRows = blankRows + 1
+        Else
+            fields = ParseDelimitedLine(CStr(lines(lineIndex)), delimiter)
+            Set rowRecord = CreateObject("Scripting.Dictionary")
+            rowRecord.CompareMode = vbTextCompare
+            rowRecord.Add "__RowNumber", lineIndex + 1
+            For colIndex = LBound(headerFields) To UBound(headerFields)
+                headerName = Trim$(CStr(headerFields(colIndex)))
+                If headerName <> "" Then
+                    If colIndex <= UBound(fields) Then
+                        rowRecord(headerName) = Trim$(CStr(fields(colIndex)))
+                    Else
+                        rowRecord(headerName) = ""
+                    End If
+                End If
+            Next colIndex
+            If LogTenRecordHasAnyValue(rowRecord) Then
+                records.Add rowRecord
+            Else
+                blankRows = blankRows + 1
+            End If
+        End If
+    Next lineIndex
+
+    Set ReadDelimitedRecords = records
+End Function
+
+Private Function DetectDelimiter(ByVal headerLine As String) As String
+    If CountOccurrences(headerLine, vbTab) >= CountOccurrences(headerLine, ",") Then
+        DetectDelimiter = vbTab
+    Else
+        DetectDelimiter = ","
+    End If
+End Function
+
+Private Function CountOccurrences(ByVal value As String, ByVal token As String) As Long
+    CountOccurrences = (Len(value) - Len(Replace(value, token, ""))) / Len(token)
+End Function
+
+Private Function ParseDelimitedLine(ByVal lineText As String, ByVal delimiter As String) As Variant
+    Dim values As Collection
+    Dim valueText As String
+    Dim i As Long
+    Dim ch As String
+    Dim inQuotes As Boolean
+    Dim arr() As String
+
+    Set values = New Collection
+    For i = 1 To Len(lineText)
+        ch = Mid$(lineText, i, 1)
+        If ch = """" Then
+            If inQuotes And i < Len(lineText) And Mid$(lineText, i + 1, 1) = """" Then
+                valueText = valueText & """"
+                i = i + 1
+            Else
+                inQuotes = Not inQuotes
+            End If
+        ElseIf ch = delimiter And Not inQuotes Then
+            values.Add valueText
+            valueText = ""
+        Else
+            valueText = valueText & ch
+        End If
+    Next i
+    values.Add valueText
+
+    ReDim arr(0 To values.Count - 1)
+    For i = 1 To values.Count
+        arr(i - 1) = CStr(values(i))
+    Next i
+    ParseDelimitedLine = arr
+End Function
+
+Private Sub ValidateLogTenHeaders(ByVal headers As Object)
+    Dim requiredHeaders As Variant
+    Dim headerName As Variant
+    Dim missing As String
+
+    requiredHeaders = Array("Date", "Aircraft ID", "Aircraft Type", "From", "To", _
+                            "Total Time", "Simulator", "PIC/P1 Crew", "Day Ldg", _
+                            "Night Ldg", "Approach 1", "Approach 2")
+    For Each headerName In requiredHeaders
+        If Not headers.Exists(LCase$(CStr(headerName))) Then
+            missing = AppendListItem(missing, CStr(headerName), ", ")
+        End If
+    Next headerName
+
+    If missing <> "" Then Err.Raise 5, "ValidateLogTenHeaders", "Missing required LogTen headers: " & missing
+End Sub
+
+Private Function LogTenRecordHasAnyValue(ByVal rowRecord As Object) As Boolean
+    Dim key As Variant
+    For Each key In rowRecord.Keys
+        If Left$(CStr(key), 2) <> "__" Then
+            If Trim$(CStr(rowRecord(key))) <> "" Then
+                LogTenRecordHasAnyValue = True
+                Exit Function
+            End If
+        End If
+    Next key
+End Function
+
+Private Function MapLogTenRecord(ByVal sourceRow As Object, _
+                                 ByVal rowNumber As Long, _
+                                 ByVal aircraftTypes As Object, _
+                                 ByVal unknownTypes As Object, _
+                                 ByVal ignoredApproaches As Object, _
+                                 ByVal errors As Collection) As Object
+    Dim mapped As Object
+    Dim aircraftType As String
+    Dim aircraftClass As String
+    Dim isSimulatorOnly As Boolean
+    Dim entryDate As Date
+    Dim totalHours As Double
+    Dim nightHours As Double
+    Dim picHours As Double
+    Dim p1usHours As Double
+    Dim sicHours As Double
+    Dim simulatorHours As Double
+    Dim accountedHours As Double
+    Dim remainderHours As Double
+    Dim commandHours As Double
+    Dim icusHours As Double
+    Dim copilotHours As Double
+    Dim dualHours As Double
+    Dim rowText As String
+
+    Set mapped = CreateObject("Scripting.Dictionary")
+    mapped.CompareMode = vbTextCompare
+
+    If Not IsDate(FieldValue(sourceRow, "Date")) Then
+        errors.Add "Row " & rowNumber & ": invalid or missing Date."
+        Exit Function
+    End If
+
+    entryDate = CDate(FieldValue(sourceRow, "Date"))
+    aircraftType = UCase$(Trim$(FieldValue(sourceRow, "Aircraft Type")))
+    totalHours = ParseLogTenHours(FieldValue(sourceRow, "Total Time"))
+    nightHours = ParseLogTenHours(FieldValue(sourceRow, "Night"))
+    picHours = ParseLogTenHours(FieldValue(sourceRow, "PIC"))
+    p1usHours = ParseLogTenHours(FieldValue(sourceRow, "P1u/s"))
+    sicHours = ParseLogTenHours(FieldValue(sourceRow, "SIC"))
+    simulatorHours = ParseLogTenHours(FieldValue(sourceRow, "Simulator"))
+    isSimulatorOnly = (simulatorHours > 0 And aircraftType = "" And totalHours = 0)
+
+    If totalHours = 0 And simulatorHours = 0 Then Exit Function
+
+    If isSimulatorOnly Then
+        aircraftType = "SIM"
+        aircraftClass = "SIM"
+    Else
+        If Not aircraftTypes.Exists(aircraftType) Then
+            unknownTypes(aircraftType) = True
+            Exit Function
+        End If
+        aircraftClass = CStr(aircraftTypes(aircraftType))
+    End If
+
+    accountedHours = picHours + p1usHours + sicHours
+    If totalHours > 0 And accountedHours > totalHours + 0.0001 Then
+        errors.Add "Row " & rowNumber & ": PIC/P1u/s/SIC hours exceed Total Time."
+        Exit Function
+    End If
+
+    commandHours = picHours
+    icusHours = p1usHours
+    copilotHours = sicHours
+    remainderHours = totalHours - accountedHours
+    If remainderHours < 0 Then remainderHours = 0
+
+    rowText = JoinLogTenRowValues(sourceRow)
+    If remainderHours > 0 Then
+        If InStr(1, rowText, "ICUS", vbTextCompare) > 0 Then
+            icusHours = icusHours + remainderHours
+        Else
+            dualHours = dualHours + remainderHours
+        End If
+    End If
+
+    AddMappedBaseFields mapped, sourceRow, entryDate, aircraftType, rowNumber
+    AllocateMappedHours mapped, aircraftClass, commandHours, icusHours, copilotHours, dualHours, nightHours
+
+    mapped("IfrIf") = ParseLogTenHours(FieldValue(sourceRow, "Actual Inst"))
+    mapped("IfrSim") = simulatorHours
+    mapped("LandingsDay") = ParseLogTenNumber(FieldValue(sourceRow, "Day Ldg"))
+    mapped("LandingsNight") = ParseLogTenNumber(FieldValue(sourceRow, "Night Ldg"))
+    ApplyLogTenApproaches mapped, FieldValue(sourceRow, "Approach 1"), ignoredApproaches
+    ApplyLogTenApproaches mapped, FieldValue(sourceRow, "Approach 2"), ignoredApproaches
+    mapped("DuplicateKey") = BuildLogTenDuplicateKey(mapped)
+    Set MapLogTenRecord = mapped
+End Function
+
+Private Sub AddMappedBaseFields(ByVal mapped As Object, _
+                                ByVal sourceRow As Object, _
+                                ByVal entryDate As Date, _
+                                ByVal aircraftType As String, _
+                                ByVal rowNumber As Long)
+    mapped("SourceRow") = rowNumber
+    mapped("Date") = entryDate
+    mapped("Year") = Year(entryDate)
+    mapped("Month") = Format$(entryDate, "mmm")
+    mapped("Day") = Day(entryDate)
+    mapped("Type") = aircraftType
+    mapped("Reg") = UCase$(Trim$(FieldValue(sourceRow, "Aircraft ID")))
+    mapped("PIC") = FirstPresentField(sourceRow, Array("PIC/P1 Crew", "PIC"))
+    mapped("Other Pilot or Crew") = JoinNonBlank(Array(FieldValue(sourceRow, "SIC/P2 Crew"), FieldValue(sourceRow, "Observer")), ", ")
+    mapped("Details") = BuildLogTenDetails(sourceRow)
+
+    InitialiseMappedNumericFields mapped
+End Sub
+
+Private Sub InitialiseMappedNumericFields(ByVal mapped As Object)
+    Dim columnName As Variant
+
+    For Each columnName In Array("SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+                                 "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
+                                 "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
+                                 "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", _
+                                 "LandingsDay", "LandingsNight", "ILS", "VOR", "RNAV", _
+                                 "NDB", "DGA (CDI)", "DGA (Azi)", "Circling")
+        mapped(CStr(columnName)) = 0#
+    Next columnName
+End Sub
+
+Private Sub AllocateMappedHours(ByVal mapped As Object, _
+                                ByVal aircraftClass As String, _
+                                ByVal commandHours As Double, _
+                                ByVal icusHours As Double, _
+                                ByVal copilotHours As Double, _
+                                ByVal dualHours As Double, _
+                                ByVal nightHours As Double)
+    Dim commandNight As Double
+    Dim icusNight As Double
+    Dim copilotNight As Double
+    Dim dualNight As Double
+    Dim remainingNight As Double
+    Dim prefix As String
+
+    remainingNight = nightHours
+    commandNight = AllocateNightHours(commandHours, remainingNight)
+    icusNight = AllocateNightHours(icusHours, remainingNight)
+    copilotNight = AllocateNightHours(copilotHours, remainingNight)
+    dualNight = AllocateNightHours(dualHours, remainingNight)
+
+    If aircraftClass = "SIM" Then Exit Sub
+    If aircraftClass = "ME" Then
+        prefix = "Me"
+    Else
+        prefix = "Se"
+    End If
+
+    mapped(prefix & "CommandDay") = RoundLogTenHours(commandHours - commandNight)
+    mapped(prefix & "CommandNight") = RoundLogTenHours(commandNight)
+    mapped(prefix & "IcusDay") = RoundLogTenHours(icusHours - icusNight)
+    mapped(prefix & "IcusNight") = RoundLogTenHours(icusNight)
+    mapped(prefix & "DualDay") = RoundLogTenHours(dualHours - dualNight)
+    mapped(prefix & "DualNight") = RoundLogTenHours(dualNight)
+    mapped("CopilotDay") = RoundLogTenHours(copilotHours - copilotNight)
+    mapped("CopilotNight") = RoundLogTenHours(copilotNight)
+End Sub
+
+Private Function AllocateNightHours(ByVal bucketHours As Double, ByRef remainingNight As Double) As Double
+    If remainingNight <= 0 Or bucketHours <= 0 Then Exit Function
+
+    If bucketHours <= remainingNight Then
+        AllocateNightHours = bucketHours
+        remainingNight = remainingNight - bucketHours
+    Else
+        AllocateNightHours = remainingNight
+        remainingNight = 0
+    End If
+End Function
+
+Private Function BuildLogTenDetails(ByVal sourceRow As Object) As String
+    Dim routeText As String
+    Dim details As String
+    Dim flightNumber As String
+
+    flightNumber = Trim$(FieldValue(sourceRow, "Flight #"))
+    routeText = BuildLogTenRouteText(sourceRow)
+
+    If flightNumber <> "" Then details = flightNumber
+    If routeText <> "" Then details = AppendListItem(details, routeText, " ")
+    details = AppendListItem(details, FieldValue(sourceRow, "Remarks"), " | ")
+    details = AppendListItem(details, FieldValue(sourceRow, "IPC/ICC"), " | ")
+    details = AppendListItem(details, FieldValue(sourceRow, "Flight Review"), " | ")
+
+    If details = "" Then details = "LogTen import"
+    BuildLogTenDetails = details
+End Function
+
+Private Function BuildLogTenRouteText(ByVal sourceRow As Object) As String
+    Dim dep As String
+    Dim arr As String
+    Dim route As String
+
+    dep = UCase$(Trim$(FieldValue(sourceRow, "From")))
+    arr = UCase$(Trim$(FieldValue(sourceRow, "To")))
+    route = Trim$(FieldValue(sourceRow, "Route"))
+
+    If dep = "" And arr = "" Then Exit Function
+    If route <> "" Then
+        BuildLogTenRouteText = dep & "-" & route & "-" & arr
+    Else
+        BuildLogTenRouteText = dep & "-" & arr
+    End If
+End Function
+
+Private Sub ApplyLogTenApproaches(ByVal mapped As Object, _
+                                  ByVal approachText As String, _
+                                  ByVal ignoredApproaches As Object)
+    Dim parts As Variant
+    Dim approachCount As Double
+    Dim approachType As String
+
+    approachText = Trim$(approachText)
+    If approachText = "" Then Exit Sub
+
+    parts = Split(approachText, ";")
+    If UBound(parts) < 1 Then Exit Sub
+
+    approachCount = ParseLogTenNumber(CStr(parts(0)))
+    If approachCount = 0 Then approachCount = 1
+    approachType = UCase$(Trim$(CStr(parts(1))))
+
+    Select Case approachType
+        Case "ILS"
+            mapped("ILS") = CDbl(mapped("ILS")) + approachCount
+        Case "RNP", "LNAV/VNAV"
+            mapped("RNAV") = CDbl(mapped("RNAV")) + approachCount
+        Case "GLS"
+            mapped("ILS") = CDbl(mapped("ILS")) + approachCount
+        Case "VOR"
+            mapped("VOR") = CDbl(mapped("VOR")) + approachCount
+        Case "RNAV"
+            mapped("RNAV") = CDbl(mapped("RNAV")) + approachCount
+        Case "NDB"
+            mapped("NDB") = CDbl(mapped("NDB")) + approachCount
+        Case "VISUAL"
+            ignoredApproaches("Visual") = True
+        Case Else
+            If approachType <> "" Then ignoredApproaches(approachType) = True
+    End Select
+End Sub
+
+Private Sub AppendMappedLogTenRows(ByVal tbl As ListObject, ByVal rowsToImport As Collection)
+    Dim originalRowCount As Long
+    Dim targetRange As Range
+    Dim importIndex As Long
+    Dim targetRow As Range
+    Dim mapped As Object
+    Dim formulaCol As Long
+    Dim formulaSource As Range
+    Dim formulaTarget As Range
+    Dim insertAtRow As Long
+
+    If rowsToImport.Count = 0 Then Exit Sub
+    If tbl.DataBodyRange Is Nothing Then Err.Raise 5, "AppendMappedLogTenRows", "Logbook table has no template row."
+
+    originalRowCount = tbl.ListRows.Count
+    insertAtRow = tbl.DataBodyRange.Row + originalRowCount
+    tbl.Parent.Rows(insertAtRow & ":" & insertAtRow + rowsToImport.Count - 1).Insert Shift:=xlDown
+    Set targetRange = tbl.Range.Resize(tbl.Range.Rows.Count + rowsToImport.Count, tbl.Range.Columns.Count)
+    tbl.Resize targetRange
+
+    For formulaCol = 1 To tbl.ListColumns.Count
+        If tbl.DataBodyRange.Cells(originalRowCount, formulaCol).HasFormula Then
+            Set formulaSource = tbl.DataBodyRange.Cells(originalRowCount, formulaCol)
+            Set formulaTarget = tbl.DataBodyRange.Cells(originalRowCount, formulaCol).Resize(rowsToImport.Count + 1, 1)
+            formulaSource.AutoFill Destination:=formulaTarget
+        End If
+    Next formulaCol
+
+    For importIndex = 1 To rowsToImport.Count
+        Set mapped = rowsToImport(importIndex)
+        Set targetRow = tbl.DataBodyRange.Rows(originalRowCount + importIndex)
+        WriteMappedLogTenRow targetRow, tbl, mapped
+    Next importIndex
+End Sub
+
+Private Sub WriteMappedLogTenRow(ByVal targetRow As Range, ByVal tbl As ListObject, ByVal mapped As Object)
+    Dim columnName As Variant
+
+    WriteMappedValueToColumn targetRow, tbl, "Year", mapped("Year")
+    WriteMappedValueToColumn targetRow, tbl, "Month", mapped("Month")
+    WriteMappedValueToColumn targetRow, tbl, "Day", mapped("Day")
+    WriteMappedValueToColumn targetRow, tbl, "Type", mapped("Type")
+    WriteMappedValueToColumn targetRow, tbl, "Reg", mapped("Reg")
+    WriteMappedValueToColumn targetRow, tbl, "PIC", mapped("PIC")
+    WriteMappedValueToColumn targetRow, tbl, "Other Pilot or Crew", mapped("Other Pilot or Crew")
+    WriteMappedValueToColumn targetRow, tbl, "Details", mapped("Details")
+
+    For Each columnName In Array("SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+                                 "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
+                                 "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
+                                 "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", "LandingsDay", _
+                                 "LandingsNight", "ILS", "VOR", "RNAV", "NDB", "DGA (CDI)", _
+                                 "DGA (Azi)", "Circling")
+        If CDbl(mapped(CStr(columnName))) <> 0 Then
+            WriteMappedValueToColumn targetRow, tbl, CStr(columnName), CDbl(mapped(CStr(columnName)))
+        Else
+            WriteMappedValueToColumn targetRow, tbl, CStr(columnName), vbNullString
+        End If
+    Next columnName
+End Sub
+
+Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Object)
+    Dim newRow As ListRow
+    Dim templateRow As Range
+    Dim iPrevRow As Long
+    Dim iCol As Long
+    Dim columnName As Variant
+    Dim fmtCol As Long
+
+    Set templateRow = tbl.DataBodyRange.Rows(1)
+    Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
+
+    If tbl.ListRows.Count > 1 Then
+        iPrevRow = tbl.ListRows.Count - 1
+        For iCol = 1 To tbl.ListColumns.Count
+            If tbl.DataBodyRange.Cells(iPrevRow, iCol).HasFormula Then
+                tbl.DataBodyRange.Cells(iPrevRow, iCol).Resize(2, 1).FillDown
+            End If
+        Next iCol
+    End If
+
+    WriteMappedValueToColumn newRow.Range, tbl, "Year", mapped("Year")
+    WriteMappedValueToColumn newRow.Range, tbl, "Month", mapped("Month")
+    WriteMappedValueToColumn newRow.Range, tbl, "Day", mapped("Day")
+    WriteMappedValueToColumn newRow.Range, tbl, "Type", mapped("Type")
+    WriteMappedValueToColumn newRow.Range, tbl, "Reg", mapped("Reg")
+    WriteMappedValueToColumn newRow.Range, tbl, "PIC", mapped("PIC")
+    WriteMappedValueToColumn newRow.Range, tbl, "Other Pilot or Crew", mapped("Other Pilot or Crew")
+    WriteMappedValueToColumn newRow.Range, tbl, "Details", mapped("Details")
+
+    For Each columnName In Array("SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+                                 "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
+                                 "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
+                                 "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", "LandingsDay", _
+                                 "LandingsNight", "ILS", "VOR", "RNAV", "NDB", "DGA (CDI)", _
+                                 "DGA (Azi)", "Circling")
+        If CDbl(mapped(CStr(columnName))) <> 0 Then
+            WriteMappedValueToColumn newRow.Range, tbl, CStr(columnName), CDbl(mapped(CStr(columnName)))
+        Else
+            WriteMappedValueToColumn newRow.Range, tbl, CStr(columnName), vbNullString
+        End If
+    Next columnName
+
+    newRow.Range.ClearFormats
+    For fmtCol = 1 To tbl.ListColumns.Count
+        ApplyLogbookCellDataFormatting newRow.Range.Cells(1, fmtCol), templateRow.Cells(1, fmtCol)
+    Next fmtCol
+End Sub
+
+Private Sub WriteMappedValueToColumn(ByVal rowRange As Range, _
+                                     ByVal tbl As ListObject, _
+                                     ByVal columnName As String, _
+                                     ByVal value As Variant)
+    rowRange.Cells(1, tbl.ListColumns(columnName).Index).Value = value
+End Sub
+
+Private Function BuildExistingLogTenDuplicateKeys(ByVal tbl As ListObject) As Object
+    Dim result As Object
+    Dim rowIndex As Long
+    Dim key As String
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+
+    If Not tbl.DataBodyRange Is Nothing Then
+        For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
+            key = BuildExistingLogTenDuplicateKey(tbl, rowIndex)
+            If Not result.Exists(key) Then result.Add key, True
+        Next rowIndex
+    End If
+
+    Set BuildExistingLogTenDuplicateKeys = result
+End Function
+
+Private Function LogTenMappedRowIsDuplicate(ByVal tbl As ListObject, ByVal mapped As Object) As Boolean
+    Dim rowIndex As Long
+
+    If tbl.DataBodyRange Is Nothing Then Exit Function
+
+    For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
+        If BuildExistingLogTenDuplicateKey(tbl, rowIndex) = CStr(mapped("DuplicateKey")) Then
+            LogTenMappedRowIsDuplicate = True
+            Exit Function
+        End If
+    Next rowIndex
+End Function
+
+Private Function BuildExistingLogTenDuplicateKey(ByVal tbl As ListObject, ByVal rowIndex As Long) As String
+    Dim parts As Collection
+    Dim columnName As Variant
+    Dim value As Variant
+
+    Set parts = New Collection
+    value = tbl.ListColumns("Date").DataBodyRange.Cells(rowIndex, 1).Value
+    If IsDate(value) Then
+        parts.Add Format$(CDate(value), "yyyy-mm-dd")
+    Else
+        parts.Add ""
+    End If
+    parts.Add NormalizeDuplicateText(CStr(tbl.ListColumns("Type").DataBodyRange.Cells(rowIndex, 1).Value))
+    parts.Add NormalizeDuplicateText(CStr(tbl.ListColumns("Reg").DataBodyRange.Cells(rowIndex, 1).Value))
+    parts.Add NormalizeDuplicateText(CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value))
+
+    For Each columnName In LogTenDuplicateHourColumns()
+        parts.Add FormatDuplicateNumber(tbl.ListColumns(CStr(columnName)).DataBodyRange.Cells(rowIndex, 1).Value)
+    Next columnName
+
+    BuildExistingLogTenDuplicateKey = JoinCollection(parts, "|")
+End Function
+
+Private Function BuildLogTenDuplicateKey(ByVal mapped As Object) As String
+    Dim parts As Collection
+    Dim columnName As Variant
+
+    Set parts = New Collection
+    parts.Add Format$(CDate(mapped("Date")), "yyyy-mm-dd")
+    parts.Add NormalizeDuplicateText(CStr(mapped("Type")))
+    parts.Add NormalizeDuplicateText(CStr(mapped("Reg")))
+    parts.Add NormalizeDuplicateText(CStr(mapped("Details")))
+
+    For Each columnName In LogTenDuplicateHourColumns()
+        parts.Add FormatDuplicateNumber(mapped(CStr(columnName)))
+    Next columnName
+
+    BuildLogTenDuplicateKey = JoinCollection(parts, "|")
+End Function
+
+Private Function LogTenDuplicateHourColumns() As Variant
+    LogTenDuplicateHourColumns = Array("SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+                                       "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
+                                       "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
+                                       "CopilotDay", "CopilotNight", "IfrIf", "IfrSim")
+End Function
+
+Private Function FormatDuplicateNumber(ByVal value As Variant) As String
+    If IsNumeric(value) Then
+        FormatDuplicateNumber = Format$(RoundLogTenHours(CDbl(value)), "0.000000")
+    Else
+        FormatDuplicateNumber = "0.000000"
+    End If
+End Function
+
+Private Function NormalizeDuplicateText(ByVal value As String) As String
+    NormalizeDuplicateText = UCase$(Trim$(value))
+End Function
+
+Private Function ParseLogTenHours(ByVal value As String) As Double
+    value = Trim$(value)
+    If value = "" Then Exit Function
+
+    If InStr(value, ":") > 0 Then
+        Dim parts As Variant
+        parts = Split(value, ":")
+        If UBound(parts) = 1 Then
+            If IsNumeric(parts(0)) And IsNumeric(parts(1)) Then
+                ParseLogTenHours = RoundLogTenHours((CDbl(parts(0)) * 60 + CDbl(parts(1))) / 60)
+            End If
+        End If
+    ElseIf IsNumeric(value) Then
+        ParseLogTenHours = RoundLogTenHours(CDbl(value))
+    End If
+End Function
+
+Private Function ParseLogTenNumber(ByVal value As String) As Double
+    value = Trim$(value)
+    If value = "" Then Exit Function
+    If IsNumeric(value) Then ParseLogTenNumber = CDbl(value)
+End Function
+
+Private Function RoundLogTenHours(ByVal value As Double) As Double
+    RoundLogTenHours = Round(value, 6)
+End Function
+
+Private Function FieldValue(ByVal sourceRow As Object, ByVal fieldName As String) As String
+    If sourceRow.Exists(fieldName) Then FieldValue = CStr(sourceRow(fieldName))
+End Function
+
+Private Function FirstPresentField(ByVal sourceRow As Object, ByVal fieldNames As Variant) As String
+    Dim fieldName As Variant
+    For Each fieldName In fieldNames
+        If Trim$(FieldValue(sourceRow, CStr(fieldName))) <> "" Then
+            FirstPresentField = Trim$(FieldValue(sourceRow, CStr(fieldName)))
+            Exit Function
+        End If
+    Next fieldName
+End Function
+
+Private Function JoinLogTenRowValues(ByVal sourceRow As Object) As String
+    Dim key As Variant
+    For Each key In sourceRow.Keys
+        If Left$(CStr(key), 2) <> "__" Then
+            JoinLogTenRowValues = JoinLogTenRowValues & " " & CStr(sourceRow(key))
+        End If
+    Next key
+End Function
+
+Private Function JoinNonBlank(ByVal values As Variant, ByVal delimiter As String) As String
+    Dim item As Variant
+    For Each item In values
+        JoinNonBlank = AppendListItem(JoinNonBlank, CStr(item), delimiter)
+    Next item
+End Function
+
+Private Function AppendListItem(ByVal listText As String, ByVal itemText As String, ByVal delimiter As String) As String
+    itemText = Trim$(itemText)
+    If itemText = "" Then
+        AppendListItem = listText
+    ElseIf listText = "" Then
+        AppendListItem = itemText
+    Else
+        AppendListItem = listText & delimiter & itemText
+    End If
+End Function
+
+Private Function JoinCollection(ByVal values As Collection, ByVal delimiter As String) As String
+    Dim i As Long
+    For i = 1 To values.Count
+        If i > 1 Then JoinCollection = JoinCollection & delimiter
+        JoinCollection = JoinCollection & CStr(values(i))
+    Next i
+End Function
+
+Private Function JoinDictionaryKeys(ByVal dict As Object, ByVal delimiter As String) As String
+    Dim key As Variant
+    If dict Is Nothing Then Exit Function
+    For Each key In dict.Keys
+        JoinDictionaryKeys = AppendListItem(JoinDictionaryKeys, CStr(key), delimiter)
+    Next key
+    If JoinDictionaryKeys = "" Then JoinDictionaryKeys = "none"
+End Function
+
+Private Function LoadAircraftTypeClasses() As Object
+    Dim tbl As ListObject
+    Dim result As Object
+    Dim rowIndex As Long
+    Dim designator As String
+    Dim engineClass As String
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+    Set tbl = EnsureAircraftTypesTable()
+
+    If Not tbl.DataBodyRange Is Nothing Then
+        For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
+            designator = UCase$(Trim$(CStr(tbl.ListColumns("Designator").DataBodyRange.Cells(rowIndex, 1).Value)))
+            engineClass = UCase$(Trim$(CStr(tbl.ListColumns("EngineClass").DataBodyRange.Cells(rowIndex, 1).Value)))
+            If designator <> "" And engineClass <> "" Then result(designator) = engineClass
+        Next rowIndex
+    End If
+
+    Set LoadAircraftTypeClasses = result
+End Function
+
+Private Function EnsureAircraftTypesTable() As ListObject
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim headerRange As Range
+    Dim workbookWasProtected As Boolean
+
+    workbookWasProtected = ThisWorkbook.ProtectStructure
+    If workbookWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(AIRCRAFT_TYPES_SHEET)
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = AIRCRAFT_TYPES_SHEET
+    End If
+    ws.Unprotect Password:=ProtectionPassword()
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects(AIRCRAFT_TYPES_TABLE)
+    On Error GoTo 0
+
+    If tbl Is Nothing Then
+        ws.Cells.Clear
+        ws.Range("A1:F1").Value = Array("Designator", "DescriptionCode", "EngineCount", "EngineClass", "Source", "LastUpdated")
+        Set headerRange = ws.Range("A1:F2")
+        Set tbl = ws.ListObjects.Add(xlSrcRange, headerRange, , xlYes)
+        tbl.Name = AIRCRAFT_TYPES_TABLE
+        If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.Delete
+        SeedAircraftTypes tbl
+    ElseIf tbl.DataBodyRange Is Nothing Then
+        SeedAircraftTypes tbl
+    End If
+
+    ws.Visible = xlSheetVeryHidden
+    If workbookWasProtected Then ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    Set EnsureAircraftTypesTable = tbl
+End Function
+
+Private Sub SeedAircraftTypes(ByVal tbl As ListObject)
+    AddAircraftTypeRow tbl, "A320", "L2J", "Seed"
+    AddAircraftTypeRow tbl, "A321", "L2J", "Seed"
+    AddAircraftTypeRow tbl, "C172", "L1P", "Seed"
+    AddAircraftTypeRow tbl, "PA44", "L2P", "Seed"
+End Sub
+
+Private Sub AddAircraftTypeRow(ByVal tbl As ListObject, _
+                               ByVal designator As String, _
+                               ByVal descriptionCode As String, _
+                               ByVal sourceText As String)
+    Dim row As ListRow
+    Dim engineCount As String
+
+    engineCount = AircraftDescriptionEngineCount(descriptionCode)
+    Set row = tbl.ListRows.Add
+    row.Range.Cells(1, tbl.ListColumns("Designator").Index).Value = UCase$(designator)
+    row.Range.Cells(1, tbl.ListColumns("DescriptionCode").Index).Value = UCase$(descriptionCode)
+    row.Range.Cells(1, tbl.ListColumns("EngineCount").Index).Value = engineCount
+    row.Range.Cells(1, tbl.ListColumns("EngineClass").Index).Value = AircraftEngineClass(engineCount)
+    row.Range.Cells(1, tbl.ListColumns("Source").Index).Value = sourceText
+    row.Range.Cells(1, tbl.ListColumns("LastUpdated").Index).Value = Date
+End Sub
+
+Private Function AircraftDescriptionEngineCount(ByVal descriptionCode As String) As String
+    descriptionCode = UCase$(Trim$(descriptionCode))
+    If Len(descriptionCode) >= 2 Then AircraftDescriptionEngineCount = Mid$(descriptionCode, 2, 1)
+End Function
+
+Private Function AircraftEngineClass(ByVal engineCount As String) As String
+    Select Case UCase$(Trim$(engineCount))
+        Case "1"
+            AircraftEngineClass = "SE"
+        Case "2", "3", "4", "6", "8", "C"
+            AircraftEngineClass = "ME"
+        Case Else
+            AircraftEngineClass = ""
+    End Select
+End Function
+
+Private Sub WriteLogTenImportReport(ByVal mappedRows As Collection, _
+                                    ByVal errors As Collection, _
+                                    ByVal unknownTypes As Object, _
+                                    ByVal ignoredApproaches As Object, _
+                                    ByVal imported As Long, _
+                                    ByVal duplicates As Long, _
+                                    ByVal blankRows As Long, _
+                                    ByVal validationOnly As Boolean)
+    Dim ws As Worksheet
+    Dim rowIndex As Long
+    Dim item As Variant
+    Dim mapped As Object
+    Dim key As Variant
+
+    Set ws = EnsureLogTenImportReportSheet()
+    ws.Cells.Clear
+    ws.Range("A1").Value = "LogTen Import Report"
+    ws.Range("A3").Value = "Imported"
+    ws.Range("B3").Value = imported
+    ws.Range("A4").Value = "Duplicates"
+    ws.Range("B4").Value = duplicates
+    ws.Range("A5").Value = "Blank rows ignored"
+    ws.Range("B5").Value = blankRows
+    ws.Range("A6").Value = "Validation only"
+    ws.Range("B6").Value = validationOnly
+
+    rowIndex = 8
+    ws.Cells(rowIndex, 1).Value = "Issues"
+    rowIndex = rowIndex + 1
+    For Each item In errors
+        ws.Cells(rowIndex, 1).Value = CStr(item)
+        rowIndex = rowIndex + 1
+    Next item
+    For Each key In unknownTypes.Keys
+        ws.Cells(rowIndex, 1).Value = "Unknown aircraft type: " & CStr(key)
+        rowIndex = rowIndex + 1
+    Next key
+    For Each key In ignoredApproaches.Keys
+        ws.Cells(rowIndex, 1).Value = "Ignored approach label: " & CStr(key)
+        rowIndex = rowIndex + 1
+    Next key
+
+    rowIndex = rowIndex + 2
+    ws.Cells(rowIndex, 1).Resize(1, 7).Value = Array("Status", "Source Row", "Date", "Type", "Reg", "Details", "Duplicate Key")
+    rowIndex = rowIndex + 1
+    For Each mapped In mappedRows
+        ws.Cells(rowIndex, 1).Value = FieldValue(mapped, "Status")
+        ws.Cells(rowIndex, 2).Value = mapped("SourceRow")
+        ws.Cells(rowIndex, 3).Value = mapped("Date")
+        ws.Cells(rowIndex, 4).Value = mapped("Type")
+        ws.Cells(rowIndex, 5).Value = mapped("Reg")
+        ws.Cells(rowIndex, 6).Value = mapped("Details")
+        ws.Cells(rowIndex, 7).Value = mapped("DuplicateKey")
+        rowIndex = rowIndex + 1
+    Next mapped
+
+    ws.Columns.AutoFit
+End Sub
+
+Private Function EnsureLogTenImportReportSheet() As Worksheet
+    Dim workbookWasProtected As Boolean
+
+    workbookWasProtected = ThisWorkbook.ProtectStructure
+    If workbookWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
+
+    On Error Resume Next
+    Set EnsureLogTenImportReportSheet = ThisWorkbook.Worksheets(LOGTEN_REPORT_SHEET)
+    On Error GoTo 0
+    If EnsureLogTenImportReportSheet Is Nothing Then
+        Set EnsureLogTenImportReportSheet = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        EnsureLogTenImportReportSheet.Name = LOGTEN_REPORT_SHEET
+    End If
+    EnsureLogTenImportReportSheet.Unprotect Password:=ProtectionPassword()
+    EnsureLogTenImportReportSheet.Visible = xlSheetVisible
+    If workbookWasProtected Then ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+End Function
+
 Private Function GetLatestLogbookEntryDate(ByVal tbl As ListObject) As Date
     Dim dateCol As Long
     Dim dateCell As Range
@@ -1861,8 +3004,17 @@ End Sub
 
 Private Function ShouldSkipRoutesPromptOnOpen(wb As Workbook) As Boolean
     Dim branchValue As String
+    Dim fileName As String
 
     If ShouldSuppressOpenPrompts() Then
+        ShouldSkipRoutesPromptOnOpen = True
+        Exit Function
+    End If
+
+    fileName = LCase$(wb.Name)
+    If InStr(fileName, "_old_") > 0 Or _
+       InStr(fileName, "_backup_") > 0 Or _
+       InStr(fileName, "_restored_") > 0 Then
         ShouldSkipRoutesPromptOnOpen = True
         Exit Function
     End If
@@ -1874,6 +3026,96 @@ Private Function ShouldSkipRoutesPromptOnOpen(wb As Workbook) As Boolean
     End If
 
     ShouldSkipRoutesPromptOnOpen = False
+End Function
+
+Public Sub DeleteSelectedLogbookRows()
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim selectedRows As Range
+    Dim area As Range
+    Dim rowRange As Range
+    Dim rowIndexes As Object
+    Dim key As Variant
+    Dim rowIndex As Long
+    Dim logbookWasProtected As Boolean
+
+    On Error GoTo Fail
+
+    Set ws = ThisWorkbook.Sheets("Logbook")
+    Set tbl = ws.ListObjects("Logbook")
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    Set selectedRows = Intersect(Selection.EntireRow, tbl.DataBodyRange)
+    If selectedRows Is Nothing Then
+        MsgBox "Select one or more Logbook table rows to delete.", vbInformation, "Delete Logbook Rows"
+        Exit Sub
+    End If
+
+    Set rowIndexes = CreateObject("Scripting.Dictionary")
+    For Each area In selectedRows.Areas
+        For Each rowRange In area.Rows
+            rowIndex = rowRange.Row - tbl.DataBodyRange.Row + 1
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then rowIndexes(CStr(rowIndex)) = rowIndex
+        Next rowRange
+    Next area
+
+    If rowIndexes.Count = 0 Then Exit Sub
+    If tbl.ListRows.Count - rowIndexes.Count < 1 Then
+        MsgBox "At least one Logbook row must remain as the table template.", vbExclamation, "Delete Logbook Rows"
+        Exit Sub
+    End If
+
+    If MsgBox("Delete " & rowIndexes.Count & " selected Logbook row(s)?", _
+              vbOKCancel + vbExclamation, "Delete Logbook Rows") = vbCancel Then Exit Sub
+
+    logbookWasProtected = ws.ProtectContents
+    If logbookWasProtected Then ws.Unprotect Password:=ProtectionPassword()
+
+    Application.ScreenUpdating = False
+    For Each key In SortedDictionaryKeysDescending(rowIndexes)
+        tbl.ListRows(CLng(rowIndexes(key))).Delete
+    Next key
+
+    NormalizeLogbookFormatting tbl
+    UpdateHiddenRows ThisWorkbook
+    MarkRoutesDirty ThisWorkbook
+
+CleanExit:
+    Application.ScreenUpdating = True
+    If logbookWasProtected Then ProtectLogbookSheetForRuntime ws
+    Exit Sub
+
+Fail:
+    Dim errNum As Long
+    Dim errDesc As String
+    errNum = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    Application.ScreenUpdating = True
+    If logbookWasProtected Then ProtectLogbookSheetForRuntime ws
+    On Error GoTo 0
+    MsgBox "The selected Logbook rows could not be deleted." & vbCrLf & vbCrLf & _
+           "Error " & errNum & ": " & errDesc, vbCritical, "Delete Logbook Rows"
+End Sub
+
+Private Function SortedDictionaryKeysDescending(ByVal dict As Object) As Variant
+    Dim keys As Variant
+    Dim i As Long
+    Dim j As Long
+    Dim temp As Variant
+
+    keys = dict.Keys
+    For i = LBound(keys) To UBound(keys) - 1
+        For j = i + 1 To UBound(keys)
+            If CLng(dict(keys(i))) < CLng(dict(keys(j))) Then
+                temp = keys(i)
+                keys(i) = keys(j)
+                keys(j) = temp
+            End If
+        Next j
+    Next i
+
+    SortedDictionaryKeysDescending = keys
 End Function
 
 Private Function ShouldSuppressOpenPrompts() As Boolean
@@ -4111,6 +5353,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
         If Not tbl Is Nothing Then
             On Error Resume Next
             If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.Locked = False
+            UnlockLogbookRowsForDeletion wsLog
             If Not tbl.HeaderRowRange Is Nothing Then tbl.HeaderRowRange.Locked = False
             On Error GoTo 0
         End If
@@ -4143,6 +5386,19 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     Set wsLog = Nothing
     Set wsCharts = Nothing
     Set wb = Nothing
+End Sub
+
+Private Sub UnlockLogbookRowsForDeletion(ByVal ws As Worksheet)
+    Dim tbl As ListObject
+
+    If LCase$(ws.Name) <> "logbook" Then Exit Sub
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("Logbook")
+    If Not tbl Is Nothing Then
+        If Not tbl.DataBodyRange Is Nothing Then tbl.DataBodyRange.EntireRow.Locked = False
+    End If
+    On Error GoTo 0
 End Sub
 
 Private Sub EnsurePrimarySheetOrder(wb As Workbook)
