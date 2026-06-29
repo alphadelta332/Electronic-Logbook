@@ -577,13 +577,15 @@ public partial class MainWindow : Window
             _lastReportPath = _context.UseInPlaceSwap
                 ? Path.ChangeExtension(source, ".update-report.json")
                 : Path.ChangeExtension(stagedOutput, ".update-report.json");
-            if (DetailedLoggingCheckBox.IsChecked != false)
-            {
-                await File.WriteAllTextAsync(
-                    _lastReportPath,
-                    JsonSerializer.Serialize(report, JsonDefaults.Indented),
-                    _updateCts.Token);
-            }
+            await File.WriteAllTextAsync(
+                _lastReportPath,
+                JsonSerializer.Serialize(report, JsonDefaults.Indented),
+                _updateCts.Token);
+            AppendLog(
+                "airport visit stats: " +
+                $"{report.AirportVisitStats.WrittenVisitedAirportRows} written, " +
+                $"{report.AirportVisitStats.SavedNonBlankVisitRows} saved, " +
+                $"{report.AirportVisitStats.LogbookRowsWithRecognisedAirports} recognised logbook rows");
 
             if (_context.UseInPlaceSwap)
             {

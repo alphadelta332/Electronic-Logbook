@@ -57,6 +57,7 @@ public sealed class ExcelWorkbookMigrator
         dynamic? outputWorkbook = null;
         var excelProcessId = 0;
         var migrationSucceeded = false;
+        AirportVisitStatsDiagnostics? airportVisitStats = null;
         var step = SetStep(UpdaterPhaseIds.StartExcel, "starting Excel");
 
         try
@@ -99,7 +100,14 @@ public sealed class ExcelWorkbookMigrator
             step = SetStep(UpdaterPhaseIds.RestoreLogbookPresentation, "restoring Logbook presentation");
             RestoreLogbookPresentation((object)sourceWorkbook, (object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.RefreshAirportVisitStats, "refreshing airport visit stats");
-            RefreshAirportVisitStats((object)outputWorkbook);
+            airportVisitStats = RefreshAirportVisitStats((object)outputWorkbook);
+            if (airportVisitStats.LogbookRowsWithRecognisedAirports > 0 &&
+                airportVisitStats.WrittenVisitedAirportRows <= 0)
+            {
+                throw new InvalidDataException(
+                    "Airport visit stats refresh found recognised airports in the Logbook, " +
+                    "but did not write any Airports[Visits] values.");
+            }
 
             var outputVersion = ReadName((object)outputWorkbook, "LogbookVersion");
             if (request.Manifest is not null &&
@@ -139,6 +147,16 @@ public sealed class ExcelWorkbookMigrator
             outputWorkbook.RemovePersonalInformation = false;
             ActivatePrimaryWorksheetForSave((object)outputWorkbook);
             outputWorkbook.Save();
+            var savedNonBlankVisitRows = CountNonBlankAirportVisitRows((object)outputWorkbook);
+            airportVisitStats = airportVisitStats with
+            {
+                SavedNonBlankVisitRows = savedNonBlankVisitRows
+            };
+            if (airportVisitStats.WrittenVisitedAirportRows > 0 && savedNonBlankVisitRows <= 0)
+            {
+                throw new InvalidDataException(
+                    "Airport visit stats were written before save, but Airports[Visits] is blank after save.");
+            }
 
             _progressSink?.Report(new UpdaterProgressEvent(
                 UpdaterProgressEventTypes.UpdateCompleted,
@@ -157,6 +175,7 @@ public sealed class ExcelWorkbookMigrator
                 sourceVersion,
                 outputVersion,
                 logbookRows,
+                airportVisitStats ?? EmptyAirportVisitStatsDiagnostics(),
                 sourceFingerprints,
                 DateTimeOffset.UtcNow,
                 "validated");
@@ -375,7 +394,7 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static void RefreshAirportVisitStats(object workbookObject)
+    private static AirportVisitStatsDiagnostics RefreshAirportVisitStats(object workbookObject)
     {
         dynamic airports = GetTable(workbookObject, "Airports");
         dynamic logbook = GetTable(workbookObject, "Logbook");
@@ -383,7 +402,11 @@ public sealed class ExcelWorkbookMigrator
         var logbookRows = (int)logbook.ListRows.Count;
         if (airportRows <= 0)
         {
-            return;
+            return EmptyAirportVisitStatsDiagnostics() with
+            {
+                AirportRows = airportRows,
+                LogbookRows = logbookRows
+            };
         }
 
         var airportIcao = ReadColumnValues(airports, "ICAO", airportRows);
@@ -391,6 +414,13 @@ public sealed class ExcelWorkbookMigrator
         var airportThree = ReadColumnValues(airports, "Three", airportRows);
         var aliasLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var stats = new Dictionary<string, AirportVisitStats>(StringComparer.OrdinalIgnoreCase);
+        var logbookRowsWithDetails = 0;
+        var simOnlyRowsSkipped = 0;
+        var tokensScanned = 0;
+        var tokensIgnored = 0;
+        var tokensMatched = 0;
+        var logbookRowsWithRecognisedAirports = 0;
+        var writtenVisitedAirportRows = 0;
 
         for (var row = 0; row < airportRows; row++)
         {
@@ -437,6 +467,7 @@ public sealed class ExcelWorkbookMigrator
             {
                 if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
                 {
+                    simOnlyRowsSkipped++;
                     continue;
                 }
 
@@ -445,20 +476,29 @@ public sealed class ExcelWorkbookMigrator
                 {
                     continue;
                 }
+                logbookRowsWithDetails++;
 
                 var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 foreach (string token in TokeniseAirportDetails(detailsText))
                 {
+                    tokensScanned++;
                     if (AirportStatsIgnoreToken(token, keywords))
                     {
+                        tokensIgnored++;
                         continue;
                     }
                     string? matchedIcao;
                     if (aliasLookup.TryGetValue(token, out matchedIcao) &&
                         !string.IsNullOrWhiteSpace(matchedIcao))
                     {
+                        tokensMatched++;
                         matchedIcaos.Add(matchedIcao);
                     }
+                }
+
+                if (matchedIcaos.Count > 0)
+                {
+                    logbookRowsWithRecognisedAirports++;
                 }
 
                 foreach (var icao in matchedIcaos)
@@ -506,12 +546,68 @@ public sealed class ExcelWorkbookMigrator
             lastVisited[row, 0] = visitStats.LastVisited.HasValue ? visitStats.LastVisited.Value : "";
             visits[row, 0] = visitStats.Visits;
             rankValues[row, 0] = ranks[icao];
+            writtenVisitedAirportRows++;
         }
 
         SetColumnValues(airports, "First Visited", firstVisited, airportRows);
         SetColumnValues(airports, "Last Visited", lastVisited, airportRows);
         SetColumnValues(airports, "Visits", visits, airportRows);
         SetColumnValues(airports, "Rank", rankValues, airportRows);
+
+        var topVisitedAirports = stats
+            .Where(pair => pair.Value.Visits > 0)
+            .OrderByDescending(pair => pair.Value.Visits)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToDictionary(pair => pair.Key, pair => pair.Value.Visits, StringComparer.OrdinalIgnoreCase);
+
+        return new AirportVisitStatsDiagnostics(
+            airportRows,
+            logbookRows,
+            aliasLookup.Count,
+            keywords.Count,
+            logbookRowsWithDetails,
+            simOnlyRowsSkipped,
+            tokensScanned,
+            tokensIgnored,
+            tokensMatched,
+            logbookRowsWithRecognisedAirports,
+            ranks.Count,
+            writtenVisitedAirportRows,
+            CountNonBlankAirportVisitRows(workbookObject),
+            topVisitedAirports);
+    }
+
+    private static AirportVisitStatsDiagnostics EmptyAirportVisitStatsDiagnostics()
+    {
+        return new AirportVisitStatsDiagnostics(
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static int CountNonBlankAirportVisitRows(object workbookObject)
+    {
+        dynamic airports = GetTable(workbookObject, "Airports");
+        var airportRows = (int)airports.ListRows.Count;
+        if (airportRows <= 0)
+        {
+            return 0;
+        }
+
+        object?[] visits = ReadColumnValues(airports, "Visits", airportRows);
+        return visits.Count(value => !IsBlankValue(value));
     }
 
     private sealed class AirportVisitStats

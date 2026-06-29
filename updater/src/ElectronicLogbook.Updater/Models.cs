@@ -28,9 +28,26 @@ public sealed record MigrationReport(
     string SourceVersion,
     string OutputVersion,
     int LogbookRows,
+    AirportVisitStatsDiagnostics AirportVisitStats,
     IReadOnlyDictionary<string, string> PreservedFingerprints,
     DateTimeOffset CompletedAtUtc,
     string Status);
+
+public sealed record AirportVisitStatsDiagnostics(
+    int AirportRows,
+    int LogbookRows,
+    int AliasCount,
+    int KeywordCount,
+    int LogbookRowsWithDetails,
+    int SimOnlyRowsSkipped,
+    int TokensScanned,
+    int TokensIgnored,
+    int TokensMatched,
+    int LogbookRowsWithRecognisedAirports,
+    int VisitedAirportRows,
+    int WrittenVisitedAirportRows,
+    int SavedNonBlankVisitRows,
+    IReadOnlyDictionary<string, int> TopVisitedAirports);
 
 public static class JsonDefaults
 {
