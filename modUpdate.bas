@@ -15,6 +15,8 @@ Private Const GITHUB_REPO  As String = "Electronic-Logbook"
 Private Const MASTER_FILE  As String = "Electronic_Logbook_Master.xlsm"
 Private Const WIZARD_EXE_NAME As String = "ElectronicLogbook.Updater.Wizard.exe"
 Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+Private Const DEV_WIZARD_TAG As String = "dev-wizard"
+Private Const DEV_WIZARD_COMMIT_NAME As String = "dev-wizard-commit.txt"
 ' -------------------------------------------------------------
 
 ' ==============================================================
@@ -258,6 +260,15 @@ Private Sub RunUpdate(newVersion As String)
                 vbExclamation, "Manual Close Required"
         End If
 
+        Exit Sub
+    End If
+
+    If wizardReason <> "" And LCase$(Trim$(GetGitHubBranch())) = "main" Then
+        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard unavailable on release channel. Reason=" & wizardReason
+        MsgBox "The external updater wizard was not available, so the update cannot continue safely." & vbCrLf & vbCrLf & _
+               "Reason: " & wizardReason & vbCrLf & vbCrLf & _
+               "Your workbook has not been changed.", vbCritical, "Update Failed"
+        UpdateStatus ""
         Exit Sub
     End If
 
@@ -1950,7 +1961,7 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     If wizardPath = "" Then
         If reason = "" Then
             If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-                reason = "Development channel updates require UpdaterWizardPath to point to a local updater wizard executable."
+                reason = "Development updater wizard could not be found or downloaded."
             Else
                 reason = "No wizard asset was found in release assets."
             End If
@@ -2012,7 +2023,23 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     End If
 
     If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-        ResolveWizardExecutablePath = ""
+        tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+        If mResolvedRef <> "" Then
+            tempFolder = tempFolder & "_" & SafePathSegment(Left$(mResolvedRef, 12))
+        ElseIf targetVersion <> "" Then
+            tempFolder = tempFolder & "_" & SafePathSegment(targetVersion)
+        End If
+        If Dir$(tempFolder, vbDirectory) = "" Then MkDir tempFolder
+
+        candidate = tempFolder & "\" & WIZARD_EXE_NAME
+        If Dir$(candidate) = "" Then
+            If Not DownloadDevelopmentWizardPackage(repository, candidate, tempFolder) Then
+                ResolveWizardExecutablePath = ""
+                Exit Function
+            End If
+        End If
+
+        ResolveWizardExecutablePath = candidate
         Exit Function
     End If
 
@@ -2031,6 +2058,32 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     End If
 
     ResolveWizardExecutablePath = candidate
+End Function
+
+Private Function DownloadDevelopmentWizardPackage(ByVal repository As String, _
+                                                  ByVal destinationExePath As String, _
+                                                  ByVal tempFolder As String) As Boolean
+    Dim downloadUrl As String
+    Dim commitPath As String
+    Dim publishedCommit As String
+
+    If mResolvedRef <> "" Then
+        commitPath = tempFolder & "\" & DEV_WIZARD_COMMIT_NAME
+        downloadUrl = "https://github.com/" & repository & "/releases/download/" & DEV_WIZARD_TAG & "/" & DEV_WIZARD_COMMIT_NAME
+        If Not DownloadFile(downloadUrl, commitPath) Then Exit Function
+
+        publishedCommit = Trim$(ReadFirstTextLine(commitPath))
+        If StrComp(publishedCommit, mResolvedRef, vbTextCompare) <> 0 Then Exit Function
+    End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & DEV_WIZARD_TAG & "/" & WIZARD_EXE_NAME
+    If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
+        DownloadDevelopmentWizardPackage = True
+        Exit Function
+    End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & DEV_WIZARD_TAG & "/" & WIZARD_ZIP_NAME
+    DownloadDevelopmentWizardPackage = TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder)
 End Function
 
 Private Function SafePathSegment(ByVal value As String) As String
@@ -2053,6 +2106,25 @@ Private Function SafePathSegment(ByVal value As String) As String
 
     If result = "" Then result = "current"
     SafePathSegment = result
+End Function
+
+Private Function ReadFirstTextLine(ByVal filePath As String) As String
+    Dim fileNumber As Integer
+    Dim lineText As String
+
+    On Error GoTo Fail
+    fileNumber = FreeFile
+    Open filePath For Input As #fileNumber
+    Line Input #fileNumber, lineText
+    Close #fileNumber
+    ReadFirstTextLine = lineText
+    Exit Function
+
+Fail:
+    On Error Resume Next
+    If fileNumber <> 0 Then Close #fileNumber
+    On Error GoTo 0
+    ReadFirstTextLine = ""
 End Function
 
 Private Function DownloadLatestWizardPackage(ByVal repository As String, _
