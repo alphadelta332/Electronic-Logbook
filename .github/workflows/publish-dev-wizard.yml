@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish rolling dev wizard asset
+    name: Publish dev wizard asset
     runs-on: windows-latest
     timeout-minutes: 25
 
@@ -34,37 +34,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "dev-wizard"
-          $title = "Development updater wizard"
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          $tag = "dev-wizard-$shortSha"
+          $title = "Development updater wizard $shortSha"
           Set-Content -Path dev-wizard-commit.txt -Value $env:GITHUB_SHA -Encoding ascii
           $notes = @"
-          Rolling development wizard asset for dev-channel workbook update testing.
+          Development wizard asset for dev-channel workbook update testing.
 
           Commit: $env:GITHUB_SHA
           Branch: $env:GITHUB_REF_NAME
           "@
 
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag `
-              --repo $env:GITHUB_REPOSITORY `
-              --title $title `
-              --notes $notes `
-              --prerelease `
-              --target $env:GITHUB_SHA `
-              --latest=false
-          } else {
-            gh release edit $tag `
-              --repo $env:GITHUB_REPOSITORY `
-              --title $title `
-              --notes $notes `
-              --prerelease `
-              --latest=false
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists; leaving immutable release unchanged."
+            exit 0
           }
 
-          gh release upload $tag `
+          gh release create $tag `
             updater/dist/ElectronicLogbook.Updater.Wizard.exe `
             updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
             dev-wizard-commit.txt `
             --repo $env:GITHUB_REPOSITORY `
-            --clobber
+            --title $title `
+            --notes $notes `
+            --prerelease `
+            --target $env:GITHUB_SHA `
+            --latest=false

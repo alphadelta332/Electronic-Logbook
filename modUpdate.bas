@@ -15,7 +15,7 @@ Private Const GITHUB_REPO  As String = "Electronic-Logbook"
 Private Const MASTER_FILE  As String = "Electronic_Logbook_Master.xlsm"
 Private Const WIZARD_EXE_NAME As String = "ElectronicLogbook.Updater.Wizard.exe"
 Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-x64.zip"
-Private Const DEV_WIZARD_TAG As String = "dev-wizard"
+Private Const DEV_WIZARD_TAG_PREFIX As String = "dev-wizard-"
 Private Const DEV_WIZARD_COMMIT_NAME As String = "dev-wizard-commit.txt"
 ' -------------------------------------------------------------
 
@@ -219,8 +219,8 @@ Private Sub RunUpdate(newVersion As String)
     WriteUpdateDiagnostic diagnosticsPath, "Update started. Source=" & sourceWorkbookPath & _
         "; targetVersion=" & newVersion & "; branch=" & GetGitHubBranch()
 
-    ' Prefer the external wizard flow when available.
-    ' If launch fails for any reason, keep the legacy in-workbook update path.
+    ' Prefer the external wizard flow. Development builds may fall back to the
+    ' classic updater for diagnostics; release builds abort if the wizard is unavailable.
     If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
         wizardMasterPath = tempPath
         If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), wizardMasterPath) Then
@@ -2066,23 +2066,25 @@ Private Function DownloadDevelopmentWizardPackage(ByVal repository As String, _
     Dim downloadUrl As String
     Dim commitPath As String
     Dim publishedCommit As String
+    Dim devWizardTag As String
 
-    If mResolvedRef <> "" Then
-        commitPath = tempFolder & "\" & DEV_WIZARD_COMMIT_NAME
-        downloadUrl = "https://github.com/" & repository & "/releases/download/" & DEV_WIZARD_TAG & "/" & DEV_WIZARD_COMMIT_NAME
-        If Not DownloadFile(downloadUrl, commitPath) Then Exit Function
+    If mResolvedRef = "" Then Exit Function
+    devWizardTag = DEV_WIZARD_TAG_PREFIX & SafePathSegment(Left$(mResolvedRef, 12))
 
-        publishedCommit = Trim$(ReadFirstTextLine(commitPath))
-        If StrComp(publishedCommit, mResolvedRef, vbTextCompare) <> 0 Then Exit Function
-    End If
+    commitPath = tempFolder & "\" & DEV_WIZARD_COMMIT_NAME
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & devWizardTag & "/" & DEV_WIZARD_COMMIT_NAME
+    If Not DownloadFile(downloadUrl, commitPath) Then Exit Function
 
-    downloadUrl = "https://github.com/" & repository & "/releases/download/" & DEV_WIZARD_TAG & "/" & WIZARD_EXE_NAME
+    publishedCommit = Trim$(ReadFirstTextLine(commitPath))
+    If StrComp(publishedCommit, mResolvedRef, vbTextCompare) <> 0 Then Exit Function
+
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & devWizardTag & "/" & WIZARD_EXE_NAME
     If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
         DownloadDevelopmentWizardPackage = True
         Exit Function
     End If
 
-    downloadUrl = "https://github.com/" & repository & "/releases/download/" & DEV_WIZARD_TAG & "/" & WIZARD_ZIP_NAME
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & devWizardTag & "/" & WIZARD_ZIP_NAME
     DownloadDevelopmentWizardPackage = TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder)
 End Function
 
