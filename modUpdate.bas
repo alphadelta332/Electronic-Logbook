@@ -6,6 +6,7 @@ Attribute VB_Name = "modUpdate"
 Option Explicit
 
 Private mResolvedRef As String
+Private mLastUpdateFailureReason As String
 Private Const ROUTE_CACHE_DEFINITION_VERSION As Long = 1
 
 ' -- GITHUB CONFIG --------------------------------------------
@@ -186,10 +187,15 @@ Private Sub RunUpdate(newVersion As String)
     Dim expectedRows  As Long
     Dim expectedTotalHours As Double
     Dim expectedTotalKnown As Boolean
+    Dim diagnosticsPath As String
+    Dim sourceWorkbookPath As String
+    Dim wizardReason As String
+    Dim wizardMasterPath As String
 
     ' Unique per-run filenames prevent stale leftovers from a prior failed update
     ' from being silently used as the staging input.
     sessionId = Format(Now, "yyyymmdd_hhmmss")
+    mLastUpdateFailureReason = ""
     On Error Resume Next
     expectedRows = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count
     expectedTotalHours = GetLogbookTotalHours(ThisWorkbook)
@@ -207,13 +213,13 @@ Private Sub RunUpdate(newVersion As String)
     savePath = localPath & "\" & canonicalName
     updatedPath = savePath
     oldPath = BuildOldWorkbookPath(localPath, canonicalName)
+    diagnosticsPath = BuildUpdateDiagnosticsPath(localPath, canonicalName)
+    sourceWorkbookPath = localPath & "\" & originalName
+    WriteUpdateDiagnostic diagnosticsPath, "Update started. Source=" & sourceWorkbookPath & _
+        "; targetVersion=" & newVersion & "; branch=" & GetGitHubBranch()
 
     ' Prefer the external wizard flow when available.
     ' If launch fails for any reason, keep the legacy in-workbook update path.
-    Dim sourceWorkbookPath As String
-    Dim wizardReason As String
-    Dim wizardMasterPath As String
-    sourceWorkbookPath = localPath & "\" & originalName
     If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
         wizardMasterPath = tempPath
         If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), wizardMasterPath) Then
@@ -225,6 +231,7 @@ Private Sub RunUpdate(newVersion As String)
     End If
 
     If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
+        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
         UpdateStatus ""
 
         Dim closeErr As Long
@@ -255,14 +262,17 @@ Private Sub RunUpdate(newVersion As String)
         Exit Sub
     End If
 
-    If wizardReason <> "" And LCase$(Trim$(GetGitHubBranch())) = "main" Then
+    If wizardReason <> "" Then
+        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard unavailable. Reason=" & wizardReason
         MsgBox "The external updater wizard was not available, so the classic updater will be used for this run." & vbCrLf & vbCrLf & _
                "Reason: " & wizardReason, vbInformation, "Using Classic Updater"
     End If
 
     diagStep = "Downloading master workbook"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Downloading update (version " & newVersion & ")..."
     If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), tempPath) Then
+        WriteUpdateDiagnostic diagnosticsPath, "Failed: could not download master workbook."
         MsgBox "Could not download the update file." & vbCrLf & _
                "Check your internet connection and try again.", _
                vbExclamation, "Download Failed"
@@ -277,12 +287,15 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo UpdateFailed
 
     diagStep = "Opening master workbook"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     Set masterWb = Workbooks.Open(tempPath, ReadOnly:=False, UpdateLinks:=False)
 
     diagStep = "Unprotecting master workbook"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     PrepareMasterWorkbookForMigration masterWb
 
     diagStep = "Copying Logbook data into master"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Copying flight data..."
     InjectLogbookData masterWb
 
@@ -320,6 +333,7 @@ Private Sub RunUpdate(newVersion As String)
     Set tblLog = Nothing
 
     diagStep = "Refreshing airport visit stats"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Refreshing airport visit stats..."
     Application.Run "'" & masterWb.Name & "'!RefreshAirportVisitStats", masterWb
 
@@ -415,8 +429,10 @@ Private Sub RunUpdate(newVersion As String)
     ' This is the last safe abort point: the original file has not been touched.
     On Error GoTo 0
     diagStep = "Validating staged update"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Validating update..."
     If Not ValidateStagedUpdate(localSavePath, newVersion, expectedRows, expectedTotalHours, expectedTotalKnown) Then
+        WriteUpdateDiagnostic diagnosticsPath, "Staged update validation failed. Reason=" & mLastUpdateFailureReason
         On Error Resume Next
         Kill localSavePath
         On Error GoTo 0
@@ -425,6 +441,8 @@ Private Sub RunUpdate(newVersion As String)
         Application.EnableEvents = True
         UpdateStatus ""
         MsgBox "The staged update failed validation. Your logbook has not been changed." & vbCrLf & vbCrLf & _
+               "Reason: " & mLastUpdateFailureReason & vbCrLf & vbCrLf & _
+               "Diagnostics were written to:" & vbCrLf & diagnosticsPath & vbCrLf & vbCrLf & _
                "Please try updating again. If the problem persists, use the Report a Bug button.", _
                vbCritical, "Update Validation Failed"
         Exit Sub
@@ -432,6 +450,7 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo UpdateFailed
 
     diagStep = "Renaming current file to old copy"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Renaming previous logbook..."
     finalHandoffStarted = True
     Application.DisplayAlerts = False
@@ -457,20 +476,25 @@ Private Sub RunUpdate(newVersion As String)
     Application.DisplayAlerts = True
 
     diagStep = "Validating backup file"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Validating backup..."
     If Not ValidateBackupWorkbook(oldPath, ThisWorkbook) Then
+        WriteUpdateDiagnostic diagnosticsPath, "Backup validation failed. Reason=" & mLastUpdateFailureReason
         Application.Calculation = xlCalculationAutomatic
         Application.ScreenUpdating = True
         Application.EnableEvents = True
         UpdateStatus ""
         MsgBox "The previous-version backup could not be validated after save." & vbCrLf & vbCrLf & _
+               "Reason: " & mLastUpdateFailureReason & vbCrLf & vbCrLf & _
                "Your workbook has been kept as:" & vbCrLf & oldPath & vbCrLf & vbCrLf & _
+               "Diagnostics were written to:" & vbCrLf & diagnosticsPath & vbCrLf & vbCrLf & _
                "The update was stopped before replacing the original filename.", _
                vbCritical, "Backup Validation Failed"
         Exit Sub
     End If
 
     diagStep = "Moving updated file to original filename"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Saving updated logbook..."
     If usedSaveCopyFallback Then
         updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
@@ -483,6 +507,7 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo 0
 
     diagStep = "Waiting for final workbook readiness"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "finalising updated file..."
     finalReady = WaitForUpdatedWorkbookReady(updatedPath, newVersion, 90)
 
@@ -492,9 +517,11 @@ Private Sub RunUpdate(newVersion As String)
     UpdateStatus ""
 
     If finalReady Then
+        WriteUpdateDiagnostic diagnosticsPath, "Final workbook readiness verified."
         readinessNote = vbCrLf & vbCrLf & _
                         "Ready to open: the updated workbook was verified after handoff."
     Else
+        WriteUpdateDiagnostic diagnosticsPath, "Final workbook readiness timed out."
         readinessNote = vbCrLf & vbCrLf & _
                         "OneDrive is still finalising this file. Do not open it yet." & vbCrLf & _
                         "Wait for sync to finish (pending icon clears), then open from Explorer."
@@ -551,7 +578,8 @@ UpdateFailed:
 
     MsgBox "Update failed at step: " & diagStep & vbCrLf & vbCrLf & _
            "Error " & errNum & ": " & errMsg & vbCrLf & vbCrLf & _
-           failureNote, _
+           failureNote & vbCrLf & vbCrLf & _
+           "Diagnostics were written to:" & vbCrLf & diagnosticsPath, _
            vbCritical, "Update Failed"
 End Sub
 
@@ -761,6 +789,33 @@ Private Function BuildUpdatedWorkbookPath(folderPath As String, workbookName As 
     BuildUpdatedWorkbookPath = candidate
 End Function
 
+Private Function BuildUpdateDiagnosticsPath(ByVal folderPath As String, ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+    Else
+        baseName = workbookName
+    End If
+
+    BuildUpdateDiagnosticsPath = folderPath & "\" & baseName & "_UpdateDiagnostics.txt"
+End Function
+
+Private Sub WriteUpdateDiagnostic(ByVal diagnosticsPath As String, ByVal message As String)
+    Dim fileNumber As Integer
+
+    If diagnosticsPath = "" Then Exit Sub
+
+    On Error Resume Next
+    fileNumber = FreeFile
+    Open diagnosticsPath For Append As #fileNumber
+    Print #fileNumber, Format$(Now, "yyyy-mm-dd hh:nn:ss") & " | " & message
+    Close #fileNumber
+    On Error GoTo 0
+End Sub
+
 Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
     Dim ws As Worksheet
 
@@ -813,6 +868,8 @@ Private Function ValidateBackupWorkbook(backupPath As String, Optional backupWb 
 
 Fail:
     On Error Resume Next
+    mLastUpdateFailureReason = Err.Description
+    If mLastUpdateFailureReason = "" Then mLastUpdateFailureReason = "Backup validation failed."
     Application.Run "WriteDebugLog", "modUpdate.ValidateBackupWorkbook", Err.Number, Err.Description, "Validating backup file"
     On Error GoTo 0
     ValidateBackupWorkbook = False
@@ -2522,6 +2579,8 @@ ValidationFailed:
     errN = Err.Number
     errD = Err.Description
     If failReason = "" Then failReason = errD
+    If failReason = "" Then failReason = "Staged update validation failed."
+    mLastUpdateFailureReason = failReason
     On Error Resume Next
     If Not stagedWb Is Nothing Then stagedWb.Close SaveChanges:=False
     Application.AutomationSecurity = prevSec
