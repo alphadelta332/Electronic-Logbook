@@ -68,9 +68,10 @@ Public Function RefreshAirportDataset(ByVal wb As Workbook, Optional ByVal force
 
     If oldSignature <> newSignature Then
         ReplaceAirportTable tbl, mergedRecords, sortedKeys
-        RefreshAirportVisitStats wb
         RefreshAirportDataset = True
     End If
+
+    RefreshAirportVisitStats wb
 
     WriteWorkbookNameText wb, "AirportDatasetSource", AIRPORT_DATA_SOURCE
     WriteWorkbookNameText wb, "AirportDatasetVersion", remoteVersion

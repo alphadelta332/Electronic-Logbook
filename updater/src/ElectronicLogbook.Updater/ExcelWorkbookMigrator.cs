@@ -236,6 +236,10 @@ public sealed class ExcelWorkbookMigrator
     private static void UnprotectWorkbookForMigration(object workbookObject)
     {
         dynamic workbook = workbookObject;
+        if (workbook is null)
+        {
+            throw new InvalidDataException("Output workbook was not opened.");
+        }
 
         // Release workbooks can be saved in a protected state.
         // Migration needs table resize/copy operations, so force an editable
@@ -249,8 +253,19 @@ public sealed class ExcelWorkbookMigrator
             // Continue: some workbook states may not require workbook-level unprotect.
         }
 
-        foreach (dynamic worksheet in workbook.Worksheets)
+        if (workbook.Worksheets is null)
         {
+            throw new InvalidDataException("Output workbook does not expose a Worksheets collection.");
+        }
+
+        var worksheetCount = (int)workbook.Worksheets.Count;
+        for (var index = 1; index <= worksheetCount; index++)
+        {
+            dynamic worksheet = workbook.Worksheets.Item(index);
+            if (worksheet is null)
+            {
+                throw new InvalidDataException($"Output workbook worksheet {index} could not be opened.");
+            }
             try
             {
                 worksheet.Unprotect("");
@@ -258,10 +273,6 @@ public sealed class ExcelWorkbookMigrator
             catch
             {
                 // Continue: migration will surface a specific failure if protection remains.
-            }
-            finally
-            {
-                ReleaseComObject(worksheet);
             }
         }
     }
