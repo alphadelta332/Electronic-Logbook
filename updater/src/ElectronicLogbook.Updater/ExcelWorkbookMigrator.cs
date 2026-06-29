@@ -98,6 +98,8 @@ public sealed class ExcelWorkbookMigrator
             CopyNamedPreferences((object)sourceWorkbook, (object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.RestoreLogbookPresentation, "restoring Logbook presentation");
             RestoreLogbookPresentation((object)sourceWorkbook, (object)outputWorkbook);
+            step = SetStep(UpdaterPhaseIds.RefreshAirportVisitStats, "refreshing airport visit stats");
+            RefreshAirportVisitStats((object)outputWorkbook);
 
             var outputVersion = ReadName((object)outputWorkbook, "LogbookVersion");
             if (request.Manifest is not null &&
@@ -360,6 +362,354 @@ public sealed class ExcelWorkbookMigrator
                 destinationBase.Cells.Item(row + 1, 1).Value2 = value;
             }
         }
+    }
+
+    private static void RefreshAirportVisitStats(object workbookObject)
+    {
+        dynamic airports = GetTable(workbookObject, "Airports");
+        dynamic logbook = GetTable(workbookObject, "Logbook");
+        var airportRows = (int)airports.ListRows.Count;
+        var logbookRows = (int)logbook.ListRows.Count;
+        if (airportRows <= 0)
+        {
+            return;
+        }
+
+        var airportIcao = ReadColumnValues(airports, "ICAO", airportRows);
+        var airportTwo = ReadColumnValues(airports, "Two", airportRows);
+        var airportThree = ReadColumnValues(airports, "Three", airportRows);
+        var aliasLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var stats = new Dictionary<string, AirportVisitStats>(StringComparer.OrdinalIgnoreCase);
+
+        for (var row = 0; row < airportRows; row++)
+        {
+            var icao = StableValue(airportIcao[row]).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(icao))
+            {
+                continue;
+            }
+
+            stats[icao] = new AirportVisitStats();
+            aliasLookup.TryAdd(icao, icao);
+
+            var two = StableValue(airportTwo[row]).Trim().ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(two))
+            {
+                aliasLookup.TryAdd(two, icao);
+            }
+
+            var three = StableValue(airportThree[row]).Trim().ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(three))
+            {
+                aliasLookup.TryAdd(three, icao);
+            }
+        }
+
+        var keywords = ReadAirportStatsKeywords(workbookObject);
+        if (logbookRows > 0)
+        {
+            var years = ReadColumnValues(logbook, "Year", logbookRows);
+            var months = ReadColumnValues(logbook, "Month", logbookRows);
+            var days = ReadColumnValues(logbook, "Day", logbookRows);
+            var details = ReadColumnValues(logbook, "Details", logbookRows);
+            var ifrSim = ReadColumnValues(logbook, "IfrSim", logbookRows);
+            var firstHourColumn = GetColumnIndex(logbook, "SeIcusDay");
+            var lastOtherHourColumn = GetColumnIndex(logbook, "IfrIf");
+            var hourColumns = new List<object?[]>();
+            for (var column = firstHourColumn; column <= lastOtherHourColumn; column++)
+            {
+                var name = (string)logbook.ListColumns.Item(column).Name;
+                hourColumns.Add(ReadColumnValues(logbook, name, logbookRows));
+            }
+
+            for (var row = 0; row < logbookRows; row++)
+            {
+                if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
+                {
+                    continue;
+                }
+
+                var detailsText = StableValue(details[row]).Trim();
+                if (string.IsNullOrWhiteSpace(detailsText))
+                {
+                    continue;
+                }
+
+                var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (string token in TokeniseAirportDetails(detailsText))
+                {
+                    if (AirportStatsIgnoreToken(token, keywords))
+                    {
+                        continue;
+                    }
+                    string? matchedIcao;
+                    if (aliasLookup.TryGetValue(token, out matchedIcao) &&
+                        !string.IsNullOrWhiteSpace(matchedIcao))
+                    {
+                        matchedIcaos.Add(matchedIcao);
+                    }
+                }
+
+                foreach (var icao in matchedIcaos)
+                {
+                    if (stats.TryGetValue(icao, out var stat))
+                    {
+                        stat.AddVisit(ToLogbookDate(years[row], months[row], days[row]));
+                    }
+                }
+            }
+        }
+
+        var ranks = stats
+            .Where(pair => pair.Value.Visits > 0)
+            .OrderByDescending(pair => pair.Value.Visits)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Select((pair, index) => new { pair.Key, Rank = index + 1 })
+            .ToDictionary(pair => pair.Key, pair => pair.Rank, StringComparer.OrdinalIgnoreCase);
+
+        var firstVisited = NewColumnArray(airportRows);
+        var lastVisited = NewColumnArray(airportRows);
+        var visits = NewColumnArray(airportRows);
+        var rankValues = NewColumnArray(airportRows);
+
+        for (var row = 0; row < airportRows; row++)
+        {
+            var icao = StableValue(airportIcao[row]).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(icao))
+            {
+                continue;
+            }
+
+            if (!stats.TryGetValue(icao, out AirportVisitStats? stat))
+            {
+                continue;
+            }
+
+            var visitStats = stat ?? throw new InvalidDataException($"Airport stats missing for {icao}.");
+            if (visitStats.Visits <= 0)
+            {
+                continue;
+            }
+
+            firstVisited[row, 0] = visitStats.FirstVisited.HasValue ? visitStats.FirstVisited.Value : "";
+            lastVisited[row, 0] = visitStats.LastVisited.HasValue ? visitStats.LastVisited.Value : "";
+            visits[row, 0] = visitStats.Visits;
+            rankValues[row, 0] = ranks[icao];
+        }
+
+        SetColumnValues(airports, "First Visited", firstVisited, airportRows);
+        SetColumnValues(airports, "Last Visited", lastVisited, airportRows);
+        SetColumnValues(airports, "Visits", visits, airportRows);
+        SetColumnValues(airports, "Rank", rankValues, airportRows);
+    }
+
+    private sealed class AirportVisitStats
+    {
+        public int Visits { get; private set; }
+        public double? FirstVisited { get; private set; }
+        public double? LastVisited { get; private set; }
+
+        public void AddVisit(double? flightDate)
+        {
+            Visits++;
+            if (flightDate is null)
+            {
+                return;
+            }
+
+            FirstVisited = FirstVisited is null ? flightDate : Math.Min(FirstVisited.Value, flightDate.Value);
+            LastVisited = LastVisited is null ? flightDate : Math.Max(LastVisited.Value, flightDate.Value);
+        }
+    }
+
+    private static bool AirportStatsLogbookRowIsSimOnly(
+        int row,
+        object?[] ifrSim,
+        IReadOnlyCollection<object?[]> hourColumns)
+    {
+        var simHours = ToDouble(ifrSim[row]);
+        var otherHours = hourColumns.Sum(column => ToDouble(column[row]));
+        return simHours > 0 && otherHours == 0;
+    }
+
+    private static IEnumerable<string> TokeniseAirportDetails(string details)
+    {
+        var normalised = details.Replace("|", "", StringComparison.Ordinal);
+        foreach (var delimiter in new[] { '-', ' ', ',', '(', ')' })
+        {
+            normalised = normalised.Replace(delimiter, '|');
+        }
+        return normalised
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(token => token.ToUpperInvariant());
+    }
+
+    private static bool AirportStatsIgnoreToken(string token, IReadOnlyCollection<string> keywords)
+    {
+        var ignored = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "IPC", "OPC", "FR", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
+        };
+        if (ignored.Contains(token))
+        {
+            return true;
+        }
+        return keywords.Any(keyword => keyword.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IReadOnlyCollection<string> ReadAirportStatsKeywords(object workbookObject)
+    {
+        try
+        {
+            dynamic keywords = GetTable(workbookObject, "Keywords");
+            var rows = (int)keywords.ListRows.Count;
+            var values = new List<string>();
+            for (var column = 1; column <= (int)keywords.ListColumns.Count; column++)
+            {
+                var name = (string)keywords.ListColumns.Item(column).Name;
+                foreach (var rawValue in ReadColumnValues(keywords, name, rows))
+                {
+                    var value = StableValue(rawValue).Trim();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        values.Add(value);
+                    }
+                }
+            }
+            return values;
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static object[,] NewColumnArray(int rows)
+    {
+        var values = new object[rows, 1];
+        for (var row = 0; row < rows; row++)
+        {
+            values[row, 0] = "";
+        }
+        return values;
+    }
+
+    private static void SetColumnValues(dynamic table, string name, object[,] values, int rows)
+    {
+        var index = GetColumnIndex(table, name);
+        table.DataBodyRange.Columns.Item(index).Resize[rows, 1].Value2 = values;
+    }
+
+    private static double ToDouble(object? value)
+    {
+        return value switch
+        {
+            null => 0,
+            double number => number,
+            float number => number,
+            int number => number,
+            decimal number => (double)number,
+            string text when double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => number,
+            _ => 0
+        };
+    }
+
+    private static double? ToLogbookDate(object? yearValue, object? monthValue, object? dayValue)
+    {
+        var year = (int)ToDouble(yearValue);
+        var day = ResolveLogbookDay(dayValue);
+        var monthText = StableValue(monthValue).Trim();
+        var month = ResolveLogbookMonth(monthValue, monthText);
+        if (year <= 0 || day <= 0 || string.IsNullOrWhiteSpace(monthText))
+        {
+            return null;
+        }
+
+        if (month <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return new DateTime(year, month, day).ToOADate();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int ResolveLogbookMonth(object? monthValue, string monthText)
+    {
+        var monthNumber = ToDouble(monthValue);
+        if (monthNumber >= 1 && monthNumber <= 12)
+        {
+            return (int)monthNumber;
+        }
+        if (monthNumber > 31)
+        {
+            try
+            {
+                return DateTime.FromOADate(monthNumber).Month;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        if (int.TryParse(monthText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericMonth))
+        {
+            if (numericMonth >= 1 && numericMonth <= 12)
+            {
+                return numericMonth;
+            }
+            if (numericMonth > 31)
+            {
+                try
+                {
+                    return DateTime.FromOADate(numericMonth).Month;
+                }
+                catch
+                {
+                    return 0;
+                }
+            }
+        }
+
+        var format = CultureInfo.InvariantCulture.DateTimeFormat;
+        for (var month = 1; month <= 12; month++)
+        {
+            if (string.Equals(monthText, format.AbbreviatedMonthNames[month - 1], StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(monthText, format.MonthNames[month - 1], StringComparison.OrdinalIgnoreCase))
+            {
+                return month;
+            }
+        }
+
+        return 0;
+    }
+
+    private static int ResolveLogbookDay(object? dayValue)
+    {
+        var dayNumber = ToDouble(dayValue);
+        if (dayNumber >= 1 && dayNumber <= 31)
+        {
+            return (int)dayNumber;
+        }
+        if (dayNumber > 31)
+        {
+            try
+            {
+                return DateTime.FromOADate(dayNumber).Day;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+        return 0;
     }
 
     private static void CopyNamedPreferences(object sourceWorkbookObject, object outputWorkbookObject)

@@ -172,7 +172,9 @@ Private Function BuildAirportAliasLookup(ByVal tblAirports As ListObject, ByVal 
 End Function
 
 Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLookup As Object, ByVal airportStats As Object)
-    Dim dateCol As Long
+    Dim yearCol As Long
+    Dim monthCol As Long
+    Dim dayCol As Long
     Dim detailsCol As Long
     Dim rowIndex As Long
     Dim details As String
@@ -183,7 +185,9 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
     Dim rowMatches As Object
     Dim key As Variant
 
-    dateCol = tblLog.ListColumns("Date").Index
+    yearCol = tblLog.ListColumns("Year").Index
+    monthCol = tblLog.ListColumns("Month").Index
+    dayCol = tblLog.ListColumns("Day").Index
     detailsCol = tblLog.ListColumns("Details").Index
 
     For rowIndex = 1 To tblLog.DataBodyRange.Rows.Count
@@ -192,7 +196,10 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
         details = Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, detailsCol).Value))
         If details = "" Then GoTo NextRow
 
-        flightDate = tblLog.DataBodyRange.Cells(rowIndex, dateCol).Value
+        flightDate = ResolveAirportStatsLogbookDate( _
+            tblLog.DataBodyRange.Cells(rowIndex, yearCol).Value2, _
+            tblLog.DataBodyRange.Cells(rowIndex, monthCol).Value2, _
+            tblLog.DataBodyRange.Cells(rowIndex, dayCol).Value2)
         tokens = Split(TokeniseAirportDetails(details), "|")
         Set rowMatches = CreateObject("Scripting.Dictionary")
         rowMatches.CompareMode = 1
@@ -217,6 +224,62 @@ NextRow:
     Next rowIndex
 End Sub
 
+Private Function ResolveAirportStatsLogbookDate(ByVal yearValue As Variant, _
+                                                ByVal monthValue As Variant, _
+                                                ByVal dayValue As Variant) As Variant
+    Dim yearNumber As Long
+    Dim monthNumber As Long
+    Dim dayNumber As Long
+
+    If Not IsNumeric(yearValue) Then Exit Function
+    yearNumber = CLng(yearValue)
+    monthNumber = ResolveAirportStatsMonth(monthValue)
+    dayNumber = ResolveAirportStatsDay(dayValue)
+
+    If yearNumber <= 0 Or monthNumber <= 0 Or dayNumber <= 0 Then Exit Function
+
+    On Error GoTo InvalidDate
+    ResolveAirportStatsLogbookDate = CDbl(DateSerial(yearNumber, monthNumber, dayNumber))
+    Exit Function
+
+InvalidDate:
+End Function
+
+Private Function ResolveAirportStatsMonth(ByVal monthValue As Variant) As Long
+    Dim monthText As String
+    Dim monthIndex As Long
+
+    If IsNumeric(monthValue) Then
+        If CDbl(monthValue) >= 1 And CDbl(monthValue) <= 12 Then
+            ResolveAirportStatsMonth = CLng(monthValue)
+            Exit Function
+        End If
+        If CDbl(monthValue) > 31 Then
+            ResolveAirportStatsMonth = Month(CDate(CDbl(monthValue)))
+            Exit Function
+        End If
+    End If
+
+    monthText = UCase$(Trim$(CStr(monthValue)))
+    For monthIndex = 1 To 12
+        If monthText = UCase$(Format$(DateSerial(2000, monthIndex, 1), "mmm")) Or _
+           monthText = UCase$(Format$(DateSerial(2000, monthIndex, 1), "mmmm")) Then
+            ResolveAirportStatsMonth = monthIndex
+            Exit Function
+        End If
+    Next monthIndex
+End Function
+
+Private Function ResolveAirportStatsDay(ByVal dayValue As Variant) As Long
+    If IsNumeric(dayValue) Then
+        If CDbl(dayValue) >= 1 And CDbl(dayValue) <= 31 Then
+            ResolveAirportStatsDay = CLng(dayValue)
+        ElseIf CDbl(dayValue) > 31 Then
+            ResolveAirportStatsDay = Day(CDate(CDbl(dayValue)))
+        End If
+    End If
+End Function
+
 Private Function TokeniseAirportDetails(ByVal details As String) As String
     Dim delimiter As Variant
 
@@ -229,19 +292,24 @@ End Function
 
 Private Sub AddAirportVisit(ByVal airportStats As Object, ByVal icao As String, ByVal flightDate As Variant)
     Dim stat As Variant
+    Dim flightSerial As Double
 
     If Not airportStats.Exists(icao) Then Exit Sub
     stat = airportStats(icao)
     stat(0) = CLng(stat(0)) + 1
-    If IsDate(flightDate) Then
+    If IsNumeric(flightDate) Then
+        flightSerial = CDbl(flightDate)
+        If flightSerial <= 0 Then GoTo StoreStat
         If IsEmpty(stat(1)) Then
-            stat(1) = CDate(flightDate)
-            stat(2) = CDate(flightDate)
+            stat(1) = flightSerial
+            stat(2) = flightSerial
         Else
-            If CDate(flightDate) < CDate(stat(1)) Then stat(1) = CDate(flightDate)
-            If CDate(flightDate) > CDate(stat(2)) Then stat(2) = CDate(flightDate)
+            If flightSerial < CDbl(stat(1)) Then stat(1) = flightSerial
+            If flightSerial > CDbl(stat(2)) Then stat(2) = flightSerial
         End If
     End If
+
+StoreStat:
     airportStats(icao) = stat
 End Sub
 

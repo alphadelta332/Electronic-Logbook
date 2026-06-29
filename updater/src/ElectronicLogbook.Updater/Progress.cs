@@ -13,6 +13,7 @@ public static class UpdaterPhaseIds
     public const string CopyAirportBaseFlags = "copy-airport-base-flags";
     public const string CopyNamedPreferences = "copy-named-preferences";
     public const string RestoreLogbookPresentation = "restore-logbook-presentation";
+    public const string RefreshAirportVisitStats = "refresh-airport-visit-stats";
     public const string CalculateOutputWorkbook = "calculate-output-workbook";
     public const string RefreshPivotTables = "refresh-pivot-tables";
     public const string UpdateHoursOverTimeChart = "update-hours-over-time-chart";

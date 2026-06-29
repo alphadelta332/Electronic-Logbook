@@ -8,6 +8,16 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [1.5.0] - 2026-06-29
+- Expanded Airports table updates to use the OurAirports dataset for international airports
+- Added workbook airport dataset update checks with visible errors if the refresh cannot complete
+- Preserved existing local airport rows when they are not present in the imported dataset
+- Kept two-letter and three-letter airport aliases limited to Australian ICAO airports
+- Restored manually cleared Australian airport aliases for codes that conflict with common flight terms
+- Added automatic airport name suffix cleanup for imported airport names
+- Reworked airport visit statistics to store refreshed values instead of formula-heavy columns
+- Updated the legacy VBA updater and external updater wizard to refresh airport visit statistics during migration
+
 ### [1.4.2] - 2026-06-25
 - Improved protected Logbook row deletion for removing placeholder entries
 - Reduced Add To Logbook sorting work when new entries are already in date order

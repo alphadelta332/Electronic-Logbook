@@ -319,6 +319,10 @@ Private Sub RunUpdate(newVersion As String)
     Set wsLog  = Nothing
     Set tblLog = Nothing
 
+    diagStep = "Refreshing airport visit stats"
+    UpdateStatus "Refreshing airport visit stats..."
+    Application.Run "'" & masterWb.Name & "'!RefreshAirportVisitStats", masterWb
+
     diagStep = "Stamping version number"
     masterWb.Names("LogbookVersion").RefersToRange.Value = newVersion
 
