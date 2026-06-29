@@ -255,7 +255,7 @@ Private Sub RunUpdate(newVersion As String)
         Exit Sub
     End If
 
-    If wizardReason <> "" Then
+    If wizardReason <> "" And LCase$(Trim$(GetGitHubBranch())) = "main" Then
         MsgBox "The external updater wizard was not available, so the classic updater will be used for this run." & vbCrLf & vbCrLf & _
                "Reason: " & wizardReason, vbInformation, "Using Classic Updater"
     End If
@@ -1913,7 +1913,13 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
 
     wizardPath = ResolveWizardExecutablePath(repository, targetVersion)
     If wizardPath = "" Then
-        If reason = "" Then reason = "No wizard asset was found in release assets."
+        If reason = "" Then
+            If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+                reason = "Development channel updates require UpdaterWizardPath to point to a local updater wizard executable."
+            Else
+                reason = "No wizard asset was found in release assets."
+            End If
+        End If
         Exit Function
     End If
     If Dir$(wizardPath) = "" Then
