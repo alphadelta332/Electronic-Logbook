@@ -19,6 +19,9 @@ Private Sub Workbook_Open()
     ' Check for logbook updates
     modBoot.CheckForUpdate
 
+    ' Refresh airport reference data before route-cache checks.
+    CheckAirportDatasetOnOpen ThisWorkbook
+
     ' Check Status of SuppressWarnings
     RefreshSuppressWarningsButton
 

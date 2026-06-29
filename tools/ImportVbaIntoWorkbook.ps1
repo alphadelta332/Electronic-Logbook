@@ -20,7 +20,7 @@ if ([string]::IsNullOrWhiteSpace($WorkbookPath)) {
     $WorkbookPath = $config.MasterWorkbook
 }
 
-$standardModules = @("modBoot.bas", "modLogbook.bas")
+$standardModules = @("modBoot.bas", "modAirports.bas", "modLogbook.bas")
 $userForms = @("frmVerifyCurrency.frm")
 if ($IncludeModUpdate) {
     $standardModules += "modUpdate.bas"

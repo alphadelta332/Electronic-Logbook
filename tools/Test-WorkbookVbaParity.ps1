@@ -20,7 +20,7 @@ $workbookPath = (Resolve-Path $WorkbookPath).Path
 $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) (
     "ElectronicLogbookParity-{0}.xlsm" -f [guid]::NewGuid().ToString("N")
 )
-$componentNames = @("modBoot", "modLogbook", "ThisWorkbook", "frmVerifyCurrency")
+$componentNames = @("modBoot", "modAirports", "modLogbook", "ThisWorkbook", "frmVerifyCurrency")
 $issues = New-Object System.Collections.Generic.List[string]
 
 function Get-WorkbookVbaSnapshot {

@@ -614,6 +614,11 @@ Sub AddToLogbook()
         Call AddNewRoutes
         On Error GoTo Cleanup
 
+        diagStep = "Step 8a.1: Refresh Airport Stats"
+        WriteCrumb diagStep
+        SetAddToLogbookStatus "Refreshing airport stats"
+        RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook
+
         '--- Refresh all pivot tables in the workbook
         diagStep = "Step 8b: Refresh Pivots"
         WriteCrumb diagStep
@@ -1678,6 +1683,7 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
         SortLogbookByDate tbl
         UpdateHiddenRows ThisWorkbook
         MarkRoutesDirty ThisWorkbook
+        RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook
         ThisWorkbook.Save
     End If
 
@@ -2814,6 +2820,159 @@ Public Sub RebuildRoutesTableNow()
     RebuildRoutesTable ThisWorkbook
 End Sub
 
+Public Sub CheckAirportDatasetOnOpen(Optional wb As Workbook = Nothing)
+    Dim targetWorkbook As Workbook
+    Dim protectionWasActive As Boolean
+    Dim updateAvailable As Boolean
+    Dim response As VbMsgBoxResult
+    Dim errNum As Long
+    Dim errDesc As String
+    Dim errSource As String
+
+    If ShouldSuppressOpenPrompts() Then Exit Sub
+
+    On Error GoTo Fail
+    If wb Is Nothing Then
+        Set targetWorkbook = ThisWorkbook
+    Else
+        Set targetWorkbook = wb
+    End If
+
+    protectionWasActive = WorkbookProtectionIsActive(targetWorkbook)
+    If protectionWasActive Then UnprotectWorkbookForEditing targetWorkbook
+    updateAvailable = modAirports.AirportDatasetUpdateAvailable(targetWorkbook, False)
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+
+    If updateAvailable Then
+        response = MsgBox("A newer airport dataset is available." & vbCrLf & vbCrLf & _
+                          "Updating the Airports table may take a short time while the latest airport list and visit statistics are refreshed." & vbCrLf & vbCrLf & _
+                          "Update now?", _
+                          vbYesNo + vbInformation, "Airport Dataset Update Available")
+        If response = vbYes Then RefreshAirportDatasetWithWorkbookProtection targetWorkbook, True
+    End If
+    Exit Sub
+
+Fail:
+    errNum = Err.Number
+    errDesc = Err.Description
+    errSource = Err.Source
+    On Error Resume Next
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    On Error GoTo 0
+    MsgBox "The airport dataset update check failed." & vbCrLf & vbCrLf & _
+           "Error " & errNum & " in " & errSource & ": " & errDesc, _
+           vbExclamation, "Airport Dataset Check Failed"
+End Sub
+
+Public Function RefreshAirportDatasetWithWorkbookProtection(Optional wb As Workbook = Nothing, Optional forceCheck As Boolean = False) As Boolean
+    Dim targetWorkbook As Workbook
+    Dim protectionWasActive As Boolean
+    Dim oldScreenUpdating As Boolean
+    Dim oldEnableEvents As Boolean
+    Dim oldDisplayStatusBar As Boolean
+    Dim oldStatusBar As Variant
+    Dim oldCalculation As XlCalculation
+    Dim errNum As Long
+    Dim errDesc As String
+    Dim errSource As String
+
+    On Error GoTo Fail
+    If wb Is Nothing Then
+        Set targetWorkbook = ThisWorkbook
+    Else
+        Set targetWorkbook = wb
+    End If
+
+    protectionWasActive = WorkbookProtectionIsActive(targetWorkbook)
+    If protectionWasActive Then UnprotectWorkbookForEditing targetWorkbook
+
+    oldScreenUpdating = Application.ScreenUpdating
+    oldEnableEvents = Application.EnableEvents
+    oldDisplayStatusBar = Application.DisplayStatusBar
+    oldStatusBar = Application.StatusBar
+    oldCalculation = Application.Calculation
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Updating airport dataset..."
+    Application.Calculation = xlCalculationManual
+
+    RefreshAirportDatasetWithWorkbookProtection = modAirports.RefreshAirportDataset(targetWorkbook, forceCheck)
+    If RefreshAirportDatasetWithWorkbookProtection Or modAirports.AirportDatasetRoutesStateNeedsRefresh(targetWorkbook) Then
+        MarkRoutesDirty targetWorkbook
+        modAirports.MarkAirportDatasetRoutesStateCurrent targetWorkbook
+    End If
+
+CleanExit:
+    Application.StatusBar = oldStatusBar
+    Application.DisplayStatusBar = oldDisplayStatusBar
+    Application.Calculation = oldCalculation
+    Application.EnableEvents = oldEnableEvents
+    Application.ScreenUpdating = oldScreenUpdating
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    Exit Function
+
+Fail:
+    errNum = Err.Number
+    errDesc = Err.Description
+    errSource = Err.Source
+    On Error Resume Next
+    Application.StatusBar = oldStatusBar
+    Application.DisplayStatusBar = oldDisplayStatusBar
+    Application.Calculation = oldCalculation
+    Application.EnableEvents = oldEnableEvents
+    Application.ScreenUpdating = oldScreenUpdating
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    On Error GoTo 0
+    MsgBox "The airport dataset could not be updated." & vbCrLf & vbCrLf & _
+           "Error " & errNum & " in " & errSource & ": " & errDesc, _
+           vbExclamation, "Airport Dataset Update Failed"
+End Function
+
+Public Sub RefreshAirportVisitStatsWithWorkbookProtection(Optional wb As Workbook = Nothing)
+    Dim targetWorkbook As Workbook
+    Dim protectionWasActive As Boolean
+    Dim oldStatusBar As Variant
+    Dim oldDisplayStatusBar As Boolean
+    Dim errNum As Long
+    Dim errDesc As String
+    Dim errSource As String
+
+    On Error GoTo Fail
+    If wb Is Nothing Then
+        Set targetWorkbook = ThisWorkbook
+    Else
+        Set targetWorkbook = wb
+    End If
+
+    protectionWasActive = WorkbookProtectionIsActive(targetWorkbook)
+    If protectionWasActive Then UnprotectWorkbookForEditing targetWorkbook
+
+    oldDisplayStatusBar = Application.DisplayStatusBar
+    oldStatusBar = Application.StatusBar
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Refreshing airport visit stats..."
+
+    modAirports.RefreshAirportVisitStats targetWorkbook
+
+CleanExit:
+    Application.StatusBar = oldStatusBar
+    Application.DisplayStatusBar = oldDisplayStatusBar
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    Exit Sub
+
+Fail:
+    errNum = Err.Number
+    errDesc = Err.Description
+    errSource = Err.Source
+    On Error Resume Next
+    Application.StatusBar = oldStatusBar
+    Application.DisplayStatusBar = oldDisplayStatusBar
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    On Error GoTo 0
+    Err.Raise errNum, errSource, errDesc
+End Sub
+
 Public Sub BackupCurrentWorkbook()
     Dim localPath As String
     Dim canonicalName As String
@@ -3079,6 +3238,7 @@ Public Sub DeleteSelectedLogbookRows()
     NormaliseLogbookFormatting tbl
     UpdateHiddenRows ThisWorkbook
     MarkRoutesDirty ThisWorkbook
+    RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook
 
 CleanExit:
     Application.ScreenUpdating = True

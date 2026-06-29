@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $sourceFiles = @(
     "modBoot.bas",
+    "modAirports.bas",
     "modLogbook.bas",
     "modUpdate.bas",
     "ThisWorkbook.cls",

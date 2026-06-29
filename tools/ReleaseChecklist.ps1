@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [switch]$SkipVbaImport,
+    [switch]$SkipAirportDataset,
     [switch]$SkipPdf,
     [switch]$SkipWorkbookPrep,
     [switch]$SkipWorkingCopy,
@@ -50,6 +51,11 @@ if (-not $SkipGitChecks) {
 if (-not $SkipVbaImport) {
     Write-Host ""
     & (Join-Path $PSScriptRoot "ImportVbaIntoWorkbook.ps1")
+}
+
+if (-not $SkipAirportDataset) {
+    Write-Host ""
+    & (Join-Path $PSScriptRoot "Update-AirportDataset.ps1")
 }
 
 if (-not $SkipPdf) {
