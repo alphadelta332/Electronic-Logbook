@@ -1971,13 +1971,7 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     End If
 
     If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-        tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
-        candidate = tempFolder & "\" & WIZARD_EXE_NAME
-        If Dir$(candidate) <> "" Then
-            ResolveWizardExecutablePath = candidate
-        Else
-            ResolveWizardExecutablePath = ""
-        End If
+        ResolveWizardExecutablePath = ""
         Exit Function
     End If
 
