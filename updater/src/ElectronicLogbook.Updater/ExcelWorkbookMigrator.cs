@@ -20,8 +20,7 @@ public sealed class ExcelWorkbookMigrator
         "RoutesDirty",
         "RoutesDefinitionVersion",
         "DateAfterExport",
-        "suppressWarningsUntil",
-        "UpdaterWizardPath"
+        "suppressWarningsUntil"
     ];
 
     private readonly IUpdaterProgressSink? _progressSink;

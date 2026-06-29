@@ -180,7 +180,6 @@ Private Sub RunUpdate(newVersion As String)
     Dim errNum        As Long
     Dim diagStep      As String
     Dim finalHandoffStarted As Boolean
-    Dim usedSaveCopyFallback As Boolean
     Dim finalReady As Boolean
     Dim readinessNote As String
     Dim sessionId     As String
@@ -449,28 +448,21 @@ Private Sub RunUpdate(newVersion As String)
     End If
     On Error GoTo UpdateFailed
 
-    diagStep = "Renaming current file to old copy"
+    diagStep = "Saving backup copy"
     WriteUpdateDiagnostic diagnosticsPath, diagStep
-    UpdateStatus "Renaming previous logbook..."
+    UpdateStatus "Saving backup copy..."
     finalHandoffStarted = True
     Application.DisplayAlerts = False
     On Error Resume Next
-    ThisWorkbook.SaveAs Filename:=oldPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
+    ThisWorkbook.SaveCopyAs Filename:=oldPath
     If Err.Number <> 0 Then
+        Dim backupErr As String
+        backupErr = Err.Description
         Err.Clear
-        ' OneDrive/AutoSave workbooks can reject SaveAs during handoff.
-        ' Fallback: preserve a backup copy without renaming the open workbook.
-        ThisWorkbook.SaveCopyAs Filename:=oldPath
-        If Err.Number <> 0 Then
-            Dim renameErr As String
-            renameErr = Err.Description
-            Err.Clear
-            Application.DisplayAlerts = True
-            On Error GoTo UpdateFailed
-            Err.Raise vbObjectError + 931, "modUpdate.RunUpdate", _
-                      "Could not create backup old-copy file. " & renameErr
-        End If
-        usedSaveCopyFallback = True
+        Application.DisplayAlerts = True
+        On Error GoTo UpdateFailed
+        Err.Raise vbObjectError + 931, "modUpdate.RunUpdate", _
+                  "Could not create backup old-copy file. " & backupErr
     End If
     On Error GoTo UpdateFailed
     Application.DisplayAlerts = True
@@ -493,14 +485,10 @@ Private Sub RunUpdate(newVersion As String)
         Exit Sub
     End If
 
-    diagStep = "Moving updated file to original filename"
+    diagStep = "Moving updated file to updated copy"
     WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Saving updated logbook..."
-    If usedSaveCopyFallback Then
-        updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
-    Else
-        updatedPath = savePath
-    End If
+    updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
     ReplaceFileWithRetry localSavePath, updatedPath
     On Error Resume Next
     Kill localSavePath
@@ -527,25 +515,13 @@ Private Sub RunUpdate(newVersion As String)
                         "Wait for sync to finish (pending icon clears), then open from Explorer."
     End If
 
-        If usedSaveCopyFallback Then
-         MsgBox "Update complete with OneDrive fallback." & vbCrLf & vbCrLf & _
-             "Your current open workbook could not be renamed while AutoSave/OneDrive locking was active." & vbCrLf & vbCrLf & _
-             "Updated workbook saved as:" & vbCrLf & vbCrLf & _
-             updatedPath & vbCrLf & vbCrLf & _
-             "Backup copy saved as:" & vbCrLf & vbCrLf & _
-             oldPath & vbCrLf & vbCrLf & _
-             "Please close this workbook and open the updated file above." & readinessNote, _
-             vbInformation, "Update Ready"
-        Else
-         MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
-             updatedPath & vbCrLf & vbCrLf & _
-             "Your previous logbook has been saved as:" & vbCrLf & vbCrLf & _
-             oldPath & vbCrLf & vbCrLf & _
-             "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
-             "Please verify that your total hours, " & _
-               "Charts page, and Currency + Recency page match what you had before." & readinessNote, _
-             vbInformation, "Update Ready"
-        End If
+    MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
+        updatedPath & vbCrLf & vbCrLf & _
+        "Backup copy saved as:" & vbCrLf & vbCrLf & _
+        oldPath & vbCrLf & vbCrLf & _
+        "Please close this old file and open the updated file above." & vbCrLf & vbCrLf & _
+        "Please verify that your total hours, Charts page, and Currency + Recency page match what you had before." & readinessNote, _
+        vbInformation, "Update Ready"
     Exit Sub
 
 UpdateFailed:
@@ -559,6 +535,8 @@ UpdateFailed:
     On Error Resume Next
     Application.Run "WriteDebugLog", "modUpdate.RunUpdate", errNum, errMsg, diagStep
     On Error GoTo 0
+    WriteUpdateDiagnostic diagnosticsPath, "Update failed at step=" & diagStep & _
+        "; error=" & CStr(errNum) & "; description=" & errMsg
     If Not masterWb Is Nothing Then
         On Error Resume Next
         masterWb.Close SaveChanges:=False
