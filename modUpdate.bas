@@ -189,6 +189,7 @@ Private Sub RunUpdate(newVersion As String)
     Dim expectedTotalHours As Double
     Dim expectedTotalKnown As Boolean
     Dim diagnosticsPath As String
+    Dim wizardReportPath As String
     Dim sourceWorkbookPath As String
     Dim wizardReason As String
     Dim wizardMasterPath As String
@@ -215,6 +216,7 @@ Private Sub RunUpdate(newVersion As String)
     updatedPath = savePath
     oldPath = BuildOldWorkbookPath(localPath, canonicalName)
     diagnosticsPath = BuildUpdateDiagnosticsPath(localPath, canonicalName)
+    wizardReportPath = BuildWizardReportPath(localPath, canonicalName)
     sourceWorkbookPath = localPath & "\" & originalName
     WriteUpdateDiagnostic diagnosticsPath, "Update started. Source=" & sourceWorkbookPath & _
         "; targetVersion=" & newVersion & "; branch=" & GetGitHubBranch()
@@ -233,6 +235,8 @@ Private Sub RunUpdate(newVersion As String)
 
     If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
         WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
+        WriteUpdateDiagnostic diagnosticsPath, "Launcher diagnostics stop here because Excel handed off to the external wizard."
+        WriteUpdateDiagnostic diagnosticsPath, "Detailed wizard report path: " & wizardReportPath
         UpdateStatus ""
 
         Dim closeErr As Long
@@ -790,6 +794,20 @@ Private Function BuildUpdateDiagnosticsPath(ByVal folderPath As String, ByVal wo
     End If
 
     BuildUpdateDiagnosticsPath = folderPath & "\" & baseName & "_UpdateDiagnostics.txt"
+End Function
+
+Private Function BuildWizardReportPath(ByVal folderPath As String, ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+    Else
+        baseName = workbookName
+    End If
+
+    BuildWizardReportPath = folderPath & "\" & baseName & ".update-report.json"
 End Function
 
 Private Sub WriteUpdateDiagnostic(ByVal diagnosticsPath As String, ByVal message As String)

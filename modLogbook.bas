@@ -1458,7 +1458,7 @@ Private Function NewEntryLogbookFieldNames() As Variant
         "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
         "neLandingsDay", "neLandingsNight", _
-        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+        "neILS", "neVOR", "neRNP", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
 Private Function NewEntryNumericFieldNames() As Variant
@@ -1470,7 +1470,7 @@ Private Function NewEntryNumericFieldNames() As Variant
         "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
         "neLandingsDay", "neLandingsNight", _
-        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+        "neILS", "neVOR", "neRNP", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
 Private Function NewEntryFlightTimeFieldNames() As Variant
@@ -1505,7 +1505,7 @@ End Function
 
 Private Function NewEntryApproachFieldNames() As Variant
     NewEntryApproachFieldNames = Array( _
-        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+        "neILS", "neVOR", "neRNP", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
 Private Function NewEntrySingleEngineColumnNames() As Variant
@@ -1530,7 +1530,7 @@ Private Function NewEntryClearFieldNames() As Variant
         "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", _
         "neLandingsDay", "neLandingsNight", _
-        "neILS", "neVOR", "neRNAV", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
+        "neILS", "neVOR", "neRNP", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
 ' ==============================================================
@@ -2066,7 +2066,7 @@ Private Sub InitialiseMappedNumericFields(ByVal mapped As Object)
                                  "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
                                  "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
                                  "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", _
-                                 "LandingsDay", "LandingsNight", "ILS", "VOR", "RNAV", _
+                                 "LandingsDay", "LandingsNight", "ILS", "VOR", "RNP", _
                                  "NDB", "DGA (CDI)", "DGA (Azi)", "Circling")
         mapped(CStr(columnName)) = 0#
     Next columnName
@@ -2177,13 +2177,13 @@ Private Sub ApplyLogTenApproaches(ByVal mapped As Object, _
         Case "ILS"
             mapped("ILS") = CDbl(mapped("ILS")) + approachCount
         Case "RNP", "LNAV/VNAV"
-            mapped("RNAV") = CDbl(mapped("RNAV")) + approachCount
+            mapped("RNP") = CDbl(mapped("RNP")) + approachCount
         Case "GLS"
             mapped("ILS") = CDbl(mapped("ILS")) + approachCount
         Case "VOR"
             mapped("VOR") = CDbl(mapped("VOR")) + approachCount
-        Case "RNAV"
-            mapped("RNAV") = CDbl(mapped("RNAV")) + approachCount
+        Case "RNP"
+            mapped("RNP") = CDbl(mapped("RNP")) + approachCount
         Case "NDB"
             mapped("NDB") = CDbl(mapped("NDB")) + approachCount
         Case "VISUAL"
@@ -2244,7 +2244,7 @@ Private Sub WriteMappedLogTenRow(ByVal targetRow As Range, ByVal tbl As ListObje
                                  "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
                                  "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
                                  "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", "LandingsDay", _
-                                 "LandingsNight", "ILS", "VOR", "RNAV", "NDB", "DGA (CDI)", _
+                                 "LandingsNight", "ILS", "VOR", "RNP", "NDB", "DGA (CDI)", _
                                  "DGA (Azi)", "Circling")
         If CDbl(mapped(CStr(columnName))) <> 0 Then
             WriteMappedValueToColumn targetRow, tbl, CStr(columnName), CDbl(mapped(CStr(columnName)))
@@ -2287,7 +2287,7 @@ Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Objec
                                  "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
                                  "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight", _
                                  "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", "LandingsDay", _
-                                 "LandingsNight", "ILS", "VOR", "RNAV", "NDB", "DGA (CDI)", _
+                                 "LandingsNight", "ILS", "VOR", "RNP", "NDB", "DGA (CDI)", _
                                  "DGA (Azi)", "Circling")
         If CDbl(mapped(CStr(columnName))) <> 0 Then
             WriteMappedValueToColumn newRow.Range, tbl, CStr(columnName), CDbl(mapped(CStr(columnName)))
@@ -5141,7 +5141,7 @@ Private Function NewEntryLayoutFieldNames() As Variant
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", "neSeCommandDay", "neSeCommandNight", _
         "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", "neLandingsDay", "neLandingsNight", _
-        "neILS", "neRNAV", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", "neSI1", "neSI2", "neSI3", "neSI4")
+        "neILS", "neRNP", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", "neSI1", "neSI2", "neSI3", "neSI4")
 End Function
 
 Public Sub VerifyCurrencyChecks()
