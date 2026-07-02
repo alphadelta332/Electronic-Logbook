@@ -86,10 +86,10 @@ Sub AddToLogbook()
         RefreshTodayValue
         SetAddToLogbookStatus "Validating entry"
         todayDate = CDate(GetWorkbookNameValue(ThisWorkbook, "today", Date))
-        ipcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "IPC")
-        opcDetected = KeywordDetected(CStr(NewEntryValue("neDetails")), "OPC")
+        ipcDetected = KeywordDetected(CStr(NewEntryValue("neRemarks")), "IPC")
+        opcDetected = KeywordDetected(CStr(NewEntryValue("neRemarks")), "OPC")
         flightReviewDetected = ipcDetected Or _
-                               KeywordDetected(CStr(NewEntryValue("neDetails")), "Flight Review")
+                               KeywordDetected(CStr(NewEntryValue("neRemarks")), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
     '===============================
@@ -160,7 +160,7 @@ Sub AddToLogbook()
         Next i
 
         'Check 2: Details field must not be blank (checked separately as it falls outside the loop range)
-        If NewEntryValue("neDetails") = "" Then
+        If NewEntryValue("neRemarks") = "" Then
             MsgBox "ERROR: Details cannot be blank.", vbCritical
             GoTo Cleanup
         End If
@@ -451,7 +451,7 @@ Sub AddToLogbook()
                 If tbl.DataBodyRange.cells(rr, dateCol).Value = NewEntryValue("neDate") And _
                     LCase(Trim(tbl.DataBodyRange.cells(rr, typeCol).Value)) = LCase(Trim(CStr(NewEntryValue("neType")))) And _
                     LCase(Trim(tbl.DataBodyRange.cells(rr, regCol).Value)) = LCase(Trim(CStr(NewEntryValue("neReg")))) And _
-               LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(NewEntryValue("neDetails"))) Then
+               LCase(Trim(tbl.DataBodyRange.cells(rr, detailsCol).Value)) = LCase(Trim(NewEntryValue("neRemarks"))) Then
                 dupFound = True
                 Exit For
             End If
@@ -1450,7 +1450,7 @@ End Sub
 
 Private Function NewEntryLogbookFieldNames() As Variant
     NewEntryLogbookFieldNames = Array( _
-        "neType", "neReg", "nePIC", "neOtherCrew", "neDetails", _
+        "neType", "neReg", "nePIC", "neOtherCrew", "neRemarks", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
         "neSeCommandDay", "neSeCommandNight", _
@@ -1522,7 +1522,7 @@ End Function
 
 Private Function NewEntryClearFieldNames() As Variant
     NewEntryClearFieldNames = Array( _
-        "neType", "neReg", "neOtherCrew", "neDetails", _
+        "neType", "neReg", "neOtherCrew", "neRemarks", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
         "neSeCommandDay", "neSeCommandNight", _
@@ -4343,7 +4343,7 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     fType    = CStr(Range("neType").Value)
     ' Evaluate keyword detection flags without retaining the personal Details text.
     Dim detailsVal As String
-    detailsVal = CStr(Range("neDetails").Value)
+    detailsVal = CStr(Range("neRemarks").Value)
     fIpcDetected          = IIf(KeywordDetected(detailsVal, "IPC"), "Yes", "No")
     fOpcDetected          = IIf(KeywordDetected(detailsVal, "OPC"), "Yes", "No")
     fFlightReviewDetected = IIf(KeywordDetected(detailsVal, "IPC") Or _
@@ -4689,25 +4689,30 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
     Application.Calculation = xlCalculationManual
 
     layoutId = ResolveNewEntryLayoutId(requestedLayout)
+    fieldNames = NewEntryLayoutFieldNames()
+    RepairNewEntryLayoutNames fieldNames
+
     desiredCompact = (layoutId = 1)
     currentCompact = IsCurrentNewEntryLayoutCompact()
-    layoutChanged = (desiredCompact <> currentCompact)
+    layoutChanged = (desiredCompact <> currentCompact) Or _
+                    (CurrentConfiguredNewEntryLayoutId() <> layoutId)
+
+    ReDim fieldValues(LBound(fieldNames) To UBound(fieldNames))
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        nameText = CStr(fieldNames(i))
+        fieldValues(i) = GetWorkbookNameValue(ThisWorkbook, nameText, vbNullString)
+    Next i
 
     If layoutChanged Then
-        fieldNames = NewEntryLayoutFieldNames()
-        ReDim fieldValues(LBound(fieldNames) To UBound(fieldNames))
-
-        For i = LBound(fieldNames) To UBound(fieldNames)
-            nameText = CStr(fieldNames(i))
-            fieldValues(i) = GetWorkbookNameValue(ThisWorkbook, nameText, vbNullString)
-        Next i
-
-        SwapNewEntryLayoutBindings fieldNames
-
-        For i = LBound(fieldNames) To UBound(fieldNames)
-            SetWorkbookNameValue ThisWorkbook, CStr(fieldNames(i)), fieldValues(i)
-        Next i
+        ApplyNewEntryLayoutBindingTargets layoutId, fieldNames
+    Else
+        RepairNewEntryLayoutNames fieldNames
     End If
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        SetWorkbookNameValue ThisWorkbook, CStr(fieldNames(i)), fieldValues(i)
+    Next i
 
     If CurrentConfiguredNewEntryLayoutId() <> layoutId Then
         SetWorkbookNameValue ThisWorkbook, "NewEntryLayout", layoutId
@@ -4715,11 +4720,9 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
 
     SyncNewEntryLayoutButtons layoutId
 
-    If layoutChanged Then
-        ConfigureNewEntryLayoutControls
-        EnforceNewEntrySheetRoles
-        ActivateNewEntrySheet
-    End If
+    ConfigureNewEntryLayoutControls
+    EnforceNewEntrySheetRoles
+    If layoutChanged Then ActivateNewEntrySheet
 
 CleanExit:
     Application.Calculation = previousCalculation
@@ -4735,11 +4738,8 @@ End Sub
 Public Sub ConfigureNewEntryLayoutControls()
     Dim ws As Worksheet
     Dim shp As Shape
-    Dim layoutBtnA As Shape
-    Dim layoutBtnB As Shape
     Dim compactBtn As Shape
     Dim groupedBtn As Shape
-    Dim linkedCellName As String
     Dim sheetName As Variant
 
     For Each sheetName In Array(NEW_ENTRY_ACTIVE_SHEET, NEW_ENTRY_UNUSED_SHEET)
@@ -4760,38 +4760,16 @@ Public Sub ConfigureNewEntryLayoutControls()
                     Case xlOptionButton
                         On Error Resume Next
                         shp.Line.Visible = msoFalse
-                        linkedCellName = LCase$(Trim$(shp.ControlFormat.LinkedCell))
-                        If linkedCellName = "newentrylayout" _
-                            Or shp.OnAction = "SetNewEntryLayoutCompactButton" _
-                            Or shp.OnAction = "SetNewEntryLayoutGroupedButton" _
-                            Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutCompactButton" _
-                            Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutGroupedButton" _
-                            Or LCase$(shp.Name) = "setcompactview" _
-                            Or LCase$(shp.Name) = "setgroupedview" _
-                            Or LCase$(shp.Name) = "newentrylayoutcompactoption" _
-                            Or LCase$(shp.Name) = "newentrylayoutgroupedoption" Then
-                            shp.ControlFormat.LinkedCell = vbNullString
-                            If layoutBtnA Is Nothing Then
-                                Set layoutBtnA = shp
-                            ElseIf layoutBtnB Is Nothing Then
-                                Set layoutBtnB = shp
-                            End If
-                        End If
                         On Error GoTo 0
                 End Select
             End If
         Next shp
 
-        If Not layoutBtnA Is Nothing And Not layoutBtnB Is Nothing Then
-            If layoutBtnA.Left <= layoutBtnB.Left Then
-                Set compactBtn = layoutBtnA
-                Set groupedBtn = layoutBtnB
-            Else
-                Set compactBtn = layoutBtnB
-                Set groupedBtn = layoutBtnA
-            End If
-
+        FindNewEntryLayoutButtons ws, compactBtn, groupedBtn
+        If Not compactBtn Is Nothing And Not groupedBtn Is Nothing Then
             On Error Resume Next
+            compactBtn.ControlFormat.LinkedCell = vbNullString
+            groupedBtn.ControlFormat.LinkedCell = vbNullString
             compactBtn.Name = "NewEntryLayoutCompactOption"
             groupedBtn.Name = "NewEntryLayoutGroupedOption"
             compactBtn.OnAction = "SetNewEntryLayoutCompactButton"
@@ -4804,8 +4782,6 @@ Public Sub ConfigureNewEntryLayoutControls()
         RemoveRadioGroupOutlines ws
 
 NextSheet:
-        Set layoutBtnA = Nothing
-        Set layoutBtnB = Nothing
         Set compactBtn = Nothing
         Set groupedBtn = Nothing
         Set ws = Nothing
@@ -4891,12 +4867,8 @@ End Sub
 
 Private Sub SyncNewEntryLayoutButtons(ByVal layoutId As Long)
     Dim ws As Worksheet
-    Dim shp As Shape
-    Dim layoutBtnA As Shape
-    Dim layoutBtnB As Shape
     Dim compactBtn As Shape
     Dim groupedBtn As Shape
-    Dim linkedCellName As String
     Dim sheetName As Variant
     Dim compactAction As String
     Dim groupedAction As String
@@ -4907,40 +4879,8 @@ Private Sub SyncNewEntryLayoutButtons(ByVal layoutId As Long)
         On Error GoTo 0
         If ws Is Nothing Then GoTo NextSheet
 
-        For Each shp In ws.Shapes
-            If shp.Type = msoFormControl Then
-                If shp.FormControlType = xlOptionButton Then
-                    On Error Resume Next
-                    linkedCellName = LCase$(Trim$(shp.ControlFormat.LinkedCell))
-                    On Error GoTo 0
-                    If linkedCellName = "newentrylayout" _
-                        Or shp.OnAction = "SetNewEntryLayoutCompactButton" _
-                        Or shp.OnAction = "SetNewEntryLayoutGroupedButton" _
-                        Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutCompactButton" _
-                        Or shp.OnAction = "Electronic_Logbook_Master.xlsm!SetNewEntryLayoutGroupedButton" _
-                        Or LCase$(shp.Name) = "newentrylayoutcompactoption" _
-                        Or LCase$(shp.Name) = "newentrylayoutgroupedoption" _
-                        Or LCase$(shp.Name) = "setcompactview" _
-                        Or LCase$(shp.Name) = "setgroupedview" Then
-                        If layoutBtnA Is Nothing Then
-                            Set layoutBtnA = shp
-                        ElseIf layoutBtnB Is Nothing Then
-                            Set layoutBtnB = shp
-                        End If
-                    End If
-                End If
-            End If
-        Next shp
-
-        If Not layoutBtnA Is Nothing And Not layoutBtnB Is Nothing Then
-            If layoutBtnA.Left <= layoutBtnB.Left Then
-                Set compactBtn = layoutBtnA
-                Set groupedBtn = layoutBtnB
-            Else
-                Set compactBtn = layoutBtnB
-                Set groupedBtn = layoutBtnA
-            End If
-
+        FindNewEntryLayoutButtons ws, compactBtn, groupedBtn
+        If Not compactBtn Is Nothing And Not groupedBtn Is Nothing Then
             On Error Resume Next
             compactAction = compactBtn.OnAction
             groupedAction = groupedBtn.OnAction
@@ -4956,12 +4896,91 @@ Private Sub SyncNewEntryLayoutButtons(ByVal layoutId As Long)
         End If
 
 NextSheet:
-        Set layoutBtnA = Nothing
-        Set layoutBtnB = Nothing
         Set compactBtn = Nothing
         Set groupedBtn = Nothing
         Set ws = Nothing
     Next sheetName
+End Sub
+
+Private Sub FindNewEntryLayoutButtons(ByVal ws As Worksheet, ByRef compactBtn As Shape, ByRef groupedBtn As Shape)
+    Dim shp As Shape
+    Dim linkedLayoutButtons As Collection
+    Dim remainingButtons As Collection
+    Dim button As Shape
+
+    Set linkedLayoutButtons = New Collection
+    Set remainingButtons = New Collection
+
+    For Each shp In ws.Shapes
+        If IsNewEntryLayoutOptionButton(shp) Then
+            If IsCompactLayoutButton(shp) Then
+                Set compactBtn = shp
+            ElseIf IsGroupedLayoutButton(shp) Then
+                Set groupedBtn = shp
+            ElseIf IsLinkedNewEntryLayoutButton(shp) Then
+                linkedLayoutButtons.Add shp
+            End If
+        End If
+    Next shp
+
+    If compactBtn Is Nothing Or groupedBtn Is Nothing Then
+        For Each button In linkedLayoutButtons
+            If (compactBtn Is Nothing Or Not (button Is compactBtn)) And _
+               (groupedBtn Is Nothing Or Not (button Is groupedBtn)) Then
+                remainingButtons.Add button
+            End If
+        Next button
+
+        If remainingButtons.Count >= 2 Then
+            AssignLayoutButtonsByPosition remainingButtons.Item(1), remainingButtons.Item(2), compactBtn, groupedBtn
+        End If
+    End If
+End Sub
+
+Private Function IsNewEntryLayoutOptionButton(ByVal shp As Shape) As Boolean
+    On Error GoTo Fail
+    If shp.Type <> msoFormControl Then Exit Function
+    If shp.FormControlType <> xlOptionButton Then Exit Function
+
+    IsNewEntryLayoutOptionButton = IsCompactLayoutButton(shp) Or _
+                                   IsGroupedLayoutButton(shp) Or _
+                                   IsLinkedNewEntryLayoutButton(shp)
+    Exit Function
+Fail:
+    IsNewEntryLayoutOptionButton = False
+End Function
+
+Private Function IsLinkedNewEntryLayoutButton(ByVal shp As Shape) As Boolean
+    On Error Resume Next
+    IsLinkedNewEntryLayoutButton = (LCase$(Trim$(shp.ControlFormat.LinkedCell)) = "newentrylayout")
+    On Error GoTo 0
+End Function
+
+Private Function IsCompactLayoutButton(ByVal shp As Shape) As Boolean
+    Dim buttonId As String
+
+    buttonId = LCase$(Trim$(shp.Name & " " & shp.OnAction & " " & ShapeText(shp)))
+    IsCompactLayoutButton = (InStr(buttonId, "compact") > 0 Or _
+                             InStr(buttonId, "setcompactview") > 0)
+End Function
+
+Private Function IsGroupedLayoutButton(ByVal shp As Shape) As Boolean
+    Dim buttonId As String
+
+    buttonId = LCase$(Trim$(shp.Name & " " & shp.OnAction & " " & ShapeText(shp)))
+    IsGroupedLayoutButton = (InStr(buttonId, "grouped") > 0 Or _
+                             InStr(buttonId, "setgroupedview") > 0)
+End Function
+
+Private Sub AssignLayoutButtonsByPosition(ByVal buttonA As Shape, ByVal buttonB As Shape, _
+                                          ByRef compactBtn As Shape, ByRef groupedBtn As Shape)
+    If buttonA.Left <= buttonB.Left Then
+        If compactBtn Is Nothing Then Set compactBtn = buttonA
+        If groupedBtn Is Nothing Then Set groupedBtn = buttonB
+    Else
+        If compactBtn Is Nothing Then Set compactBtn = buttonB
+        If groupedBtn Is Nothing Then Set groupedBtn = buttonA
+    End If
 End Sub
 
 Private Function CurrentConfiguredNewEntryLayoutId() As Long
@@ -4970,73 +4989,287 @@ Private Function CurrentConfiguredNewEntryLayoutId() As Long
 End Function
 
 Private Function IsCurrentNewEntryLayoutCompact() As Boolean
-    Dim refersToText As String
     Dim ws As Worksheet
+    Dim inputCell As Range
 
-    On Error Resume Next
-    refersToText = CStr(ThisWorkbook.Names("neSeIcusDay").RefersTo)
-    On Error GoTo 0
-
-    ' Layout marker: compact and grouped have different neSeIcusDay cells.
-    If InStr(1, refersToText, "$O$12", vbTextCompare) > 0 Then
-        IsCurrentNewEntryLayoutCompact = True
-        Exit Function
-    End If
-
-    If InStr(1, refersToText, "$C$18", vbTextCompare) > 0 Then
-        IsCurrentNewEntryLayoutCompact = False
-        Exit Function
-    End If
-
-    ' Fallback marker if cell addresses ever change: compact template has named
-    ' layout buttons, grouped template has generic option-button names.
     On Error Resume Next
     Set ws = ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET)
-    If Not ws Is Nothing Then
-        IsCurrentNewEntryLayoutCompact = Not (ws.Shapes("SetGroupedView") Is Nothing)
+    Set inputCell = FindNameByBase("neSeIcusDay").RefersToRange
+    On Error GoTo 0
+
+    If Not inputCell Is Nothing Then
+        If inputCell.Worksheet.Name = NEW_ENTRY_ACTIVE_SHEET Then
+            If inputCell.Row <= 18 And inputCell.Column >= 15 Then
+                IsCurrentNewEntryLayoutCompact = True
+                Exit Function
+            End If
+
+            If inputCell.Row >= 20 And inputCell.Column <= 6 Then
+                IsCurrentNewEntryLayoutCompact = False
+                Exit Function
+            End If
+        End If
     End If
+
+    If Not ws Is Nothing Then IsCurrentNewEntryLayoutCompact = IsNewEntrySheetCompact(ws)
+End Function
+
+Private Function IsNewEntrySheetCompact(ByVal ws As Worksheet) As Boolean
+    Dim lastColumn As Long
+
+    On Error Resume Next
+    If LCase$(Trim$(CStr(ws.Range("AO10").Value))) = "rnp" Then
+        IsNewEntrySheetCompact = True
+        Exit Function
+    End If
+
+    If LCase$(Trim$(CStr(ws.Range("N28").Value))) = "rnp" Then
+        IsNewEntrySheetCompact = False
+        Exit Function
+    End If
+
+    lastColumn = ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1
+    IsNewEntrySheetCompact = (lastColumn >= 30)
     On Error GoTo 0
 End Function
 
-Private Sub SwapNewEntryLayoutBindings(ByVal fieldNames As Variant)
+Private Sub ApplyNewEntryLayoutBindingTargets(ByVal layoutId As Long, ByVal fieldNames As Variant)
+    Dim compactSheet As Worksheet
+    Dim groupedSheet As Worksheet
+    Dim primarySheet As Worksheet
+    Dim secondarySheet As Worksheet
+
+    ResolveNewEntryLayoutSheets compactSheet, groupedSheet
+    If compactSheet Is Nothing Or groupedSheet Is Nothing Then Exit Sub
+
+    If ResolveNewEntryLayoutId(layoutId) = 1 Then
+        Set primarySheet = compactSheet
+        Set secondarySheet = groupedSheet
+    Else
+        Set primarySheet = groupedSheet
+        Set secondarySheet = compactSheet
+    End If
+
+    SetNewEntryLayoutNameTargets fieldNames, primarySheet, secondarySheet
+End Sub
+
+Private Sub RepairNewEntryLayoutNames(ByVal fieldNames As Variant)
+    Dim activeSheet As Worksheet
+    Dim inactiveSheet As Worksheet
+
+    On Error Resume Next
+    Set activeSheet = ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET)
+    Set inactiveSheet = ThisWorkbook.Sheets(NEW_ENTRY_UNUSED_SHEET)
+    On Error GoTo 0
+
+    If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
+
+    SetNewEntryLayoutNameTargets fieldNames, activeSheet, inactiveSheet
+End Sub
+
+Private Sub ResolveNewEntryLayoutSheets(ByRef compactSheet As Worksheet, ByRef groupedSheet As Worksheet)
+    Dim activeSheet As Worksheet
+    Dim inactiveSheet As Worksheet
+
+    On Error Resume Next
+    Set activeSheet = ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET)
+    Set inactiveSheet = ThisWorkbook.Sheets(NEW_ENTRY_UNUSED_SHEET)
+    On Error GoTo 0
+
+    If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
+
+    If IsNewEntrySheetCompact(activeSheet) Then
+        Set compactSheet = activeSheet
+    Else
+        Set groupedSheet = activeSheet
+    End If
+
+    If IsNewEntrySheetCompact(inactiveSheet) Then
+        Set compactSheet = inactiveSheet
+    Else
+        Set groupedSheet = inactiveSheet
+    End If
+End Sub
+
+Private Sub SetNewEntryLayoutNameTargets(ByVal fieldNames As Variant, ByVal primarySheet As Worksheet, ByVal secondarySheet As Worksheet)
     Dim i As Long
     Dim nameText As String
-    Dim primaryName As Name
-    Dim secondaryName As Name
-    Dim primaryRef As String
-    Dim secondaryRef As String
+    Dim primaryAddress As String
+    Dim secondaryAddress As String
+    Dim primaryCompact As Boolean
+    Dim secondaryCompact As Boolean
+
+    primaryCompact = IsNewEntrySheetCompact(primarySheet)
+    secondaryCompact = IsNewEntrySheetCompact(secondarySheet)
 
     For i = LBound(fieldNames) To UBound(fieldNames)
         nameText = CStr(fieldNames(i))
-        On Error Resume Next
-        Set primaryName = ThisWorkbook.Names(nameText)
-        On Error GoTo 0
-        Set secondaryName = FindNameByBase(nameText & "2")
+        primaryAddress = NewEntryLayoutFieldAddress(nameText, primaryCompact)
+        secondaryAddress = NewEntryLayoutFieldAddress(nameText, secondaryCompact)
 
-        If Not primaryName Is Nothing And Not secondaryName Is Nothing Then
-            primaryRef = primaryName.RefersTo
-            secondaryRef = secondaryName.RefersTo
-            primaryName.RefersTo = secondaryRef
-            secondaryName.RefersTo = primaryRef
+        If Len(primaryAddress) > 0 Then
+            EnsureWorkbookNameRefersTo nameText, primarySheet.Range(primaryAddress)
         End If
 
-        Set primaryName = Nothing
-        Set secondaryName = Nothing
+        If Len(secondaryAddress) > 0 Then
+            EnsureSecondaryNameRefersTo nameText & "2", secondarySheet.Range(secondaryAddress)
+        End If
     Next i
+End Sub
+
+Private Sub EnsureWorkbookNameRefersTo(ByVal nameText As String, ByVal targetRange As Range)
+    Dim nm As Name
+    Dim existingName As Name
+
+    On Error Resume Next
+    Set nm = ThisWorkbook.Names(nameText)
+    On Error GoTo 0
+
+    If nm Is Nothing Then
+        ThisWorkbook.Names.Add Name:=nameText, RefersTo:=NameRefersToRange(targetRange)
+    Else
+        nm.RefersTo = NameRefersToRange(targetRange)
+    End If
+
+    For Each existingName In ThisWorkbook.Names
+        If LCase$(NameBaseText(existingName.Name)) = LCase$(nameText) _
+            And LCase$(existingName.Name) <> LCase$(nameText) Then
+            existingName.RefersTo = NameRefersToRange(targetRange)
+        End If
+    Next existingName
+End Sub
+
+Private Sub EnsureSecondaryNameRefersTo(ByVal nameText As String, ByVal targetRange As Range)
+    Dim nm As Name
+
+    Set nm = FindNameByBase(nameText)
+    If nm Is Nothing Then
+        ThisWorkbook.Names.Add Name:=nameText, RefersTo:=NameRefersToRange(targetRange)
+    Else
+        nm.RefersTo = NameRefersToRange(targetRange)
+    End If
+End Sub
+
+Private Function NameRefersToRange(ByVal targetRange As Range) As String
+    NameRefersToRange = "='" & targetRange.Worksheet.Name & "'!" & targetRange.Address(True, True)
+End Function
+
+Private Function NewEntryLayoutFieldAddress(ByVal fieldName As String, ByVal compactLayout As Boolean) As String
+    Select Case LCase$(fieldName)
+        Case "nedate"
+            NewEntryLayoutFieldAddress = "B12"
+        Case "neyear"
+            NewEntryLayoutFieldAddress = "C12"
+        Case "nemonth"
+            NewEntryLayoutFieldAddress = "D12"
+        Case "neday"
+            NewEntryLayoutFieldAddress = "E12"
+        Case "netype"
+            NewEntryLayoutFieldAddress = "F12"
+        Case "nereg"
+            NewEntryLayoutFieldAddress = "G12"
+        Case "nepic"
+            NewEntryLayoutFieldAddress = "H12"
+        Case "neothercrew"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "I12", "J12")
+        Case "nefr"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "J12", "L12")
+        Case "neipc"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "K12", "M12")
+        Case "neopc"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "L12", "N12")
+        Case "nefrom"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "M12", "C18")
+        Case "neto"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "N12", "D18")
+        Case "neroute"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "O12", "E18")
+        Case "neRemarks", "neremarks"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "P12", "J18")
+        Case "nesi1"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "Q12", "C30")
+        Case "nesi2"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "R12", "D30")
+        Case "nesi3"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "S12", "E30")
+        Case "nesi4"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "T12", "F30")
+        Case "neseicusday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "U12", "C24")
+        Case "neseicusnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "V12", "D24")
+        Case "nesedualday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "W12", "E24")
+        Case "nesedualnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "X12", "F24")
+        Case "nesecommandday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "Y12", "G24")
+        Case "nesecommandnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "Z12", "H24")
+        Case "nemeicusday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AA12", "I24")
+        Case "nemeicusnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AB12", "J24")
+        Case "nemedualday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AC12", "K24")
+        Case "nemedualnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AD12", "L24")
+        Case "nemecommandday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AE12", "M24")
+        Case "nemecommandnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AF12", "N24")
+        Case "necopilotday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AG12", "O24")
+        Case "necopilotnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AH12", "P24")
+        Case "neifrif"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AI12", "Q24")
+        Case "neifrsim"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AJ12", "R24")
+        Case "nelandingsday"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AK12", "J30")
+        Case "nelandingsnight"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AL12", "K30")
+        Case "neils"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AM12", "L30")
+        Case "nevor"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AN12", "M30")
+        Case "nernp", "nernav"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AO12", "N30")
+        Case "nendb"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AP12", "O30")
+        Case "nedgacdi"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AQ12", "P30")
+        Case "nedgaazi"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AR12", "Q30")
+        Case "necircling"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AS12", "R30")
+    End Select
+End Function
+
+Private Sub SwapNewEntryLayoutBindings(ByVal fieldNames As Variant)
+    ApplyNewEntryLayoutBindingTargets IIf(IsCurrentNewEntryLayoutCompact(), 2, 1), fieldNames
 End Sub
 
 Private Function FindNameByBase(ByVal baseName As String) As Name
     Dim nm As Name
     Dim probe As String
+    Dim firstMatch As Name
 
     probe = LCase$(baseName)
 
     For Each nm In ThisWorkbook.Names
-        If LCase$(NameBaseText(nm.Name)) = probe Then
+        If LCase$(nm.Name) = probe Then
             Set FindNameByBase = nm
             Exit Function
         End If
+
+        If LCase$(NameBaseText(nm.Name)) = probe Then
+            If firstMatch Is Nothing Then Set firstMatch = nm
+        End If
     Next nm
+
+    Set FindNameByBase = firstMatch
 End Function
 
 Private Function NameBaseText(ByVal fullName As String) As String
@@ -5137,11 +5370,13 @@ End Function
 
 Private Function NewEntryLayoutFieldNames() As Variant
     NewEntryLayoutFieldNames = Array( _
-        "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "nePIC", "neOtherCrew", "neDetails", _
+        "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "nePIC", "neOtherCrew", _
+        "neFR", "neIPC", "neOPC", "neFrom", "neTo", "neRoute", "neRemarks", "neRemarks", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", "neSeCommandDay", "neSeCommandNight", _
         "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", "neLandingsDay", "neLandingsNight", _
-        "neILS", "neRNP", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", "neSI1", "neSI2", "neSI3", "neSI4")
+        "neILS", "neRNP", "neRNAV", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", _
+        "neSI1", "neSI2", "neSI3", "neSI4")
 End Function
 
 Public Sub VerifyCurrencyChecks()
