@@ -4,6 +4,8 @@ Option Explicit
 Private Const AIRPORT_DATA_URL As String = "https://davidmegginson.github.io/ourairports-data/airports.csv"
 Private Const AIRPORT_DATA_SOURCE As String = "OurAirports airports.csv"
 Private Const AIRPORT_CHECK_INTERVAL_DAYS As Double = 1#
+Private Const BASE_AIRPORTS_TABLE As String = "BaseAirportsTop10"
+Private Const BASE_AIRPORTS_TOP_COUNT As Long = 10
 
 Public Function AirportDatasetUpdateAvailable(ByVal wb As Workbook, Optional ByVal forceCheck As Boolean = False) As Boolean
     Dim remoteVersion As String
@@ -141,6 +143,8 @@ Public Sub RefreshAirportVisitStats(ByVal wb As Workbook)
     tblAirports.ListColumns(lastVisitedCol).DataBodyRange.Value = Application.Index(output, 0, 2)
     tblAirports.ListColumns(visitsCol).DataBodyRange.Value = Application.Index(output, 0, 3)
     tblAirports.ListColumns(rankCol).DataBodyRange.Value = Application.Index(output, 0, 4)
+
+    RefreshBaseAirportSelector wb, tblLog, tblAirports, aliasLookup
 End Sub
 
 Private Function BuildAirportAliasLookup(ByVal tblAirports As ListObject, ByVal airportRows As Object, ByVal airportStats As Object) As Object
@@ -395,6 +399,322 @@ Private Function AirportRankComesBefore(ByVal leftIcao As String, ByVal rightIca
         AirportRankComesBefore = (leftVisits > rightVisits)
     Else
         AirportRankComesBefore = (StrComp(leftIcao, rightIcao, vbTextCompare) < 0)
+    End If
+End Function
+
+Private Sub RefreshBaseAirportSelector(ByVal wb As Workbook, _
+                                       ByVal tblLog As ListObject, _
+                                       ByVal tblAirports As ListObject, _
+                                       ByVal aliasLookup As Object)
+    Dim tblBase As ListObject
+    Dim savedSelections As Object
+    Dim endpointStats As Object
+    Dim topIcaos As Variant
+    Dim topUpperBound As Long
+    Dim rowIndex As Long
+    Dim icao As String
+    Dim defaultValue As Boolean
+
+    Set tblBase = EnsureBaseAirportsTable(wb)
+    Set savedSelections = ReadBaseAirportSelections(tblBase, tblAirports)
+    Set endpointStats = BuildEndpointAirportStats(tblLog, aliasLookup)
+    topIcaos = TopEndpointAirportIcaos(endpointStats, BASE_AIRPORTS_TOP_COUNT)
+    topUpperBound = -1
+    On Error Resume Next
+    topUpperBound = UBound(topIcaos)
+    Err.Clear
+    On Error GoTo 0
+
+    ResizeBaseAirportsTable tblBase, BASE_AIRPORTS_TOP_COUNT
+    If Not tblBase.DataBodyRange Is Nothing Then tblBase.DataBodyRange.ClearContents
+
+    For rowIndex = 1 To BASE_AIRPORTS_TOP_COUNT
+        icao = ""
+        If rowIndex - 1 <= topUpperBound Then icao = CStr(topIcaos(rowIndex - 1))
+
+        tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("ICAO").Index).Value = icao
+        tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Airport").Index).Formula = _
+            "=IFERROR(INDEX(Airports[Airport],MATCH([@ICAO],Airports[ICAO],0)),"""")"
+
+        If icao = "" Then
+            tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Base").Index).ClearContents
+        ElseIf savedSelections.Exists(icao) Then
+            tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Base").Index).Value = CBool(savedSelections(icao))
+        Else
+            defaultValue = (rowIndex = 1)
+            tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Base").Index).Value = defaultValue
+        End If
+    Next rowIndex
+
+    ApplyBaseAirportCheckboxes tblBase
+End Sub
+
+Private Function EnsureBaseAirportsTable(ByVal wb As Workbook) As ListObject
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim targetRange As Range
+
+    Set tbl = FindWorkbookTable(wb, BASE_AIRPORTS_TABLE)
+    If Not tbl Is Nothing Then
+        EnsureBaseAirportsTableColumns tbl
+        Set EnsureBaseAirportsTable = tbl
+        Exit Function
+    End If
+
+    Set ws = wb.Worksheets("Stats")
+    Set targetRange = ws.Range("E2:G" & CStr(2 + BASE_AIRPORTS_TOP_COUNT))
+    targetRange.Clear
+    targetRange.Rows(1).Value = Array("Airport", "Base", "ICAO")
+    Set tbl = ws.ListObjects.Add(xlSrcRange, targetRange, , xlYes)
+    tbl.Name = BASE_AIRPORTS_TABLE
+    tbl.TableStyle = "TableStyleMedium2"
+    ws.Columns(tbl.ListColumns("ICAO").Range.Column).Hidden = True
+
+    Set EnsureBaseAirportsTable = tbl
+End Function
+
+Private Sub EnsureBaseAirportsTableColumns(ByVal tbl As ListObject)
+    If Not AirportTableColumnExists(tbl, "Airport") Then tbl.ListColumns.Add.Name = "Airport"
+    If Not AirportTableColumnExists(tbl, "Base") Then tbl.ListColumns.Add.Name = "Base"
+    If Not AirportTableColumnExists(tbl, "ICAO") Then tbl.ListColumns.Add.Name = "ICAO"
+    tbl.Parent.Columns(tbl.ListColumns("ICAO").Range.Column).Hidden = True
+End Sub
+
+Private Function ReadBaseAirportSelections(ByVal tblBase As ListObject, ByVal tblAirports As ListObject) As Object
+    Dim selections As Object
+    Dim rowIndex As Long
+    Dim icao As String
+    Dim airportName As String
+    Dim baseValue As Variant
+    Dim legacyBaseCol As Long
+    Dim airportIcaoCol As Long
+    Dim airportBaseValue As Variant
+
+    Set selections = CreateObject("Scripting.Dictionary")
+    selections.CompareMode = 1
+
+    If Not tblBase Is Nothing Then
+        If Not tblBase.DataBodyRange Is Nothing Then
+            For rowIndex = 1 To tblBase.DataBodyRange.Rows.Count
+                icao = UCase$(Trim$(CStr(tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("ICAO").Index).Value)))
+                If icao = "" Then
+                    airportName = Trim$(CStr(tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Airport").Index).Value))
+                    icao = AirportIcaoForName(tblAirports, airportName)
+                End If
+
+                If icao <> "" Then
+                    baseValue = tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Base").Index).Value
+                    selections(icao) = AirportBooleanValue(baseValue)
+                End If
+            Next rowIndex
+        End If
+    End If
+
+    If AirportTableColumnExists(tblAirports, "Base") And Not tblAirports.DataBodyRange Is Nothing Then
+        legacyBaseCol = tblAirports.ListColumns("Base").Index
+        airportIcaoCol = tblAirports.ListColumns("ICAO").Index
+        For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+            airportBaseValue = tblAirports.DataBodyRange.Cells(rowIndex, legacyBaseCol).Value
+            If AirportBooleanValue(airportBaseValue) Then
+                icao = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, airportIcaoCol).Value)))
+                If icao <> "" And Not selections.Exists(icao) Then selections(icao) = True
+            End If
+        Next rowIndex
+    End If
+
+    Set ReadBaseAirportSelections = selections
+End Function
+
+Private Function BuildEndpointAirportStats(ByVal tblLog As ListObject, ByVal aliasLookup As Object) As Object
+    Dim stats As Object
+    Dim rowMatches As Object
+    Dim rowIndex As Long
+    Dim fromText As String
+    Dim toText As String
+    Dim icao As String
+    Dim key As Variant
+
+    Set stats = CreateObject("Scripting.Dictionary")
+    stats.CompareMode = 1
+    If tblLog.DataBodyRange Is Nothing Then
+        Set BuildEndpointAirportStats = stats
+        Exit Function
+    End If
+    If Not AirportTableColumnExists(tblLog, "From") Or Not AirportTableColumnExists(tblLog, "To") Then
+        Set BuildEndpointAirportStats = stats
+        Exit Function
+    End If
+
+    For rowIndex = 1 To tblLog.DataBodyRange.Rows.Count
+        If AirportStatsLogbookRowIsSimOnly(tblLog, rowIndex) Then GoTo NextRow
+
+        Set rowMatches = CreateObject("Scripting.Dictionary")
+        rowMatches.CompareMode = 1
+
+        fromText = UCase$(Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, tblLog.ListColumns("From").Index).Value)))
+        toText = UCase$(Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, tblLog.ListColumns("To").Index).Value)))
+
+        If fromText <> "" And aliasLookup.Exists(fromText) Then rowMatches(CStr(aliasLookup(fromText))) = True
+        If toText <> "" And aliasLookup.Exists(toText) Then rowMatches(CStr(aliasLookup(toText))) = True
+
+        For Each key In rowMatches.Keys
+            icao = CStr(key)
+            If stats.Exists(icao) Then
+                stats(icao) = CLng(stats(icao)) + 1
+            Else
+                stats.Add icao, 1&
+            End If
+        Next key
+
+NextRow:
+    Next rowIndex
+
+    Set BuildEndpointAirportStats = stats
+End Function
+
+Private Function TopEndpointAirportIcaos(ByVal endpointStats As Object, ByVal maxCount As Long) As Variant
+    Dim keys As Collection
+    Dim key As Variant
+    Dim sortedKeys() As String
+    Dim result() As String
+    Dim index As Long
+    Dim resultCount As Long
+
+    Set keys = New Collection
+    For Each key In endpointStats.Keys
+        If CLng(endpointStats(key)) > 0 Then keys.Add CStr(key)
+    Next key
+
+    If keys.Count = 0 Then
+        TopEndpointAirportIcaos = Array()
+        Exit Function
+    End If
+
+    ReDim sortedKeys(0 To keys.Count - 1)
+    For index = 1 To keys.Count
+        sortedKeys(index - 1) = CStr(keys(index))
+    Next index
+
+    If UBound(sortedKeys) > LBound(sortedKeys) Then QuickSortEndpointAirportRanks sortedKeys, endpointStats, LBound(sortedKeys), UBound(sortedKeys)
+
+    resultCount = WorksheetFunction.Min(maxCount, UBound(sortedKeys) - LBound(sortedKeys) + 1)
+    ReDim result(0 To resultCount - 1)
+    For index = 0 To resultCount - 1
+        result(index) = sortedKeys(index)
+    Next index
+
+    TopEndpointAirportIcaos = result
+End Function
+
+Private Sub QuickSortEndpointAirportRanks(ByRef values() As String, ByVal endpointStats As Object, ByVal first As Long, ByVal last As Long)
+    Dim low As Long
+    Dim high As Long
+    Dim pivot As String
+    Dim temp As String
+
+    low = first
+    high = last
+    pivot = values((first + last) \ 2)
+
+    Do While low <= high
+        Do While EndpointAirportRankComesBefore(values(low), pivot, endpointStats)
+            low = low + 1
+        Loop
+        Do While EndpointAirportRankComesBefore(pivot, values(high), endpointStats)
+            high = high - 1
+        Loop
+        If low <= high Then
+            temp = values(low)
+            values(low) = values(high)
+            values(high) = temp
+            low = low + 1
+            high = high - 1
+        End If
+    Loop
+
+    If first < high Then QuickSortEndpointAirportRanks values, endpointStats, first, high
+    If low < last Then QuickSortEndpointAirportRanks values, endpointStats, low, last
+End Sub
+
+Private Function EndpointAirportRankComesBefore(ByVal leftIcao As String, ByVal rightIcao As String, ByVal endpointStats As Object) As Boolean
+    Dim leftVisits As Long
+    Dim rightVisits As Long
+
+    leftVisits = CLng(endpointStats(leftIcao))
+    rightVisits = CLng(endpointStats(rightIcao))
+
+    If leftVisits <> rightVisits Then
+        EndpointAirportRankComesBefore = (leftVisits > rightVisits)
+    Else
+        EndpointAirportRankComesBefore = (StrComp(leftIcao, rightIcao, vbTextCompare) < 0)
+    End If
+End Function
+
+Private Sub ResizeBaseAirportsTable(ByVal tbl As ListObject, ByVal rows As Long)
+    Dim currentRows As Long
+
+    If tbl.DataBodyRange Is Nothing Then
+        currentRows = 0
+    Else
+        currentRows = tbl.DataBodyRange.Rows.Count
+    End If
+
+    If currentRows = 0 Then
+        tbl.ListRows.Add
+        currentRows = 1
+    End If
+
+    If currentRows <> rows Then tbl.Resize tbl.Range.Resize(rows + 1, tbl.ListColumns.Count)
+End Sub
+
+Private Sub ApplyBaseAirportCheckboxes(ByVal tbl As ListObject)
+    On Error Resume Next
+    tbl.ListColumns("Base").DataBodyRange.CellControl.SetCheckbox
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+Private Function FindWorkbookTable(ByVal wb As Workbook, ByVal tableName As String) As ListObject
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        Set FindWorkbookTable = ws.ListObjects(tableName)
+        If Not FindWorkbookTable Is Nothing Then Exit Function
+    Next ws
+    On Error GoTo 0
+End Function
+
+Private Function AirportTableColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
+    On Error Resume Next
+    AirportTableColumnExists = Not tbl.ListColumns(columnName) Is Nothing
+    On Error GoTo 0
+End Function
+
+Private Function AirportIcaoForName(ByVal tblAirports As ListObject, ByVal airportName As String) As String
+    Dim rowIndex As Long
+
+    If airportName = "" Or tblAirports.DataBodyRange Is Nothing Then Exit Function
+
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        If StrComp(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, tblAirports.ListColumns("Airport").Index).Value)), _
+                   airportName, vbTextCompare) = 0 Then
+            AirportIcaoForName = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, tblAirports.ListColumns("ICAO").Index).Value)))
+            Exit Function
+        End If
+    Next rowIndex
+End Function
+
+Private Function AirportBooleanValue(ByVal value As Variant) As Boolean
+    If VarType(value) = vbBoolean Then
+        AirportBooleanValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        AirportBooleanValue = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                AirportBooleanValue = True
+        End Select
     End If
 End Function
 
@@ -686,7 +1006,6 @@ Private Function MergeAirportRecords(ByVal tbl As ListObject, ByVal remoteRecord
             currentRecord = currentRecords(CStr(key))
             remoteRecord(4) = PreferNonBlank(remoteRecord(4), currentRecord(4))
             remoteRecord(5) = PreferNonBlank(remoteRecord(5), currentRecord(5))
-            remoteRecord(6) = currentRecord(6)
         End If
         merged.Add CStr(key), remoteRecord
     Next key
@@ -709,7 +1028,6 @@ Private Function ReadCurrentAirportRecords(ByVal tbl As ListObject) As Object
     Dim lonCol As Long
     Dim threeCol As Long
     Dim twoCol As Long
-    Dim baseCol As Long
 
     Set records = CreateObject("Scripting.Dictionary")
     records.CompareMode = 1
@@ -724,7 +1042,6 @@ Private Function ReadCurrentAirportRecords(ByVal tbl As ListObject) As Object
     lonCol = tbl.ListColumns("Longitude").Index
     threeCol = tbl.ListColumns("Three").Index
     twoCol = tbl.ListColumns("Two").Index
-    baseCol = tbl.ListColumns("Base").Index
 
     For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
         icao = UCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rowIndex, icaoCol).Value)))
@@ -735,8 +1052,7 @@ Private Function ReadCurrentAirportRecords(ByVal tbl As ListObject) As Object
                 tbl.DataBodyRange.Cells(rowIndex, latCol).Value, _
                 tbl.DataBodyRange.Cells(rowIndex, lonCol).Value, _
                 UCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rowIndex, threeCol).Value))), _
-                UCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rowIndex, twoCol).Value))), _
-                tbl.DataBodyRange.Cells(rowIndex, baseCol).Value)
+                UCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rowIndex, twoCol).Value))))
             If Not records.Exists(icao) Then records.Add icao, record
         End If
     Next rowIndex
@@ -763,7 +1079,7 @@ Private Sub ReplaceAirportTable(ByVal tbl As ListObject, ByVal records As Object
     Set targetRange = tbl.Range.Resize(rowCount + 1, tbl.ListColumns.Count)
     tbl.Resize targetRange
 
-    ReDim values(1 To rowCount, 1 To 7)
+    ReDim values(1 To rowCount, 1 To 6)
     rowIndex = 1
     For Each key In sortedKeys
         record = records(CStr(key))
@@ -773,7 +1089,6 @@ Private Sub ReplaceAirportTable(ByVal tbl As ListObject, ByVal records As Object
         values(rowIndex, 4) = record(3)
         values(rowIndex, 5) = record(4)
         values(rowIndex, 6) = record(5)
-        values(rowIndex, 7) = record(6)
         rowIndex = rowIndex + 1
     Next key
 
@@ -781,7 +1096,6 @@ Private Sub ReplaceAirportTable(ByVal tbl As ListObject, ByVal records As Object
     WriteAirportColumn tbl, "Airport", values, 2
     WriteAirportColumn tbl, "Latitude", values, 3
     WriteAirportColumn tbl, "Longitude", values, 4
-    WriteAirportColumn tbl, "Base", values, 7
     ApplyAirportAliases tbl, aliasCells
 
     For Each columnName In formulaColumns.Keys

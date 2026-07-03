@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Diagnostics;
+using Microsoft.CSharp.RuntimeBinder;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -13,6 +14,7 @@ public sealed class ExcelWorkbookMigrator
     private const int XlCalculationAutomatic = -4105;
     private const int XlPasteFormats = -4122;
     private const int XlUp = -4162;
+    private const int BaseAirportsTopCount = 10;
 
     private static readonly string[] PreservedNames =
     [
@@ -93,8 +95,6 @@ public sealed class ExcelWorkbookMigrator
             CopyTableByMatchingColumns((object)sourceWorkbook, (object)outputWorkbook, "Keywords");
             step = SetStep(UpdaterPhaseIds.CopyRoutesData, "copying Routes data");
             CopyTableByMatchingColumns((object)sourceWorkbook, (object)outputWorkbook, "Routes");
-            step = SetStep(UpdaterPhaseIds.CopyAirportBaseFlags, "copying airport base flags");
-            CopyAirportBaseFlags((object)sourceWorkbook, (object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.CopyNamedPreferences, "copying named preferences");
             CopyNamedPreferences((object)sourceWorkbook, (object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.RestoreLogbookPresentation, "restoring Logbook presentation");
@@ -108,6 +108,8 @@ public sealed class ExcelWorkbookMigrator
                     "Airport visit stats refresh found recognised airports in the Logbook, " +
                     "but did not write any Airports[Visits] values.");
             }
+            step = SetStep(UpdaterPhaseIds.CopyBaseAirportSelections, "copying base airport selections");
+            ApplyBaseAirportSelections((object)sourceWorkbook, (object)outputWorkbook);
 
             var outputVersion = ReadName((object)outputWorkbook, "LogbookVersion");
             if (request.Manifest is not null &&
@@ -306,15 +308,16 @@ public sealed class ExcelWorkbookMigrator
             throw new InvalidDataException("Source Logbook table does not contain rows.");
         }
 
-        var sourceDetails = GetColumnIndex(source, "Details");
         var sourceDataStart = GetColumnIndex(source, "Year");
         var sourceDataEnd = GetColumnIndex(source, "Circling");
-        var destinationDetails = GetColumnIndex(destination, "Details");
         var destinationDataStart = GetColumnIndex(destination, "Year");
         var destinationDataEnd = GetColumnIndex(destination, "Circling");
+        var airportLookup = BuildAirportAliasLookup(outputWorkbookObject);
 
-        var sourceCustomCount = GetColumnIndex(source, "SeIcusDay") - sourceDetails - 1;
-        var destinationCustomCount = GetColumnIndex(destination, "SeIcusDay") - destinationDetails - 1;
+        var sourceCustomStart = GetLogbookCustomStartColumn(source);
+        var destinationCustomStart = GetLogbookCustomStartColumn(destination);
+        var sourceCustomCount = GetColumnIndex(source, "SeIcusDay") - sourceCustomStart;
+        var destinationCustomCount = GetColumnIndex(destination, "SeIcusDay") - destinationCustomStart;
         if (sourceCustomCount != destinationCustomCount)
         {
             throw new InvalidDataException(
@@ -323,8 +326,8 @@ public sealed class ExcelWorkbookMigrator
 
         for (var offset = 1; offset <= sourceCustomCount; offset++)
         {
-            destination.ListColumns.Item(destinationDetails + offset).Name =
-                source.ListColumns.Item(sourceDetails + offset).Name;
+            destination.ListColumns.Item(destinationCustomStart + offset - 1).Name =
+                source.ListColumns.Item(sourceCustomStart + offset - 1).Name;
         }
 
         ResizeTable(destination, sourceRows);
@@ -333,9 +336,15 @@ public sealed class ExcelWorkbookMigrator
         for (var sourceIndex = sourceDataStart; sourceIndex <= sourceDataEnd; sourceIndex++)
         {
             var name = (string)source.ListColumns.Item(sourceIndex).Name;
-            CopyColumn(source, destination, name, sourceRows);
+            var destinationName = DestinationLogbookColumnName((object)destination, name);
+            if (destinationName is not null)
+            {
+                CopyColumn(source, destination, name, destinationName, sourceRows);
+            }
         }
-        CopyColumn(source, destination, "CurrencyExclusions", sourceRows);
+
+        SplitLegacyDetailsIntoNewEntryColumns(source, destination, sourceRows, airportLookup);
+        ConvertLegacyCurrencyColumns(source, destination, sourceRows);
     }
 
     private static void CopyTableByMatchingColumns(
@@ -362,36 +371,271 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static void CopyAirportBaseFlags(object sourceWorkbook, object outputWorkbook)
+    private static int GetLogbookCustomStartColumn(dynamic table)
     {
-        dynamic source = GetTable(sourceWorkbook, "Airports");
-        dynamic destination = GetTable(outputWorkbook, "Airports");
-        var sourceRows = (int)source.ListRows.Count;
-        var destinationRows = (int)destination.ListRows.Count;
-        var sourceIcao = ReadColumnValues((object)source, "ICAO", sourceRows);
-        var sourceBase = ReadColumnValues((object)source, "Base", sourceRows);
-        var bases = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        for (var row = 0; row < sourceRows; row++)
+        var firstHoursColumn = GetColumnIndex(table, "SeIcusDay");
+        if (HasColumn((object)table, "OPC") &&
+            GetColumnIndex(table, "OPC") < firstHoursColumn)
         {
-            var icao = Convert.ToString(sourceIcao[row], CultureInfo.InvariantCulture)?.Trim();
-            if (!string.IsNullOrEmpty(icao) && !IsBlankValue(sourceBase[row]))
+            return GetColumnIndex(table, "OPC") + 1;
+        }
+        if (HasColumn((object)table, "Details"))
+        {
+            return GetColumnIndex(table, "Details") + 1;
+        }
+        if (HasColumn((object)table, "Remarks"))
+        {
+            return GetColumnIndex(table, "Remarks") + 1;
+        }
+        throw new InvalidDataException($"Table {table.Name} has no recognised custom-column anchor.");
+    }
+
+    private static void SplitLegacyDetailsIntoNewEntryColumns(
+        dynamic source,
+        dynamic destination,
+        int rows,
+        IReadOnlyDictionary<string, string> airportLookup)
+    {
+        if (rows <= 0 ||
+            !HasColumn((object)destination, "From") ||
+            !HasColumn((object)destination, "To") ||
+            !HasColumn((object)destination, "Route") ||
+            !HasColumn((object)destination, "Remarks"))
+        {
+            return;
+        }
+
+        if (HasColumn((object)source, "Remarks"))
+        {
+            CopyColumnIfPresent(source, destination, "From", rows);
+            CopyColumnIfPresent(source, destination, "To", rows);
+            CopyColumnIfPresent(source, destination, "Route", rows);
+            CopyColumnIfPresent(source, destination, "Remarks", rows);
+            return;
+        }
+
+        if (!HasColumn((object)source, "Details"))
+        {
+            return;
+        }
+
+        var details = ReadColumnValues(source, "Details", rows);
+        var fromValues = NewColumnArray(rows);
+        var toValues = NewColumnArray(rows);
+        var routeValues = NewColumnArray(rows);
+        var remarksValues = NewColumnArray(rows);
+        for (var row = 0; row < rows; row++)
+        {
+            var split = SplitLegacyDetailsText(StableValue(details[row]), airportLookup);
+            fromValues[row, 0] = split.From;
+            toValues[row, 0] = split.To;
+            routeValues[row, 0] = split.Route;
+            remarksValues[row, 0] = split.Remarks;
+        }
+
+        SetColumnValues(destination, "From", fromValues, rows);
+        SetColumnValues(destination, "To", toValues, rows);
+        SetColumnValues(destination, "Route", routeValues, rows);
+        SetColumnValues(destination, "Remarks", remarksValues, rows);
+    }
+
+    private static void ConvertLegacyCurrencyColumns(dynamic source, dynamic destination, int rows)
+    {
+        if (rows <= 0 ||
+            !HasColumn((object)destination, "FR") ||
+            !HasColumn((object)destination, "IPC") ||
+            !HasColumn((object)destination, "OPC"))
+        {
+            return;
+        }
+
+        var frValues = NewColumnArray(rows);
+        var ipcValues = NewColumnArray(rows);
+        var opcValues = NewColumnArray(rows);
+        var exclusionSource = ReadColumnValuesIfPresent(source, "CurrencyExclusions", rows);
+        var frSource = ReadColumnValuesIfPresent(source, "FR", rows);
+        var flightReviewSource = ReadColumnValuesIfPresent(source, "FlightReview", rows);
+        var ipcSource = ReadColumnValuesIfPresent(source, "IPC", rows);
+        var opcSource = ReadColumnValuesIfPresent(source, "OPC", rows);
+
+        for (var row = 0; row < rows; row++)
+        {
+            var excluded = ToBoolean(ReadOptionalColumnValue(exclusionSource, row));
+            if (!excluded)
             {
-                bases[icao] = sourceBase[row];
+                var ipcChecked = ToCurrencyCheckValue(ReadOptionalColumnValue(ipcSource, row));
+                frValues[row, 0] =
+                    ToCurrencyCheckValue(ReadOptionalColumnValue(frSource, row)) ||
+                    ToCurrencyCheckValue(ReadOptionalColumnValue(flightReviewSource, row)) ||
+                    ipcChecked;
+                ipcValues[row, 0] = ipcChecked;
+                opcValues[row, 0] = ToCurrencyCheckValue(ReadOptionalColumnValue(opcSource, row));
             }
         }
 
-        var destinationIcao = ReadColumnValues((object)destination, "ICAO", destinationRows);
-        dynamic destinationBase = destination.ListColumns.Item(GetColumnIndex(destination, "Base"))
-            .DataBodyRange;
-        destinationBase.ClearContents();
-        for (var row = 0; row < destinationRows; row++)
+        SetColumnValues(destination, "FR", frValues, rows);
+        SetColumnValues(destination, "IPC", ipcValues, rows);
+        SetColumnValues(destination, "OPC", opcValues, rows);
+    }
+
+    private static void CopyColumnIfPresent(dynamic source, dynamic destination, string name, int rows)
+    {
+        if (HasColumn((object)source, name) && HasColumn((object)destination, name))
         {
-            var icao = Convert.ToString(destinationIcao[row], CultureInfo.InvariantCulture)?.Trim();
-            if (icao is not null && bases.TryGetValue(icao, out var value))
+            CopyColumn(source, destination, name, rows);
+        }
+    }
+
+    private static object?[]? ReadColumnValuesIfPresent(dynamic table, string name, int rows)
+    {
+        if (!HasColumn((object)table, name) || rows <= 0)
+        {
+            return null;
+        }
+
+        return ReadColumnValues(table, name, rows);
+    }
+
+    private static object? ReadOptionalColumnValue(object?[]? values, int zeroBasedRow)
+    {
+        if (values is null || zeroBasedRow < 0 || zeroBasedRow >= values.Length)
+        {
+            return null;
+        }
+
+        return values[zeroBasedRow];
+    }
+
+    private static Dictionary<string, string> BuildAirportAliasLookup(object workbookObject)
+    {
+        dynamic airports = GetTable(workbookObject, "Airports");
+        var rows = (int)airports.ListRows.Count;
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (rows <= 0)
+        {
+            return lookup;
+        }
+
+        var airportIcao = ReadColumnValues(airports, "ICAO", rows);
+        var airportTwo = ReadColumnValues(airports, "Two", rows);
+        var airportThree = ReadColumnValues(airports, "Three", rows);
+        for (var row = 0; row < rows; row++)
+        {
+            var icao = StableValue(airportIcao[row]).Trim().ToUpperInvariant();
+            if (string.IsNullOrWhiteSpace(icao))
             {
-                destinationBase.Cells.Item(row + 1, 1).Value2 = value;
+                continue;
+            }
+
+            lookup.TryAdd(icao, icao);
+            AddAirportAlias(lookup, StableValue(airportTwo[row]), icao);
+            AddAirportAlias(lookup, StableValue(airportThree[row]), icao);
+        }
+
+        return lookup;
+    }
+
+    private static void AddAirportAlias(
+        IDictionary<string, string> lookup,
+        string alias,
+        string icao)
+    {
+        alias = alias.Trim().ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(alias))
+        {
+            lookup.TryAdd(alias, icao);
+        }
+    }
+
+    private static LegacyDetailsSplit SplitLegacyDetailsText(
+        string details,
+        IReadOnlyDictionary<string, string> airportLookup)
+    {
+        var matchedIcaos = new List<string>();
+        var remarkTokens = new List<string>();
+        foreach (var rawToken in TokeniseAirportDetails(details))
+        {
+            if (airportLookup.TryGetValue(rawToken.ToUpperInvariant(), out var icao))
+            {
+                matchedIcaos.Add(icao);
+            }
+            else
+            {
+                remarkTokens.Add(rawToken);
             }
         }
+
+        var from = matchedIcaos.Count >= 1 ? matchedIcaos[0] : "";
+        var to = matchedIcaos.Count >= 2 ? matchedIcaos[^1] : "";
+        var route = matchedIcaos.Count > 2
+            ? string.Join("-", matchedIcaos.Skip(1).Take(matchedIcaos.Count - 2))
+            : "";
+        var remarks = string.Join(" ", remarkTokens);
+        return new LegacyDetailsSplit(from, to, route, remarks);
+    }
+
+    private sealed record LegacyDetailsSplit(string From, string To, string Route, string Remarks);
+
+    private static void ApplyBaseAirportSelections(object sourceWorkbook, object outputWorkbook)
+    {
+        dynamic? destination = GetTableOrNull(outputWorkbook, "BaseAirportsTop10");
+        if (destination is null)
+        {
+            return;
+        }
+
+        var selections = ReadSourceBaseAirportSelections(sourceWorkbook);
+        var rows = (int)destination.ListRows.Count;
+        if (rows > 0 &&
+            HasColumn((object)destination, "ICAO") &&
+            HasColumn((object)destination, "Base"))
+        {
+            var icaos = ReadColumnValues(destination, "ICAO", rows);
+            for (var row = 0; row < rows; row++)
+            {
+                var icao = StableValue(icaos[row]).Trim().ToUpperInvariant();
+                if (string.IsNullOrWhiteSpace(icao))
+                {
+                    continue;
+                }
+                if (selections.TryGetValue(icao, out bool isBase))
+                {
+                    destination.DataBodyRange.Cells.Item(
+                        row + 1,
+                        GetColumnIndex(destination, "Base")).Value2 = isBase;
+                }
+            }
+        }
+        ApplyNativeCheckboxesIfAvailable(destination, "Base");
+    }
+
+    private static Dictionary<string, bool> ReadSourceBaseAirportSelections(object workbookObject)
+    {
+        var selections = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        dynamic? table = GetTableOrNull(workbookObject, "BaseAirportsTop10");
+        if (table is not null &&
+            HasColumn((object)table, "ICAO") &&
+            HasColumn((object)table, "Base"))
+        {
+            var rows = (int)table.ListRows.Count;
+            var icaos = ReadColumnValues(table, "ICAO", rows);
+            var bases = ReadColumnValues(table, "Base", rows);
+            for (var row = 0; row < rows; row++)
+            {
+                var icao = StableValue(icaos[row]).Trim().ToUpperInvariant();
+                if (!string.IsNullOrWhiteSpace(icao))
+                {
+                    selections[icao] = ToBoolean(bases[row]);
+                }
+            }
+        }
+
+        foreach (var legacySelection in ReadLegacyAirportBaseSelections(workbookObject))
+        {
+            selections.TryAdd(legacySelection.Key, true);
+        }
+
+        return selections;
     }
 
     private static AirportVisitStatsDiagnostics RefreshAirportVisitStats(object workbookObject)
@@ -452,7 +696,7 @@ public sealed class ExcelWorkbookMigrator
             var years = ReadColumnValues(logbook, "Year", logbookRows);
             var months = ReadColumnValues(logbook, "Month", logbookRows);
             var days = ReadColumnValues(logbook, "Day", logbookRows);
-            var details = ReadColumnValues(logbook, "Details", logbookRows);
+            var routeSourceValues = ReadLogbookRouteSourceValues(logbook, logbookRows);
             var ifrSim = ReadColumnValues(logbook, "IfrSim", logbookRows);
             var firstHourColumn = GetColumnIndex(logbook, "SeIcusDay");
             var lastOtherHourColumn = GetColumnIndex(logbook, "IfrIf");
@@ -471,7 +715,7 @@ public sealed class ExcelWorkbookMigrator
                     continue;
                 }
 
-                var detailsText = StableValue(details[row]).Trim();
+                var detailsText = routeSourceValues[row].Trim();
                 if (string.IsNullOrWhiteSpace(detailsText))
                 {
                     continue;
@@ -554,6 +798,8 @@ public sealed class ExcelWorkbookMigrator
         SetColumnValues(airports, "Visits", visits, airportRows);
         SetColumnValues(airports, "Rank", rankValues, airportRows);
 
+        RefreshBaseAirportSelector(workbookObject, airports, logbook, aliasLookup);
+
         var topVisitedAirports = stats
             .Where(pair => pair.Value.Visits > 0)
             .OrderByDescending(pair => pair.Value.Visits)
@@ -576,6 +822,255 @@ public sealed class ExcelWorkbookMigrator
             writtenVisitedAirportRows,
             CountNonBlankAirportVisitRows(workbookObject),
             topVisitedAirports);
+    }
+
+    private static void RefreshBaseAirportSelector(
+        object workbookObject,
+        dynamic airports,
+        dynamic logbook,
+        IReadOnlyDictionary<string, string> aliasLookup)
+    {
+        dynamic table = EnsureBaseAirportsTable(workbookObject);
+        Dictionary<string, bool> savedSelections = ReadBaseAirportSelections(
+            workbookObject,
+            (object)airports,
+            (object)table);
+        Dictionary<string, int> endpointCounts = BuildEndpointAirportCounts((object)logbook, aliasLookup);
+        string[] topIcaos = endpointCounts
+            .Where(pair => pair.Value > 0)
+            .OrderByDescending(pair => pair.Value)
+            .ThenBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase)
+            .Take(BaseAirportsTopCount)
+            .Select(pair => pair.Key)
+            .ToArray();
+
+        ResizeTable(table, BaseAirportsTopCount);
+        table.DataBodyRange.ClearContents();
+        for (var row = 1; row <= BaseAirportsTopCount; row++)
+        {
+            var icao = row <= topIcaos.Length ? topIcaos[row - 1] : "";
+            table.DataBodyRange.Cells.Item(row, GetColumnIndex(table, "ICAO")).Value2 = icao;
+            table.DataBodyRange.Cells.Item(row, GetColumnIndex(table, "Airport")).Formula =
+                "=IFERROR(INDEX(Airports[Airport],MATCH([@ICAO],Airports[ICAO],0)),\"\")";
+
+            dynamic baseCell = table.DataBodyRange.Cells.Item(row, GetColumnIndex(table, "Base"));
+            if (string.IsNullOrWhiteSpace(icao))
+            {
+                baseCell.ClearContents();
+            }
+            else if (savedSelections.TryGetValue(icao, out bool savedValue))
+            {
+                baseCell.Value2 = savedValue;
+            }
+            else
+            {
+                baseCell.Value2 = row == 1;
+            }
+        }
+
+        ApplyNativeCheckboxesIfAvailable(table, "Base");
+        table.Parent.Columns.Item(table.ListColumns.Item(GetColumnIndex(table, "ICAO")).Range.Column)
+            .Hidden = true;
+    }
+
+    private static dynamic EnsureBaseAirportsTable(object workbookObject)
+    {
+        dynamic? table = GetTableOrNull(workbookObject, "BaseAirportsTop10");
+        if (table is not null)
+        {
+            EnsureBaseAirportsTableColumns(table);
+            return table;
+        }
+
+        dynamic workbook = workbookObject;
+        dynamic worksheet = workbook.Worksheets.Item("Stats");
+        dynamic range = worksheet.Range["E2:G12"];
+        range.Clear();
+        range.Rows.Item(1).Value2 = new object[,] { { "Airport", "Base", "ICAO" } };
+        table = worksheet.ListObjects.Add(1, range, Type.Missing, 1);
+        table.Name = "BaseAirportsTop10";
+        table.TableStyle = "TableStyleMedium2";
+        worksheet.Columns.Item(table.ListColumns.Item(GetColumnIndex(table, "ICAO")).Range.Column)
+            .Hidden = true;
+        return table;
+    }
+
+    private static void EnsureBaseAirportsTableColumns(dynamic table)
+    {
+        if (!HasColumn((object)table, "Airport"))
+        {
+            table.ListColumns.Add().Name = "Airport";
+        }
+        if (!HasColumn((object)table, "Base"))
+        {
+            table.ListColumns.Add().Name = "Base";
+        }
+        if (!HasColumn((object)table, "ICAO"))
+        {
+            table.ListColumns.Add().Name = "ICAO";
+        }
+    }
+
+    private static Dictionary<string, bool> ReadBaseAirportSelections(
+        object workbookObject,
+        object airportsObject,
+        object tableObject)
+    {
+        dynamic airports = airportsObject;
+        dynamic table = tableObject;
+        var selections = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var rows = (int)table.ListRows.Count;
+        if (rows > 0)
+        {
+            object?[] icaos = HasColumn((object)table, "ICAO")
+                ? ReadColumnValues(table, "ICAO", rows)
+                : Array.Empty<object?>();
+            object?[] names = HasColumn((object)table, "Airport")
+                ? ReadColumnValues(table, "Airport", rows)
+                : Array.Empty<object?>();
+            object?[] bases = HasColumn((object)table, "Base")
+                ? ReadColumnValues(table, "Base", rows)
+                : Array.Empty<object?>();
+            for (var row = 0; row < rows; row++)
+            {
+                var icao = row < icaos.Length ? StableValue(icaos[row]).Trim() : "";
+                if (string.IsNullOrWhiteSpace(icao) && row < names.Length)
+                {
+                    icao = AirportIcaoForName(airports, StableValue(names[row]));
+                }
+                if (!string.IsNullOrWhiteSpace(icao) && row < bases.Length)
+                {
+                    selections[icao] = ToBoolean(bases[row]);
+                }
+            }
+        }
+
+        foreach (var legacySelection in ReadLegacyAirportBaseSelections(workbookObject))
+        {
+            selections.TryAdd(legacySelection.Key, true);
+        }
+
+        return selections;
+    }
+
+    private static Dictionary<string, int> BuildEndpointAirportCounts(
+        object logbookObject,
+        IReadOnlyDictionary<string, string> aliasLookup)
+    {
+        dynamic logbook = logbookObject;
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var rows = (int)logbook.ListRows.Count;
+        if (rows <= 0 ||
+            !HasColumn((object)logbook, "From") ||
+            !HasColumn((object)logbook, "To"))
+        {
+            return counts;
+        }
+
+        var fromValues = ReadColumnValues(logbook, "From", rows);
+        var toValues = ReadColumnValues(logbook, "To", rows);
+        var ifrSim = ReadColumnValues(logbook, "IfrSim", rows);
+        var firstHourColumn = GetColumnIndex(logbook, "SeIcusDay");
+        var lastOtherHourColumn = GetColumnIndex(logbook, "IfrIf");
+        var hourColumns = new List<object?[]>();
+        for (var column = firstHourColumn; column <= lastOtherHourColumn; column++)
+        {
+            var name = (string)logbook.ListColumns.Item(column).Name;
+            hourColumns.Add(ReadColumnValues(logbook, name, rows));
+        }
+
+        for (var row = 0; row < rows; row++)
+        {
+            if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
+            {
+                continue;
+            }
+
+            var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(fromValues[row]));
+            AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(toValues[row]));
+
+            foreach (var icao in matchedIcaos)
+            {
+                counts[icao] = counts.TryGetValue(icao, out var current) ? current + 1 : 1;
+            }
+        }
+
+        return counts;
+    }
+
+    private static void AddEndpointAirportMatch(
+        ISet<string> matchedIcaos,
+        IReadOnlyDictionary<string, string> aliasLookup,
+        string rawValue)
+    {
+        var token = rawValue.Trim().ToUpperInvariant();
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return;
+        }
+        if (aliasLookup.TryGetValue(token, out var icao) && !string.IsNullOrWhiteSpace(icao))
+        {
+            matchedIcaos.Add(icao);
+        }
+    }
+
+    private static Dictionary<string, string> ReadLegacyAirportBaseSelections(object workbookObject)
+    {
+        dynamic? airports = GetTableOrNull(workbookObject, "Airports");
+        var selections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (airports is null ||
+            !HasColumn((object)airports, "Base") ||
+            !HasColumn((object)airports, "ICAO"))
+        {
+            return selections;
+        }
+
+        var rows = (int)airports.ListRows.Count;
+        var icaos = ReadColumnValues(airports, "ICAO", rows);
+        object?[] names = HasColumn((object)airports, "Airport")
+            ? ReadColumnValues(airports, "Airport", rows)
+            : Array.Empty<object?>();
+        var bases = ReadColumnValues(airports, "Base", rows);
+        for (var row = 0; row < rows; row++)
+        {
+            if (!ToBoolean(bases[row]))
+            {
+                continue;
+            }
+
+            var icao = StableValue(icaos[row]).Trim().ToUpperInvariant();
+            if (!string.IsNullOrWhiteSpace(icao))
+            {
+                selections[icao] = row < names.Length ? StableValue(names[row]) : "";
+            }
+        }
+
+        return selections;
+    }
+
+    private static string AirportIcaoForName(dynamic airports, string airportName)
+    {
+        if (string.IsNullOrWhiteSpace(airportName))
+        {
+            return "";
+        }
+
+        var rows = (int)airports.ListRows.Count;
+        var icaos = ReadColumnValues(airports, "ICAO", rows);
+        var names = ReadColumnValues(airports, "Airport", rows);
+        for (var row = 0; row < rows; row++)
+        {
+            if (string.Equals(
+                    StableValue(names[row]).Trim(),
+                    airportName.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return StableValue(icaos[row]).Trim().ToUpperInvariant();
+            }
+        }
+
+        return "";
     }
 
     private static AirportVisitStatsDiagnostics EmptyAirportVisitStatsDiagnostics()
@@ -647,8 +1142,7 @@ public sealed class ExcelWorkbookMigrator
             normalised = normalised.Replace(delimiter, '|');
         }
         return normalised
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(token => token.ToUpperInvariant());
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     private static bool AirportStatsIgnoreToken(string token, IReadOnlyCollection<string> keywords)
@@ -707,6 +1201,52 @@ public sealed class ExcelWorkbookMigrator
         table.DataBodyRange.Columns.Item(index).Resize[rows, 1].Value2 = values;
     }
 
+    private static string[] ReadLogbookRouteSourceValues(dynamic logbook, int rows)
+    {
+        var result = new string[rows];
+        object?[]? fromValues = HasColumn((object)logbook, "From")
+            ? ReadColumnValues(logbook, "From", rows)
+            : null;
+        object?[]? routeValues = HasColumn((object)logbook, "Route")
+            ? ReadColumnValues(logbook, "Route", rows)
+            : null;
+        object?[]? toValues = HasColumn((object)logbook, "To")
+            ? ReadColumnValues(logbook, "To", rows)
+            : null;
+        object?[]? remarksValues = null;
+        if (HasColumn((object)logbook, "Remarks"))
+        {
+            remarksValues = ReadColumnValues(logbook, "Remarks", rows);
+        }
+        else if (HasColumn((object)logbook, "Details"))
+        {
+            remarksValues = ReadColumnValues(logbook, "Details", rows);
+        }
+
+        for (var row = 0; row < rows; row++)
+        {
+            var routeText = JoinNonBlank(
+                " ",
+                fromValues is null ? "" : StableValue(fromValues[row]),
+                routeValues is null ? "" : StableValue(routeValues[row]),
+                toValues is null ? "" : StableValue(toValues[row]));
+            if (string.IsNullOrWhiteSpace(routeText) && remarksValues is not null)
+            {
+                routeText = StableValue(remarksValues[row]);
+            }
+            result[row] = routeText;
+        }
+
+        return result;
+    }
+
+    private static string JoinNonBlank(string separator, params string[] values)
+    {
+        return string.Join(
+            separator,
+            values.Select(value => value.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
     private static double ToDouble(object? value)
     {
         return value switch
@@ -718,6 +1258,54 @@ public sealed class ExcelWorkbookMigrator
             decimal number => (double)number,
             string text when double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => number,
             _ => 0
+        };
+    }
+
+    private static bool ToBoolean(object? value)
+    {
+        return value switch
+        {
+            null => false,
+            bool flag => flag,
+            double number => Math.Abs(number) > double.Epsilon,
+            float number => Math.Abs(number) > float.Epsilon,
+            int number => number != 0,
+            decimal number => number != 0,
+            string text when bool.TryParse(text.Trim(), out var flag) => flag,
+            string text when double.TryParse(text.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => Math.Abs(number) > double.Epsilon,
+            string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
+            string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
+            string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
+            _ => false
+        };
+    }
+
+    private static bool ToCurrencyCheckValue(object? value)
+    {
+        return value switch
+        {
+            null => false,
+            bool flag => flag,
+            DateTime => true,
+            double number => number > 0,
+            float number => number > 0,
+            int number => number > 0,
+            decimal number => number > 0,
+            string text when bool.TryParse(text.Trim(), out var flag) => flag,
+            string text when DateTime.TryParse(
+                text.Trim(),
+                CultureInfo.CurrentCulture,
+                DateTimeStyles.None,
+                out _) => true,
+            string text when double.TryParse(
+                text.Trim(),
+                NumberStyles.Any,
+                CultureInfo.InvariantCulture,
+                out var number) => number > 0,
+            string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
+            string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
+            string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
+            _ => false
         };
     }
 
@@ -876,12 +1464,13 @@ public sealed class ExcelWorkbookMigrator
         for (var destinationIndex = 1; destinationIndex <= lastUserFormatColumn; destinationIndex++)
         {
             var name = (string)destination.ListColumns.Item(destinationIndex).Name;
-            if (!HasColumn((object)source, name))
+            var sourceFormatName = LogbookSourceFormatColumnName(source, name);
+            if (string.IsNullOrEmpty(sourceFormatName))
             {
                 continue;
             }
 
-            var sourceIndex = GetColumnIndex(source, name);
+            var sourceIndex = GetColumnIndex(source, sourceFormatName);
             source.Range.Columns.Item(sourceIndex).Copy();
             destination.Range.Columns.Item(destinationIndex).PasteSpecial(XlPasteFormats);
         }
@@ -898,7 +1487,12 @@ public sealed class ExcelWorkbookMigrator
 
         CopyTotalsAreaFormatting(source, destination);
         EnsureTotalsArea(outputWorkbookObject, destination);
+        CopySumTotalsFormatting(source, destination);
+        ApplyLogbookSumTotalsFormatting(outputWorkbookObject, destination);
+        ApplyLogbookTotalsAreaFormatting(destination);
         RestoreHeaderPalette(sourceWorkbook, outputWorkbook, destination);
+        ApplyHiddenHourHeaderFormatting(destination);
+        ApplyNativeCheckboxesIfAvailable(destination, "FR", "IPC", "OPC");
 
         var lastDataRow =
             (int)destination.DataBodyRange.Row + (int)destination.DataBodyRange.Rows.Count - 1;
@@ -909,25 +1503,106 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
+    private static string? LogbookSourceFormatColumnName(dynamic source, string name)
+    {
+        if (string.Equals(name, "Details", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "FlightReview", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (string.Equals(name, "Flight ID", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasColumn((object)source, "Flight ID") ? "Flight ID" : "Reg";
+        }
+        if (string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "Route", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasColumn((object)source, "Details") ? "Details" : name;
+        }
+        if (string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase))
+        {
+            return HasColumn((object)source, "Custom 1") ? "Custom 1" : "Details";
+        }
+        if (string.Equals(name, "RNP", StringComparison.OrdinalIgnoreCase))
+        {
+            if (HasColumn((object)source, "RNP"))
+            {
+                return "RNP";
+            }
+            return HasColumn((object)source, "RNAV") ? "RNAV" : null;
+        }
+        if (string.Equals(name, "CumRNP", StringComparison.OrdinalIgnoreCase))
+        {
+            if (HasColumn((object)source, "CumRNP"))
+            {
+                return "CumRNP";
+            }
+            return HasColumn((object)source, "CumRNAV") ? "CumRNAV" : null;
+        }
+
+        return HasColumn((object)source, name) ? name : null;
+    }
+
     private static void CopyTotalsAreaFormatting(dynamic source, dynamic destination)
     {
         dynamic sourceWorksheet = source.Parent;
         dynamic destinationWorksheet = destination.Parent;
         var sourceTotalsRow = (int)source.TotalsRowRange.Row;
         var destinationTotalsRow = (int)destination.TotalsRowRange.Row;
-        var regColumn = (int)source.ListColumns.Item(GetColumnIndex(source, "Reg")).Range.Column;
-        var otherColumn = (int)source.ListColumns
+        var sourceFirstColumn = HasColumn((object)source, "Flight ID")
+            ? (int)source.ListColumns.Item(GetColumnIndex(source, "Flight ID")).Range.Column
+            : (int)source.ListColumns.Item(GetColumnIndex(source, "Reg")).Range.Column;
+        var sourceOtherColumn = (int)source.ListColumns
             .Item(GetColumnIndex(source, "Other Pilot or Crew")).Range.Column;
+        var destinationFirstColumn = (int)destination.ListColumns
+            .Item(GetColumnIndex(destination, "Flight ID")).Range.Column;
+        var destinationOtherColumn = (int)destination.ListColumns
+            .Item(GetColumnIndex(destination, "Other Pilot or Crew")).Range.Column;
 
         dynamic sourceRange = sourceWorksheet.Range[
-            sourceWorksheet.Cells.Item(sourceTotalsRow, regColumn),
-            sourceWorksheet.Cells.Item(sourceTotalsRow + 1, otherColumn)];
+            sourceWorksheet.Cells.Item(sourceTotalsRow, sourceFirstColumn),
+            sourceWorksheet.Cells.Item(sourceTotalsRow + 1, sourceOtherColumn)];
         dynamic destinationRange = destinationWorksheet.Range[
-            destinationWorksheet.Cells.Item(destinationTotalsRow, regColumn),
-            destinationWorksheet.Cells.Item(destinationTotalsRow + 1, otherColumn)];
+            destinationWorksheet.Cells.Item(destinationTotalsRow, destinationFirstColumn),
+            destinationWorksheet.Cells.Item(destinationTotalsRow + 1, destinationOtherColumn)];
         sourceRange.Copy();
         destinationRange.PasteSpecial(XlPasteFormats);
         destinationWorksheet.Application.CutCopyMode = false;
+        destinationRange.WrapText = false;
+    }
+
+    private static void CopySumTotalsFormatting(dynamic source, dynamic destination)
+    {
+        dynamic sourceWorksheet = source.Parent;
+        dynamic destinationWorksheet = destination.Parent;
+        var sourceTotalsRow = (int)source.TotalsRowRange.Row;
+        var destinationTotalsRow = (int)destination.TotalsRowRange.Row;
+        var sourceStartColumn = (int)source.ListColumns
+            .Item(GetLogbookCustomStartColumn(source)).Range.Column;
+        var sourceEndColumn = (int)source.ListColumns.Item(GetColumnIndex(source, "TotalApps")).Range.Column;
+        var destinationStartColumn = (int)destination.ListColumns
+            .Item(GetLogbookCustomStartColumn(destination)).Range.Column;
+        var destinationEndColumn = (int)destination.ListColumns
+            .Item(GetColumnIndex(destination, "TotalApps")).Range.Column;
+
+        dynamic sourceRange = sourceWorksheet.Range[
+            sourceWorksheet.Cells.Item(sourceTotalsRow, sourceStartColumn),
+            sourceWorksheet.Cells.Item(sourceTotalsRow, sourceEndColumn)];
+        dynamic destinationRange = destinationWorksheet.Range[
+            destinationWorksheet.Cells.Item(destinationTotalsRow, destinationStartColumn),
+            destinationWorksheet.Cells.Item(destinationTotalsRow, destinationEndColumn)];
+        sourceRange.Copy();
+        destinationRange.PasteSpecial(XlPasteFormats);
+        destinationWorksheet.Application.CutCopyMode = false;
+        destinationRange.WrapText = false;
     }
 
     private static void EnsureTotalsArea(object workbookObject, dynamic table)
@@ -938,8 +1613,8 @@ public sealed class ExcelWorkbookMigrator
         var picColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "PIC")).Range.Column;
         var otherColumn = (int)table.ListColumns
             .Item(GetColumnIndex(table, "Other Pilot or Crew")).Range.Column;
-        var regColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Reg")).Range.Column;
-        var firstCustomIndex = GetColumnIndex(table, "Details") + 1;
+        var flightIdColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Flight ID")).Range.Column;
+        var firstCustomIndex = GetLogbookCustomStartColumn(table);
         var sumStartColumn = (int)table.ListColumns.Item(firstCustomIndex).Range.Column;
         var sumEndColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "TotalApps")).Range.Column;
 
@@ -951,7 +1626,7 @@ public sealed class ExcelWorkbookMigrator
             workbook,
             "LogbookTotals",
             worksheet.Range[
-                worksheet.Cells.Item(totalsRow, regColumn),
+                worksheet.Cells.Item(totalsRow, flightIdColumn),
                 worksheet.Cells.Item(totalsRow + 1, otherColumn)]);
         SetWorkbookName(
             workbook,
@@ -959,6 +1634,121 @@ public sealed class ExcelWorkbookMigrator
             worksheet.Range[
                 worksheet.Cells.Item(totalsRow, sumStartColumn),
                 worksheet.Cells.Item(totalsRow, sumEndColumn)]);
+    }
+
+    private static void ApplyLogbookSumTotalsFormatting(object workbookObject, dynamic table)
+    {
+        dynamic workbook = workbookObject;
+        dynamic sumTotalsRange = workbook.Names.Item("LogbookSumTotals").RefersToRange;
+        var secondaryColor = (int)table.DataBodyRange.Rows.Item(1).Cells.Item(1, 1)
+            .DisplayFormat.Interior.Color;
+        sumTotalsRange.Interior.Pattern = 1;
+        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, 0.2);
+        sumTotalsRange.Font.Color = 0xFFFFFF;
+    }
+
+    private static void ApplyLogbookTotalsAreaFormatting(dynamic table)
+    {
+        dynamic worksheet = table.Parent;
+        var totalsRow = (int)table.TotalsRowRange.Row;
+        var flightIdColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Flight ID")).Range.Column;
+        var picColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "PIC")).Range.Column;
+        var otherColumn = (int)table.ListColumns
+            .Item(GetColumnIndex(table, "Other Pilot or Crew")).Range.Column;
+        var secondaryColor = (int)table.DataBodyRange.Rows.Item(1).Cells.Item(1, 1)
+            .DisplayFormat.Interior.Color;
+        var textColor = ContrastingTextColor(secondaryColor);
+        var fontName = (string)table.DataBodyRange.Cells.Item(1, 1).Font.Name;
+        var fontSize = (double)table.DataBodyRange.Cells.Item(1, 1).Font.Size;
+
+        dynamic totalsBlock = worksheet.Range[
+            worksheet.Cells.Item(totalsRow, flightIdColumn),
+            worksheet.Cells.Item(totalsRow + 1, otherColumn)];
+        dynamic topRow = totalsBlock.Rows.Item(1);
+        dynamic bottomRow = totalsBlock.Rows.Item(2);
+        dynamic firstColumnCells = worksheet.Range[
+            worksheet.Cells.Item(totalsRow, flightIdColumn),
+            worksheet.Cells.Item(totalsRow + 1, flightIdColumn)];
+        dynamic labelCells = worksheet.Range[
+            worksheet.Cells.Item(totalsRow, picColumn),
+            worksheet.Cells.Item(totalsRow + 1, picColumn)];
+        dynamic hoursCells = worksheet.Range[
+            worksheet.Cells.Item(totalsRow, otherColumn),
+            worksheet.Cells.Item(totalsRow + 1, otherColumn)];
+        dynamic totalsCellLeftOfBlock = worksheet.Cells.Item(totalsRow, flightIdColumn - 1);
+        dynamic experienceCellLeftOfBlock = worksheet.Cells.Item(totalsRow + 1, flightIdColumn - 1);
+        dynamic experienceCellLeftFillSource = experienceCellLeftOfBlock.Offset[0, -1];
+
+        topRow.Interior.Pattern = -4142;
+        topRow.Font.Color = 0;
+        topRow.Font.Bold = false;
+        topRow.Cells.Item(1, 3).Font.Bold = true;
+
+        bottomRow.Interior.Pattern = 1;
+        bottomRow.Interior.Color = secondaryColor;
+        bottomRow.Font.Color = textColor;
+        bottomRow.Font.Bold = true;
+        totalsBlock.Font.Name = fontName;
+        totalsBlock.Font.Size = fontSize;
+
+        firstColumnCells.HorizontalAlignment = -4152;
+        firstColumnCells.WrapText = false;
+        labelCells.HorizontalAlignment = -4152;
+        labelCells.WrapText = false;
+        hoursCells.HorizontalAlignment = -4108;
+        hoursCells.VerticalAlignment = -4108;
+        hoursCells.WrapText = false;
+        bottomRow.Cells.Item(1, 3).NumberFormat = topRow.Cells.Item(1, 3).NumberFormat;
+        totalsCellLeftOfBlock.Interior.Pattern = 1;
+        totalsCellLeftOfBlock.Interior.Color = 0;
+        totalsCellLeftOfBlock.Font.Color = 0xFFFFFF;
+        totalsCellLeftOfBlock.Font.Bold = false;
+        totalsCellLeftOfBlock.HorizontalAlignment = -4152;
+        totalsCellLeftOfBlock.WrapText = false;
+        experienceCellLeftOfBlock.Interior.Pattern = experienceCellLeftFillSource.Interior.Pattern;
+        experienceCellLeftOfBlock.Interior.Color = experienceCellLeftFillSource.Interior.Color;
+        experienceCellLeftOfBlock.Font.Color = experienceCellLeftFillSource.Font.Color;
+        experienceCellLeftOfBlock.Font.Bold = experienceCellLeftFillSource.Font.Bold;
+        experienceCellLeftOfBlock.HorizontalAlignment = -4152;
+        experienceCellLeftOfBlock.WrapText = false;
+    }
+
+    private static void ApplyNativeCheckboxesIfAvailable(dynamic table, params string[] columnNames)
+    {
+        foreach (var columnName in columnNames)
+        {
+            if (!HasColumn((object)table, columnName))
+            {
+                continue;
+            }
+
+            try
+            {
+                table.ListColumns.Item(GetColumnIndex(table, columnName))
+                    .DataBodyRange.CellControl.SetCheckbox();
+            }
+            catch (COMException)
+            {
+                // Older Excel builds do not expose native in-cell checkbox controls.
+            }
+            catch (RuntimeBinderException)
+            {
+                // Some COM wrappers surface the missing CellControl member this way.
+            }
+        }
+    }
+
+    private static void ApplyHiddenHourHeaderFormatting(dynamic destination)
+    {
+        var start = GetColumnIndex(destination, "SeIcusDay");
+        var end = GetColumnIndex(destination, "Circling");
+        dynamic hourHeaders = destination.HeaderRowRange.Cells.Item(1, start).Resize[
+            1,
+            end - start + 1];
+        foreach (dynamic cell in hourHeaders.Cells)
+        {
+            cell.Font.Color = cell.DisplayFormat.Interior.Color;
+        }
     }
 
     private static void RestoreHeaderPalette(
@@ -981,6 +1771,89 @@ public sealed class ExcelWorkbookMigrator
         {
             cell.Font.Color = cell.DisplayFormat.Interior.Color;
         }
+    }
+
+    private static int ColorWithLightness(int sourceColor, double targetLightness)
+    {
+        var red = (sourceColor & 0xFF) / 255.0;
+        var green = ((sourceColor >> 8) & 0xFF) / 255.0;
+        var blue = ((sourceColor >> 16) & 0xFF) / 255.0;
+        var maximum = Math.Max(red, Math.Max(green, blue));
+        var minimum = Math.Min(red, Math.Min(green, blue));
+
+        if (Math.Abs(maximum - minimum) < double.Epsilon)
+        {
+            var grey = (int)Math.Round(targetLightness * 255);
+            return grey + (grey << 8) + (grey << 16);
+        }
+
+        var lightness = (maximum + minimum) / 2.0;
+        var saturation = lightness > 0.5
+            ? (maximum - minimum) / (2.0 - maximum - minimum)
+            : (maximum - minimum) / (maximum + minimum);
+
+        double hue;
+        if (Math.Abs(maximum - red) < double.Epsilon)
+        {
+            hue = (green - blue) / (maximum - minimum);
+            if (green < blue)
+            {
+                hue += 6.0;
+            }
+        }
+        else if (Math.Abs(maximum - green) < double.Epsilon)
+        {
+            hue = (blue - red) / (maximum - minimum) + 2.0;
+        }
+        else
+        {
+            hue = (red - green) / (maximum - minimum) + 4.0;
+        }
+
+        hue /= 6.0;
+        var second = targetLightness < 0.5
+            ? targetLightness * (1.0 + saturation)
+            : targetLightness + saturation - (targetLightness * saturation);
+        var first = (2.0 * targetLightness) - second;
+        var outRed = (int)Math.Round(255 * HueChannel(first, second, hue + (1.0 / 3.0)));
+        var outGreen = (int)Math.Round(255 * HueChannel(first, second, hue));
+        var outBlue = (int)Math.Round(255 * HueChannel(first, second, hue - (1.0 / 3.0)));
+        return outRed + (outGreen << 8) + (outBlue << 16);
+    }
+
+    private static double HueChannel(double first, double second, double hue)
+    {
+        if (hue < 0)
+        {
+            hue += 1.0;
+        }
+        if (hue > 1)
+        {
+            hue -= 1.0;
+        }
+
+        if (hue < 1.0 / 6.0)
+        {
+            return first + ((second - first) * 6.0 * hue);
+        }
+        if (hue < 1.0 / 2.0)
+        {
+            return second;
+        }
+        if (hue < 2.0 / 3.0)
+        {
+            return first + ((second - first) * ((2.0 / 3.0) - hue) * 6.0);
+        }
+        return first;
+    }
+
+    private static int ContrastingTextColor(int backgroundColor)
+    {
+        var red = backgroundColor & 0xFF;
+        var green = (backgroundColor >> 8) & 0xFF;
+        var blue = (backgroundColor >> 16) & 0xFF;
+        var brightness = ((red * 299) + (green * 587) + (blue * 114)) / 1000.0;
+        return brightness >= 150 ? 0 : 0xFFFFFF;
     }
 
     private static void RefreshPivots(object workbookObject)
@@ -1069,17 +1942,8 @@ public sealed class ExcelWorkbookMigrator
         object sourceWorkbookObject,
         object outputWorkbookObject)
     {
-        dynamic source = GetTable(sourceWorkbookObject, "Logbook");
         dynamic outputWorkbook = outputWorkbookObject;
         dynamic destination = GetTable(outputWorkbookObject, "Logbook");
-
-        if (!string.Equals(
-                (string)source.TableStyle.Name,
-                (string)destination.TableStyle.Name,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidDataException("Logbook table style was not preserved.");
-        }
 
         for (var row = 1; row <= (int)destination.Range.Rows.Count; row++)
         {
@@ -1106,9 +1970,12 @@ public sealed class ExcelWorkbookMigrator
                 workbook,
                 "Routes",
                 new[] { "DepAirport", "ArrAirport" }),
-            ["AirportBases"] = FingerprintAirportBases(workbook),
             ["Preferences"] = FingerprintNames(workbook, PreservedNames)
         };
+        if (GetTableOrNull(workbook, "BaseAirportsTop10") is not null)
+        {
+            fingerprints["BaseAirports"] = FingerprintBaseAirportSelections(workbook);
+        }
         AddLogbookFingerprints(workbook, fingerprints);
         return fingerprints;
     }
@@ -1120,21 +1987,54 @@ public sealed class ExcelWorkbookMigrator
         dynamic table = GetTable(workbook, "Logbook");
         var start = GetColumnIndex(table, "Year");
         var end = GetColumnIndex(table, "Circling");
-        var names = new List<string>();
+        var columns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         for (var index = start; index <= end; index++)
         {
-            names.Add((string)table.ListColumns.Item(index).Name);
+            var name = (string)table.ListColumns.Item(index).Name;
+            if (LogbookFingerprintColumnIsPreserved(name))
+            {
+                columns.TryAdd(CanonicalLogbookFingerprintColumnName(name), name);
+            }
         }
-        names.Add("CurrencyExclusions");
 
-        fingerprints["LogbookHeaders"] = Sha256(string.Join('\u001f', names));
-        foreach (var name in names)
+        fingerprints["LogbookHeaders"] = Sha256(string.Join('\u001f', columns.Keys));
+        foreach (var column in columns)
         {
-            fingerprints[$"Logbook:{name}"] = FingerprintColumns(
+            fingerprints[$"Logbook:{column.Key}"] = FingerprintLogbookColumn(
                 workbook,
-                "Logbook",
-                new[] { name });
+                column.Value,
+                column.Key);
         }
+    }
+
+    private static bool LogbookFingerprintColumnIsPreserved(string name)
+    {
+        return !string.Equals(name, "Details", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "Flight ID", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "FlightReview", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "Route", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string CanonicalLogbookFingerprintColumnName(string name)
+    {
+        if (string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase))
+        {
+            return "RNP";
+        }
+
+        if (string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase))
+        {
+            return "CumRNP";
+        }
+
+        return name;
     }
 
     private static string FingerprintTable(dynamic workbook, string tableName)
@@ -1148,24 +2048,51 @@ public sealed class ExcelWorkbookMigrator
         return FingerprintColumns(workbook, tableName, columns);
     }
 
-    private static string FingerprintAirportBases(dynamic workbook)
+    private static string FingerprintLogbookColumn(
+        dynamic workbook,
+        string actualColumn,
+        string canonicalColumn)
     {
-        dynamic table = GetTable(workbook, "Airports");
+        dynamic table = GetTable(workbook, "Logbook");
         var rows = (int)table.ListRows.Count;
-        var icaoValues = ReadColumnValues((object)table, "ICAO", rows);
-        var baseValues = ReadColumnValues((object)table, "Base", rows);
-        var selections = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        for (var row = 0; row < rows; row++)
+        var builder = new StringBuilder();
+        builder.Append("Logbook").Append('|').Append(rows);
+        builder.Append('|').Append(canonicalColumn);
+        foreach (var value in ReadColumnValues(table, actualColumn, rows))
         {
-            var icao = StableValue(icaoValues[row]).Trim();
-            var baseValue = StableValue(baseValues[row]);
-            if (!string.IsNullOrEmpty(icao) && !IsBlankValue(baseValues[row]))
+            builder.Append('\u001f').Append(StableValue(value));
+        }
+
+        return Sha256(builder.ToString());
+    }
+
+    private static string FingerprintBaseAirportSelections(dynamic workbook)
+    {
+        var selections = new SortedDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        dynamic? table = GetTableOrNull((object)workbook, "BaseAirportsTop10");
+        if (table is not null && HasColumn((object)table, "ICAO") && HasColumn((object)table, "Base"))
+        {
+            var rows = (int)table.ListRows.Count;
+            var icaoValues = ReadColumnValues(table, "ICAO", rows);
+            var baseValues = ReadColumnValues(table, "Base", rows);
+            for (var row = 0; row < rows; row++)
             {
-                selections[icao] = baseValue;
+                var icao = StableValue(icaoValues[row]).Trim();
+                if (!string.IsNullOrEmpty(icao) && ToBoolean(baseValues[row]))
+                {
+                    selections[icao] = "TRUE";
+                }
+            }
+        }
+        else
+        {
+            foreach (var selection in ReadLegacyAirportBaseSelections((object)workbook))
+            {
+                selections[selection.Key] = "TRUE";
             }
         }
 
-        var builder = new StringBuilder("AirportBases");
+        var builder = new StringBuilder("BaseAirports");
         foreach (var selection in selections)
         {
             builder.Append('|').Append(selection.Key).Append('=').Append(selection.Value);
@@ -1205,10 +2132,42 @@ public sealed class ExcelWorkbookMigrator
 
     private static void CopyColumn(dynamic source, dynamic destination, string name, int rows)
     {
-        var sourceIndex = GetColumnIndex(source, name);
-        var destinationIndex = GetColumnIndex(destination, name);
+        CopyColumn(source, destination, name, name, rows);
+    }
+
+    private static void CopyColumn(
+        dynamic source,
+        dynamic destination,
+        string sourceName,
+        string destinationName,
+        int rows)
+    {
+        var sourceIndex = GetColumnIndex(source, sourceName);
+        var destinationIndex = GetColumnIndex(destination, destinationName);
         destination.DataBodyRange.Columns.Item(destinationIndex).Resize[rows, 1].Value2 =
             source.DataBodyRange.Columns.Item(sourceIndex).Resize[rows, 1].Value2;
+    }
+
+    private static string? DestinationLogbookColumnName(object destinationTable, string sourceName)
+    {
+        if (HasColumn(destinationTable, sourceName))
+        {
+            return sourceName;
+        }
+
+        if (string.Equals(sourceName, "RNAV", StringComparison.OrdinalIgnoreCase) &&
+            HasColumn(destinationTable, "RNP"))
+        {
+            return "RNP";
+        }
+
+        if (string.Equals(sourceName, "CumRNAV", StringComparison.OrdinalIgnoreCase) &&
+            HasColumn(destinationTable, "CumRNP"))
+        {
+            return "CumRNP";
+        }
+
+        return null;
     }
 
     private static void CopyColumnPreservingFormula(
@@ -1317,6 +2276,18 @@ public sealed class ExcelWorkbookMigrator
         throw new InvalidDataException($"Workbook table not found: {tableName}");
     }
 
+    private static dynamic? GetTableOrNull(object workbookObject, string tableName)
+    {
+        try
+        {
+            return GetTable(workbookObject, tableName);
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+    }
+
     private static int GetColumnIndex(dynamic table, string name)
     {
         for (var index = 1; index <= (int)table.ListColumns.Count; index++)
@@ -1364,7 +2335,7 @@ public sealed class ExcelWorkbookMigrator
     {
         return value switch
         {
-            null => "<null>",
+            null => "",
             double number => number.ToString("R", CultureInfo.InvariantCulture),
             float number => number.ToString("R", CultureInfo.InvariantCulture),
             DateTime date => date.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),

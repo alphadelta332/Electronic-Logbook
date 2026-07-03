@@ -35,7 +35,7 @@ public partial class MainWindow : Window
         [UpdaterPhaseIds.CopyLogbookData] = 40,
         [UpdaterPhaseIds.CopyKeywordsData] = 50,
         [UpdaterPhaseIds.CopyRoutesData] = 58,
-        [UpdaterPhaseIds.CopyAirportBaseFlags] = 64,
+        [UpdaterPhaseIds.CopyBaseAirportSelections] = 64,
         [UpdaterPhaseIds.CopyNamedPreferences] = 70,
         [UpdaterPhaseIds.RestoreLogbookPresentation] = 76,
         [UpdaterPhaseIds.CalculateOutputWorkbook] = 82,

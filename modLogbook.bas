@@ -11,7 +11,7 @@ Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
 Private mApplyingNewEntryLayout As Boolean
 
-Sub AddToLogbook()
+Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
     Dim previousDisplayStatusBar As Boolean
     Dim previousStatusBar As Variant
@@ -72,11 +72,12 @@ Sub AddToLogbook()
             wsLog.Unprotect Password:=ProtectionPassword()
             On Error GoTo Cleanup
         End If
-        If Not ListColumnExists(tbl, "IPC") Or _
+        If Not ListColumnExists(tbl, "Flight ID") Or _
+           Not ListColumnExists(tbl, "FR") Or _
+           Not ListColumnExists(tbl, "IPC") Or _
            Not ListColumnExists(tbl, "OPC") Or _
-           Not ListColumnExists(tbl, "FlightReview") Or _
-           Not ListColumnExists(tbl, "CurrencyExclusions") Then
-            MsgBox "ERROR: The Logbook table is missing one or more currency helper columns. Please update the workbook structure before adding entries.", vbCritical
+           Not ListColumnExists(tbl, "Remarks") Then
+            MsgBox "ERROR: The Logbook table is missing one or more New Entry columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
         If Not KeywordTableIsValid() Then
@@ -86,9 +87,11 @@ Sub AddToLogbook()
         RefreshTodayValue
         SetAddToLogbookStatus "Validating entry"
         todayDate = CDate(GetWorkbookNameValue(ThisWorkbook, "today", Date))
-        ipcDetected = KeywordDetected(CStr(NewEntryValue("neRemarks")), "IPC")
-        opcDetected = KeywordDetected(CStr(NewEntryValue("neRemarks")), "OPC")
-        flightReviewDetected = ipcDetected Or _
+        ipcDetected = NewEntryBooleanValue("neIPC") Or _
+                      KeywordDetected(CStr(NewEntryValue("neRemarks")), "IPC")
+        opcDetected = NewEntryBooleanValue("neOPC") Or _
+                      KeywordDetected(CStr(NewEntryValue("neRemarks")), "OPC")
+        flightReviewDetected = NewEntryBooleanValue("neFR") Or ipcDetected Or _
                                KeywordDetected(CStr(NewEntryValue("neRemarks")), "Flight Review")
         RefreshDateCalculationFormulas tbl
 
@@ -159,9 +162,9 @@ Sub AddToLogbook()
             End If
         Next i
 
-        'Check 2: Details field must not be blank (checked separately as it falls outside the loop range)
+        'Check 2: Remarks field must not be blank (checked separately as it falls outside the loop range)
         If NewEntryValue("neRemarks") = "" Then
-            MsgBox "ERROR: Details cannot be blank.", vbCritical
+            MsgBox "ERROR: Remarks cannot be blank.", vbCritical
             GoTo Cleanup
         End If
 
@@ -407,7 +410,7 @@ Sub AddToLogbook()
         Dim rr          As Long
 
         dateCol = tbl.ListColumns("Date").Index
-        detailsCol = tbl.ListColumns("Details").Index
+        detailsCol = tbl.ListColumns("Remarks").Index
         typeCol = tbl.ListColumns("Type").Index
         regCol = tbl.ListColumns("Reg").Index
 
@@ -444,7 +447,7 @@ Sub AddToLogbook()
         End If
 
     '--- 4o. Duplicate Entry Check
-        'Warn if an entry with the same Date, Type, Reg and Details already exists in the logbook
+        'Warn if an entry with the same Date, Type, Reg and Remarks already exists in the logbook
         dupFound = False
 
         For rr = 1 To tbl.DataBodyRange.Rows.Count
@@ -459,7 +462,7 @@ Sub AddToLogbook()
 
         If Not suppressWarnings Then
             If dupFound Then
-                response = MsgBox("Warning: An entry with the same Date, Type, Registration and Details already exists in the Logbook. This may be a duplicate. Continue?", vbOKCancel + vbExclamation, "Duplicate Entry")
+                response = MsgBox("Warning: An entry with the same Date, Type, Registration and Remarks already exists in the Logbook. This may be a duplicate. Continue?", vbOKCancel + vbExclamation, "Duplicate Entry")
                 If response = vbCancel Then GoTo Cleanup
             End If
         End If
@@ -485,9 +488,9 @@ Sub AddToLogbook()
         Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
 
     '--- Copy Year, Month, Day
-        newRow.Range.Cells(1, 2).Value = NewEntryValue("neYear")
-        newRow.Range.Cells(1, 3).Value = NewEntryValue("neMonth")
-        newRow.Range.Cells(1, 4).Value = NewEntryValue("neDay")
+        WriteValueToLogbookColumn newRow.Range, tbl, "Year", NewEntryValue("neYear")
+        WriteValueToLogbookColumn newRow.Range, tbl, "Month", NewEntryValue("neMonth")
+        WriteValueToLogbookColumn newRow.Range, tbl, "Day", NewEntryValue("neDay")
 
     '--- 5b. Fill Down Formula Columns from Previous Row
         diagStep = "Step 5b: Fill Formulas"
@@ -503,23 +506,20 @@ Sub AddToLogbook()
             Next iCol
         End If
 
-    '--- 5c. Copy Remaining Data (Type through Circling)
+    '--- 5c. Copy Remaining Data
         diagStep = "Step 5c: Copy Data"
         WriteCrumb diagStep
-        CopyNewEntryFieldsToLogbookRow newRow.Range
+        CopyNewEntryFieldsToLogbookRow newRow.Range, tbl, _
+                                       flightReviewDetected And Not currencyExcluded, _
+                                       ipcDetected And Not currencyExcluded, _
+                                       opcDetected And Not currencyExcluded
 
-    '--- 5d. Record Currency Detection Exclusion
-        With newRow.Range.Cells(1, tbl.ListColumns("CurrencyExclusions").Index)
-            .ClearContents
-            If currencyExcluded Then .Value = True
-        End With
-
-    '--- 5e. Fix Month Formatting (always Proper Case e.g. Mar)
+    '--- 5d. Fix Month Formatting (always Proper Case e.g. Mar)
         If VarType(newRow.Range.cells(1, 3).Value) = vbString Then
             newRow.Range.cells(1, 3).Value = StrConv(newRow.Range.cells(1, 3).Value, vbProperCase)
         End If
 
-    '--- 5f. Remove formats inherited by row insertion and formula FillDown
+    '--- 5e. Remove formats inherited by row insertion and formula FillDown
         diagStep = "Step 5f: Format Row"
         WriteCrumb diagStep
         newRow.Range.ClearFormats
@@ -635,7 +635,7 @@ Sub AddToLogbook()
         diagStep = "Step 9: Success"
         SetAddToLogbookStatus "Done"
 
-        MsgBox "Entry successfully added to Logbook!", vbInformation
+        If showSuccessMessage Then MsgBox "Entry successfully added to Logbook!", vbInformation
 
     '===============================
     ' STEP 10: CLEANUP & RESTORE SETTINGS
@@ -766,10 +766,12 @@ Private Sub NormaliseLogbookFormatting(ByVal tbl As ListObject)
     NormaliseLogbookDataFormatting tbl
     NormaliseLogbookDataBorders tbl
     NormaliseLogbookTotalsFormatting tbl
+    UpdateLogbookTotalsNamedRanges tbl
     ApplyLogbookPalette tbl
     ApplyLogbookTotalsRowBorders tbl
     ApplyLogbookTotalsFormatting tbl
     ApplyVisibleLogbookOutsideBorder tbl
+    ApplyNativeCheckboxesIfAvailable tbl
 End Sub
 
 Private Sub NormaliseLogbookDataFormatting(ByVal tbl As ListObject)
@@ -858,6 +860,39 @@ Private Sub SetBorderFormat(ByVal targetBorder As Border, _
     targetBorder.Weight = weight
     targetBorder.Color = color
     targetBorder.LineStyle = lineStyle
+End Sub
+
+Private Sub UpdateLogbookTotalsNamedRanges(ByVal tbl As ListObject)
+    Dim ws As Worksheet
+    Dim totalsBlock As Range
+    Dim sumTotalsRange As Range
+    Dim totalsFormula As String
+    Dim sumTotalsFormula As String
+
+    If Not tbl.ShowTotals Then Exit Sub
+
+    Set ws = tbl.Parent
+    Set totalsBlock = ws.Range(ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Flight ID").Range.Column), _
+                               ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
+    Set sumTotalsRange = ws.Range(ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns(LogbookCustomStartColumn(tbl)).Range.Column), _
+                                  ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("TotalApps").Range.Column))
+
+    totalsFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
+    sumTotalsFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & sumTotalsRange.Address
+
+    On Error Resume Next
+    ThisWorkbook.Names("LogbookTotals").RefersTo = totalsFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        ThisWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=totalsFormula
+    End If
+    Err.Clear
+    ThisWorkbook.Names("LogbookSumTotals").RefersTo = sumTotalsFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        ThisWorkbook.Names.Add Name:="LogbookSumTotals", RefersTo:=sumTotalsFormula
+    End If
+    On Error GoTo 0
 End Sub
 
 Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
@@ -1047,9 +1082,11 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     Dim totalsBlock As Range
     Dim topRow As Range
     Dim bottomRow As Range
+    Dim firstColumnCells As Range
     Dim labelCells As Range
     Dim hoursCells As Range
-    Dim cellLeftOfBlock As Range
+    Dim totalsCellLeftOfBlock As Range
+    Dim experienceCellLeftOfBlock As Range
     Dim nameFormula As String
     Dim tableFontName As String
     Dim tableFontSize As Double
@@ -1058,13 +1095,15 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     If Not tbl.ShowTotals Then Exit Sub
 
     Set ws = tbl.Parent
-    Set totalsBlock = ws.Range(ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Reg").Range.Column), _
+    Set totalsBlock = ws.Range(ws.Cells(tbl.TotalsRowRange.Row, tbl.ListColumns("Flight ID").Range.Column), _
                                ws.Cells(tbl.TotalsRowRange.Row + 1, tbl.ListColumns("Other Pilot or Crew").Range.Column))
     Set topRow = totalsBlock.Rows(1)
     Set bottomRow = totalsBlock.Rows(2)
+    Set firstColumnCells = Union(topRow.Cells(1, 1), bottomRow.Cells(1, 1))
     Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
     Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
-    Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
+    Set totalsCellLeftOfBlock = topRow.Cells(1, 1).Offset(0, -1)
+    Set experienceCellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
     tableFontName = tbl.DataBodyRange.Cells(1, 1).Font.Name
     tableFontSize = tbl.DataBodyRange.Cells(1, 1).Font.Size
     secondaryColor = LogbookSecondaryFillColor(tbl)
@@ -1090,6 +1129,8 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     totalsBlock.Font.Name = tableFontName
     totalsBlock.Font.Size = tableFontSize
 
+    firstColumnCells.HorizontalAlignment = xlRight
+    firstColumnCells.WrapText = False
     labelCells.HorizontalAlignment = xlRight
     labelCells.WrapText = False
     hoursCells.HorizontalAlignment = xlCenter
@@ -1104,9 +1145,48 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlContinuous, xlMedium, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
     SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
-    cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
-    cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
-    cellLeftOfBlock.Borders.LineStyle = xlNone
+    totalsCellLeftOfBlock.Interior.Pattern = xlSolid
+    totalsCellLeftOfBlock.Interior.Color = vbBlack
+    totalsCellLeftOfBlock.Font.Color = vbWhite
+    totalsCellLeftOfBlock.Font.Bold = False
+    totalsCellLeftOfBlock.HorizontalAlignment = xlRight
+    totalsCellLeftOfBlock.WrapText = False
+    totalsCellLeftOfBlock.Borders.LineStyle = xlNone
+    experienceCellLeftOfBlock.Interior.Pattern = experienceCellLeftOfBlock.Offset(0, -1).Interior.Pattern
+    experienceCellLeftOfBlock.Interior.Color = experienceCellLeftOfBlock.Offset(0, -1).Interior.Color
+    experienceCellLeftOfBlock.Font.Color = experienceCellLeftOfBlock.Offset(0, -1).Font.Color
+    experienceCellLeftOfBlock.Font.Bold = experienceCellLeftOfBlock.Offset(0, -1).Font.Bold
+    experienceCellLeftOfBlock.HorizontalAlignment = xlRight
+    experienceCellLeftOfBlock.WrapText = False
+    experienceCellLeftOfBlock.Borders.LineStyle = xlNone
+End Sub
+
+Private Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
+    Dim firstHoursColumn As Long
+
+    firstHoursColumn = tbl.ListColumns("SeIcusDay").Index
+    If ListColumnExists(tbl, "OPC") And tbl.ListColumns("OPC").Index < firstHoursColumn Then
+        LogbookCustomStartColumn = tbl.ListColumns("OPC").Index + 1
+    ElseIf ListColumnExists(tbl, "Details") Then
+        LogbookCustomStartColumn = tbl.ListColumns("Details").Index + 1
+    ElseIf ListColumnExists(tbl, "Remarks") Then
+        LogbookCustomStartColumn = tbl.ListColumns("Remarks").Index + 1
+    End If
+End Function
+
+Private Sub ApplyNativeCheckboxesIfAvailable(ByVal tbl As ListObject)
+    Dim columnName As Variant
+
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    For Each columnName In Array("FR", "IPC", "OPC")
+        If ListColumnExists(tbl, CStr(columnName)) Then
+            On Error Resume Next
+            tbl.ListColumns(CStr(columnName)).DataBodyRange.CellControl.SetCheckbox
+            Err.Clear
+            On Error GoTo 0
+        End If
+    Next columnName
 End Sub
 
 Private Function LogbookSecondaryFillColor(ByVal tbl As ListObject) As Long
@@ -1398,6 +1478,22 @@ Private Function NewEntryNumericValue(ByVal fieldName As String) As Double
     End If
 End Function
 
+Private Function NewEntryBooleanValue(ByVal fieldName As String) As Boolean
+    Dim value As Variant
+
+    value = NewEntryValue(fieldName)
+    If VarType(value) = vbBoolean Then
+        NewEntryBooleanValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        NewEntryBooleanValue = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                NewEntryBooleanValue = True
+        End Select
+    End If
+End Function
+
 Private Sub SetNewEntryValue(ByVal fieldName As String, ByVal value As Variant)
     NewEntryCell(fieldName).Value = value
 End Sub
@@ -1438,19 +1534,29 @@ Private Function CountPositiveNewEntryFields(ByVal fieldNames As Variant) As Lon
     Next fieldName
 End Function
 
-Private Sub CopyNewEntryFieldsToLogbookRow(ByVal rowRange As Range)
-    Dim fieldNames As Variant
+Private Sub CopyNewEntryFieldsToLogbookRow(ByVal rowRange As Range, _
+                                           ByVal tbl As ListObject, _
+                                           ByVal flightReviewValue As Boolean, _
+                                           ByVal ipcValue As Boolean, _
+                                           ByVal opcValue As Boolean)
     Dim i As Long
+    Dim fieldNames As Variant
+    Dim columnNames As Variant
 
     fieldNames = NewEntryLogbookFieldNames()
+    columnNames = NewEntryLogbookColumnNames()
     For i = LBound(fieldNames) To UBound(fieldNames)
-        rowRange.Cells(1, 5 + i).Value = NewEntryValue(CStr(fieldNames(i)))
+        WriteValueToLogbookColumn rowRange, tbl, CStr(columnNames(i)), NewEntryValue(CStr(fieldNames(i)))
     Next i
+
+    WriteValueToLogbookColumn rowRange, tbl, "FR", flightReviewValue
+    WriteValueToLogbookColumn rowRange, tbl, "IPC", ipcValue
+    WriteValueToLogbookColumn rowRange, tbl, "OPC", opcValue
 End Sub
 
 Private Function NewEntryLogbookFieldNames() As Variant
     NewEntryLogbookFieldNames = Array( _
-        "neType", "neReg", "nePIC", "neOtherCrew", "neRemarks", _
+        "neType", "neReg", "neFlightID", "nePIC", "neOtherCrew", "neFrom", "neTo", "neRoute", "neRemarks", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
         "neSeCommandDay", "neSeCommandNight", _
@@ -1460,6 +1566,26 @@ Private Function NewEntryLogbookFieldNames() As Variant
         "neLandingsDay", "neLandingsNight", _
         "neILS", "neVOR", "neRNP", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
+
+Private Function NewEntryLogbookColumnNames() As Variant
+    NewEntryLogbookColumnNames = Array( _
+        "Type", "Reg", "Flight ID", "PIC", "Other Pilot or Crew", "From", "To", "Route", "Remarks", _
+        "Custom 1", "Custom 2", "Custom 3", "Custom 4", _
+        "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+        "SeCommandDay", "SeCommandNight", _
+        "MeIcusDay", "MeIcusNight", "MeDualDay", "MeDualNight", _
+        "MeCommandDay", "MeCommandNight", _
+        "CopilotDay", "CopilotNight", "IfrIf", "IfrSim", _
+        "LandingsDay", "LandingsNight", _
+        "ILS", "VOR", "RNP", "NDB", "DGA (CDI)", "DGA (Azi)", "Circling")
+End Function
+
+Private Sub WriteValueToLogbookColumn(ByVal rowRange As Range, _
+                                      ByVal tbl As ListObject, _
+                                      ByVal columnName As String, _
+                                      ByVal value As Variant)
+    rowRange.Cells(1, tbl.ListColumns(columnName).Index).Value = value
+End Sub
 
 Private Function NewEntryNumericFieldNames() As Variant
     NewEntryNumericFieldNames = Array( _
@@ -1522,7 +1648,8 @@ End Function
 
 Private Function NewEntryClearFieldNames() As Variant
     NewEntryClearFieldNames = Array( _
-        "neType", "neReg", "neOtherCrew", "neRemarks", _
+        "neType", "neReg", "neFlightID", "neOtherCrew", "neFrom", "neTo", "neRoute", "neRemarks", _
+        "neFR", "neIPC", "neOPC", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
         "neSeCommandDay", "neSeCommandNight", _
@@ -2052,8 +2179,13 @@ Private Sub AddMappedBaseFields(ByVal mapped As Object, _
     mapped("Day") = Day(entryDate)
     mapped("Type") = aircraftType
     mapped("Reg") = UCase$(Trim$(FieldValue(sourceRow, "Aircraft ID")))
+    mapped("Flight ID") = Trim$(FieldValue(sourceRow, "Flight #"))
     mapped("PIC") = FirstPresentField(sourceRow, Array("PIC/P1 Crew", "PIC"))
     mapped("Other Pilot or Crew") = JoinNonBlank(Array(FieldValue(sourceRow, "SIC/P2 Crew"), FieldValue(sourceRow, "Observer")), ", ")
+    mapped("From") = UCase$(Trim$(FieldValue(sourceRow, "From")))
+    mapped("To") = UCase$(Trim$(FieldValue(sourceRow, "To")))
+    mapped("Route") = Trim$(FieldValue(sourceRow, "Route"))
+    mapped("Remarks") = BuildLogTenRemarks(sourceRow)
     mapped("Details") = BuildLogTenDetails(sourceRow)
 
     InitialiseMappedNumericFields mapped
@@ -2124,12 +2256,12 @@ End Function
 Private Function BuildLogTenDetails(ByVal sourceRow As Object) As String
     Dim routeText As String
     Dim details As String
-    Dim flightNumber As String
+    Dim FlightID As String
 
-    flightNumber = Trim$(FieldValue(sourceRow, "Flight #"))
+    FlightID = Trim$(FieldValue(sourceRow, "Flight #"))
     routeText = BuildLogTenRouteText(sourceRow)
 
-    If flightNumber <> "" Then details = flightNumber
+    If FlightID <> "" Then details = FlightID
     If routeText <> "" Then details = AppendListItem(details, routeText, " ")
     details = AppendListItem(details, FieldValue(sourceRow, "Remarks"), " | ")
     details = AppendListItem(details, FieldValue(sourceRow, "IPC/ICC"), " | ")
@@ -2137,6 +2269,17 @@ Private Function BuildLogTenDetails(ByVal sourceRow As Object) As String
 
     If details = "" Then details = "LogTen import"
     BuildLogTenDetails = details
+End Function
+
+Private Function BuildLogTenRemarks(ByVal sourceRow As Object) As String
+    Dim remarks As String
+
+    remarks = AppendListItem(remarks, FieldValue(sourceRow, "Remarks"), " | ")
+    remarks = AppendListItem(remarks, FieldValue(sourceRow, "IPC/ICC"), " | ")
+    remarks = AppendListItem(remarks, FieldValue(sourceRow, "Flight Review"), " | ")
+
+    If remarks = "" Then remarks = "LogTen import"
+    BuildLogTenRemarks = remarks
 End Function
 
 Private Function BuildLogTenRouteText(ByVal sourceRow As Object) As String
@@ -2230,15 +2373,25 @@ End Sub
 
 Private Sub WriteMappedLogTenRow(ByVal targetRow As Range, ByVal tbl As ListObject, ByVal mapped As Object)
     Dim columnName As Variant
+    Dim remarksColumn As String
 
     WriteMappedValueToColumn targetRow, tbl, "Year", mapped("Year")
     WriteMappedValueToColumn targetRow, tbl, "Month", mapped("Month")
     WriteMappedValueToColumn targetRow, tbl, "Day", mapped("Day")
     WriteMappedValueToColumn targetRow, tbl, "Type", mapped("Type")
     WriteMappedValueToColumn targetRow, tbl, "Reg", mapped("Reg")
+    WriteMappedValueToColumnIfPresent targetRow, tbl, "Flight ID", mapped("Flight ID")
     WriteMappedValueToColumn targetRow, tbl, "PIC", mapped("PIC")
     WriteMappedValueToColumn targetRow, tbl, "Other Pilot or Crew", mapped("Other Pilot or Crew")
-    WriteMappedValueToColumn targetRow, tbl, "Details", mapped("Details")
+    WriteMappedValueToColumnIfPresent targetRow, tbl, "From", mapped("From")
+    WriteMappedValueToColumnIfPresent targetRow, tbl, "To", mapped("To")
+    WriteMappedValueToColumnIfPresent targetRow, tbl, "Route", mapped("Route")
+    remarksColumn = LogbookRemarksColumnName(tbl)
+    If remarksColumn = "Remarks" Then
+        WriteMappedValueToColumn targetRow, tbl, remarksColumn, mapped("Remarks")
+    ElseIf remarksColumn = "Details" Then
+        WriteMappedValueToColumn targetRow, tbl, remarksColumn, mapped("Details")
+    End If
 
     For Each columnName In Array("SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
                                  "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
@@ -2261,6 +2414,7 @@ Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Objec
     Dim iCol As Long
     Dim columnName As Variant
     Dim fmtCol As Long
+    Dim remarksColumn As String
 
     Set templateRow = tbl.DataBodyRange.Rows(1)
     Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
@@ -2279,9 +2433,18 @@ Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Objec
     WriteMappedValueToColumn newRow.Range, tbl, "Day", mapped("Day")
     WriteMappedValueToColumn newRow.Range, tbl, "Type", mapped("Type")
     WriteMappedValueToColumn newRow.Range, tbl, "Reg", mapped("Reg")
+    WriteMappedValueToColumnIfPresent newRow.Range, tbl, "Flight ID", mapped("Flight ID")
     WriteMappedValueToColumn newRow.Range, tbl, "PIC", mapped("PIC")
     WriteMappedValueToColumn newRow.Range, tbl, "Other Pilot or Crew", mapped("Other Pilot or Crew")
-    WriteMappedValueToColumn newRow.Range, tbl, "Details", mapped("Details")
+    WriteMappedValueToColumnIfPresent newRow.Range, tbl, "From", mapped("From")
+    WriteMappedValueToColumnIfPresent newRow.Range, tbl, "To", mapped("To")
+    WriteMappedValueToColumnIfPresent newRow.Range, tbl, "Route", mapped("Route")
+    remarksColumn = LogbookRemarksColumnName(tbl)
+    If remarksColumn = "Remarks" Then
+        WriteMappedValueToColumn newRow.Range, tbl, remarksColumn, mapped("Remarks")
+    ElseIf remarksColumn = "Details" Then
+        WriteMappedValueToColumn newRow.Range, tbl, remarksColumn, mapped("Details")
+    End If
 
     For Each columnName In Array("SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
                                  "SeCommandDay", "SeCommandNight", "MeIcusDay", "MeIcusNight", _
@@ -2307,6 +2470,15 @@ Private Sub WriteMappedValueToColumn(ByVal rowRange As Range, _
                                      ByVal columnName As String, _
                                      ByVal value As Variant)
     rowRange.Cells(1, tbl.ListColumns(columnName).Index).Value = value
+End Sub
+
+Private Sub WriteMappedValueToColumnIfPresent(ByVal rowRange As Range, _
+                                             ByVal tbl As ListObject, _
+                                             ByVal columnName As String, _
+                                             ByVal value As Variant)
+    If ListColumnExists(tbl, columnName) Then
+        WriteMappedValueToColumn rowRange, tbl, columnName, value
+    End If
 End Sub
 
 Private Function BuildExistingLogTenDuplicateKeys(ByVal tbl As ListObject) As Object
@@ -2343,6 +2515,7 @@ End Function
 Private Function BuildExistingLogTenDuplicateKey(ByVal tbl As ListObject, ByVal rowIndex As Long) As String
     Dim parts As Collection
     Dim columnName As Variant
+    Dim remarksColumn As String
     Dim value As Variant
 
     Set parts = New Collection
@@ -2354,7 +2527,12 @@ Private Function BuildExistingLogTenDuplicateKey(ByVal tbl As ListObject, ByVal 
     End If
     parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Type").DataBodyRange.Cells(rowIndex, 1).Value))
     parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Reg").DataBodyRange.Cells(rowIndex, 1).Value))
-    parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value))
+    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "Flight ID")))
+    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "From")))
+    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "Route")))
+    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "To")))
+    remarksColumn = LogbookRemarksColumnName(tbl)
+    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, remarksColumn)))
 
     For Each columnName In LogTenDuplicateHourColumns()
         parts.Add FormatDuplicateNumber(tbl.ListColumns(CStr(columnName)).DataBodyRange.Cells(rowIndex, 1).Value)
@@ -2371,7 +2549,11 @@ Private Function BuildLogTenDuplicateKey(ByVal mapped As Object) As String
     parts.Add Format$(CDate(mapped("Date")), "yyyy-mm-dd")
     parts.Add NormaliseDuplicateText(CStr(mapped("Type")))
     parts.Add NormaliseDuplicateText(CStr(mapped("Reg")))
-    parts.Add NormaliseDuplicateText(CStr(mapped("Details")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Flight ID")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("From")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Route")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("To")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Remarks")))
 
     For Each columnName In LogTenDuplicateHourColumns()
         parts.Add FormatDuplicateNumber(mapped(CStr(columnName)))
@@ -2954,6 +3136,7 @@ Public Sub RefreshAirportVisitStatsWithWorkbookProtection(Optional wb As Workboo
     Application.StatusBar = "Refreshing airport visit stats..."
 
     modAirports.RefreshAirportVisitStats targetWorkbook
+    If targetWorkbook Is ThisWorkbook Then ThisWorkbook.AutoFitStatsSheetColumns
 
 CleanExit:
     Application.StatusBar = oldStatusBar
@@ -3426,9 +3609,6 @@ Public Sub BuildRoutesTable(wb As Workbook)
     '===============================
     ' STEP 3: EXTRACT ROUTES FROM LOGBOOK
     '===============================
-        Dim detailsCol As Long
-        detailsCol = tblLog.ListColumns("Details").Index
-
         Dim allRoutes() As String
         Dim routeCount  As Long
         routeCount = 0
@@ -3442,7 +3622,7 @@ Public Sub BuildRoutesTable(wb As Workbook)
             If IsLogbookRowSimOnly(tblLog, row) Then GoTo NextRow
 
             Dim details As String
-            details = Trim(tblLog.DataBodyRange.cells(row, detailsCol).Value)
+            details = LogbookRouteSourceText(tblLog, row)
             If details = "" Then GoTo NextRow
 
             Dim d As Long
@@ -3618,11 +3798,8 @@ Sub AddNewRoutes()
         lastLogRow = tblLog.DataBodyRange.Rows.Count
         If IsLogbookRowSimOnly(tblLog, lastLogRow) Then Exit Sub
 
-        Dim detailsCol As Long
-        detailsCol = tblLog.ListColumns("Details").Index
-
         Dim details As String
-        details = Trim(tblLog.DataBodyRange.cells(lastLogRow, detailsCol).Value)
+        details = LogbookRouteSourceText(tblLog, lastLogRow)
         If details = "" Then Exit Sub
 
     '===============================
@@ -3728,6 +3905,41 @@ Private Function KeywordTableContainsToken(ByVal token As String) As Boolean
             Next keywordCell
         End If
     Next keywordColumn
+End Function
+
+Private Function LogbookRouteSourceText(ByVal tbl As ListObject, ByVal rowIndex As Long) As String
+    Dim routeText As String
+    Dim remarksColumn As String
+
+    If ListColumnExists(tbl, "From") Or ListColumnExists(tbl, "To") Or ListColumnExists(tbl, "Route") Then
+        routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "From"), " ")
+        routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "Route"), " ")
+        routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "To"), " ")
+    End If
+
+    If Len(Trim$(routeText)) = 0 Then
+        remarksColumn = LogbookRemarksColumnName(tbl)
+        If Len(remarksColumn) > 0 Then
+            routeText = CStr(LogbookColumnValue(tbl, rowIndex, remarksColumn))
+        End If
+    End If
+
+    LogbookRouteSourceText = Trim$(routeText)
+End Function
+
+Private Function LogbookColumnValue(ByVal tbl As ListObject, _
+                                    ByVal rowIndex As Long, _
+                                    ByVal columnName As String) As Variant
+    If Not ListColumnExists(tbl, columnName) Then Exit Function
+    LogbookColumnValue = tbl.ListColumns(columnName).DataBodyRange.Cells(rowIndex, 1).Value
+End Function
+
+Private Function LogbookRemarksColumnName(ByVal tbl As ListObject) As String
+    If ListColumnExists(tbl, "Remarks") Then
+        LogbookRemarksColumnName = "Remarks"
+    ElseIf ListColumnExists(tbl, "Details") Then
+        LogbookRemarksColumnName = "Details"
+    End If
 End Function
 
 Sub ExportKeplerJSON()
@@ -4031,7 +4243,7 @@ Sub SetLogbookFilterArrows()
 
     '--- Define which column names should show filter arrows
     Dim visibleColumns As Variant
-    visibleColumns = Array("Date", "Type", "Reg", "PIC", "Other Pilot or Crew", "Details")
+    visibleColumns = Array("Date", "Type", "Reg", "PIC", "Other Pilot or Crew", "From", "To", "Route", "Remarks")
 
     '--- Loop through all columns, show or hide arrow based on list above
     For i = 1 To tbl.ListColumns.Count
@@ -5168,82 +5380,84 @@ Private Function NewEntryLayoutFieldAddress(ByVal fieldName As String, ByVal com
             NewEntryLayoutFieldAddress = "F12"
         Case "nereg"
             NewEntryLayoutFieldAddress = "G12"
-        Case "nepic"
+        Case "neflightid"
             NewEntryLayoutFieldAddress = "H12"
+        Case "nepic"
+            NewEntryLayoutFieldAddress = "I12"
         Case "neothercrew"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "I12", "J12")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "J12", "K12")
         Case "nefr"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "J12", "L12")
-        Case "neipc"
             NewEntryLayoutFieldAddress = IIf(compactLayout, "K12", "M12")
-        Case "neopc"
+        Case "neipc"
             NewEntryLayoutFieldAddress = IIf(compactLayout, "L12", "N12")
+        Case "neopc"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "M12", "O12")
         Case "nefrom"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "M12", "C18")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "N12", "C18")
         Case "neto"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "N12", "D18")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "O12", "D18")
         Case "neroute"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "O12", "E18")
-        Case "neRemarks", "neremarks"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "P12", "J18")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "P12", "E18")
+        Case "nedetails", "neremarks"
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "Q12", "J18")
         Case "nesi1"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "Q12", "C30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "R12", "C30")
         Case "nesi2"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "R12", "D30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "S12", "D30")
         Case "nesi3"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "S12", "E30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "T12", "E30")
         Case "nesi4"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "T12", "F30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "U12", "F30")
         Case "neseicusday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "U12", "C24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "V12", "C24")
         Case "neseicusnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "V12", "D24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "W12", "D24")
         Case "nesedualday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "W12", "E24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "X12", "E24")
         Case "nesedualnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "X12", "F24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "Y12", "F24")
         Case "nesecommandday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "Y12", "G24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "Z12", "G24")
         Case "nesecommandnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "Z12", "H24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AA12", "H24")
         Case "nemeicusday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AA12", "I24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AB12", "I24")
         Case "nemeicusnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AB12", "J24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AC12", "J24")
         Case "nemedualday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AC12", "K24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AD12", "K24")
         Case "nemedualnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AD12", "L24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AE12", "L24")
         Case "nemecommandday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AE12", "M24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AF12", "M24")
         Case "nemecommandnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AF12", "N24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AG12", "N24")
         Case "necopilotday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AG12", "O24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AH12", "O24")
         Case "necopilotnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AH12", "P24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AI12", "P24")
         Case "neifrif"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AI12", "Q24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AJ12", "Q24")
         Case "neifrsim"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AJ12", "R24")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AK12", "R24")
         Case "nelandingsday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AK12", "J30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AL12", "J30")
         Case "nelandingsnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AL12", "K30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AM12", "K30")
         Case "neils"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AM12", "L30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AN12", "L30")
         Case "nevor"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AN12", "M30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AO12", "M30")
         Case "nernp", "nernav"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AO12", "N30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AP12", "N30")
         Case "nendb"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AP12", "O30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AQ12", "O30")
         Case "nedgacdi"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AQ12", "P30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AR12", "P30")
         Case "nedgaazi"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AR12", "Q30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AS12", "Q30")
         Case "necircling"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AS12", "R30")
+            NewEntryLayoutFieldAddress = IIf(compactLayout, "AT12", "R30")
     End Select
 End Function
 
@@ -5370,8 +5584,8 @@ End Function
 
 Private Function NewEntryLayoutFieldNames() As Variant
     NewEntryLayoutFieldNames = Array( _
-        "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "nePIC", "neOtherCrew", _
-        "neFR", "neIPC", "neOPC", "neFrom", "neTo", "neRoute", "neRemarks", "neRemarks", _
+        "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "neFlightID", "nePIC", "neOtherCrew", _
+        "neFR", "neIPC", "neOPC", "neFrom", "neTo", "neRoute", "neDetails", "neRemarks", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", "neSeCommandDay", "neSeCommandNight", _
         "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", "neLandingsDay", "neLandingsNight", _
@@ -5419,7 +5633,7 @@ Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As 
 
     For rowIndex = tbl.ListRows.Count To 1 Step -1
         entryDate = tbl.ListColumns("Date").DataBodyRange.Cells(rowIndex, 1).Value
-        flightReviewValue = tbl.ListColumns("FlightReview").DataBodyRange.Cells(rowIndex, 1).Value
+        flightReviewValue = tbl.ListColumns("FR").DataBodyRange.Cells(rowIndex, 1).Value
         ipcValue = tbl.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value
         opcValue = tbl.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value
 
@@ -5431,7 +5645,7 @@ Public Function PopulateCurrencyVerificationList(ByVal targetList As Object) As 
                 targetList.AddItem CStr(rowIndex)
                 targetList.List(targetList.ListCount - 1, 1) = Format$(CDate(entryDate), "dd mmm yyyy")
                 targetList.List(targetList.ListCount - 1, 2) = _
-                    CStr(tbl.ListColumns("Details").DataBodyRange.Cells(rowIndex, 1).Value)
+                    CStr(tbl.ListColumns(LogbookRemarksColumnName(tbl)).DataBodyRange.Cells(rowIndex, 1).Value)
                 targetList.List(targetList.ListCount - 1, 3) = CurrencyCheckMarker(flightReviewValue)
                 targetList.List(targetList.ListCount - 1, 4) = CurrencyCheckMarker(ipcValue)
                 targetList.List(targetList.ListCount - 1, 5) = CurrencyCheckMarker(opcValue)
@@ -5565,7 +5779,7 @@ Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Bo
         "Exclude " & selectedCount & " selected " & _
         IIf(selectedCount = 1, "entry", "entries") & _
         " from Flight Review, IPC, and OPC detection?" & vbCrLf & vbCrLf & _
-        "The original logbook details will not be changed.", _
+        "The original logbook remarks will not be changed.", _
         vbOKCancel + vbExclamation, _
         "Confirm Currency Exclusions")
     If response <> vbOK Then Exit Function
@@ -5578,7 +5792,9 @@ Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Bo
     For itemIndex = 0 To targetList.ListCount - 1
         If targetList.Selected(itemIndex) Then
             rowIndex = CLng(targetList.List(itemIndex, 0))
-            tbl.ListColumns("CurrencyExclusions").DataBodyRange.Cells(rowIndex, 1).Value = True
+            tbl.ListColumns("FR").DataBodyRange.Cells(rowIndex, 1).Value = False
+            tbl.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value = False
+            tbl.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value = False
         End If
     Next itemIndex
 
