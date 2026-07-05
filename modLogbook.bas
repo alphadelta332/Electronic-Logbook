@@ -9,6 +9,7 @@ Private Const NEW_ENTRY_SWAP_TEMP_SHEET As String = "New Entry Swap Temp"
 Private Const AIRCRAFT_TYPES_SHEET As String = "AircraftTypes"
 Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
+Private Const AIRPORT_ICAO_VALIDATION_NAME As String = "AirportIcaoValidationList"
 Private mApplyingNewEntryLayout As Boolean
 
 Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
@@ -1683,6 +1684,31 @@ Public Sub ClearNewEntryValidationHighlightsForTarget(ByVal targetRange As Range
     On Error GoTo 0
 End Sub
 
+Public Sub ConfigureNewEntryAirportValidation()
+    Dim workbookWasProtected As Boolean
+
+    workbookWasProtected = ThisWorkbook.ProtectStructure
+    On Error Resume Next
+    If workbookWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
+    On Error GoTo CleanFail
+
+    EnsureAirportIcaoValidationName
+    ApplyAirportIcaoValidationToNameBase "neFrom"
+    ApplyAirportIcaoValidationToNameBase "neTo"
+    ApplyAirportIcaoValidationToNameBase "neFrom2"
+    ApplyAirportIcaoValidationToNameBase "neTo2"
+    DeleteLegacyNewEntryAirportHintShape
+
+CleanExit:
+    On Error Resume Next
+    If workbookWasProtected Then ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    On Error GoTo 0
+    Exit Sub
+
+CleanFail:
+    Resume CleanExit
+End Sub
+
 Private Sub ClearNewEntryValidationHighlights()
     Dim fieldName As Variant
     Dim inputArea As Range
@@ -1726,6 +1752,89 @@ End Sub
 Private Function NewEntryValidationHighlightColor() As Long
     NewEntryValidationHighlightColor = RGB(255, 199, 206)
 End Function
+
+Private Sub EnsureAirportIcaoValidationName()
+    Dim nm As Name
+    Dim refersToText As String
+
+    refersToText = "=Airports[ICAO]"
+
+    On Error Resume Next
+    Set nm = ThisWorkbook.Names(AIRPORT_ICAO_VALIDATION_NAME)
+    On Error GoTo 0
+
+    If nm Is Nothing Then
+        ThisWorkbook.Names.Add Name:=AIRPORT_ICAO_VALIDATION_NAME, RefersTo:=refersToText
+    Else
+        nm.RefersTo = refersToText
+    End If
+End Sub
+
+Private Sub ApplyAirportIcaoValidationToNameBase(ByVal nameText As String)
+    Dim nm As Name
+    Dim targetRange As Range
+
+    Set nm = FindNameByBase(nameText)
+    If nm Is Nothing Then Exit Sub
+
+    On Error Resume Next
+    Set targetRange = nm.RefersToRange
+    On Error GoTo 0
+    If targetRange Is Nothing Then Exit Sub
+
+    If targetRange.MergeCells Then Set targetRange = targetRange.MergeArea
+    ApplyAirportIcaoValidationToRange targetRange
+End Sub
+
+Private Sub ApplyAirportIcaoValidationToRange(ByVal targetRange As Range)
+    Dim sheetWasProtected As Boolean
+
+    If targetRange Is Nothing Then Exit Sub
+
+    sheetWasProtected = targetRange.Worksheet.ProtectContents
+    On Error Resume Next
+    If sheetWasProtected Then targetRange.Worksheet.Unprotect Password:=ProtectionPassword()
+    On Error GoTo CleanFail
+
+    With targetRange.Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, _
+             Formula1:="=" & AIRPORT_ICAO_VALIDATION_NAME
+        .IgnoreBlank = True
+        .InCellDropdown = True
+        .InputTitle = "Airport ICAO"
+        .InputMessage = "Choose or enter a recognised ICAO airport code."
+        .ErrorTitle = "Airport not recognised"
+        .ErrorMessage = "Enter an ICAO airport code from the Airports table."
+        .ShowInput = True
+        .ShowError = True
+    End With
+
+CleanExit:
+    On Error Resume Next
+    If sheetWasProtected Then
+        targetRange.Worksheet.Protect Password:=ProtectionPassword(), DrawingObjects:=False, _
+            Contents:=True, Scenarios:=True, UserInterfaceOnly:=True, AllowUsingPivotTables:=True
+    End If
+    On Error GoTo 0
+    Exit Sub
+
+CleanFail:
+    Resume CleanExit
+End Sub
+
+Private Sub DeleteLegacyNewEntryAirportHintShape()
+    Dim sheetName As Variant
+    Dim ws As Worksheet
+
+    For Each sheetName In Array(NEW_ENTRY_ACTIVE_SHEET, NEW_ENTRY_UNUSED_SHEET)
+        On Error Resume Next
+        Set ws = ThisWorkbook.Worksheets(CStr(sheetName))
+        If Not ws Is Nothing Then ws.Shapes("AirportNameHint").Delete
+        Set ws = Nothing
+        On Error GoTo 0
+    Next sheetName
+End Sub
 
 Private Function CombineNewEntryFieldNames(ParamArray fieldGroups() As Variant) As Variant
     Dim combined As Collection
@@ -5360,6 +5469,7 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
 
     ConfigureNewEntryLayoutControls
     EnforceNewEntrySheetRoles
+    ConfigureNewEntryAirportValidation
     If layoutChanged Then ActivateNewEntrySheet
 
 CleanExit:
