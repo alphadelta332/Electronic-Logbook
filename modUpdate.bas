@@ -1632,7 +1632,7 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
     On Error GoTo Fail
 
     ' Copy full table formats by destination column name, using source-template
-    ' columns for 1.5.0 columns that did not exist in older workbooks.
+    ' columns for 2.0.0 columns that did not exist in older workbooks.
     For Each dstCol In dstLo.ListColumns
         If dstCol.Index > dstLo.ListColumns("CumAzi").Index Then Exit For
         sourceFormatName = LogbookSourceFormatColumnName(srcLo, dstCol.Name)

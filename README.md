@@ -8,7 +8,7 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
-### [1.5.0] - 2026-06-29
+### [2.0.0] - 2026-07-05
 - Expanded Airports table updates to use the OurAirports dataset for international airports
 - Added workbook airport dataset update checks with visible errors if the refresh cannot complete
 - Preserved existing local airport rows when they are not present in the imported dataset

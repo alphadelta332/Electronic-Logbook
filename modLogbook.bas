@@ -170,16 +170,18 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         Next i
 
-        If NewEntryValue("neFrom") = "" Then
-            MarkNewEntryProblemFields Array("neFrom")
-            MsgBox "ERROR: Departure Airport cannot be blank.", vbCritical
-            GoTo Cleanup
-        End If
+        If NewEntryNumericValue("neIfrSim") = 0 Then
+            If NewEntryValue("neFrom") = "" Then
+                MarkNewEntryProblemFields Array("neFrom")
+                MsgBox "ERROR: Departure Airport cannot be blank.", vbCritical
+                GoTo Cleanup
+            End If
 
-        If NewEntryValue("neTo") = "" Then
-            MarkNewEntryProblemFields Array("neTo")
-            MsgBox "ERROR: Destination Airport cannot be blank.", vbCritical
-            GoTo Cleanup
+            If NewEntryValue("neTo") = "" Then
+                MarkNewEntryProblemFields Array("neTo")
+                MsgBox "ERROR: Destination Airport cannot be blank.", vbCritical
+                GoTo Cleanup
+            End If
         End If
 
     '--- 3f. Non-Numeric Value Check (Hours, Landings, Approaches)
@@ -1770,8 +1772,12 @@ Private Function UnrecognisedNewEntryAirportFieldNames() As Variant
 
     Set problemFields = New Collection
 
-    If Not NewEntryAirportIsRecognised(CStr(NewEntryValue("neFrom"))) Then problemFields.Add "neFrom"
-    If Not NewEntryAirportIsRecognised(CStr(NewEntryValue("neTo"))) Then problemFields.Add "neTo"
+    If Trim$(CStr(NewEntryValue("neFrom"))) <> "" Then
+        If Not NewEntryAirportIsRecognised(CStr(NewEntryValue("neFrom"))) Then problemFields.Add "neFrom"
+    End If
+    If Trim$(CStr(NewEntryValue("neTo"))) <> "" Then
+        If Not NewEntryAirportIsRecognised(CStr(NewEntryValue("neTo"))) Then problemFields.Add "neTo"
+    End If
 
     If problemFields.Count = 0 Then
         UnrecognisedNewEntryAirportFieldNames = Array()
@@ -6306,6 +6312,26 @@ Public Sub EnsureCurrencyRecencyFormulaCompatibility(Optional wb As Workbook = N
 
     formulaText = Replace(formulaText, "LogbookSEA", "LogbookMEA")
     SetWorkbookFormula targetWorkbook, "IPCOPCExpiryMEA", formulaText
+
+CleanExit:
+End Sub
+
+Public Sub EnsureStatsFormulaCompatibility(Optional wb As Workbook = Nothing)
+    Dim targetWorkbook As Workbook
+    Dim ws As Worksheet
+
+    On Error GoTo CleanExit
+    If wb Is Nothing Then
+        Set targetWorkbook = ThisWorkbook
+    Else
+        Set targetWorkbook = wb
+    End If
+
+    If FindListObject(targetWorkbook, "Logbook") Is Nothing Then GoTo CleanExit
+
+    Set ws = targetWorkbook.Worksheets("Stats")
+    SetCurrencyFormula ws, "C15", "=LET(maxVal,MAX(Logbook[TotalHours]),idx,MATCH(maxVal,Logbook[TotalHours],0),date,INDEX(Logbook[Date],idx),fromText,TRIM(INDEX(Logbook[From],idx)&""""),viaText,TRIM(INDEX(Logbook[Via],idx)&""""),toText,TRIM(INDEX(Logbook[To],idx)&""""),remarksText,TRIM(INDEX(Logbook[Remarks],idx)&""""),routeText,TEXTJOIN(""-"",TRUE,fromText,viaText,toText),details,routeText&IF(remarksText<>"""",IF(routeText<>"""","" "","""")&""(""&remarksText&"")"",""""),TEXT(maxVal,""0.0"")&IF(details<>"""","" — ""&details,"""")&"" (""&TEXT(date,""D MMMM YYYY"")&"")"")"
+    SetCurrencyFormula ws, "C16", "=LET(minVal,MINIFS(Logbook[TotalHours],Logbook[TotalHours],"">""&0),idx,MATCH(minVal,Logbook[TotalHours],0),date,INDEX(Logbook[Date],idx),fromText,TRIM(INDEX(Logbook[From],idx)&""""),viaText,TRIM(INDEX(Logbook[Via],idx)&""""),toText,TRIM(INDEX(Logbook[To],idx)&""""),remarksText,TRIM(INDEX(Logbook[Remarks],idx)&""""),routeText,TEXTJOIN(""-"",TRUE,fromText,viaText,toText),details,routeText&IF(remarksText<>"""",IF(routeText<>"""","" "","""")&""(""&remarksText&"")"",""""),TEXT(minVal,""0.0"")&IF(details<>"""","" — ""&details,"""")&"" (""&TEXT(date,""D MMMM YYYY"")&"")"")"
 
 CleanExit:
 End Sub

@@ -34,6 +34,8 @@ Private Sub Workbook_Open()
     RefreshTodayValue
     SetWorkbookOpenStatus "Checking currency and recency formulas"
     EnsureCurrencyRecencyFormulaCompatibility ThisWorkbook
+    SetWorkbookOpenStatus "Checking Stats formulas"
+    EnsureStatsFormulaCompatibility ThisWorkbook
 
     ' Check for logbook updates
     SetWorkbookOpenStatus "Checking for workbook updates"
@@ -151,7 +153,10 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
         EnsureCurrencyRecencyFormulaCompatibility ThisWorkbook
         If RefreshTodayValue() Then Sh.Calculate
     End If
-    If Sh.Name = "Stats" Then AutoFitStatsSheetColumns
+    If Sh.Name = "Stats" Then
+        EnsureStatsFormulaCompatibility ThisWorkbook
+        AutoFitStatsSheetColumns
+    End If
 
 CleanExit:
 End Sub
