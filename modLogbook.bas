@@ -1024,7 +1024,7 @@ Private Sub UpdateLogbookFilterHeadersNamedRange(ByVal tbl As ListObject)
     Set ws = tbl.Parent
     Set dateHeader = tbl.HeaderRowRange.Cells(1, tbl.ListColumns("Date").Index)
     Set entryHeaders = ws.Range(ws.Cells(tbl.HeaderRowRange.Row, tbl.ListColumns("Type").Range.Column), _
-                                ws.Cells(tbl.HeaderRowRange.Row, tbl.ListColumns("SeIcusDay").Range.Column - 1))
+                                ws.Cells(tbl.HeaderRowRange.Row, tbl.ListColumns("Circling").Range.Column))
 
     filterFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & dateHeader.Address & _
                     ",'" & Replace(ws.Name, "'", "''") & "'!" & entryHeaders.Address
@@ -4641,21 +4641,21 @@ Sub SetLogbookFilterArrows()
     Dim tbl     As ListObject
     Dim i       As Long
     Dim typeIndex As Long
-    Dim lastCustomEntryIndex As Long
+    Dim circlingIndex As Long
 
     Set wsLog = ThisWorkbook.Sheets("Logbook")
     Set tbl = wsLog.ListObjects("Logbook")
 
     typeIndex = tbl.ListColumns("Type").Index
-    lastCustomEntryIndex = tbl.ListColumns("SeIcusDay").Index - 1
+    circlingIndex = tbl.ListColumns("Circling").Index
 
     UpdateLogbookFilterHeadersNamedRange tbl
 
-    '--- Show arrows on Date and on every entry-detail column before the hours block.
+    '--- Show arrows on Date and on every logbook-entry column from Type through Circling.
     For i = 1 To tbl.ListColumns.Count
         Dim showArrow As Boolean
         showArrow = (tbl.ListColumns(i).Name = "Date") Or _
-                    (i >= typeIndex And i <= lastCustomEntryIndex)
+                    (i >= typeIndex And i <= circlingIndex)
 
         tbl.Range.AutoFilter Field:=i, VisibleDropDown:=showArrow
     Next i

@@ -1966,7 +1966,7 @@ Private Sub UpdateLogbookFilterHeadersNamedRange(masterWb As Workbook, lo As Lis
     Set ws = lo.Parent
     Set dateHeader = lo.HeaderRowRange.Cells(1, lo.ListColumns("Date").Index)
     Set entryHeaders = ws.Range(ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("Type").Range.Column), _
-                                ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("SeIcusDay").Range.Column - 1))
+                                ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("Circling").Range.Column))
 
     filterFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & dateHeader.Address & _
                     ",'" & Replace(ws.Name, "'", "''") & "'!" & entryHeaders.Address

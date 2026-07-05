@@ -1644,13 +1644,13 @@ public sealed class ExcelWorkbookMigrator
         var headerRow = (int)table.HeaderRowRange.Row;
         var dateColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Date")).Range.Column;
         var typeColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Type")).Range.Column;
-        var lastCustomEntryColumn =
-            (int)table.ListColumns.Item(GetColumnIndex(table, "SeIcusDay")).Range.Column - 1;
+        var circlingColumn =
+            (int)table.ListColumns.Item(GetColumnIndex(table, "Circling")).Range.Column;
 
         dynamic dateHeader = worksheet.Cells.Item(headerRow, dateColumn);
         dynamic entryHeaders = worksheet.Range[
             worksheet.Cells.Item(headerRow, typeColumn),
-            worksheet.Cells.Item(headerRow, lastCustomEntryColumn)];
+            worksheet.Cells.Item(headerRow, circlingColumn)];
         dynamic filterHeaders = workbook.Application.Union(dateHeader, entryHeaders);
 
         SetWorkbookName(workbook, "LogbookFilterHeaders", filterHeaders);
