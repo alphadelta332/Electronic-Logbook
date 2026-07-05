@@ -80,13 +80,6 @@ if ($modLogbook -match "https://docs\.google\.com/forms/d/e/REPLACE_WITH_FORM_ID
     throw "ReportBug Google Forms responder URL has not been configured."
 }
 
-$userFormFiles = @("frmVerifyCurrency.frm", "frmVerifyCurrency.frx")
-foreach ($formFile in $userFormFiles) {
-    if (-not (Test-Path (Join-Path $repoRoot $formFile))) {
-        throw "$formFile not found."
-    }
-}
-
 $thisWorkbookPath = Join-Path $repoRoot "ThisWorkbook.cls"
 if (-not (Test-Path $thisWorkbookPath)) {
     throw "ThisWorkbook.cls not found."

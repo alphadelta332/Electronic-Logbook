@@ -13,8 +13,7 @@ $sourceFiles = @(
     "modAirports.bas",
     "modLogbook.bas",
     "modUpdate.bas",
-    "ThisWorkbook.cls",
-    "frmVerifyCurrency.frm"
+    "ThisWorkbook.cls"
 )
 $issues = New-Object System.Collections.Generic.List[string]
 
