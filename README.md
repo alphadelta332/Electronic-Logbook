@@ -189,15 +189,20 @@ Only enable macros and VBA project access for workbooks downloaded from this rep
 
 The release workbook may run in protected mode to reduce accidental edits. Intended input areas remain editable, including New Entry (`ne*`) fields, supported override/settings cells, and editable Logbook table data.
 
-For development workflows, protection can be toggled with macros:
+Protection follows the workbook's `GitHubBranch` named range:
 
-1. `DisableProtectionForDevelopment`
-2. `EnableProtectionForRelease`
+- `dev`: protection is removed automatically each time the workbook opens.
+- `main`: protection is applied automatically each time the workbook opens.
+
+For development workflows, protection mode can be toggled persistently with macros:
+
+1. `DisableProtectionForDevelopment` sets `GitHubBranch` to `dev` and removes protection.
+2. `EnableProtectionForRelease` sets `GitHubBranch` to `main` and applies protection.
 
 Preparation scripts also attempt to call these macros automatically:
 
-- `PrepareForTesting.ps1` disables protection mode when available.
-- `PrepareForRelease.ps1` enables protection mode when available.
+- `PrepareForTesting.ps1` sets `GitHubBranch` to `dev`, so protection stays off across launches.
+- `PrepareForRelease.ps1` sets `GitHubBranch` to `main`, so protection is restored for release.
 
 ### 4. First open -- build the Routes table
 
@@ -232,7 +237,7 @@ After an entry is added, the Logbook table is automatically sorted by Date. Depe
 
 The Details field is checked against the workbook's **Keywords** table to identify IPC, OPC, and Flight Review entries. Matching entries feed the relevant currency and recency calculations, and the logbook asks for confirmation before saving them. Keywords can be configured to match the terms you normally use.
 
-Only use an OPC keyword for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption and 61.880 proficiency-validity logic.
+Only use an OPC keyword for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption. If an OPC also qualifies as an IPC for 61.880 proficiency validity or circling currency, tick IPC as well; the IPC checkbox is the source of truth for those calculations.
 
 The entry form includes validation that will warn you of potential errors before saving, including:
 

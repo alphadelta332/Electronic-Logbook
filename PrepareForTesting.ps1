@@ -42,5 +42,5 @@ if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPat
 
 Write-Host ""
 Write-Host "Master workbook state set to branch 'dev' and version '$version'." -ForegroundColor Green
-Write-Host "Development protection mode disabled when the macro is available." -ForegroundColor Green
+Write-Host "Development protection mode persists while GitHubBranch is 'dev'." -ForegroundColor Green
 Write-Host "Working copy branch set to 'dev' when configured; its LogbookVersion is left unchanged." -ForegroundColor Green

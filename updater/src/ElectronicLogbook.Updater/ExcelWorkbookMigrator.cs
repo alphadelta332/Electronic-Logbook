@@ -399,7 +399,7 @@ public sealed class ExcelWorkbookMigrator
         if (rows <= 0 ||
             !HasColumn((object)destination, "From") ||
             !HasColumn((object)destination, "To") ||
-            !HasColumn((object)destination, "Route") ||
+            !HasColumn((object)destination, "Via") ||
             !HasColumn((object)destination, "Remarks"))
         {
             return;
@@ -409,7 +409,7 @@ public sealed class ExcelWorkbookMigrator
         {
             CopyColumnIfPresent(source, destination, "From", rows);
             CopyColumnIfPresent(source, destination, "To", rows);
-            CopyColumnIfPresent(source, destination, "Route", rows);
+            CopyColumnIfPresent(source, destination, "Via", rows);
             CopyColumnIfPresent(source, destination, "Remarks", rows);
             return;
         }
@@ -435,7 +435,7 @@ public sealed class ExcelWorkbookMigrator
 
         SetColumnValues(destination, "From", fromValues, rows);
         SetColumnValues(destination, "To", toValues, rows);
-        SetColumnValues(destination, "Route", routeValues, rows);
+        SetColumnValues(destination, "Via", routeValues, rows);
         SetColumnValues(destination, "Remarks", remarksValues, rows);
     }
 
@@ -1207,8 +1207,8 @@ public sealed class ExcelWorkbookMigrator
         object?[]? fromValues = HasColumn((object)logbook, "From")
             ? ReadColumnValues(logbook, "From", rows)
             : null;
-        object?[]? routeValues = HasColumn((object)logbook, "Route")
-            ? ReadColumnValues(logbook, "Route", rows)
+        object?[]? routeValues = HasColumn((object)logbook, "Via")
+            ? ReadColumnValues(logbook, "Via", rows)
             : null;
         object?[]? toValues = HasColumn((object)logbook, "To")
             ? ReadColumnValues(logbook, "To", rows)
@@ -1490,6 +1490,7 @@ public sealed class ExcelWorkbookMigrator
         CopySumTotalsFormatting(source, destination);
         ApplyLogbookSumTotalsFormatting(outputWorkbookObject, destination);
         ApplyLogbookTotalsAreaFormatting(destination);
+        SetLogbookFilterHeadersName(outputWorkbookObject, destination);
         RestoreHeaderPalette(sourceWorkbook, outputWorkbook, destination);
         ApplyHiddenHourHeaderFormatting(destination);
         ApplyNativeCheckboxesIfAvailable(destination, "FR", "IPC", "OPC");
@@ -1520,7 +1521,7 @@ public sealed class ExcelWorkbookMigrator
         }
         if (string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "Route", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(name, "Via", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase))
         {
             return HasColumn((object)source, "Details") ? "Details" : name;
@@ -1636,6 +1637,25 @@ public sealed class ExcelWorkbookMigrator
                 worksheet.Cells.Item(totalsRow, sumEndColumn)]);
     }
 
+    private static void SetLogbookFilterHeadersName(object workbookObject, dynamic table)
+    {
+        dynamic workbook = workbookObject;
+        dynamic worksheet = table.Parent;
+        var headerRow = (int)table.HeaderRowRange.Row;
+        var dateColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Date")).Range.Column;
+        var typeColumn = (int)table.ListColumns.Item(GetColumnIndex(table, "Type")).Range.Column;
+        var lastCustomEntryColumn =
+            (int)table.ListColumns.Item(GetColumnIndex(table, "SeIcusDay")).Range.Column - 1;
+
+        dynamic dateHeader = worksheet.Cells.Item(headerRow, dateColumn);
+        dynamic entryHeaders = worksheet.Range[
+            worksheet.Cells.Item(headerRow, typeColumn),
+            worksheet.Cells.Item(headerRow, lastCustomEntryColumn)];
+        dynamic filterHeaders = workbook.Application.Union(dateHeader, entryHeaders);
+
+        SetWorkbookName(workbook, "LogbookFilterHeaders", filterHeaders);
+    }
+
     private static void ApplyLogbookSumTotalsFormatting(object workbookObject, dynamic table)
     {
         dynamic workbook = workbookObject;
@@ -1645,6 +1665,9 @@ public sealed class ExcelWorkbookMigrator
         sumTotalsRange.Interior.Pattern = 1;
         sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, 0.2);
         sumTotalsRange.Font.Color = 0xFFFFFF;
+        dynamic labelCell = sumTotalsRange.Cells.Item(1, 1).Offset[0, -1];
+        labelCell.HorizontalAlignment = -4152;
+        labelCell.WrapText = false;
     }
 
     private static void ApplyLogbookTotalsAreaFormatting(dynamic table)
@@ -1927,7 +1950,7 @@ public sealed class ExcelWorkbookMigrator
 
     private static void SetWorkbookName(dynamic workbook, string name, dynamic range)
     {
-        var refersTo = $"='{range.Worksheet.Name}'!{range.Address}";
+        var refersTo = BuildRangeRefersToFormula(range);
         try
         {
             workbook.Names.Item(name).RefersTo = refersTo;
@@ -1936,6 +1959,21 @@ public sealed class ExcelWorkbookMigrator
         {
             workbook.Names.Add(name, refersTo);
         }
+    }
+
+    private static string BuildRangeRefersToFormula(dynamic range)
+    {
+        var areas = range.Areas;
+        var areaCount = (int)areas.Count;
+        var parts = new string[areaCount];
+        for (var index = 1; index <= areaCount; index++)
+        {
+            dynamic area = areas.Item(index);
+            string worksheetName = area.Worksheet.Name;
+            parts[index - 1] = $"'{worksheetName.Replace("'", "''")}'!{area.Address}";
+        }
+
+        return "=" + string.Join(",", parts);
     }
 
     private static void ValidateLogbookStructure(
@@ -2015,7 +2053,7 @@ public sealed class ExcelWorkbookMigrator
             !string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Route", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "Via", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) &&

@@ -161,7 +161,7 @@ End Function
 '
 ' Data preserved from user:
 '   Logbook[Year] through Logbook[Circling]  (raw flight entries)
-'   Legacy Logbook[Details] split into From, To, Route, and Remarks
+'   Legacy Logbook[Details] split into From, To, Via, and Remarks
 '   Legacy currency detection helper columns converted to FR, IPC, and OPC
 '   BaseAirportsTop10                         (matched by ICAO)
 '   Keywords table                            (user detection terms)
@@ -574,10 +574,11 @@ UpdateFailed:
         failureNote = "Your current file has not been changed."
     End If
 
-    MsgBox "Update failed at step: " & diagStep & vbCrLf & vbCrLf & _
-           "Error " & errNum & ": " & errMsg & vbCrLf & vbCrLf & _
+    MsgBox BuildUpdateUserFacingErrorMessage( _
+           "The workbook update could not be completed.", _
            failureNote & vbCrLf & vbCrLf & _
-           "Diagnostics were written to:" & vbCrLf & diagnosticsPath, _
+           "Please try updating again. If the problem persists, use the Report a Bug button and include the update diagnostics file.", _
+           errNum, "modUpdate.RunUpdate", errMsg, diagStep, diagnosticsPath), _
            vbCritical, "Update Failed"
 End Sub
 
@@ -801,6 +802,27 @@ Private Function BuildUpdateDiagnosticsPath(ByVal folderPath As String, ByVal wo
     BuildUpdateDiagnosticsPath = folderPath & "\" & baseName & "_UpdateDiagnostics.txt"
 End Function
 
+Private Function BuildUpdateUserFacingErrorMessage(ByVal userMessage As String, _
+                                                   ByVal recoveryMessage As String, _
+                                                   ByVal errNum As Long, _
+                                                   ByVal errSource As String, _
+                                                   ByVal errDesc As String, _
+                                                   Optional ByVal diagStep As String = "", _
+                                                   Optional ByVal diagnosticsPath As String = "") As String
+    Dim details As String
+
+    details = "Technical details for support:" & vbCrLf & _
+              "Error " & CStr(errNum)
+    If Trim$(errSource) <> "" Then details = details & " in " & errSource
+    If Trim$(errDesc) <> "" Then details = details & ": " & errDesc
+    If Trim$(diagStep) <> "" Then details = details & vbCrLf & "Step: " & diagStep
+    If Trim$(diagnosticsPath) <> "" Then details = details & vbCrLf & "Diagnostics: " & diagnosticsPath
+
+    BuildUpdateUserFacingErrorMessage = userMessage & vbCrLf & vbCrLf & _
+                                        recoveryMessage & vbCrLf & vbCrLf & _
+                                        details
+End Function
+
 Private Function BuildWizardReportPath(ByVal folderPath As String, ByVal workbookName As String) As String
     Dim dotPos As Long
     Dim baseName As String
@@ -1022,13 +1044,13 @@ Private Sub SplitLegacyDetailsIntoNewEntryColumns(ByVal loSrc As ListObject, _
     If rowCount <= 0 Then Exit Sub
     If Not ListColumnExists(loDst, "From") Then Exit Sub
     If Not ListColumnExists(loDst, "To") Then Exit Sub
-    If Not ListColumnExists(loDst, "Route") Then Exit Sub
+    If Not ListColumnExists(loDst, "Via") Then Exit Sub
     If Not ListColumnExists(loDst, "Remarks") Then Exit Sub
 
     If ListColumnExists(loSrc, "Remarks") Then
         CopyColumnIfPresent loSrc, loDst, "From", rowCount
         CopyColumnIfPresent loSrc, loDst, "To", rowCount
-        CopyColumnIfPresent loSrc, loDst, "Route", rowCount
+        CopyColumnIfPresent loSrc, loDst, "Via", rowCount
         CopyColumnIfPresent loSrc, loDst, "Remarks", rowCount
         Exit Sub
     End If
@@ -1043,7 +1065,7 @@ Private Sub SplitLegacyDetailsIntoNewEntryColumns(ByVal loSrc As ListObject, _
 
         loDst.ListColumns("From").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(0)
         loDst.ListColumns("To").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(1)
-        loDst.ListColumns("Route").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(2)
+        loDst.ListColumns("Via").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(2)
         loDst.ListColumns("Remarks").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(3)
     Next rowIndex
 End Sub
@@ -1665,7 +1687,7 @@ Private Function LogbookSourceFormatColumnName(ByVal srcLo As ListObject, _
             Else
                 LogbookSourceFormatColumnName = "Reg"
             End If
-        Case "from", "to", "route", "remarks"
+        Case "from", "to", "via", "remarks"
             If ListColumnExists(srcLo, "Details") Then
                 LogbookSourceFormatColumnName = "Details"
             Else
@@ -1807,6 +1829,7 @@ Private Sub NormaliseLogbookFormatting(masterWb As Workbook)
     NormaliseLogbookDataBorders lo
     NormaliseLogbookTotalsFormatting lo
     UpdateLogbookTotalsNamedRanges masterWb, lo
+    UpdateLogbookFilterHeadersNamedRange masterWb, lo
     ApplyLogbookPalette masterWb, lo
     ApplyLogbookTotalsRowBorders lo
     ApplyLogbookTotalsFormatting masterWb, lo
@@ -1934,6 +1957,29 @@ Private Sub UpdateLogbookTotalsNamedRanges(masterWb As Workbook, lo As ListObjec
     On Error GoTo 0
 End Sub
 
+Private Sub UpdateLogbookFilterHeadersNamedRange(masterWb As Workbook, lo As ListObject)
+    Dim ws As Worksheet
+    Dim dateHeader As Range
+    Dim entryHeaders As Range
+    Dim filterFormula As String
+
+    Set ws = lo.Parent
+    Set dateHeader = lo.HeaderRowRange.Cells(1, lo.ListColumns("Date").Index)
+    Set entryHeaders = ws.Range(ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("Type").Range.Column), _
+                                ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("SeIcusDay").Range.Column - 1))
+
+    filterFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & dateHeader.Address & _
+                    ",'" & Replace(ws.Name, "'", "''") & "'!" & entryHeaders.Address
+
+    On Error Resume Next
+    masterWb.Names("LogbookFilterHeaders").RefersTo = filterFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        masterWb.Names.Add Name:="LogbookFilterHeaders", RefersTo:=filterFormula
+    End If
+    On Error GoTo 0
+End Sub
+
 Private Sub ApplyLogbookPalette(masterWb As Workbook, lo As ListObject)
     Const SUM_TOTALS_LIGHTNESS As Double = 0.2
     Dim headerRange As Range
@@ -1965,6 +2011,8 @@ Private Sub ApplyLogbookPalette(masterWb As Workbook, lo As ListObject)
         sumTotalsRange.Interior.Pattern = xlSolid
         sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
         sumTotalsRange.Font.Color = vbWhite
+        sumTotalsRange.Cells(1, 1).Offset(0, -1).HorizontalAlignment = xlRight
+        sumTotalsRange.Cells(1, 1).Offset(0, -1).WrapText = False
     End If
 End Sub
 
@@ -2312,13 +2360,15 @@ Private Sub RefreshAndRegroupPivots(masterWb As Workbook)
     Exit Sub
 
 GroupFail:
-    MsgBox "Warning: HoursByYear date grouping could not be automatically restored." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description & vbCrLf & vbCrLf & _
-           "To fix manually in the updated file:" & vbCrLf & _
+    MsgBox BuildUpdateUserFacingErrorMessage( _
+           "HoursByYear date grouping could not be automatically restored.", _
+           "The update can still be used, but the Hours by Year chart may need a manual refresh." & vbCrLf & vbCrLf & _
+           "To fix it in the updated file:" & vbCrLf & _
            "  1. Open the HoursByYear pivot table" & vbCrLf & _
            "  2. Remove 'Date' from the Rows field" & vbCrLf & _
            "  3. Press Ctrl+Alt+F5 to refresh all" & vbCrLf & _
            "  4. Re-add 'Date' to the Rows field", _
+           Err.Number, Err.Source, Err.Description, "Restoring HoursByYear pivot date grouping"), _
            vbExclamation, "Pivot Grouping Warning"
     Err.Clear
 End Sub

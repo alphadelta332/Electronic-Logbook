@@ -94,6 +94,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         flightReviewDetected = NewEntryBooleanValue("neFR") Or ipcDetected Or _
                                KeywordDetected(CStr(NewEntryValue("neRemarks")), "Flight Review")
         RefreshDateCalculationFormulas tbl
+        ClearNewEntryValidationHighlights
 
     '===============================
     ' STEP 3: HARD VALIDATION (STOP ERRORS)
@@ -103,18 +104,21 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
     '--- 3a. Date Validity Check
         'Check 1: Ensure the date field doesn't contain a formula error (e.g. invalid month string)
         If IsError(NewEntryValue("neDate")) Then
+            MarkNewEntryProblemFields NewEntryDateInputFieldNames()
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
         'Check 2: Ensure the resolved value is actually a recognisable date
         If Not IsDate(NewEntryValue("neDate")) Then
+            MarkNewEntryProblemFields NewEntryDateInputFieldNames()
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
 
         'Check 3: Ensure the date is not in the future
         If CDate(NewEntryValue("neDate")) > todayDate Then
+            MarkNewEntryProblemFields NewEntryDateInputFieldNames()
             MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
             GoTo Cleanup
         End If
@@ -128,6 +132,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
             'Check 1: Aircraft registration must not be blank
             If CStr(NewEntryValue("neReg")) = "" Then
+                MarkNewEntryProblemFields Array("neReg")
                 MsgBox "ERROR: Registration cannot be blank.", vbCritical
                 GoTo Cleanup
             End If
@@ -136,12 +141,14 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
     '--- 3c. Zero Hours Check
         If CountPositiveNewEntryFields(NewEntryFlightHourFieldNames()) = 0 Then
+            MarkNewEntryProblemFields NewEntryFlightHourFieldNames()
             MsgBox "ERROR: Total hours cannot be zero.", vbCritical
             GoTo Cleanup
         End If
 
     '--- 3d. IFR Hours vs Total Hours Check
         If NewEntryNumericValue("neIfrIf") > SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
+            MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neIfrIf"), NewEntryFlightTimeFieldNames())
             MsgBox "ERROR: In Flight Instrument Hours cannot be greater than Total Hours.", vbCritical
             GoTo Cleanup
         End If
@@ -157,14 +164,21 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
         For i = 0 To UBound(requiredFields)
             If NewEntryValue(CStr(requiredFields(i))) = "" Then
+                MarkNewEntryProblemFields Array(CStr(requiredFields(i)))
                 MsgBox "ERROR: " & fieldNames(i) & " cannot be blank.", vbCritical
                 GoTo Cleanup
             End If
         Next i
 
-        'Check 2: Remarks field must not be blank (checked separately as it falls outside the loop range)
-        If NewEntryValue("neRemarks") = "" Then
-            MsgBox "ERROR: Remarks cannot be blank.", vbCritical
+        If NewEntryValue("neFrom") = "" Then
+            MarkNewEntryProblemFields Array("neFrom")
+            MsgBox "ERROR: Departure Airport cannot be blank.", vbCritical
+            GoTo Cleanup
+        End If
+
+        If NewEntryValue("neTo") = "" Then
+            MarkNewEntryProblemFields Array("neTo")
+            MsgBox "ERROR: Destination Airport cannot be blank.", vbCritical
             GoTo Cleanup
         End If
 
@@ -174,6 +188,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         For Each checkField In NewEntryNumericFieldNames()
             If NewEntryValue(CStr(checkField)) <> "" Then
                 If Not IsNumeric(NewEntryValue(CStr(checkField))) Then
+                    MarkNewEntryProblemFields Array(CStr(checkField))
                     MsgBox "ERROR: Non-numerical value found in Hours, Landings, or Approaches.", vbCritical
                     GoTo Cleanup
                 End If
@@ -200,30 +215,86 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4b. No Landings Recorded (Non-Sim Entries Only)
+    '--- 4b. IPC / OPC Consistency Checks
+        If Not suppressWarnings Then
+            If NewEntryBooleanValue("neOPC") And _
+               (NewEntryNumericValue("neIfrIf") > 0 Or NewEntryNumericValue("neIfrSim") > 0) And _
+               Not NewEntryBooleanValue("neIPC") Then
+                response = MsgBox("Warning: OPC is ticked and instrument hours are logged, but IPC is not ticked. Continue?", _
+                                  vbOKCancel + vbExclamation, _
+                                  "OPC Without IPC")
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields Array("neOPC", "neIPC", "neIfrIf", "neIfrSim")
+                    GoTo Cleanup
+                End If
+            End If
+
+            If NewEntryBooleanValue("neIPC") And Not NewEntryBooleanValue("neFR") Then
+                response = MsgBox("Warning: IPC is ticked, but Flight Review is not ticked. Continue?", _
+                                  vbOKCancel + vbExclamation, _
+                                  "IPC Without Flight Review")
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields Array("neIPC", "neFR")
+                    GoTo Cleanup
+                End If
+            End If
+
+            If NewEntryBooleanValue("neIPC") And NewEntryNumericValue("neCircling") = 0 Then
+                response = MsgBox("No Circling Approach was recorded on this IPC. This means you will not be recent for circling approaches until your next IPC. Continue?", _
+                                  vbOKCancel + vbExclamation, _
+                                  "IPC Without Circling Approach")
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields Array("neIPC", "neCircling")
+                    GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4c. Unrecognised Route Airports
+        If Not suppressWarnings Then
+            Dim unrecognisedAirportFields As Variant
+            unrecognisedAirportFields = UnrecognisedNewEntryAirportFieldNames()
+            If VariantArrayHasItems(unrecognisedAirportFields) Then
+                response = MsgBox(UnrecognisedNewEntryAirportWarningMessage(unrecognisedAirportFields), _
+                                  vbOKCancel + vbExclamation, _
+                                  "Unrecognised Airport")
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields unrecognisedAirportFields
+                    GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4d. No Landings Recorded (Non-Sim Entries Only)
         If Not suppressWarnings Then
             If NewEntryNumericValue("neIfrSim") = 0 Then
                 If NewEntryNumericValue("neLandingsDay") = 0 And _
                    NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: No Landings Recorded. Proceed?", vbOKCancel + vbExclamation, "No Landings")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields Array("neLandingsDay", "neLandingsNight")
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4c. Earlier Than Latest Existing Logbook Entry Check
+    '--- 4e. Earlier Than Latest Existing Logbook Entry Check
         If Not suppressWarnings Then
             If latestLogbookDate <> 0 Then
                 If CDate(NewEntryValue("neDate")) < latestLogbookDate Then
                     response = MsgBox("Warning: This entry is dated before the latest existing Logbook entry (" & _
                                       Format(latestLogbookDate, "dd mmm yyyy") & "). Continue?", _
                                       vbOKCancel + vbExclamation, "Earlier Than Latest Logbook Entry")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields NewEntryDateInputFieldNames()
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4d. Day Hours vs Day Landings Cross-Check
+    '--- 4f. Day Hours vs Day Landings Cross-Check
         Dim dayHours As Double
         dayHours = SumNewEntryFields(Array( _
             "neSeIcusDay", "neSeDualDay", "neSeCommandDay", _
@@ -235,7 +306,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If dayHours > 0 Then
                 If NewEntryNumericValue("neLandingsDay") = 0 Then
                     response = MsgBox("Warning: Day hours recorded, but no Day Landings recorded. Continue?", vbOKCancel + vbExclamation, "Day Hours Warning")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryDayFlightTimeFieldNames(), Array("neLandingsDay"))
+                        GoTo Cleanup
+                    End If
                 End If
             End If
 
@@ -243,12 +317,15 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If NewEntryNumericValue("neLandingsDay") > 0 Then
                 If dayHours = 0 Then
                     response = MsgBox("Warning: Day Landings recorded, but no Day hours recorded. Continue?", vbOKCancel + vbExclamation, "Day Landings Warning")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neLandingsDay"), NewEntryDayFlightTimeFieldNames())
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4e. Night Hours vs Night Landings Cross-Check
+    '--- 4g. Night Hours vs Night Landings Cross-Check
         Dim nightHours As Double
         nightHours = SumNewEntryFields(Array( _
             "neSeIcusNight", "neSeDualNight", "neSeCommandNight", _
@@ -260,7 +337,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If nightHours > 0 Then
                 If NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: Night hours recorded, but no Night Landings recorded. Continue?", vbOKCancel + vbExclamation, "Night Hours Warning")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryNightFlightTimeFieldNames(), Array("neLandingsNight"))
+                        GoTo Cleanup
+                    End If
                 End If
             End If
 
@@ -268,12 +348,15 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If NewEntryNumericValue("neLandingsNight") > 0 Then
                 If nightHours = 0 Then
                     response = MsgBox("Warning: Night Landings recorded, but no Night hours recorded. Continue?", vbOKCancel + vbExclamation, "Night Landings Warning")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neLandingsNight"), NewEntryNightFlightTimeFieldNames())
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4f. IPC / OPC / Flight Review Detection Check
+    '--- 4h. IPC / OPC / Flight Review Detection Check
         If Not suppressWarnings Then
             If ipcDetected Or opcDetected Or flightReviewDetected Then
                 Dim detectionMessage As String
@@ -292,55 +375,70 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                     detectionMessage, _
                     vbYesNoCancel + vbInformation, _
                     "Currency Detection")
-                If response = vbCancel Then GoTo Cleanup
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields NewEntryCurrencyDetectionFieldNames()
+                    GoTo Cleanup
+                End If
                 If response = vbNo Then currencyExcluded = True
             End If
         End If
 
-    '--- 4g. OPC Without Instrument Hours / Approaches Check
+    '--- 4i. OPC Without Instrument Hours / Approaches Check
         If Not suppressWarnings Then
             If opcDetected And Not currencyExcluded Then
                      If NewEntryNumericValue("neIfrIf") = 0 And _
                          NewEntryNumericValue("neIfrSim") = 0 And _
                    CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
                     response = MsgBox("OPC detected but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryCurrencyDetectionFieldNames(), Array("neIfrIf", "neIfrSim"), NewEntryApproachFieldNames())
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4h. Approaches Without Instrument Hours Check
+    '--- 4j. Approaches Without Instrument Hours Check
         If Not suppressWarnings Then
             If CountPositiveNewEntryFields(NewEntryApproachFieldNames()) > 0 Then
                      If NewEntryNumericValue("neIfrIf") = 0 And _
                          NewEntryNumericValue("neIfrSim") = 0 Then
                     response = MsgBox("Warning: Approaches recorded with no Instrument hours. Continue?", vbOKCancel + vbExclamation, "Approaches Warning")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryApproachFieldNames(), Array("neIfrIf", "neIfrSim"))
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4i. High Landings vs Hours Check
+    '--- 4k. High Landings vs Hours Check
         'Total landings (day + night) should not exceed 6x total flight hours
         If Not suppressWarnings Then
             If (NewEntryNumericValue("neLandingsDay") + NewEntryNumericValue("neLandingsNight")) > _
                 6 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Landings seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Landings Warning")
-                If response = vbCancel Then GoTo Cleanup
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neLandingsDay", "neLandingsNight"), NewEntryFlightTimeFieldNames())
+                    GoTo Cleanup
+                End If
             End If
         End If
 
-    '--- 4j. High Approaches vs Hours Check
+    '--- 4l. High Approaches vs Hours Check
         'Total approaches should not exceed 3x total flight hours
         If Not suppressWarnings Then
             If SumNewEntryFields(NewEntryApproachFieldNames()) > _
                 3 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
                 response = MsgBox("Warning: Number of Approaches seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Approaches Warning")
-                If response = vbCancel Then GoTo Cleanup
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryApproachFieldNames(), NewEntryFlightTimeFieldNames())
+                    GoTo Cleanup
+                End If
             End If
         End If
 
-    '--- 4k. Dual / ICUS / Copilot Without Other Crew Check
+    '--- 4m. Dual / ICUS / Copilot Without Other Crew Check
         If Not suppressWarnings Then
             If NewEntryValue("neOtherCrew") = "" Then
                 If SumNewEntryFields(Array( _
@@ -350,12 +448,15 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                     "neMeDualDay", "neMeDualNight", _
                     "neCopilotDay", "neCopilotNight")) > 0 Then
                     response = MsgBox("Warning: Dual, ICUS, or Copilot hours recorded, but no Other Pilot or Crew recorded. Continue?", vbOKCancel + vbExclamation, "Other Crew Warning")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields NewEntryOtherCrewWarningFieldNames()
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4l. Single and Multi Engine Hours in Same Entry Check
+    '--- 4n. Single and Multi Engine Hours in Same Entry Check
         If Not suppressWarnings Then
             Dim currentSingleEngineHours As Double
             Dim currentMultiEngineHours As Double
@@ -367,11 +468,14 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                 response = MsgBox("Warning: This entry records both Single Engine and Multi Engine hours. Continue?", _
                                   vbOKCancel + vbExclamation, _
                                   "Mixed Engine Class Hours")
-                If response = vbCancel Then GoTo Cleanup
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntrySingleEngineFieldNames(), NewEntryMultiEngineFieldNames())
+                    GoTo Cleanup
+                End If
             End If
         End If
 
-    '--- 4m. Aircraft Type Engine Class History Check
+    '--- 4o. Aircraft Type Engine Class History Check
         If Not suppressWarnings Then
             Dim hasSingleEngineHistory As Boolean
             Dim hasMultiEngineHistory As Boolean
@@ -391,12 +495,18 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                     response = MsgBox("Warning: This type has previously been logged with Multi Engine hours, but this entry records Single Engine hours. Continue?", _
                                       vbOKCancel + vbExclamation, _
                                       "Aircraft Type Engine Class")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neType"), NewEntrySingleEngineFieldNames())
+                        GoTo Cleanup
+                    End If
                 ElseIf currentMultiEngineHours > 0 And currentSingleEngineHours = 0 And hasSingleEngineHistory Then
                     response = MsgBox("Warning: This type has previously been logged with Single Engine hours, but this entry records Multi Engine hours. Continue?", _
                                       vbOKCancel + vbExclamation, _
                                       "Aircraft Type Engine Class")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neType"), NewEntryMultiEngineFieldNames())
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
@@ -414,7 +524,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         typeCol = tbl.ListColumns("Type").Index
         regCol = tbl.ListColumns("Reg").Index
 
-    '--- 4n. Aircraft Type and Registration Mismatch History Check
+    '--- 4p. Aircraft Type and Registration Mismatch History Check
         If Not suppressWarnings Then
             Dim currentType As String
             Dim currentReg As String
@@ -441,12 +551,15 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                     response = MsgBox("Warning: This Registration has previously been logged with a different aircraft Type. Continue?", _
                                       vbOKCancel + vbExclamation, _
                                       "Type/Registration Mismatch")
-                    If response = vbCancel Then GoTo Cleanup
+                    If response = vbCancel Then
+                        MarkNewEntryProblemFields Array("neType", "neReg")
+                        GoTo Cleanup
+                    End If
                 End If
             End If
         End If
 
-    '--- 4o. Duplicate Entry Check
+    '--- 4q. Duplicate Entry Check
         'Warn if an entry with the same Date, Type, Reg and Remarks already exists in the logbook
         dupFound = False
 
@@ -463,7 +576,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         If Not suppressWarnings Then
             If dupFound Then
                 response = MsgBox("Warning: An entry with the same Date, Type, Registration and Remarks already exists in the Logbook. This may be a duplicate. Continue?", vbOKCancel + vbExclamation, "Duplicate Entry")
-                If response = vbCancel Then GoTo Cleanup
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryDateInputFieldNames(), Array("neType", "neReg", "neRemarks"))
+                    GoTo Cleanup
+                End If
             End If
         End If
 
@@ -617,7 +733,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         diagStep = "Step 8a.1: Refresh Airport Stats"
         WriteCrumb diagStep
         SetAddToLogbookStatus "Refreshing airport stats"
-        RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook
+        RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook, False
 
         '--- Refresh all pivot tables in the workbook
         diagStep = "Step 8b: Refresh Pivots"
@@ -680,10 +796,11 @@ Cleanup:
             On Error Resume Next
             WriteDebugLog "AddToLogbook", errNum, errDesc, diagStep
             On Error GoTo 0
-                 MsgBox "An unexpected error occurred and the entry may not have been saved." & vbNewLine & vbNewLine & _
-                   "Error " & errNum & ": " & errDesc & vbNewLine & vbNewLine & _
-                     "Step: " & diagStep & vbNewLine & vbNewLine & _
-                   "Please check the logbook before adding another entry.", vbCritical, "Unexpected Error"
+            MsgBox BuildUserFacingErrorMessage( _
+                   "The entry could not be added cleanly.", _
+                   "Check the Logbook table before adding another entry. If the entry is missing, try adding it again. If this keeps happening, use the Report a Bug button and include the debug log.", _
+                   errNum, "AddToLogbook", errDesc, diagStep), _
+                   vbCritical, "Add Entry Failed"
         End If
 
         Exit Sub
@@ -757,8 +874,10 @@ Public Sub NormaliseLogbookTableFormatting(Optional ByVal showConfirmation As Bo
     Exit Sub
 Fail:
     Application.ScreenUpdating = True
-    MsgBox "The Logbook formatting could not be reset." & vbNewLine & vbNewLine & _
-           "Error " & Err.Number & ": " & Err.Description, _
+    MsgBox BuildUserFacingErrorMessage( _
+           "The Logbook formatting could not be reset.", _
+           "Your logbook data was not intentionally changed. Try closing and reopening the workbook, then run the formatting reset again.", _
+           Err.Number, Err.Source, Err.Description, "Resetting Logbook table formatting"), _
            vbCritical, "Formatting Reset Failed"
 End Sub
 
@@ -767,6 +886,7 @@ Private Sub NormaliseLogbookFormatting(ByVal tbl As ListObject)
     NormaliseLogbookDataBorders tbl
     NormaliseLogbookTotalsFormatting tbl
     UpdateLogbookTotalsNamedRanges tbl
+    UpdateLogbookFilterHeadersNamedRange tbl
     ApplyLogbookPalette tbl
     ApplyLogbookTotalsRowBorders tbl
     ApplyLogbookTotalsFormatting tbl
@@ -895,6 +1015,29 @@ Private Sub UpdateLogbookTotalsNamedRanges(ByVal tbl As ListObject)
     On Error GoTo 0
 End Sub
 
+Private Sub UpdateLogbookFilterHeadersNamedRange(ByVal tbl As ListObject)
+    Dim ws As Worksheet
+    Dim dateHeader As Range
+    Dim entryHeaders As Range
+    Dim filterFormula As String
+
+    Set ws = tbl.Parent
+    Set dateHeader = tbl.HeaderRowRange.Cells(1, tbl.ListColumns("Date").Index)
+    Set entryHeaders = ws.Range(ws.Cells(tbl.HeaderRowRange.Row, tbl.ListColumns("Type").Range.Column), _
+                                ws.Cells(tbl.HeaderRowRange.Row, tbl.ListColumns("SeIcusDay").Range.Column - 1))
+
+    filterFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & dateHeader.Address & _
+                    ",'" & Replace(ws.Name, "'", "''") & "'!" & entryHeaders.Address
+
+    On Error Resume Next
+    ThisWorkbook.Names("LogbookFilterHeaders").RefersTo = filterFormula
+    If Err.Number <> 0 Then
+        Err.Clear
+        ThisWorkbook.Names.Add Name:="LogbookFilterHeaders", RefersTo:=filterFormula
+    End If
+    On Error GoTo 0
+End Sub
+
 Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
     Const SUM_TOTALS_LIGHTNESS As Double = 0.2
     Dim headerRange As Range
@@ -926,6 +1069,8 @@ Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
         sumTotalsRange.Interior.Pattern = xlSolid
         sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
         sumTotalsRange.Font.Color = vbWhite
+        sumTotalsRange.Cells(1, 1).Offset(0, -1).HorizontalAlignment = xlRight
+        sumTotalsRange.Cells(1, 1).Offset(0, -1).WrapText = False
     End If
 End Sub
 
@@ -1516,6 +1661,191 @@ Private Sub ClearNewEntryFields(ByVal fieldNames As Variant)
     Next fieldName
 End Sub
 
+Public Sub ClearNewEntryValidationHighlightsForTarget(ByVal targetRange As Range)
+    Dim fieldName As Variant
+    Dim inputArea As Range
+
+    If targetRange Is Nothing Then Exit Sub
+
+    On Error Resume Next
+    For Each fieldName In NewEntryLayoutFieldNames()
+        Set inputArea = NewEntryCell(CStr(fieldName))
+        If inputArea.MergeCells Then Set inputArea = inputArea.MergeArea
+        If inputArea.Worksheet Is targetRange.Worksheet Then
+            If Not Intersect(targetRange, inputArea) Is Nothing Then
+                ClearNewEntryValidationHighlight inputArea
+            End If
+        End If
+        Set inputArea = Nothing
+    Next fieldName
+    On Error GoTo 0
+End Sub
+
+Private Sub ClearNewEntryValidationHighlights()
+    Dim fieldName As Variant
+    Dim inputArea As Range
+
+    On Error Resume Next
+    For Each fieldName In NewEntryLayoutFieldNames()
+        Set inputArea = NewEntryCell(CStr(fieldName))
+        If inputArea.MergeCells Then Set inputArea = inputArea.MergeArea
+        ClearNewEntryValidationHighlight inputArea
+        Set inputArea = Nothing
+    Next fieldName
+    On Error GoTo 0
+End Sub
+
+Private Sub MarkNewEntryProblemFields(ByVal fieldNames As Variant)
+    Dim fieldName As Variant
+    Dim inputArea As Range
+
+    On Error Resume Next
+    For Each fieldName In fieldNames
+        Set inputArea = NewEntryCell(CStr(fieldName))
+        If inputArea.MergeCells Then Set inputArea = inputArea.MergeArea
+        With inputArea.Interior
+            .Pattern = xlSolid
+            .Color = NewEntryValidationHighlightColor()
+        End With
+        Set inputArea = Nothing
+    Next fieldName
+    On Error GoTo 0
+End Sub
+
+Private Sub ClearNewEntryValidationHighlight(ByVal inputArea As Range)
+    If inputArea Is Nothing Then Exit Sub
+
+    If inputArea.Interior.Pattern = xlSolid And _
+       inputArea.Interior.Color = NewEntryValidationHighlightColor() Then
+        inputArea.Interior.Pattern = xlNone
+    End If
+End Sub
+
+Private Function NewEntryValidationHighlightColor() As Long
+    NewEntryValidationHighlightColor = RGB(255, 199, 206)
+End Function
+
+Private Function CombineNewEntryFieldNames(ParamArray fieldGroups() As Variant) As Variant
+    Dim combined As Collection
+    Dim result() As String
+    Dim group As Variant
+    Dim fieldName As Variant
+    Dim i As Long
+
+    Set combined = New Collection
+
+    For Each group In fieldGroups
+        If IsArray(group) Then
+            For Each fieldName In group
+                combined.Add CStr(fieldName)
+            Next fieldName
+        Else
+            combined.Add CStr(group)
+        End If
+    Next group
+
+    If combined.Count = 0 Then
+        CombineNewEntryFieldNames = Array()
+        Exit Function
+    End If
+
+    ReDim result(0 To combined.Count - 1)
+    For i = 1 To combined.Count
+        result(i - 1) = CStr(combined(i))
+    Next i
+
+    CombineNewEntryFieldNames = result
+End Function
+
+Private Function VariantArrayHasItems(ByVal values As Variant) As Boolean
+    On Error GoTo CleanExit
+    If IsArray(values) Then VariantArrayHasItems = (UBound(values) >= LBound(values))
+CleanExit:
+End Function
+
+Private Function UnrecognisedNewEntryAirportFieldNames() As Variant
+    Dim problemFields As Collection
+    Dim result() As String
+    Dim i As Long
+
+    Set problemFields = New Collection
+
+    If Not NewEntryAirportIsRecognised(CStr(NewEntryValue("neFrom"))) Then problemFields.Add "neFrom"
+    If Not NewEntryAirportIsRecognised(CStr(NewEntryValue("neTo"))) Then problemFields.Add "neTo"
+
+    If problemFields.Count = 0 Then
+        UnrecognisedNewEntryAirportFieldNames = Array()
+        Exit Function
+    End If
+
+    ReDim result(0 To problemFields.Count - 1)
+    For i = 1 To problemFields.Count
+        result(i - 1) = CStr(problemFields(i))
+    Next i
+
+    UnrecognisedNewEntryAirportFieldNames = result
+End Function
+
+Private Function UnrecognisedNewEntryAirportWarningMessage(ByVal fieldNames As Variant) As String
+    Dim hasFrom As Boolean
+    Dim hasTo As Boolean
+    Dim fieldName As Variant
+    Dim airportText As String
+
+    For Each fieldName In fieldNames
+        Select Case LCase$(CStr(fieldName))
+            Case "nefrom"
+                hasFrom = True
+            Case "neto"
+                hasTo = True
+        End Select
+    Next fieldName
+
+    If hasFrom And hasTo Then
+        airportText = "The Departure and Destination airport codes are not recognised."
+    ElseIf hasFrom Then
+        airportText = "The Departure airport code is not recognised."
+    ElseIf hasTo Then
+        airportText = "The Destination airport code is not recognised."
+    Else
+        airportText = "An airport code is not recognised."
+    End If
+
+    UnrecognisedNewEntryAirportWarningMessage = _
+        "Warning: " & airportText & " Continue?"
+End Function
+
+Private Function NewEntryAirportIsRecognised(ByVal airportCode As String) As Boolean
+    Dim tblAirports As ListObject
+    Dim rowIndex As Long
+    Dim candidate As String
+    Dim icaoCol As Long
+    Dim twoCol As Long
+    Dim threeCol As Long
+
+    candidate = UCase$(Trim$(airportCode))
+    If candidate = "" Then Exit Function
+
+    On Error GoTo CleanExit
+    Set tblAirports = ThisWorkbook.Worksheets("Airports").ListObjects("Airports")
+    If tblAirports.DataBodyRange Is Nothing Then Exit Function
+
+    icaoCol = tblAirports.ListColumns("ICAO").Index
+    twoCol = tblAirports.ListColumns("Two").Index
+    threeCol = tblAirports.ListColumns("Three").Index
+
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        If candidate = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, icaoCol).Value))) Or _
+           candidate = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, twoCol).Value))) Or _
+           candidate = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, threeCol).Value))) Then
+            NewEntryAirportIsRecognised = True
+            Exit Function
+        End If
+    Next rowIndex
+
+CleanExit:
+End Function
+
 Private Function SumNewEntryFields(ByVal fieldNames As Variant) As Double
     Dim fieldName As Variant
 
@@ -1556,7 +1886,7 @@ End Sub
 
 Private Function NewEntryLogbookFieldNames() As Variant
     NewEntryLogbookFieldNames = Array( _
-        "neType", "neReg", "neFlightID", "nePIC", "neOtherCrew", "neFrom", "neTo", "neRoute", "neRemarks", _
+        "neType", "neReg", "neFlightID", "nePIC", "neOtherCrew", "neFrom", "neTo", "neVia", "neRemarks", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
         "neSeCommandDay", "neSeCommandNight", _
@@ -1569,7 +1899,7 @@ End Function
 
 Private Function NewEntryLogbookColumnNames() As Variant
     NewEntryLogbookColumnNames = Array( _
-        "Type", "Reg", "Flight ID", "PIC", "Other Pilot or Crew", "From", "To", "Route", "Remarks", _
+        "Type", "Reg", "Flight ID", "PIC", "Other Pilot or Crew", "From", "To", "Via", "Remarks", _
         "Custom 1", "Custom 2", "Custom 3", "Custom 4", _
         "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
         "SeCommandDay", "SeCommandNight", _
@@ -1608,6 +1938,20 @@ Private Function NewEntryFlightTimeFieldNames() As Variant
         "neCopilotDay", "neCopilotNight")
 End Function
 
+Private Function NewEntryDayFlightTimeFieldNames() As Variant
+    NewEntryDayFlightTimeFieldNames = Array( _
+        "neSeIcusDay", "neSeDualDay", "neSeCommandDay", _
+        "neMeIcusDay", "neMeDualDay", "neMeCommandDay", _
+        "neCopilotDay")
+End Function
+
+Private Function NewEntryNightFlightTimeFieldNames() As Variant
+    NewEntryNightFlightTimeFieldNames = Array( _
+        "neSeIcusNight", "neSeDualNight", "neSeCommandNight", _
+        "neMeIcusNight", "neMeDualNight", "neMeCommandNight", _
+        "neCopilotNight")
+End Function
+
 Private Function NewEntrySingleEngineFieldNames() As Variant
     NewEntrySingleEngineFieldNames = Array( _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
@@ -1634,6 +1978,24 @@ Private Function NewEntryApproachFieldNames() As Variant
         "neILS", "neVOR", "neRNP", "neNDB", "neDgaCdi", "neDgaAzi", "neCircling")
 End Function
 
+Private Function NewEntryDateInputFieldNames() As Variant
+    NewEntryDateInputFieldNames = Array("neYear", "neMonth", "neDay")
+End Function
+
+Private Function NewEntryCurrencyDetectionFieldNames() As Variant
+    NewEntryCurrencyDetectionFieldNames = Array("neFR", "neIPC", "neOPC", "neRemarks")
+End Function
+
+Private Function NewEntryOtherCrewWarningFieldNames() As Variant
+    NewEntryOtherCrewWarningFieldNames = Array( _
+        "neOtherCrew", _
+        "neSeIcusDay", "neSeIcusNight", _
+        "neSeDualDay", "neSeDualNight", _
+        "neMeIcusDay", "neMeIcusNight", _
+        "neMeDualDay", "neMeDualNight", _
+        "neCopilotDay", "neCopilotNight")
+End Function
+
 Private Function NewEntrySingleEngineColumnNames() As Variant
     NewEntrySingleEngineColumnNames = Array( _
         "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
@@ -1648,7 +2010,7 @@ End Function
 
 Private Function NewEntryClearFieldNames() As Variant
     NewEntryClearFieldNames = Array( _
-        "neType", "neReg", "neFlightID", "neOtherCrew", "neFrom", "neTo", "neRoute", "neRemarks", _
+        "neType", "neReg", "neFlightID", "neOtherCrew", "neFrom", "neTo", "neVia", "neRemarks", _
         "neFR", "neIPC", "neOPC", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
@@ -1810,7 +2172,7 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
         SortLogbookByDate tbl
         UpdateHiddenRows ThisWorkbook
         MarkRoutesDirty ThisWorkbook
-        RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook
+        RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook, False
         ThisWorkbook.Save
     End If
 
@@ -1840,9 +2202,10 @@ Fail:
     If logbookWasProtected Then ProtectLogbookSheetForRuntime wsLog
     RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
                                   previousDisplayStatusBar, previousStatusBar
-    result("Message") = "The LogTen import failed." & vbCrLf & vbCrLf & _
-                        "Step: " & diagStep & vbCrLf & _
-                        "Error " & errNum & ": " & errDesc
+    result("Message") = BuildUserFacingErrorMessage( _
+                        "The LogTen import could not be completed.", _
+                        "No completed import was applied. Check the selected export file and try again. If this keeps happening, use the Report a Bug button and include the debug log.", _
+                        errNum, "ImportFromLogTenFile", errDesc, diagStep)
     Set ImportFromLogTenFile = result
 End Function
 
@@ -1886,8 +2249,11 @@ Public Sub ImportAircraftTypesFromCsv()
     Exit Sub
 
 Fail:
-    MsgBox "Aircraft type import failed." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description, vbExclamation, "Aircraft Types Import"
+    MsgBox BuildUserFacingErrorMessage( _
+           "Aircraft type import could not be completed.", _
+           "Check that the selected CSV has aircraft type/designator columns, then try again.", _
+           Err.Number, Err.Source, Err.Description, "Importing aircraft types from CSV"), _
+           vbExclamation, "Aircraft Types Import"
 End Sub
 
 Private Sub RestoreImportApplicationState(ByVal screenUpdating As Boolean, _
@@ -2184,7 +2550,7 @@ Private Sub AddMappedBaseFields(ByVal mapped As Object, _
     mapped("Other Pilot or Crew") = JoinNonBlank(Array(FieldValue(sourceRow, "SIC/P2 Crew"), FieldValue(sourceRow, "Observer")), ", ")
     mapped("From") = UCase$(Trim$(FieldValue(sourceRow, "From")))
     mapped("To") = UCase$(Trim$(FieldValue(sourceRow, "To")))
-    mapped("Route") = Trim$(FieldValue(sourceRow, "Route"))
+    mapped("Via") = Trim$(FieldValue(sourceRow, "Route"))
     mapped("Remarks") = BuildLogTenRemarks(sourceRow)
     mapped("Details") = BuildLogTenDetails(sourceRow)
 
@@ -2385,7 +2751,7 @@ Private Sub WriteMappedLogTenRow(ByVal targetRow As Range, ByVal tbl As ListObje
     WriteMappedValueToColumn targetRow, tbl, "Other Pilot or Crew", mapped("Other Pilot or Crew")
     WriteMappedValueToColumnIfPresent targetRow, tbl, "From", mapped("From")
     WriteMappedValueToColumnIfPresent targetRow, tbl, "To", mapped("To")
-    WriteMappedValueToColumnIfPresent targetRow, tbl, "Route", mapped("Route")
+    WriteMappedValueToColumnIfPresent targetRow, tbl, "Via", mapped("Via")
     remarksColumn = LogbookRemarksColumnName(tbl)
     If remarksColumn = "Remarks" Then
         WriteMappedValueToColumn targetRow, tbl, remarksColumn, mapped("Remarks")
@@ -2438,7 +2804,7 @@ Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Objec
     WriteMappedValueToColumn newRow.Range, tbl, "Other Pilot or Crew", mapped("Other Pilot or Crew")
     WriteMappedValueToColumnIfPresent newRow.Range, tbl, "From", mapped("From")
     WriteMappedValueToColumnIfPresent newRow.Range, tbl, "To", mapped("To")
-    WriteMappedValueToColumnIfPresent newRow.Range, tbl, "Route", mapped("Route")
+    WriteMappedValueToColumnIfPresent newRow.Range, tbl, "Via", mapped("Via")
     remarksColumn = LogbookRemarksColumnName(tbl)
     If remarksColumn = "Remarks" Then
         WriteMappedValueToColumn newRow.Range, tbl, remarksColumn, mapped("Remarks")
@@ -2529,7 +2895,7 @@ Private Function BuildExistingLogTenDuplicateKey(ByVal tbl As ListObject, ByVal 
     parts.Add NormaliseDuplicateText(CStr(tbl.ListColumns("Reg").DataBodyRange.Cells(rowIndex, 1).Value))
     parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "Flight ID")))
     parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "From")))
-    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "Route")))
+    parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "Via")))
     parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, "To")))
     remarksColumn = LogbookRemarksColumnName(tbl)
     parts.Add NormaliseDuplicateText(CStr(LogbookColumnValue(tbl, rowIndex, remarksColumn)))
@@ -2551,7 +2917,7 @@ Private Function BuildLogTenDuplicateKey(ByVal mapped As Object) As String
     parts.Add NormaliseDuplicateText(CStr(mapped("Reg")))
     parts.Add NormaliseDuplicateText(CStr(mapped("Flight ID")))
     parts.Add NormaliseDuplicateText(CStr(mapped("From")))
-    parts.Add NormaliseDuplicateText(CStr(mapped("Route")))
+    parts.Add NormaliseDuplicateText(CStr(mapped("Via")))
     parts.Add NormaliseDuplicateText(CStr(mapped("To")))
     parts.Add NormaliseDuplicateText(CStr(mapped("Remarks")))
 
@@ -3030,7 +3396,7 @@ Public Sub CheckAirportDatasetOnOpen(Optional wb As Workbook = Nothing)
                           "Updating the Airports table may take a short time while the latest airport list and visit statistics are refreshed." & vbCrLf & vbCrLf & _
                           "Update now?", _
                           vbYesNo + vbInformation, "Airport Dataset Update Available")
-        If response = vbYes Then RefreshAirportDatasetWithWorkbookProtection targetWorkbook, True
+        If response = vbYes Then RefreshAirportDatasetWithWorkbookProtection targetWorkbook, True, True
     End If
     Exit Sub
 
@@ -3041,12 +3407,17 @@ Fail:
     On Error Resume Next
     If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
     On Error GoTo 0
-    MsgBox "The airport dataset update check failed." & vbCrLf & vbCrLf & _
-           "Error " & errNum & " in " & errSource & ": " & errDesc, _
+    WriteDebugLog "CheckAirportDatasetOnOpen", errNum, errDesc, "Checking whether a newer airport dataset is available"
+    MsgBox BuildUserFacingErrorMessage( _
+           "The airport dataset update check could not be completed.", _
+           "Your logbook was not changed. Check your internet connection and try again later. If this keeps happening, use the Report a Bug button and include the debug log.", _
+           errNum, errSource, errDesc, "Checking airport dataset version"), _
            vbExclamation, "Airport Dataset Check Failed"
 End Sub
 
-Public Function RefreshAirportDatasetWithWorkbookProtection(Optional wb As Workbook = Nothing, Optional forceCheck As Boolean = False) As Boolean
+Public Function RefreshAirportDatasetWithWorkbookProtection(Optional wb As Workbook = Nothing, _
+                                                           Optional forceCheck As Boolean = False, _
+                                                           Optional showCompletionMessage As Boolean = False) As Boolean
     Dim targetWorkbook As Workbook
     Dim protectionWasActive As Boolean
     Dim oldScreenUpdating As Boolean
@@ -3057,8 +3428,10 @@ Public Function RefreshAirportDatasetWithWorkbookProtection(Optional wb As Workb
     Dim errNum As Long
     Dim errDesc As String
     Dim errSource As String
+    Dim diagStep As String
 
     On Error GoTo Fail
+    diagStep = "Preparing workbook for airport dataset update"
     If wb Is Nothing Then
         Set targetWorkbook = ThisWorkbook
     Else
@@ -3068,6 +3441,7 @@ Public Function RefreshAirportDatasetWithWorkbookProtection(Optional wb As Workb
     protectionWasActive = WorkbookProtectionIsActive(targetWorkbook)
     If protectionWasActive Then UnprotectWorkbookForEditing targetWorkbook
 
+    diagStep = "Saving Excel application state"
     oldScreenUpdating = Application.ScreenUpdating
     oldEnableEvents = Application.EnableEvents
     oldDisplayStatusBar = Application.DisplayStatusBar
@@ -3079,19 +3453,33 @@ Public Function RefreshAirportDatasetWithWorkbookProtection(Optional wb As Workb
     Application.StatusBar = "Updating airport dataset..."
     Application.Calculation = xlCalculationManual
 
+    diagStep = "Downloading and importing airport dataset"
     RefreshAirportDatasetWithWorkbookProtection = modAirports.RefreshAirportDataset(targetWorkbook, forceCheck)
+    diagStep = "Marking route cache after airport dataset update"
     If RefreshAirportDatasetWithWorkbookProtection Or modAirports.AirportDatasetRoutesStateNeedsRefresh(targetWorkbook) Then
         MarkRoutesDirty targetWorkbook
         modAirports.MarkAirportDatasetRoutesStateCurrent targetWorkbook
     End If
 
 CleanExit:
+    diagStep = "Restoring Excel application state"
     Application.StatusBar = oldStatusBar
     Application.DisplayStatusBar = oldDisplayStatusBar
     Application.Calculation = oldCalculation
     Application.EnableEvents = oldEnableEvents
     Application.ScreenUpdating = oldScreenUpdating
     If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    If showCompletionMessage Then
+        If RefreshAirportDatasetWithWorkbookProtection Then
+            MsgBox "Airport dataset updated successfully." & vbCrLf & vbCrLf & _
+                   "The Airports table and airport visit statistics have been refreshed.", _
+                   vbInformation, "Airport Dataset Updated"
+        Else
+            MsgBox "Airport dataset check completed." & vbCrLf & vbCrLf & _
+                   "Your Airports table is already up to date.", _
+                   vbInformation, "Airport Dataset"
+        End If
+    End If
     Exit Function
 
 Fail:
@@ -3106,12 +3494,16 @@ Fail:
     Application.ScreenUpdating = oldScreenUpdating
     If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
     On Error GoTo 0
-    MsgBox "The airport dataset could not be updated." & vbCrLf & vbCrLf & _
-           "Error " & errNum & " in " & errSource & ": " & errDesc, _
+    WriteDebugLog "RefreshAirportDatasetWithWorkbookProtection", errNum, errDesc, diagStep
+    MsgBox BuildUserFacingErrorMessage( _
+           "The airport dataset could not be updated.", _
+           "No logbook entries were changed. Check your internet connection and try the airport update again. If it keeps failing, use the Report a Bug button and include the debug log.", _
+           errNum, errSource, errDesc, diagStep), _
            vbExclamation, "Airport Dataset Update Failed"
 End Function
 
-Public Sub RefreshAirportVisitStatsWithWorkbookProtection(Optional wb As Workbook = Nothing)
+Public Sub RefreshAirportVisitStatsWithWorkbookProtection(Optional wb As Workbook = Nothing, _
+                                                         Optional showCompletionMessage As Boolean = True)
     Dim targetWorkbook As Workbook
     Dim protectionWasActive As Boolean
     Dim oldStatusBar As Variant
@@ -3142,6 +3534,10 @@ CleanExit:
     Application.StatusBar = oldStatusBar
     Application.DisplayStatusBar = oldDisplayStatusBar
     If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, targetWorkbook
+    If showCompletionMessage Then
+        MsgBox "Airport visit statistics refreshed successfully.", _
+               vbInformation, "Airport Stats Refreshed"
+    End If
     Exit Sub
 
 Fail:
@@ -3172,8 +3568,10 @@ Public Sub BackupCurrentWorkbook()
     Exit Sub
 
 Fail:
-    MsgBox "Could not create a backup copy." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description, _
+    MsgBox BuildUserFacingErrorMessage( _
+           "Could not create a backup copy.", _
+           "Check that the workbook folder is writable and that the file is not blocked by OneDrive, SharePoint, or another sync tool. Then try again.", _
+           Err.Number, Err.Source, Err.Description, "Creating backup workbook copy"), _
            vbCritical, "Backup Failed"
 End Sub
 
@@ -3208,8 +3606,10 @@ Public Sub RestorePreviousVersion()
     Exit Sub
 
 Fail:
-    MsgBox "Could not prepare the restored workbook copy." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description, _
+    MsgBox BuildUserFacingErrorMessage( _
+           "Could not prepare the restored workbook copy.", _
+           "Check that the workbook folder is writable and that the previous-version backup still exists, then try again.", _
+           Err.Number, Err.Source, Err.Description, "Preparing restored workbook copy"), _
            vbCritical, "Restore Failed"
 End Sub
 
@@ -3421,7 +3821,7 @@ Public Sub DeleteSelectedLogbookRows()
     NormaliseLogbookFormatting tbl
     UpdateHiddenRows ThisWorkbook
     MarkRoutesDirty ThisWorkbook
-    RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook
+    RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook, False
 
 CleanExit:
     Application.ScreenUpdating = True
@@ -3437,8 +3837,11 @@ Fail:
     Application.ScreenUpdating = True
     If logbookWasProtected Then ProtectLogbookSheetForRuntime ws
     On Error GoTo 0
-    MsgBox "The selected Logbook rows could not be deleted." & vbCrLf & vbCrLf & _
-           "Error " & errNum & ": " & errDesc, vbCritical, "Delete Logbook Rows"
+    MsgBox BuildUserFacingErrorMessage( _
+           "The selected Logbook rows could not be deleted.", _
+           "No further rows were intentionally deleted. Check the Logbook table and try again after closing any dialogs or filters.", _
+           errNum, "DeleteSelectedLogbookRows", errDesc, "Deleting selected Logbook rows"), _
+           vbCritical, "Delete Logbook Rows"
 End Sub
 
 Private Function SortedDictionaryKeysDescending(ByVal dict As Object) As Variant
@@ -3911,9 +4314,9 @@ Private Function LogbookRouteSourceText(ByVal tbl As ListObject, ByVal rowIndex 
     Dim routeText As String
     Dim remarksColumn As String
 
-    If ListColumnExists(tbl, "From") Or ListColumnExists(tbl, "To") Or ListColumnExists(tbl, "Route") Then
+    If ListColumnExists(tbl, "From") Or ListColumnExists(tbl, "To") Or ListColumnExists(tbl, "Via") Then
         routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "From"), " ")
-        routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "Route"), " ")
+        routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "Via"), " ")
         routeText = AppendListItem(routeText, LogbookColumnValue(tbl, rowIndex, "To"), " ")
     End If
 
@@ -4237,26 +4640,22 @@ Sub SetLogbookFilterArrows()
     Dim wsLog   As Worksheet
     Dim tbl     As ListObject
     Dim i       As Long
+    Dim typeIndex As Long
+    Dim lastCustomEntryIndex As Long
 
     Set wsLog = ThisWorkbook.Sheets("Logbook")
     Set tbl = wsLog.ListObjects("Logbook")
 
-    '--- Define which column names should show filter arrows
-    Dim visibleColumns As Variant
-    visibleColumns = Array("Date", "Type", "Reg", "PIC", "Other Pilot or Crew", "From", "To", "Route", "Remarks")
+    typeIndex = tbl.ListColumns("Type").Index
+    lastCustomEntryIndex = tbl.ListColumns("SeIcusDay").Index - 1
 
-    '--- Loop through all columns, show or hide arrow based on list above
+    UpdateLogbookFilterHeadersNamedRange tbl
+
+    '--- Show arrows on Date and on every entry-detail column before the hours block.
     For i = 1 To tbl.ListColumns.Count
         Dim showArrow As Boolean
-        showArrow = False
-
-        Dim v As Variant
-        For Each v In visibleColumns
-            If tbl.ListColumns(i).Name = v Then
-                showArrow = True
-                Exit For
-            End If
-        Next v
+        showArrow = (tbl.ListColumns(i).Name = "Date") Or _
+                    (i >= typeIndex And i <= lastCustomEntryIndex)
 
         tbl.Range.AutoFilter Field:=i, VisibleDropDown:=showArrow
     Next i
@@ -4522,6 +4921,27 @@ Public Sub WriteCrumb(step As String)
     Close #f
     On Error GoTo 0
 End Sub
+
+Public Function BuildUserFacingErrorMessage(ByVal userMessage As String, _
+                                            ByVal recoveryMessage As String, _
+                                            ByVal errNum As Long, _
+                                            ByVal errSource As String, _
+                                            ByVal errDesc As String, _
+                                            Optional ByVal diagStep As String = "", _
+                                            Optional ByVal diagnosticsPath As String = "") As String
+    Dim details As String
+
+    details = "Technical details for support:" & vbCrLf & _
+              "Error " & CStr(errNum)
+    If Trim$(errSource) <> "" Then details = details & " in " & errSource
+    If Trim$(errDesc) <> "" Then details = details & ": " & errDesc
+    If Trim$(diagStep) <> "" Then details = details & vbCrLf & "Step: " & diagStep
+    If Trim$(diagnosticsPath) <> "" Then details = details & vbCrLf & "Diagnostics: " & diagnosticsPath
+
+    BuildUserFacingErrorMessage = userMessage & vbCrLf & vbCrLf & _
+                                  recoveryMessage & vbCrLf & vbCrLf & _
+                                  details
+End Function
 
 Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Optional diagStep As String = "")
     On Error Resume Next
@@ -5396,7 +5816,7 @@ Private Function NewEntryLayoutFieldAddress(ByVal fieldName As String, ByVal com
             NewEntryLayoutFieldAddress = IIf(compactLayout, "N12", "C18")
         Case "neto"
             NewEntryLayoutFieldAddress = IIf(compactLayout, "O12", "D18")
-        Case "neroute"
+        Case "nevia"
             NewEntryLayoutFieldAddress = IIf(compactLayout, "P12", "E18")
         Case "nedetails", "neremarks"
             NewEntryLayoutFieldAddress = IIf(compactLayout, "Q12", "J18")
@@ -5585,7 +6005,7 @@ End Function
 Private Function NewEntryLayoutFieldNames() As Variant
     NewEntryLayoutFieldNames = Array( _
         "neYear", "neMonth", "neDay", "neDate", "neReg", "neType", "neFlightID", "nePIC", "neOtherCrew", _
-        "neFR", "neIPC", "neOPC", "neFrom", "neTo", "neRoute", "neDetails", "neRemarks", _
+        "neFR", "neIPC", "neOPC", "neFrom", "neTo", "neVia", "neDetails", "neRemarks", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", "neSeCommandDay", "neSeCommandNight", _
         "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", "neMeCommandDay", "neMeCommandNight", _
         "neCopilotDay", "neCopilotNight", "neIfrIf", "neIfrSim", "neLandingsDay", "neLandingsNight", _
@@ -5812,15 +6232,99 @@ Public Function ExcludeSelectedCurrencyEntries(ByVal targetList As Object) As Bo
 Fail:
     Application.EnableEvents = True
     Application.ScreenUpdating = True
-    MsgBox "The selected currency exclusions could not be applied." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description, _
+    MsgBox BuildUserFacingErrorMessage( _
+           "The selected currency exclusions could not be applied.", _
+           "Check the selected entries, then try again. If this keeps happening, use the Report a Bug button and include the debug log.", _
+           Err.Number, Err.Source, Err.Description, "Applying currency exclusions"), _
            vbCritical, "Currency Exclusion Error"
 End Function
 
 Private Function CurrencyCheckValueIsMarked(ByVal value As Variant) As Boolean
     If IsError(value) Then Exit Function
-    CurrencyCheckValueIsMarked = Trim$(CStr(value)) <> ""
+    If VarType(value) = vbBoolean Then
+        CurrencyCheckValueIsMarked = CBool(value)
+    Else
+        Select Case UCase$(Trim$(CStr(value)))
+            Case "", "FALSE", "0", "NO", "N"
+                CurrencyCheckValueIsMarked = False
+            Case Else
+                CurrencyCheckValueIsMarked = True
+        End Select
+    End If
 End Function
+
+Public Sub EnsureCurrencyRecencyFormulaCompatibility(Optional wb As Workbook = Nothing)
+    Dim targetWorkbook As Workbook
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+    Dim formulaText As String
+
+    On Error GoTo CleanExit
+    If wb Is Nothing Then
+        Set targetWorkbook = ThisWorkbook
+    Else
+        Set targetWorkbook = wb
+    End If
+
+    Set tbl = FindListObject(targetWorkbook, "Logbook")
+    If tbl Is Nothing Then GoTo CleanExit
+    If Not ListColumnExists(tbl, "FR") Then GoTo CleanExit
+    If Not ListColumnExists(tbl, "IPC") Then GoTo CleanExit
+    If Not ListColumnExists(tbl, "OPC") Then GoTo CleanExit
+
+    Set ws = targetWorkbook.Worksheets("Currency + Recency")
+    SetCurrencyFormula ws, "T7", "=MAX(IFERROR(MAX(FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[IPC]=TRUE))),0),N(XLOOKUP(""IPC"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")))"
+    SetCurrencyFormula ws, "T8", "=LET(ov,N(XLOOKUP(""IPC"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")),d,FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[IPC]=TRUE)),logLast,IFERROR(MAX(d),0),logSecond,IFERROR(LARGE(d,2),0),second,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),IF(second=0,""N/A"",second))"
+    SetCurrencyFormula ws, "T10", "=MAX(IFERROR(MAX(FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[OPC]=TRUE))),0),N(XLOOKUP(""OPC"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")))"
+    SetCurrencyFormula ws, "T14", "=MAX(IFERROR(MAX(FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[FR]=TRUE))),0),N(XLOOKUP(""Flight Review"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")))"
+    SetCurrencyFormula ws, "T15", "=LET(ov,N(XLOOKUP(""Flight Review"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")),d,FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[FR]=TRUE)),logLast,IFERROR(MAX(d),0),logSecond,IFERROR(LARGE(d,2),0),second,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),IF(second=0,""N/A"",second))"
+
+    SetWorkbookFormula targetWorkbook, "FRExpirySEA", "=LET(d,IF(Logbook[FR]=TRUE,Logbook[Date],0),ov,N(FROverride),dates,FILTER(d,(ISNUMBER(d))*(d>0)*LogbookSEA),logLast,IFERROR(MAX(dates),0),logSecond,IFERROR(LARGE(dates,2),0),lastFR,MAX(logLast,ov),prevFR,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),normal,IF(lastFR=0,0,EOMONTH(EDATE(lastFR,24),0)),prevExpiry,IF(prevFR>0,EOMONTH(EDATE(prevFR,24),0),0),IF(lastFR=0,0,IF(AND(prevExpiry>0,lastFR<=prevExpiry,prevExpiry<=EDATE(lastFR,3)),EOMONTH(EDATE(prevExpiry,24),0),normal)))"
+    SetWorkbookFormula targetWorkbook, "FRExpiryMEA", "=LET(d,IF(Logbook[FR]=TRUE,Logbook[Date],0),ov,N(FROverride),dates,FILTER(d,(ISNUMBER(d))*(d>0)*LogbookMEA),logLast,IFERROR(MAX(dates),0),logSecond,IFERROR(LARGE(dates,2),0),lastFR,MAX(logLast,ov),prevFR,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),normal,IF(lastFR=0,0,EOMONTH(EDATE(lastFR,24),0)),prevExpiry,IF(prevFR>0,EOMONTH(EDATE(prevFR,24),0),0),IF(lastFR=0,0,IF(AND(prevExpiry>0,lastFR<=prevExpiry,prevExpiry<=EDATE(lastFR,3)),EOMONTH(EDATE(prevExpiry,24),0),normal)))"
+    SetWorkbookFormula targetWorkbook, "OPCRecencyExpirySEA", "=LET(d,IF(Logbook[OPC]=TRUE,Logbook[Date],0),ov,N(OPCOverride),logLast,IFERROR(MAX(FILTER(d,(ISNUMBER(d))*(d>0)*LogbookSEA)),0),last,MAX(logLast,ov),IF(last=0,0,EDATE(last,3)))"
+    SetWorkbookFormula targetWorkbook, "OPCRecencyExpiryMEA", "=LET(d,IF(Logbook[OPC]=TRUE,Logbook[Date],0),ov,N(OPCOverride),logLast,IFERROR(MAX(FILTER(d,(ISNUMBER(d))*(d>0)*LogbookMEA)),0),last,MAX(logLast,ov),IF(last=0,0,EDATE(last,3)))"
+
+    formulaText = "=LET(dC,IF((Logbook[Circling]>0)*(Logbook[IPC]=TRUE),Logbook[Date],0)," & _
+                  "qual,(ISNUMBER(dC))*(dC>0)*LogbookSEA,dates,FILTER(dC,qual),logLast,IFERROR(MAX(dates),0)," & _
+                  "logSecond,IFERROR(LARGE(dates,2),0),lastCheck,logLast,prevCheck,logSecond," & _
+                  "normal,IF(lastCheck=0,0,DATE(YEAR(lastCheck)+1,MONTH(lastCheck),DAY(EOMONTH(lastCheck,0))))," & _
+                  "prevExpiry,IF(prevCheck>0,DATE(YEAR(prevCheck)+1,MONTH(prevCheck),DAY(EOMONTH(prevCheck,0))),0)," & _
+                  "IF(lastCheck=0,0,IF(prevExpiry>0,IF(AND(lastCheck>=EDATE(prevExpiry,-3),lastCheck<=prevExpiry),DATE(YEAR(prevExpiry)+1,MONTH(prevExpiry),DAY(EOMONTH(prevExpiry,0))),normal),normal)))"
+    SetWorkbookFormula targetWorkbook, "CirclingExpirySEA", formulaText
+
+    formulaText = Replace(formulaText, "LogbookSEA", "LogbookMEA")
+    SetWorkbookFormula targetWorkbook, "CirclingExpiryMEA", formulaText
+
+    formulaText = "=LET(dI,IF(Logbook[IPC]=TRUE,Logbook[Date],0)," & _
+                  "ovI,N(IPCOverride),ipcDates,FILTER(dI,(ISNUMBER(dI))*(dI>0)*LogbookSEA)," & _
+                  "logLastIPC,IFERROR(MAX(ipcDates),0),logSecondIPC,IFERROR(LARGE(ipcDates,2),0)," & _
+                  "lastIPC,MAX(logLastIPC,ovI),prevIPC,IF(ovI=0,logSecondIPC,IF(ovI>=logLastIPC,logLastIPC,MAX(ovI,logSecondIPC)))," & _
+                  "normal,IF(lastIPC=0,0,DATE(YEAR(lastIPC)+1,MONTH(lastIPC),DAY(EOMONTH(lastIPC,0))))," & _
+                  "prevExpiry,IF(prevIPC>0,DATE(YEAR(prevIPC)+1,MONTH(prevIPC),DAY(EOMONTH(prevIPC,0))),0)," & _
+                  "IF(lastIPC=0,0,IF(prevExpiry>0,IF(AND(lastIPC>=EDATE(prevExpiry,-3),lastIPC<=prevExpiry),DATE(YEAR(prevExpiry)+1,MONTH(prevExpiry),DAY(EOMONTH(prevExpiry,0))),normal),normal)))"
+    SetWorkbookFormula targetWorkbook, "IPCOPCExpirySEA", formulaText
+
+    formulaText = Replace(formulaText, "LogbookSEA", "LogbookMEA")
+    SetWorkbookFormula targetWorkbook, "IPCOPCExpiryMEA", formulaText
+
+CleanExit:
+End Sub
+
+Private Sub SetCurrencyFormula(ByVal ws As Worksheet, ByVal addressText As String, ByVal formulaText As String)
+    On Error Resume Next
+    ws.Range(addressText).Formula2 = formulaText
+    If Err.Number <> 0 Then
+        Err.Clear
+        ws.Range(addressText).Formula = formulaText
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub SetWorkbookFormula(ByVal wb As Workbook, ByVal nameText As String, ByVal formulaText As String)
+    On Error Resume Next
+    wb.Names(nameText).RefersTo = formulaText
+    On Error GoTo 0
+End Sub
 
 Private Function CurrencyCheckMarker(ByVal value As Variant) As String
     If CurrencyCheckValueIsMarked(value) Then CurrencyCheckMarker = "X"
@@ -5907,22 +6411,37 @@ End Function
 ' ==============================================================
 
 Public Sub EnsureWorkbookProtectionOnOpen()
-    If mProtectionDisabledForSession Then Exit Sub
+    If WorkbookProtectionDisabledByBranch(ThisWorkbook) Then
+        UnprotectWorkbookForEditing
+        mProtectionDisabledForSession = True
+        Exit Sub
+    End If
+
+    mProtectionDisabledForSession = False
     ApplyWorkbookProtection False
 End Sub
 
 Public Sub EnableProtectionForRelease()
+    SetWorkbookNameValue ThisWorkbook, "GitHubBranch", "main"
     mProtectionDisabledForSession = False
     ApplyWorkbookProtection True
 End Sub
 
 Public Sub DisableProtectionForDevelopment()
+    SetWorkbookNameValue ThisWorkbook, "GitHubBranch", "dev"
     UnprotectWorkbookForEditing
     mProtectionDisabledForSession = True
-    MsgBox "Workbook protection has been disabled for this Excel session." & vbCrLf & vbCrLf & _
-           "Close and reopen the workbook to re-enable protection automatically, or run EnableProtectionForRelease.", _
+    MsgBox "Workbook protection has been disabled while GitHubBranch is set to 'dev'." & vbCrLf & vbCrLf & _
+           "Run EnableProtectionForRelease to set GitHubBranch back to 'main' and re-enable protection.", _
            vbInformation, "Development Mode Enabled"
 End Sub
+
+Private Function WorkbookProtectionDisabledByBranch(wb As Workbook) As Boolean
+    Dim branchValue As String
+
+    branchValue = LCase$(Trim$(CStr(GetWorkbookNameValue(wb, "GitHubBranch", ""))))
+    WorkbookProtectionDisabledByBranch = (branchValue = "dev")
+End Function
 
 Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False, Optional targetWorkbook As Workbook = Nothing)
     Dim wb As Workbook
@@ -5952,6 +6471,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     UnlockNamedRangeIfPresent wb, "FROverride"
     UnlockNamedRangeIfPresent wb, "IPCOverride"
     UnlockNamedRangeIfPresent wb, "OPCOverride"
+    UnlockListColumnDataIfPresent wb, "BaseAirportsTop10", "Base"
 
     On Error Resume Next
     Set wsLog = wb.Sheets("Logbook")
@@ -5997,6 +6517,24 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     Set wsLog = Nothing
     Set wsCharts = Nothing
     Set wb = Nothing
+End Sub
+
+Private Sub UnlockListColumnDataIfPresent(ByVal wb As Workbook, ByVal tableName As String, ByVal columnName As String)
+    Dim ws As Worksheet
+    Dim tbl As ListObject
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        Set tbl = Nothing
+        Set tbl = ws.ListObjects(tableName)
+        If Not tbl Is Nothing Then
+            If Not tbl.DataBodyRange Is Nothing Then
+                tbl.ListColumns(columnName).DataBodyRange.Locked = False
+            End If
+            Exit For
+        End If
+    Next ws
+    On Error GoTo 0
 End Sub
 
 Private Sub UnlockLogbookRowsForDeletion(ByVal ws As Worksheet)

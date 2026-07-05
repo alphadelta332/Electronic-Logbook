@@ -180,9 +180,15 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
     Dim yearCol As Long
     Dim monthCol As Long
     Dim dayCol As Long
-    Dim detailsCol As Long
+    Dim remarksCol As Long
+    Dim fromCol As Long
+    Dim toCol As Long
+    Dim hasRemarksCol As Boolean
+    Dim hasFromCol As Boolean
+    Dim hasToCol As Boolean
     Dim rowIndex As Long
-    Dim details As String
+    Dim remarks As String
+    Dim endpoint As String
     Dim tokens As Variant
     Dim token As String
     Dim icao As String
@@ -193,33 +199,58 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
     yearCol = tblLog.ListColumns("Year").Index
     monthCol = tblLog.ListColumns("Month").Index
     dayCol = tblLog.ListColumns("Day").Index
-    detailsCol = tblLog.ListColumns("Details").Index
+    If AirportTableColumnExists(tblLog, "Remarks") Then
+        hasRemarksCol = True
+        remarksCol = tblLog.ListColumns("Remarks").Index
+    ElseIf AirportTableColumnExists(tblLog, "Details") Then
+        hasRemarksCol = True
+        remarksCol = tblLog.ListColumns("Details").Index
+    End If
+    If AirportTableColumnExists(tblLog, "From") Then
+        hasFromCol = True
+        fromCol = tblLog.ListColumns("From").Index
+    End If
+    If AirportTableColumnExists(tblLog, "To") Then
+        hasToCol = True
+        toCol = tblLog.ListColumns("To").Index
+    End If
 
     For rowIndex = 1 To tblLog.DataBodyRange.Rows.Count
         If AirportStatsLogbookRowIsSimOnly(tblLog, rowIndex) Then GoTo NextRow
-
-        details = Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, detailsCol).Value))
-        If details = "" Then GoTo NextRow
 
         flightDate = ResolveAirportStatsLogbookDate( _
             tblLog.DataBodyRange.Cells(rowIndex, yearCol).Value2, _
             tblLog.DataBodyRange.Cells(rowIndex, monthCol).Value2, _
             tblLog.DataBodyRange.Cells(rowIndex, dayCol).Value2)
-        tokens = Split(TokeniseAirportDetails(details), "|")
         Set rowMatches = CreateObject("Scripting.Dictionary")
         rowMatches.CompareMode = 1
 
-        For Each key In tokens
-            token = UCase$(Trim$(CStr(key)))
-            If token <> "" Then
-                If Not AirportStatsIgnoreToken(token) Then
-                    If aliasLookup.Exists(token) Then
-                        icao = CStr(aliasLookup(token))
-                        If Not rowMatches.Exists(icao) Then rowMatches.Add icao, True
+        If hasFromCol Then
+            endpoint = UCase$(Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, fromCol).Value)))
+            If endpoint <> "" And aliasLookup.Exists(endpoint) Then rowMatches(CStr(aliasLookup(endpoint))) = True
+        End If
+        If hasToCol Then
+            endpoint = UCase$(Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, toCol).Value)))
+            If endpoint <> "" And aliasLookup.Exists(endpoint) Then rowMatches(CStr(aliasLookup(endpoint))) = True
+        End If
+
+        If hasRemarksCol Then
+            remarks = Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, remarksCol).Value))
+            If remarks <> "" Then
+                tokens = Split(TokeniseAirportDetails(remarks), "|")
+                For Each key In tokens
+                    token = UCase$(Trim$(CStr(key)))
+                    If token <> "" Then
+                        If Not AirportStatsIgnoreToken(token) Then
+                            If aliasLookup.Exists(token) Then
+                                icao = CStr(aliasLookup(token))
+                                If Not rowMatches.Exists(icao) Then rowMatches.Add icao, True
+                            End If
+                        End If
                     End If
-                End If
+                Next key
             End If
-        Next key
+        End If
 
         For Each key In rowMatches.Keys
             AddAirportVisit airportStats, CStr(key), flightDate
@@ -1004,6 +1035,7 @@ Private Function MergeAirportRecords(ByVal tbl As ListObject, ByVal remoteRecord
         remoteRecord = remoteRecords(key)
         If currentRecords.Exists(CStr(key)) Then
             currentRecord = currentRecords(CStr(key))
+            remoteRecord(1) = PreferNonBlank(currentRecord(1), remoteRecord(1))
             remoteRecord(4) = PreferNonBlank(remoteRecord(4), currentRecord(4))
             remoteRecord(5) = PreferNonBlank(remoteRecord(5), currentRecord(5))
         End If
@@ -1048,7 +1080,7 @@ Private Function ReadCurrentAirportRecords(ByVal tbl As ListObject) As Object
         If icao <> "" Then
             record = Array( _
                 icao, _
-                NormaliseAirportName(CStr(tbl.DataBodyRange.Cells(rowIndex, airportCol).Value)), _
+                Trim$(CStr(tbl.DataBodyRange.Cells(rowIndex, airportCol).Value)), _
                 tbl.DataBodyRange.Cells(rowIndex, latCol).Value, _
                 tbl.DataBodyRange.Cells(rowIndex, lonCol).Value, _
                 UCase$(Trim$(CStr(tbl.DataBodyRange.Cells(rowIndex, threeCol).Value))), _

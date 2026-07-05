@@ -44,7 +44,7 @@ if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPat
 
 Write-Host ""
 Write-Host "Master workbook state set to branch 'main' and version '$version'." -ForegroundColor Green
-Write-Host "Release protection mode enabled when the macro is available." -ForegroundColor Green
+Write-Host "Release protection mode persists while GitHubBranch is 'main'." -ForegroundColor Green
 Write-Host "Working copy branch set to 'main' when configured; its LogbookVersion is left unchanged." -ForegroundColor Green
 Write-Host "Next steps:"
 Write-Host "  1. Run GenerateReadmePDF.ps1 if README.md changed"
