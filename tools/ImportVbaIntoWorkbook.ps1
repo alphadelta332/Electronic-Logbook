@@ -34,10 +34,12 @@ if (-not $IncludeModUpdate) {
 
 # Excel caches removed UserForm component names until the workbook closes.
 # Remove forms in a separate save/close pass so they re-import as forms, not standard modules.
+Write-Host "Pass 1/2: checking VBA project access and removing obsolete forms..."
 Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     param($Workbook)
 
     Assert-VbaProjectAccess -Workbook $Workbook
+    Write-Host "  VBA project access confirmed"
     $components = $Workbook.VBProject.VBComponents
 
     foreach ($formName in $removedUserForms) {
@@ -48,11 +50,14 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
         } catch {}
     }
 }
+Write-Host "Pass 1/2 complete."
 
+Write-Host "Pass 2/2: importing tracked VBA source..."
 Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     param($Workbook)
 
     Assert-VbaProjectAccess -Workbook $Workbook
+    Write-Host "  VBA project access confirmed"
     $components = $Workbook.VBProject.VBComponents
 
     foreach ($moduleFile in $standardModules) {
@@ -96,5 +101,6 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     Set-WorkbookNameValue -Workbook $Workbook -Name "LogbookVersion" -Value $version
     Write-Host "  Stamped LogbookVersion = $version"
 }
+Write-Host "Pass 2/2 complete."
 
 Write-Host "VBA import complete." -ForegroundColor Green

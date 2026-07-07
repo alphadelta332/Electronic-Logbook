@@ -9,14 +9,15 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 ## Changelog
 
 ### [2.0.0] - 2026-07-05
-- Expanded Airports table updates to use the OurAirports dataset for international airports
-- Added workbook airport dataset update checks with visible errors if the refresh cannot complete
-- Preserved existing local airport rows when they are not present in the imported dataset
-- Kept two-letter and three-letter airport aliases limited to Australian ICAO airports
-- Restored manually cleared Australian airport aliases for codes that conflict with common flight terms
-- Added automatic airport name suffix cleanup for imported airport names
-- Reworked airport visit statistics to store refreshed values instead of formula-heavy columns
-- Updated the legacy VBA updater and external updater wizard to refresh airport visit statistics during migration
+- Redesigned the Logbook and New Entry sheets so route details are entered in separate fields: Flight ID, From, To, Via, and Remarks.
+- Added direct checkboxes for Flight Review, IPC, and OPC entries, replacing the old currency verification pop-up.
+- Added clearer New Entry warnings, including highlighted fields when something needs to be fixed or reviewed.
+- Added airport-code suggestions and warnings for unrecognised departure, destination, or via airports.
+- Expanded airport data to better support international flying, with improved airport visit and base-airport statistics.
+- Added LogTen import support for compatible dynamic exports, including duplicate checks and an import report.
+- Updated route map handling to use the new route fields, with prompts to rebuild route data when needed.
+- Improved workbook opening feedback so Excel shows what the logbook is working on during startup.
+- Improved the update process for this larger upgrade, including better backups, clearer error messages, and extra checks that migrated logbooks were saved correctly.
 
 ### [1.4.2] - 2026-06-25
 - Improved protected Logbook row deletion for removing placeholder entries

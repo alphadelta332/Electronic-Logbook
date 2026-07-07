@@ -10,6 +10,7 @@ param(
     [switch]$SkipWizardAsset,
     [switch]$SkipVbaCompile,
     [switch]$SkipVbaParity,
+    [switch]$SkipCompatibilityMatrix,
     [switch]$SkipPublicReadinessCheck,
     [switch]$SkipGitChecks
 )
@@ -86,6 +87,11 @@ if (-not $SkipVbaCompile) {
 if (-not $SkipPublicReadinessCheck) {
     Write-Host ""
     & (Join-Path $PSScriptRoot "Test-WorkbookPublicReadiness.ps1") -RepoRoot $repoRoot
+}
+
+if (-not $SkipCompatibilityMatrix) {
+    Write-Host ""
+    & (Join-Path $repoRoot "updater\Test-CompatibilityMatrix.ps1") -RepoRoot $repoRoot
 }
 
 Write-Host ""

@@ -3,20 +3,19 @@ Option Explicit
 
 Private Const AIRPORT_DATA_URL As String = "https://davidmegginson.github.io/ourairports-data/airports.csv"
 Private Const AIRPORT_DATA_SOURCE As String = "OurAirports airports.csv"
-Private Const AIRPORT_CHECK_INTERVAL_DAYS As Double = 1#
+Private Const AIRAC_EPOCH_DATE As Date = #1/25/2024#
+Private Const AIRAC_CYCLE_DAYS As Long = 28
 Private Const BASE_AIRPORTS_TABLE As String = "BaseAirportsTop10"
 Private Const BASE_AIRPORTS_TOP_COUNT As Long = 10
 
 Public Function AirportDatasetUpdateAvailable(ByVal wb As Workbook, Optional ByVal forceCheck As Boolean = False) As Boolean
     Dim remoteVersion As String
     Dim storedVersion As String
-    Dim lastChecked As Date
+    Dim currentAiracCycle As String
 
     If Not forceCheck Then
-        lastChecked = ReadWorkbookNameDate(wb, "AirportDatasetLastChecked", 0)
-        If lastChecked <> 0 Then
-            If DateDiff("s", lastChecked, Now) < CLng(AIRPORT_CHECK_INTERVAL_DAYS * 86400#) Then Exit Function
-        End If
+        currentAiracCycle = CurrentAiracCycleKey()
+        If StrComp(ReadWorkbookNameText(wb, "AirportDatasetLastAiracChecked", ""), currentAiracCycle, vbTextCompare) = 0 Then Exit Function
     End If
 
     remoteVersion = FetchAirportDatasetVersion()
@@ -24,6 +23,7 @@ Public Function AirportDatasetUpdateAvailable(ByVal wb As Workbook, Optional ByV
 
     storedVersion = ReadWorkbookNameText(wb, "AirportDatasetVersion", "")
     WriteWorkbookNameText wb, "AirportDatasetLastChecked", Format$(Now, "yyyy-mm-dd hh:nn:ss")
+    WriteWorkbookNameText wb, "AirportDatasetLastAiracChecked", CurrentAiracCycleKey()
     WriteWorkbookNameText wb, "AirportDatasetAvailableVersion", remoteVersion
 
     AirportDatasetUpdateAvailable = (storedVersion = "" Or StrComp(storedVersion, remoteVersion, vbTextCompare) <> 0)
@@ -32,7 +32,7 @@ End Function
 Public Function RefreshAirportDataset(ByVal wb As Workbook, Optional ByVal forceCheck As Boolean = False) As Boolean
     Dim remoteVersion As String
     Dim storedVersion As String
-    Dim lastChecked As Date
+    Dim currentAiracCycle As String
     Dim csvText As String
     Dim remoteRecords As Object
     Dim mergedRecords As Object
@@ -44,10 +44,8 @@ Public Function RefreshAirportDataset(ByVal wb As Workbook, Optional ByVal force
     Set tbl = wb.Worksheets("Airports").ListObjects("Airports")
 
     If Not forceCheck Then
-        lastChecked = ReadWorkbookNameDate(wb, "AirportDatasetLastChecked", 0)
-        If lastChecked <> 0 Then
-            If DateDiff("s", lastChecked, Now) < CLng(AIRPORT_CHECK_INTERVAL_DAYS * 86400#) Then Exit Function
-        End If
+        currentAiracCycle = CurrentAiracCycleKey()
+        If StrComp(ReadWorkbookNameText(wb, "AirportDatasetLastAiracChecked", ""), currentAiracCycle, vbTextCompare) = 0 Then Exit Function
     End If
 
     remoteVersion = FetchAirportDatasetVersion()
@@ -55,6 +53,7 @@ Public Function RefreshAirportDataset(ByVal wb As Workbook, Optional ByVal force
 
     storedVersion = ReadWorkbookNameText(wb, "AirportDatasetVersion", "")
     WriteWorkbookNameText wb, "AirportDatasetLastChecked", Format$(Now, "yyyy-mm-dd hh:nn:ss")
+    WriteWorkbookNameText wb, "AirportDatasetLastAiracChecked", CurrentAiracCycleKey()
 
     If Not forceCheck Then
         If storedVersion <> "" And StrComp(storedVersion, remoteVersion, vbTextCompare) = 0 Then Exit Function
@@ -483,7 +482,10 @@ End Sub
 Private Function EnsureBaseAirportsTable(ByVal wb As Workbook) As ListObject
     Dim ws As Worksheet
     Dim tbl As ListObject
+    Dim tblStats As ListObject
     Dim targetRange As Range
+    Dim startRow As Long
+    Dim startCol As Long
 
     Set tbl = FindWorkbookTable(wb, BASE_AIRPORTS_TABLE)
     If Not tbl Is Nothing Then
@@ -493,7 +495,17 @@ Private Function EnsureBaseAirportsTable(ByVal wb As Workbook) As ListObject
     End If
 
     Set ws = wb.Worksheets("Stats")
-    Set targetRange = ws.Range("E2:G" & CStr(2 + BASE_AIRPORTS_TOP_COUNT))
+    Set tblStats = FindWorkbookTable(wb, "Stats")
+    If tblStats Is Nothing Then
+        startRow = 2
+        startCol = 5
+    Else
+        startRow = tblStats.Range.Row
+        startCol = tblStats.Range.Column + tblStats.Range.Columns.Count + 2
+    End If
+
+    Set targetRange = ws.Range(ws.Cells(startRow, startCol), _
+                               ws.Cells(startRow + BASE_AIRPORTS_TOP_COUNT, startCol + 2))
     targetRange.Clear
     targetRange.Rows(1).Value = Array("Airport", "Base", "ICAO")
     Set tbl = ws.ListObjects.Add(xlSrcRange, targetRange, , xlYes)
@@ -837,6 +849,16 @@ Public Sub MarkAirportDatasetRoutesStateCurrent(ByVal wb As Workbook)
     datasetVersion = ReadWorkbookNameText(wb, "AirportDatasetVersion", "")
     If datasetVersion <> "" Then WriteWorkbookNameText wb, "AirportDatasetRoutesVersion", datasetVersion
 End Sub
+
+Private Function CurrentAiracCycleKey(Optional ByVal asOfDate As Date = 0) As String
+    Dim cycleIndex As Long
+    Dim cycleStart As Date
+
+    If asOfDate = 0 Then asOfDate = Date
+    cycleIndex = CLng(Int(DateDiff("d", AIRAC_EPOCH_DATE, asOfDate) / AIRAC_CYCLE_DAYS))
+    cycleStart = DateAdd("d", cycleIndex * AIRAC_CYCLE_DAYS, AIRAC_EPOCH_DATE)
+    CurrentAiracCycleKey = Format$(cycleStart, "yyyy-mm-dd")
+End Function
 
 Private Function FetchAirportDatasetVersion() As String
     Dim http As Object
@@ -1445,17 +1467,6 @@ Private Function ReadWorkbookNameText(ByVal wb As Workbook, ByVal nameText As St
 
 Fail:
     ReadWorkbookNameText = defaultValue
-End Function
-
-Private Function ReadWorkbookNameDate(ByVal wb As Workbook, ByVal nameText As String, ByVal defaultValue As Date) As Date
-    Dim textValue As String
-
-    textValue = ReadWorkbookNameText(wb, nameText, "")
-    If IsDate(textValue) Then
-        ReadWorkbookNameDate = CDate(textValue)
-    Else
-        ReadWorkbookNameDate = defaultValue
-    End If
 End Function
 
 Private Sub WriteWorkbookNameText(ByVal wb As Workbook, ByVal nameText As String, ByVal value As String)

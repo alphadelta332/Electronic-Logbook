@@ -352,7 +352,12 @@ public sealed class ExcelWorkbookMigrator
         object outputWorkbook,
         string tableName)
     {
-        dynamic source = GetTable(sourceWorkbook, tableName);
+        dynamic? source = GetTableOrNull(sourceWorkbook, tableName);
+        if (source is null)
+        {
+            return;
+        }
+
         dynamic destination = GetTable(outputWorkbook, tableName);
         var rows = (int)source.ListRows.Count;
         ResizeTable(destination, rows);
@@ -884,7 +889,18 @@ public sealed class ExcelWorkbookMigrator
 
         dynamic workbook = workbookObject;
         dynamic worksheet = workbook.Worksheets.Item("Stats");
-        dynamic range = worksheet.Range["E2:G12"];
+        dynamic? statsTable = GetTableOrNull(workbookObject, "Stats");
+        var startRow = 2;
+        var startColumn = 5;
+        if (statsTable is not null)
+        {
+            startRow = (int)statsTable.Range.Row;
+            startColumn = (int)statsTable.Range.Column + (int)statsTable.Range.Columns.Count + 2;
+        }
+
+        dynamic startCell = worksheet.Cells.Item(startRow, startColumn);
+        dynamic endCell = worksheet.Cells.Item(startRow + 10, startColumn + 2);
+        dynamic range = worksheet.Range[startCell, endCell];
         range.Clear();
         range.Rows.Item(1).Value2 = new object[,] { { "Airport", "Base", "ICAO" } };
         table = worksheet.ListObjects.Add(1, range, Type.Missing, 1);
@@ -2003,13 +2019,19 @@ public sealed class ExcelWorkbookMigrator
     {
         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Keywords"] = FingerprintTable(workbook, "Keywords"),
-            ["Routes"] = FingerprintColumns(
-                workbook,
-                "Routes",
-                new[] { "DepAirport", "ArrAirport" }),
             ["Preferences"] = FingerprintNames(workbook, PreservedNames)
         };
+        if (GetTableOrNull(workbook, "Keywords") is not null)
+        {
+            fingerprints["Keywords"] = FingerprintTable(workbook, "Keywords");
+        }
+        if (GetTableOrNull(workbook, "Routes") is not null)
+        {
+            fingerprints["Routes"] = FingerprintColumns(
+                workbook,
+                "Routes",
+                new[] { "DepAirport", "ArrAirport" });
+        }
         if (GetTableOrNull(workbook, "BaseAirportsTop10") is not null)
         {
             fingerprints["BaseAirports"] = FingerprintBaseAirportSelections(workbook);

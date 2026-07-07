@@ -6,6 +6,9 @@ Private mProtectionDisabledForSession As Boolean
 Private Const NEW_ENTRY_ACTIVE_SHEET As String = "New Entry"
 Private Const NEW_ENTRY_UNUSED_SHEET As String = "New Entry Unused Layout"
 Private Const NEW_ENTRY_SWAP_TEMP_SHEET As String = "New Entry Swap Temp"
+Private Const NEW_ENTRY_LAYOUT_MARKER_NAME As String = "NewEntryLayoutKind"
+Private Const NEW_ENTRY_LAYOUT_COMPACT As String = "Compact"
+Private Const NEW_ENTRY_LAYOUT_GROUPED As String = "Grouped"
 Private Const AIRCRAFT_TYPES_SHEET As String = "AircraftTypes"
 Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
@@ -268,10 +271,14 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4d. No Landings Recorded (Non-Sim Entries Only)
+    '--- 4d. No Landings Recorded (Non-Sim, Non-Copilot Entries Only)
+        Dim copilotHoursRecorded As Boolean
+        copilotHoursRecorded = NewEntryHasCopilotFlightTime()
+
         If Not suppressWarnings Then
             If NewEntryNumericValue("neIfrSim") = 0 Then
-                If NewEntryNumericValue("neLandingsDay") = 0 And _
+                If Not copilotHoursRecorded And _
+                   NewEntryNumericValue("neLandingsDay") = 0 And _
                    NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: No Landings Recorded. Proceed?", vbOKCancel + vbExclamation, "No Landings")
                     If response = vbCancel Then
@@ -299,14 +306,11 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
     '--- 4f. Day Hours vs Day Landings Cross-Check
         Dim dayHours As Double
-        dayHours = SumNewEntryFields(Array( _
-            "neSeIcusDay", "neSeDualDay", "neSeCommandDay", _
-            "neMeIcusDay", "neMeDualDay", "neMeCommandDay", _
-            "neCopilotDay"))
+        dayHours = SumNewEntryFields(NewEntryDayFlightTimeFieldNames())
 
         If Not suppressWarnings Then
             'Check 1: Day hours recorded but no day landings
-            If dayHours > 0 Then
+            If dayHours > 0 And Not copilotHoursRecorded Then
                 If NewEntryNumericValue("neLandingsDay") = 0 Then
                     response = MsgBox("Warning: Day hours recorded, but no Day Landings recorded. Continue?", vbOKCancel + vbExclamation, "Day Hours Warning")
                     If response = vbCancel Then
@@ -330,14 +334,11 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
     '--- 4g. Night Hours vs Night Landings Cross-Check
         Dim nightHours As Double
-        nightHours = SumNewEntryFields(Array( _
-            "neSeIcusNight", "neSeDualNight", "neSeCommandNight", _
-            "neMeIcusNight", "neMeDualNight", "neMeCommandNight", _
-            "neCopilotNight"))
+        nightHours = SumNewEntryFields(NewEntryNightFlightTimeFieldNames())
 
         If Not suppressWarnings Then
             'Check 1: Night hours recorded but no night landings
-            If nightHours > 0 Then
+            If nightHours > 0 And Not copilotHoursRecorded Then
                 If NewEntryNumericValue("neLandingsNight") = 0 Then
                     response = MsgBox("Warning: Night hours recorded, but no Night Landings recorded. Continue?", vbOKCancel + vbExclamation, "Night Hours Warning")
                     If response = vbCancel Then
@@ -717,6 +718,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
     '--- 7c. Clear Remaining Input Fields
         ClearNewEntryFields NewEntryClearFieldNames()
+        ResetNewEntryRouteFieldsAfterAdd
 
     '--- 7d. Update Hidden Rows
         UpdateHiddenRows ThisWorkbook
@@ -1684,31 +1686,6 @@ Public Sub ClearNewEntryValidationHighlightsForTarget(ByVal targetRange As Range
     On Error GoTo 0
 End Sub
 
-Public Sub ConfigureNewEntryAirportValidation()
-    Dim workbookWasProtected As Boolean
-
-    workbookWasProtected = ThisWorkbook.ProtectStructure
-    On Error Resume Next
-    If workbookWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
-    On Error GoTo CleanFail
-
-    EnsureAirportIcaoValidationName
-    ApplyAirportIcaoValidationToNameBase "neFrom"
-    ApplyAirportIcaoValidationToNameBase "neTo"
-    ApplyAirportIcaoValidationToNameBase "neFrom2"
-    ApplyAirportIcaoValidationToNameBase "neTo2"
-    DeleteLegacyNewEntryAirportHintShape
-
-CleanExit:
-    On Error Resume Next
-    If workbookWasProtected Then ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
-    On Error GoTo 0
-    Exit Sub
-
-CleanFail:
-    Resume CleanExit
-End Sub
-
 Private Sub ClearNewEntryValidationHighlights()
     Dim fieldName As Variant
     Dim inputArea As Range
@@ -1768,59 +1745,6 @@ Private Sub EnsureAirportIcaoValidationName()
     Else
         nm.RefersTo = refersToText
     End If
-End Sub
-
-Private Sub ApplyAirportIcaoValidationToNameBase(ByVal nameText As String)
-    Dim nm As Name
-    Dim targetRange As Range
-
-    Set nm = FindNameByBase(nameText)
-    If nm Is Nothing Then Exit Sub
-
-    On Error Resume Next
-    Set targetRange = nm.RefersToRange
-    On Error GoTo 0
-    If targetRange Is Nothing Then Exit Sub
-
-    If targetRange.MergeCells Then Set targetRange = targetRange.MergeArea
-    ApplyAirportIcaoValidationToRange targetRange
-End Sub
-
-Private Sub ApplyAirportIcaoValidationToRange(ByVal targetRange As Range)
-    Dim sheetWasProtected As Boolean
-
-    If targetRange Is Nothing Then Exit Sub
-
-    sheetWasProtected = targetRange.Worksheet.ProtectContents
-    On Error Resume Next
-    If sheetWasProtected Then targetRange.Worksheet.Unprotect Password:=ProtectionPassword()
-    On Error GoTo CleanFail
-
-    With targetRange.Validation
-        .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Operator:=xlBetween, _
-             Formula1:="=" & AIRPORT_ICAO_VALIDATION_NAME
-        .IgnoreBlank = True
-        .InCellDropdown = True
-        .InputTitle = "Airport ICAO"
-        .InputMessage = "Choose or enter a recognised ICAO airport code."
-        .ErrorTitle = "Airport not recognised"
-        .ErrorMessage = "Enter an ICAO airport code from the Airports table."
-        .ShowInput = True
-        .ShowError = True
-    End With
-
-CleanExit:
-    On Error Resume Next
-    If sheetWasProtected Then
-        targetRange.Worksheet.Protect Password:=ProtectionPassword(), DrawingObjects:=False, _
-            Contents:=True, Scenarios:=True, UserInterfaceOnly:=True, AllowUsingPivotTables:=True
-    End If
-    On Error GoTo 0
-    Exit Sub
-
-CleanFail:
-    Resume CleanExit
 End Sub
 
 Private Sub DeleteLegacyNewEntryAirportHintShape()
@@ -1961,12 +1885,160 @@ Private Function NewEntryAirportIsRecognised(ByVal airportCode As String) As Boo
 CleanExit:
 End Function
 
+Private Sub ResetNewEntryRouteFieldsAfterAdd()
+    Dim fromText As String
+    Dim toText As String
+    Dim fromIsBase As Boolean
+    Dim toIsBase As Boolean
+
+    fromText = Trim$(CStr(NewEntryValue("neFrom")))
+    toText = Trim$(CStr(NewEntryValue("neTo")))
+
+    If fromText = "" And toText = "" Then Exit Sub
+    If toText = "" Then Exit Sub
+    If StrComp(fromText, toText, vbTextCompare) = 0 Then Exit Sub
+
+    fromIsBase = NewEntryAirportIsBase(fromText)
+    toIsBase = NewEntryAirportIsBase(toText)
+
+    If fromIsBase Then
+        SetNewEntryValue "neFrom", toText
+        SetNewEntryValue "neTo", fromText
+    ElseIf Not toIsBase Then
+        SetNewEntryValue "neFrom", toText
+        SetNewEntryValue "neTo", vbNullString
+    End If
+End Sub
+
+Private Function NewEntryAirportIsBase(ByVal airportCode As String) As Boolean
+    Dim tblBase As ListObject
+    Dim tblAirports As ListObject
+    Dim rowIndex As Long
+    Dim airportIcao As String
+    Dim baseIcao As String
+    Dim baseAirportName As String
+
+    airportIcao = NewEntryAirportIcao(airportCode)
+    If airportIcao = "" Then airportIcao = UCase$(Trim$(airportCode))
+    If airportIcao = "" Then Exit Function
+
+    On Error Resume Next
+    Set tblBase = FindListObject(ThisWorkbook, "BaseAirportsTop10")
+    On Error GoTo 0
+
+    If Not tblBase Is Nothing Then
+        If ListColumnExists(tblBase, "Base") And Not tblBase.DataBodyRange Is Nothing Then
+            For rowIndex = 1 To tblBase.DataBodyRange.Rows.Count
+                If NewEntryRouteBooleanValue(tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Base").Index).Value) Then
+                    baseIcao = vbNullString
+                    If ListColumnExists(tblBase, "ICAO") Then
+                        baseIcao = UCase$(Trim$(CStr(tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("ICAO").Index).Value)))
+                    End If
+                    If baseIcao = "" And ListColumnExists(tblBase, "Airport") Then
+                        baseAirportName = Trim$(CStr(tblBase.DataBodyRange.Cells(rowIndex, tblBase.ListColumns("Airport").Index).Value))
+                        baseIcao = NewEntryAirportIcao(baseAirportName)
+                    End If
+
+                    If baseIcao <> "" And baseIcao = airportIcao Then
+                        NewEntryAirportIsBase = True
+                        Exit Function
+                    End If
+                End If
+            Next rowIndex
+        End If
+    End If
+
+    On Error Resume Next
+    Set tblAirports = ThisWorkbook.Worksheets("Airports").ListObjects("Airports")
+    On Error GoTo 0
+
+    If tblAirports Is Nothing Then Exit Function
+    If Not ListColumnExists(tblAirports, "Base") Then Exit Function
+    If Not ListColumnExists(tblAirports, "ICAO") Then Exit Function
+    If tblAirports.DataBodyRange Is Nothing Then Exit Function
+
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        If NewEntryRouteBooleanValue(tblAirports.DataBodyRange.Cells(rowIndex, tblAirports.ListColumns("Base").Index).Value) Then
+            baseIcao = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, tblAirports.ListColumns("ICAO").Index).Value)))
+            If baseIcao <> "" And baseIcao = airportIcao Then
+                NewEntryAirportIsBase = True
+                Exit Function
+            End If
+        End If
+    Next rowIndex
+End Function
+
+Private Function NewEntryAirportIcao(ByVal airportText As String) As String
+    Dim tblAirports As ListObject
+    Dim rowIndex As Long
+    Dim candidate As String
+    Dim icaoCol As Long
+    Dim twoCol As Long
+    Dim threeCol As Long
+    Dim airportCol As Long
+    Dim rowIcao As String
+    Dim rowTwo As String
+    Dim rowThree As String
+    Dim rowAirport As String
+
+    candidate = UCase$(Trim$(airportText))
+    If candidate = "" Then Exit Function
+
+    On Error GoTo CleanExit
+    Set tblAirports = ThisWorkbook.Worksheets("Airports").ListObjects("Airports")
+    If tblAirports.DataBodyRange Is Nothing Then Exit Function
+    If Not ListColumnExists(tblAirports, "ICAO") Then Exit Function
+
+    icaoCol = tblAirports.ListColumns("ICAO").Index
+    If ListColumnExists(tblAirports, "Two") Then twoCol = tblAirports.ListColumns("Two").Index
+    If ListColumnExists(tblAirports, "Three") Then threeCol = tblAirports.ListColumns("Three").Index
+    If ListColumnExists(tblAirports, "Airport") Then airportCol = tblAirports.ListColumns("Airport").Index
+
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        rowIcao = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, icaoCol).Value)))
+        rowTwo = vbNullString
+        rowThree = vbNullString
+        rowAirport = vbNullString
+        If twoCol > 0 Then rowTwo = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, twoCol).Value)))
+        If threeCol > 0 Then rowThree = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, threeCol).Value)))
+        If airportCol > 0 Then rowAirport = Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, airportCol).Value))
+
+        If candidate = rowIcao Or _
+           (rowTwo <> "" And candidate = rowTwo) Or _
+           (rowThree <> "" And candidate = rowThree) Or _
+           (rowAirport <> "" And StrComp(Trim$(airportText), rowAirport, vbTextCompare) = 0) Then
+            NewEntryAirportIcao = rowIcao
+            Exit Function
+        End If
+    Next rowIndex
+
+CleanExit:
+End Function
+
+Private Function NewEntryRouteBooleanValue(ByVal value As Variant) As Boolean
+    If VarType(value) = vbBoolean Then
+        NewEntryRouteBooleanValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        NewEntryRouteBooleanValue = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                NewEntryRouteBooleanValue = True
+        End Select
+    End If
+End Function
+
 Private Function SumNewEntryFields(ByVal fieldNames As Variant) As Double
     Dim fieldName As Variant
 
     For Each fieldName In fieldNames
         SumNewEntryFields = SumNewEntryFields + NewEntryNumericValue(CStr(fieldName))
     Next fieldName
+End Function
+
+Private Function NewEntryHasCopilotFlightTime() As Boolean
+    NewEntryHasCopilotFlightTime = (NewEntryNumericValue("neCopilotDay") > 0 Or _
+                                    NewEntryNumericValue("neCopilotNight") > 0)
 End Function
 
 Private Function CountPositiveNewEntryFields(ByVal fieldNames As Variant) As Long
@@ -1985,6 +2057,8 @@ Private Sub CopyNewEntryFieldsToLogbookRow(ByVal rowRange As Range, _
                                            ByVal ipcValue As Boolean, _
                                            ByVal opcValue As Boolean)
     Dim i As Long
+    Dim customStartColumn As Long
+    Dim customFieldNames As Variant
     Dim fieldNames As Variant
     Dim columnNames As Variant
 
@@ -1992,6 +2066,12 @@ Private Sub CopyNewEntryFieldsToLogbookRow(ByVal rowRange As Range, _
     columnNames = NewEntryLogbookColumnNames()
     For i = LBound(fieldNames) To UBound(fieldNames)
         WriteValueToLogbookColumn rowRange, tbl, CStr(columnNames(i)), NewEntryValue(CStr(fieldNames(i)))
+    Next i
+
+    customStartColumn = LogbookCustomStartColumn(tbl)
+    customFieldNames = NewEntryLogbookCustomFieldNames()
+    For i = LBound(customFieldNames) To UBound(customFieldNames)
+        WriteValueToLogbookColumnIndex rowRange, customStartColumn + i, NewEntryValue(CStr(customFieldNames(i)))
     Next i
 
     WriteValueToLogbookColumn rowRange, tbl, "FR", flightReviewValue
@@ -2002,7 +2082,6 @@ End Sub
 Private Function NewEntryLogbookFieldNames() As Variant
     NewEntryLogbookFieldNames = Array( _
         "neType", "neReg", "neFlightID", "nePIC", "neOtherCrew", "neFrom", "neTo", "neVia", "neRemarks", _
-        "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
         "neSeCommandDay", "neSeCommandNight", _
         "neMeIcusDay", "neMeIcusNight", "neMeDualDay", "neMeDualNight", _
@@ -2015,7 +2094,6 @@ End Function
 Private Function NewEntryLogbookColumnNames() As Variant
     NewEntryLogbookColumnNames = Array( _
         "Type", "Reg", "Flight ID", "PIC", "Other Pilot or Crew", "From", "To", "Via", "Remarks", _
-        "Custom 1", "Custom 2", "Custom 3", "Custom 4", _
         "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
         "SeCommandDay", "SeCommandNight", _
         "MeIcusDay", "MeIcusNight", "MeDualDay", "MeDualNight", _
@@ -2025,11 +2103,21 @@ Private Function NewEntryLogbookColumnNames() As Variant
         "ILS", "VOR", "RNP", "NDB", "DGA (CDI)", "DGA (Azi)", "Circling")
 End Function
 
+Private Function NewEntryLogbookCustomFieldNames() As Variant
+    NewEntryLogbookCustomFieldNames = Array("neSI1", "neSI2", "neSI3", "neSI4")
+End Function
+
 Private Sub WriteValueToLogbookColumn(ByVal rowRange As Range, _
                                       ByVal tbl As ListObject, _
                                       ByVal columnName As String, _
                                       ByVal value As Variant)
     rowRange.Cells(1, tbl.ListColumns(columnName).Index).Value = value
+End Sub
+
+Private Sub WriteValueToLogbookColumnIndex(ByVal rowRange As Range, _
+                                           ByVal columnIndex As Long, _
+                                           ByVal value As Variant)
+    rowRange.Cells(1, columnIndex).Value = value
 End Sub
 
 Private Function NewEntryNumericFieldNames() As Variant
@@ -2125,7 +2213,7 @@ End Function
 
 Private Function NewEntryClearFieldNames() As Variant
     NewEntryClearFieldNames = Array( _
-        "neType", "neReg", "neFlightID", "neOtherCrew", "neFrom", "neTo", "neVia", "neRemarks", _
+        "neType", "neReg", "neFlightID", "neOtherCrew", "neVia", "neRemarks", _
         "neFR", "neIPC", "neOPC", _
         "neSI1", "neSI2", "neSI3", "neSI4", _
         "neSeIcusDay", "neSeIcusNight", "neSeDualDay", "neSeDualNight", _
@@ -5469,7 +5557,6 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
 
     ConfigureNewEntryLayoutControls
     EnforceNewEntrySheetRoles
-    ConfigureNewEntryAirportValidation
     If layoutChanged Then ActivateNewEntrySheet
 
 CleanExit:
@@ -5763,22 +5850,22 @@ Private Function IsCurrentNewEntryLayoutCompact() As Boolean
 End Function
 
 Private Function IsNewEntrySheetCompact(ByVal ws As Worksheet) As Boolean
-    Dim lastColumn As Long
+    Dim layoutKind As String
 
-    On Error Resume Next
-    If LCase$(Trim$(CStr(ws.Range("AO10").Value))) = "rnp" Then
+    layoutKind = NewEntrySheetLayoutKind(ws)
+    If StrComp(layoutKind, NEW_ENTRY_LAYOUT_COMPACT, vbTextCompare) = 0 Then
         IsNewEntrySheetCompact = True
         Exit Function
     End If
 
-    If LCase$(Trim$(CStr(ws.Range("N28").Value))) = "rnp" Then
+    If StrComp(layoutKind, NEW_ENTRY_LAYOUT_GROUPED, vbTextCompare) = 0 Then
         IsNewEntrySheetCompact = False
         Exit Function
     End If
 
-    lastColumn = ws.UsedRange.Column + ws.UsedRange.Columns.Count - 1
-    IsNewEntrySheetCompact = (lastColumn >= 30)
-    On Error GoTo 0
+    BootstrapNewEntryLayoutMarkers
+    layoutKind = NewEntrySheetLayoutKind(ws)
+    IsNewEntrySheetCompact = (StrComp(layoutKind, NEW_ENTRY_LAYOUT_COMPACT, vbTextCompare) = 0)
 End Function
 
 Private Sub ApplyNewEntryLayoutBindingTargets(ByVal layoutId As Long, ByVal fieldNames As Variant)
@@ -5812,6 +5899,7 @@ Private Sub RepairNewEntryLayoutNames(ByVal fieldNames As Variant)
 
     If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
 
+    BootstrapNewEntryLayoutMarkers
     SetNewEntryLayoutNameTargets fieldNames, activeSheet, inactiveSheet
 End Sub
 
@@ -5825,6 +5913,8 @@ Private Sub ResolveNewEntryLayoutSheets(ByRef compactSheet As Worksheet, ByRef g
     On Error GoTo 0
 
     If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
+
+    BootstrapNewEntryLayoutMarkers
 
     If IsNewEntrySheetCompact(activeSheet) Then
         Set compactSheet = activeSheet
@@ -5842,26 +5932,22 @@ End Sub
 Private Sub SetNewEntryLayoutNameTargets(ByVal fieldNames As Variant, ByVal primarySheet As Worksheet, ByVal secondarySheet As Worksheet)
     Dim i As Long
     Dim nameText As String
-    Dim primaryAddress As String
-    Dim secondaryAddress As String
-    Dim primaryCompact As Boolean
-    Dim secondaryCompact As Boolean
+    Dim primaryTarget As Range
+    Dim secondaryTarget As Range
+    Dim activeNameTargets As Object
+    Dim secondaryNameTargets As Object
 
-    primaryCompact = IsNewEntrySheetCompact(primarySheet)
-    secondaryCompact = IsNewEntrySheetCompact(secondarySheet)
+    Set activeNameTargets = CaptureNewEntryNameTargets(fieldNames, False)
+    Set secondaryNameTargets = CaptureNewEntryNameTargets(fieldNames, True)
 
     For i = LBound(fieldNames) To UBound(fieldNames)
         nameText = CStr(fieldNames(i))
-        primaryAddress = NewEntryLayoutFieldAddress(nameText, primaryCompact)
-        secondaryAddress = NewEntryLayoutFieldAddress(nameText, secondaryCompact)
+        Set primaryTarget = NewEntryLayoutTargetForSheet(nameText, primarySheet, activeNameTargets, secondaryNameTargets)
+        Set secondaryTarget = NewEntryLayoutTargetForSheet(nameText, secondarySheet, activeNameTargets, secondaryNameTargets)
 
-        If Len(primaryAddress) > 0 Then
-            EnsureWorkbookNameRefersTo nameText, primarySheet.Range(primaryAddress)
-        End If
+        If Not primaryTarget Is Nothing Then EnsureWorkbookNameRefersTo nameText, primaryTarget
 
-        If Len(secondaryAddress) > 0 Then
-            EnsureSecondaryNameRefersTo nameText & "2", secondarySheet.Range(secondaryAddress)
-        End If
+        If Not secondaryTarget Is Nothing Then EnsureSecondaryNameRefersTo nameText & "2", secondaryTarget
     Next i
 End Sub
 
@@ -5902,99 +5988,137 @@ Private Function NameRefersToRange(ByVal targetRange As Range) As String
     NameRefersToRange = "='" & targetRange.Worksheet.Name & "'!" & targetRange.Address(True, True)
 End Function
 
-Private Function NewEntryLayoutFieldAddress(ByVal fieldName As String, ByVal compactLayout As Boolean) As String
-    Select Case LCase$(fieldName)
-        Case "nedate"
-            NewEntryLayoutFieldAddress = "B12"
-        Case "neyear"
-            NewEntryLayoutFieldAddress = "C12"
-        Case "nemonth"
-            NewEntryLayoutFieldAddress = "D12"
-        Case "neday"
-            NewEntryLayoutFieldAddress = "E12"
-        Case "netype"
-            NewEntryLayoutFieldAddress = "F12"
-        Case "nereg"
-            NewEntryLayoutFieldAddress = "G12"
-        Case "neflightid"
-            NewEntryLayoutFieldAddress = "H12"
-        Case "nepic"
-            NewEntryLayoutFieldAddress = "I12"
-        Case "neothercrew"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "J12", "K12")
-        Case "nefr"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "K12", "M12")
-        Case "neipc"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "L12", "N12")
-        Case "neopc"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "M12", "O12")
-        Case "nefrom"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "N12", "C18")
-        Case "neto"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "O12", "D18")
-        Case "nevia"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "P12", "E18")
-        Case "nedetails", "neremarks"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "Q12", "J18")
-        Case "nesi1"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "R12", "C30")
-        Case "nesi2"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "S12", "D30")
-        Case "nesi3"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "T12", "E30")
-        Case "nesi4"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "U12", "F30")
-        Case "neseicusday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "V12", "C24")
-        Case "neseicusnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "W12", "D24")
-        Case "nesedualday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "X12", "E24")
-        Case "nesedualnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "Y12", "F24")
-        Case "nesecommandday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "Z12", "G24")
-        Case "nesecommandnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AA12", "H24")
-        Case "nemeicusday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AB12", "I24")
-        Case "nemeicusnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AC12", "J24")
-        Case "nemedualday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AD12", "K24")
-        Case "nemedualnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AE12", "L24")
-        Case "nemecommandday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AF12", "M24")
-        Case "nemecommandnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AG12", "N24")
-        Case "necopilotday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AH12", "O24")
-        Case "necopilotnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AI12", "P24")
-        Case "neifrif"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AJ12", "Q24")
-        Case "neifrsim"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AK12", "R24")
-        Case "nelandingsday"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AL12", "J30")
-        Case "nelandingsnight"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AM12", "K30")
-        Case "neils"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AN12", "L30")
-        Case "nevor"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AO12", "M30")
-        Case "nernp", "nernav"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AP12", "N30")
-        Case "nendb"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AQ12", "O30")
-        Case "nedgacdi"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AR12", "P30")
-        Case "nedgaazi"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AS12", "Q30")
-        Case "necircling"
-            NewEntryLayoutFieldAddress = IIf(compactLayout, "AT12", "R30")
-    End Select
+Private Sub BootstrapNewEntryLayoutMarkers()
+    Dim activeSheet As Worksheet
+    Dim inactiveSheet As Worksheet
+    Dim activeKind As String
+    Dim inactiveKind As String
+    Dim configuredLayout As Long
+
+    On Error Resume Next
+    Set activeSheet = ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET)
+    Set inactiveSheet = ThisWorkbook.Sheets(NEW_ENTRY_UNUSED_SHEET)
+    On Error GoTo 0
+    If activeSheet Is Nothing Or inactiveSheet Is Nothing Then Exit Sub
+
+    activeKind = NewEntrySheetLayoutKind(activeSheet)
+    inactiveKind = NewEntrySheetLayoutKind(inactiveSheet)
+
+    If NewEntryLayoutKindIsValid(activeKind) And NewEntryLayoutKindIsValid(inactiveKind) Then Exit Sub
+
+    If NewEntryLayoutKindIsValid(activeKind) Then
+        SetNewEntrySheetLayoutKind inactiveSheet, OppositeNewEntryLayoutKind(activeKind)
+        Exit Sub
+    End If
+
+    If NewEntryLayoutKindIsValid(inactiveKind) Then
+        SetNewEntrySheetLayoutKind activeSheet, OppositeNewEntryLayoutKind(inactiveKind)
+        Exit Sub
+    End If
+
+    configuredLayout = CurrentConfiguredNewEntryLayoutId()
+    If configuredLayout = 1 Then
+        SetNewEntrySheetLayoutKind activeSheet, NEW_ENTRY_LAYOUT_COMPACT
+        SetNewEntrySheetLayoutKind inactiveSheet, NEW_ENTRY_LAYOUT_GROUPED
+    Else
+        SetNewEntrySheetLayoutKind activeSheet, NEW_ENTRY_LAYOUT_GROUPED
+        SetNewEntrySheetLayoutKind inactiveSheet, NEW_ENTRY_LAYOUT_COMPACT
+    End If
+End Sub
+
+Private Function NewEntrySheetLayoutKind(ByVal ws As Worksheet) As String
+    Dim nm As Name
+    Dim refersToText As String
+
+    On Error Resume Next
+    Set nm = ws.Names(NEW_ENTRY_LAYOUT_MARKER_NAME)
+    On Error GoTo 0
+    If nm Is Nothing Then Exit Function
+
+    refersToText = Trim$(nm.RefersTo)
+    If Left$(refersToText, 2) = "=""" And Right$(refersToText, 1) = """" Then
+        NewEntrySheetLayoutKind = Mid$(refersToText, 3, Len(refersToText) - 3)
+    End If
+End Function
+
+Private Sub SetNewEntrySheetLayoutKind(ByVal ws As Worksheet, ByVal layoutKind As String)
+    Dim nm As Name
+    Dim refersToText As String
+
+    If Not NewEntryLayoutKindIsValid(layoutKind) Then Exit Sub
+    refersToText = "=""" & layoutKind & """"
+
+    On Error Resume Next
+    Set nm = ws.Names(NEW_ENTRY_LAYOUT_MARKER_NAME)
+    If nm Is Nothing Then
+        ws.Names.Add Name:=NEW_ENTRY_LAYOUT_MARKER_NAME, RefersTo:=refersToText
+    Else
+        nm.RefersTo = refersToText
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Function NewEntryLayoutKindIsValid(ByVal layoutKind As String) As Boolean
+    NewEntryLayoutKindIsValid = (StrComp(layoutKind, NEW_ENTRY_LAYOUT_COMPACT, vbTextCompare) = 0 Or _
+                                 StrComp(layoutKind, NEW_ENTRY_LAYOUT_GROUPED, vbTextCompare) = 0)
+End Function
+
+Private Function OppositeNewEntryLayoutKind(ByVal layoutKind As String) As String
+    If StrComp(layoutKind, NEW_ENTRY_LAYOUT_COMPACT, vbTextCompare) = 0 Then
+        OppositeNewEntryLayoutKind = NEW_ENTRY_LAYOUT_GROUPED
+    Else
+        OppositeNewEntryLayoutKind = NEW_ENTRY_LAYOUT_COMPACT
+    End If
+End Function
+
+Private Function CaptureNewEntryNameTargets(ByVal fieldNames As Variant, ByVal secondaryNames As Boolean) As Object
+    Dim targets As Object
+    Dim i As Long
+    Dim nameText As String
+    Dim nm As Name
+    Dim targetRange As Range
+
+    Set targets = CreateObject("Scripting.Dictionary")
+    targets.CompareMode = 1
+
+    For i = LBound(fieldNames) To UBound(fieldNames)
+        nameText = CStr(fieldNames(i))
+        If secondaryNames Then nameText = nameText & "2"
+
+        Set nm = FindNameByBase(nameText)
+        Set targetRange = Nothing
+        If Not nm Is Nothing Then
+            On Error Resume Next
+            Set targetRange = nm.RefersToRange
+            On Error GoTo 0
+            If Not targetRange Is Nothing Then Set targets(CStr(fieldNames(i))) = targetRange
+        End If
+    Next i
+
+    Set CaptureNewEntryNameTargets = targets
+End Function
+
+Private Function NewEntryLayoutTargetForSheet(ByVal fieldName As String, _
+                                              ByVal targetSheet As Worksheet, _
+                                              ByVal activeNameTargets As Object, _
+                                              ByVal secondaryNameTargets As Object) As Range
+    Dim targetRange As Range
+
+    If activeNameTargets.Exists(fieldName) Then
+        Set targetRange = activeNameTargets(fieldName)
+        If targetRange.Worksheet Is targetSheet Then
+            Set NewEntryLayoutTargetForSheet = targetRange
+            Exit Function
+        End If
+    End If
+
+    If secondaryNameTargets.Exists(fieldName) Then
+        Set targetRange = secondaryNameTargets(fieldName)
+        If targetRange.Worksheet Is targetSheet Then
+            Set NewEntryLayoutTargetForSheet = targetRange
+            Exit Function
+        End If
+    End If
 End Function
 
 Private Sub SwapNewEntryLayoutBindings(ByVal fieldNames As Variant)
@@ -6128,99 +6252,6 @@ Private Function NewEntryLayoutFieldNames() As Variant
         "neILS", "neRNP", "neRNAV", "neNDB", "neVOR", "neDgaCdi", "neDgaAzi", "neCircling", _
         "neSI1", "neSI2", "neSI3", "neSI4")
 End Function
-
-Public Sub EnsureCurrencyRecencyFormulaCompatibility(Optional wb As Workbook = Nothing)
-    Dim targetWorkbook As Workbook
-    Dim ws As Worksheet
-    Dim tbl As ListObject
-    Dim formulaText As String
-
-    On Error GoTo CleanExit
-    If wb Is Nothing Then
-        Set targetWorkbook = ThisWorkbook
-    Else
-        Set targetWorkbook = wb
-    End If
-
-    Set tbl = FindListObject(targetWorkbook, "Logbook")
-    If tbl Is Nothing Then GoTo CleanExit
-    If Not ListColumnExists(tbl, "FR") Then GoTo CleanExit
-    If Not ListColumnExists(tbl, "IPC") Then GoTo CleanExit
-    If Not ListColumnExists(tbl, "OPC") Then GoTo CleanExit
-
-    Set ws = targetWorkbook.Worksheets("Currency + Recency")
-    SetCurrencyFormula ws, "T7", "=MAX(IFERROR(MAX(FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[IPC]=TRUE))),0),N(XLOOKUP(""IPC"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")))"
-    SetCurrencyFormula ws, "T8", "=LET(ov,N(XLOOKUP(""IPC"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")),d,FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[IPC]=TRUE)),logLast,IFERROR(MAX(d),0),logSecond,IFERROR(LARGE(d,2),0),second,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),IF(second=0,""N/A"",second))"
-    SetCurrencyFormula ws, "T10", "=MAX(IFERROR(MAX(FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[OPC]=TRUE))),0),N(XLOOKUP(""OPC"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")))"
-    SetCurrencyFormula ws, "T14", "=MAX(IFERROR(MAX(FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[FR]=TRUE))),0),N(XLOOKUP(""Flight Review"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")))"
-    SetCurrencyFormula ws, "T15", "=LET(ov,N(XLOOKUP(""Flight Review"",OverrideDates[Check],OverrideDates[Manual Override Date],"""")),d,FILTER(Logbook[Date],(ISNUMBER(Logbook[Date]))*(Logbook[FR]=TRUE)),logLast,IFERROR(MAX(d),0),logSecond,IFERROR(LARGE(d,2),0),second,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),IF(second=0,""N/A"",second))"
-
-    SetWorkbookFormula targetWorkbook, "FRExpirySEA", "=LET(d,IF(Logbook[FR]=TRUE,Logbook[Date],0),ov,N(FROverride),dates,FILTER(d,(ISNUMBER(d))*(d>0)*LogbookSEA),logLast,IFERROR(MAX(dates),0),logSecond,IFERROR(LARGE(dates,2),0),lastFR,MAX(logLast,ov),prevFR,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),normal,IF(lastFR=0,0,EOMONTH(EDATE(lastFR,24),0)),prevExpiry,IF(prevFR>0,EOMONTH(EDATE(prevFR,24),0),0),IF(lastFR=0,0,IF(AND(prevExpiry>0,lastFR<=prevExpiry,prevExpiry<=EDATE(lastFR,3)),EOMONTH(EDATE(prevExpiry,24),0),normal)))"
-    SetWorkbookFormula targetWorkbook, "FRExpiryMEA", "=LET(d,IF(Logbook[FR]=TRUE,Logbook[Date],0),ov,N(FROverride),dates,FILTER(d,(ISNUMBER(d))*(d>0)*LogbookMEA),logLast,IFERROR(MAX(dates),0),logSecond,IFERROR(LARGE(dates,2),0),lastFR,MAX(logLast,ov),prevFR,IF(ov=0,logSecond,IF(ov>=logLast,logLast,MAX(ov,logSecond))),normal,IF(lastFR=0,0,EOMONTH(EDATE(lastFR,24),0)),prevExpiry,IF(prevFR>0,EOMONTH(EDATE(prevFR,24),0),0),IF(lastFR=0,0,IF(AND(prevExpiry>0,lastFR<=prevExpiry,prevExpiry<=EDATE(lastFR,3)),EOMONTH(EDATE(prevExpiry,24),0),normal)))"
-    SetWorkbookFormula targetWorkbook, "OPCRecencyExpirySEA", "=LET(d,IF(Logbook[OPC]=TRUE,Logbook[Date],0),ov,N(OPCOverride),logLast,IFERROR(MAX(FILTER(d,(ISNUMBER(d))*(d>0)*LogbookSEA)),0),last,MAX(logLast,ov),IF(last=0,0,EDATE(last,3)))"
-    SetWorkbookFormula targetWorkbook, "OPCRecencyExpiryMEA", "=LET(d,IF(Logbook[OPC]=TRUE,Logbook[Date],0),ov,N(OPCOverride),logLast,IFERROR(MAX(FILTER(d,(ISNUMBER(d))*(d>0)*LogbookMEA)),0),last,MAX(logLast,ov),IF(last=0,0,EDATE(last,3)))"
-
-    formulaText = "=LET(dC,IF((Logbook[Circling]>0)*(Logbook[IPC]=TRUE),Logbook[Date],0)," & _
-                  "qual,(ISNUMBER(dC))*(dC>0)*LogbookSEA,dates,FILTER(dC,qual),logLast,IFERROR(MAX(dates),0)," & _
-                  "logSecond,IFERROR(LARGE(dates,2),0),lastCheck,logLast,prevCheck,logSecond," & _
-                  "normal,IF(lastCheck=0,0,DATE(YEAR(lastCheck)+1,MONTH(lastCheck),DAY(EOMONTH(lastCheck,0))))," & _
-                  "prevExpiry,IF(prevCheck>0,DATE(YEAR(prevCheck)+1,MONTH(prevCheck),DAY(EOMONTH(prevCheck,0))),0)," & _
-                  "IF(lastCheck=0,0,IF(prevExpiry>0,IF(AND(lastCheck>=EDATE(prevExpiry,-3),lastCheck<=prevExpiry),DATE(YEAR(prevExpiry)+1,MONTH(prevExpiry),DAY(EOMONTH(prevExpiry,0))),normal),normal)))"
-    SetWorkbookFormula targetWorkbook, "CirclingExpirySEA", formulaText
-
-    formulaText = Replace(formulaText, "LogbookSEA", "LogbookMEA")
-    SetWorkbookFormula targetWorkbook, "CirclingExpiryMEA", formulaText
-
-    formulaText = "=LET(dI,IF(Logbook[IPC]=TRUE,Logbook[Date],0)," & _
-                  "ovI,N(IPCOverride),ipcDates,FILTER(dI,(ISNUMBER(dI))*(dI>0)*LogbookSEA)," & _
-                  "logLastIPC,IFERROR(MAX(ipcDates),0),logSecondIPC,IFERROR(LARGE(ipcDates,2),0)," & _
-                  "lastIPC,MAX(logLastIPC,ovI),prevIPC,IF(ovI=0,logSecondIPC,IF(ovI>=logLastIPC,logLastIPC,MAX(ovI,logSecondIPC)))," & _
-                  "normal,IF(lastIPC=0,0,DATE(YEAR(lastIPC)+1,MONTH(lastIPC),DAY(EOMONTH(lastIPC,0))))," & _
-                  "prevExpiry,IF(prevIPC>0,DATE(YEAR(prevIPC)+1,MONTH(prevIPC),DAY(EOMONTH(prevIPC,0))),0)," & _
-                  "IF(lastIPC=0,0,IF(prevExpiry>0,IF(AND(lastIPC>=EDATE(prevExpiry,-3),lastIPC<=prevExpiry),DATE(YEAR(prevExpiry)+1,MONTH(prevExpiry),DAY(EOMONTH(prevExpiry,0))),normal),normal)))"
-    SetWorkbookFormula targetWorkbook, "IPCOPCExpirySEA", formulaText
-
-    formulaText = Replace(formulaText, "LogbookSEA", "LogbookMEA")
-    SetWorkbookFormula targetWorkbook, "IPCOPCExpiryMEA", formulaText
-
-CleanExit:
-End Sub
-
-Public Sub EnsureStatsFormulaCompatibility(Optional wb As Workbook = Nothing)
-    Dim targetWorkbook As Workbook
-    Dim ws As Worksheet
-
-    On Error GoTo CleanExit
-    If wb Is Nothing Then
-        Set targetWorkbook = ThisWorkbook
-    Else
-        Set targetWorkbook = wb
-    End If
-
-    If FindListObject(targetWorkbook, "Logbook") Is Nothing Then GoTo CleanExit
-
-    Set ws = targetWorkbook.Worksheets("Stats")
-    SetCurrencyFormula ws, "C15", "=LET(maxVal,MAX(Logbook[TotalHours]),idx,MATCH(maxVal,Logbook[TotalHours],0),date,INDEX(Logbook[Date],idx),fromText,TRIM(INDEX(Logbook[From],idx)&""""),viaText,TRIM(INDEX(Logbook[Via],idx)&""""),toText,TRIM(INDEX(Logbook[To],idx)&""""),remarksText,TRIM(INDEX(Logbook[Remarks],idx)&""""),routeText,TEXTJOIN(""-"",TRUE,fromText,viaText,toText),details,routeText&IF(remarksText<>"""",IF(routeText<>"""","" "","""")&""(""&remarksText&"")"",""""),TEXT(maxVal,""0.0"")&IF(details<>"""","" — ""&details,"""")&"" (""&TEXT(date,""D MMMM YYYY"")&"")"")"
-    SetCurrencyFormula ws, "C16", "=LET(minVal,MINIFS(Logbook[TotalHours],Logbook[TotalHours],"">""&0),idx,MATCH(minVal,Logbook[TotalHours],0),date,INDEX(Logbook[Date],idx),fromText,TRIM(INDEX(Logbook[From],idx)&""""),viaText,TRIM(INDEX(Logbook[Via],idx)&""""),toText,TRIM(INDEX(Logbook[To],idx)&""""),remarksText,TRIM(INDEX(Logbook[Remarks],idx)&""""),routeText,TEXTJOIN(""-"",TRUE,fromText,viaText,toText),details,routeText&IF(remarksText<>"""",IF(routeText<>"""","" "","""")&""(""&remarksText&"")"",""""),TEXT(minVal,""0.0"")&IF(details<>"""","" — ""&details,"""")&"" (""&TEXT(date,""D MMMM YYYY"")&"")"")"
-
-CleanExit:
-End Sub
-
-Private Sub SetCurrencyFormula(ByVal ws As Worksheet, ByVal addressText As String, ByVal formulaText As String)
-    On Error Resume Next
-    ws.Range(addressText).Formula2 = formulaText
-    If Err.Number <> 0 Then
-        Err.Clear
-        ws.Range(addressText).Formula = formulaText
-    End If
-    On Error GoTo 0
-End Sub
-
-Private Sub SetWorkbookFormula(ByVal wb As Workbook, ByVal nameText As String, ByVal formulaText As String)
-    On Error Resume Next
-    wb.Names(nameText).RefersTo = formulaText
-    On Error GoTo 0
-End Sub
 
 ' ==============================================================
 ' PATH UTILITIES

@@ -32,10 +32,6 @@ Private Sub Workbook_Open()
     ' Keep date-sensitive formulas current without a volatile TODAY() formula.
     SetWorkbookOpenStatus "Refreshing date-sensitive values"
     RefreshTodayValue
-    SetWorkbookOpenStatus "Checking currency and recency formulas"
-    EnsureCurrencyRecencyFormulaCompatibility ThisWorkbook
-    SetWorkbookOpenStatus "Checking Stats formulas"
-    EnsureStatsFormulaCompatibility ThisWorkbook
 
     ' Check for logbook updates
     SetWorkbookOpenStatus "Checking for workbook updates"
@@ -150,13 +146,9 @@ Private Sub Workbook_SheetActivate(ByVal Sh As Object)
     On Error GoTo CleanExit
 
     If Sh.Name = "Currency + Recency" Then
-        EnsureCurrencyRecencyFormulaCompatibility ThisWorkbook
         If RefreshTodayValue() Then Sh.Calculate
     End If
-    If Sh.Name = "Stats" Then
-        EnsureStatsFormulaCompatibility ThisWorkbook
-        AutoFitStatsSheetColumns
-    End If
+    If Sh.Name = "Stats" Then AutoFitStatsSheetColumns
 
 CleanExit:
 End Sub

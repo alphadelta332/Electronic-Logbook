@@ -56,6 +56,28 @@ Run the disposable Excel migration test locally with:
 .\updater\Test-ExternalUpdater.ps1
 ```
 
+## Backward Compatibility Policy
+
+The supported automatic-update floor is defined in `updater/compatibility-policy.json`.
+By default, the updater must migrate every tagged release from `v1.4.2` onward directly
+to the current master workbook.
+
+Run the full Excel compatibility matrix before releases:
+
+```powershell
+.\updater\Test-CompatibilityMatrix.ps1
+```
+
+The matrix extracts each supported `Electronic_Logbook_Master.xlsm` from git tags, seeds
+known data into a temporary source copy, runs the current external updater, and validates
+that the updated workbook opens with preserved data. Change `minimumSupportedVersion`
+in the policy file if the supported floor intentionally changes.
+
+GitHub-hosted runners are used for static and unit checks only. The Excel compatibility
+matrix requires desktop Microsoft Excel, so it should be run locally or through the
+manual `Compatibility matrix` workflow on a self-hosted Windows runner labelled
+`self-hosted`, `windows`, and `excel`.
+
 ## Current Limitations
 
 - Requires Microsoft Excel for Windows.

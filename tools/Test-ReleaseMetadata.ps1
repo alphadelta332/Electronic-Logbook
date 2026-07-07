@@ -21,7 +21,9 @@ $requiredTooling = @(
     "tools\Test-VbaSourceQuality.ps1",
     "tools\Test-VbaCompileDisposable.ps1",
     "tools\Test-WorkbookPublicReadiness.ps1",
-    "tools\Test-WorkbookVbaParity.ps1"
+    "tools\Test-WorkbookVbaParity.ps1",
+    "updater\compatibility-policy.json",
+    "updater\Test-CompatibilityMatrix.ps1"
 )
 
 if (-not (Test-Path $readmePath)) {
