@@ -185,6 +185,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error GoTo CleanExit
     statsSheetChanged = (Sh.Name = "Stats")
     If Sh.Name = "New Entry" Then ClearNewEntryValidationHighlightsForTarget Target
+    MarkRoutesDirtyForChangedRange Sh, Target
 
     Set layoutCell = ThisWorkbook.Names("NewEntryLayout").RefersToRange
     If layoutCell Is Nothing Then

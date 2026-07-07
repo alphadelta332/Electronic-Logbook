@@ -820,6 +820,7 @@ End Sub
 
 Private Sub ProtectLogbookSheetForRuntime(ws As Worksheet)
     UnlockLogbookRowsForDeletion ws
+    LockLogbookDateColumn ws
     ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
                UserInterfaceOnly:=True, AllowFiltering:=True, AllowSorting:=True, _
                AllowFormattingCells:=True, AllowFormattingColumns:=True, AllowFormattingRows:=True, _
@@ -3552,6 +3553,21 @@ End Sub
 Public Sub MarkRoutesDirty(Optional wb As Workbook = Nothing)
     If wb Is Nothing Then Set wb = ThisWorkbook
     SetWorkbookNameValue wb, "RoutesDirty", True
+End Sub
+
+Public Sub MarkRoutesDirtyForChangedRange(ByVal changedSheet As Object, ByVal changedRange As Range)
+    On Error GoTo CleanExit
+
+    If changedRange Is Nothing Then Exit Sub
+    If TypeName(changedSheet) <> "Worksheet" Then Exit Sub
+
+    If LogbookRouteSourceChanged(changedSheet, changedRange) Or _
+       AirportRouteLookupChanged(changedSheet, changedRange) Or _
+       KeywordRouteIgnoreListChanged(changedSheet, changedRange) Then
+        MarkRoutesDirty changedSheet.Parent
+    End If
+
+CleanExit:
 End Sub
 
 Public Sub MarkRoutesClean(Optional wb As Workbook = Nothing)
@@ -6457,6 +6473,84 @@ Private Sub UnlockListColumnDataIfPresent(ByVal wb As Workbook, ByVal tableName 
             Exit For
         End If
     Next ws
+    On Error GoTo 0
+End Sub
+
+Private Function LogbookRouteSourceChanged(ByVal ws As Worksheet, ByVal changedRange As Range) As Boolean
+    Dim tbl As ListObject
+    Dim columnName As Variant
+    Dim routeColumns As Variant
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("Logbook")
+    On Error GoTo 0
+    If tbl Is Nothing Then Exit Function
+    If tbl.DataBodyRange Is Nothing Then Exit Function
+
+    routeColumns = Array("From", "Via", "To", "Remarks", "Details", _
+                         "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", _
+                         "MeIcusDay", "MeIcusNight", "MeDualDay", "MeDualNight", _
+                         "PIC", "CopilotDay", "CopilotNight", "IfrIf", "IfrSim")
+
+    For Each columnName In routeColumns
+        If TableColumnDataIntersects(tbl, CStr(columnName), changedRange) Then
+            LogbookRouteSourceChanged = True
+            Exit Function
+        End If
+    Next columnName
+End Function
+
+Private Function AirportRouteLookupChanged(ByVal ws As Worksheet, ByVal changedRange As Range) As Boolean
+    Dim tbl As ListObject
+    Dim columnName As Variant
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("Airports")
+    On Error GoTo 0
+    If tbl Is Nothing Then Exit Function
+    If tbl.DataBodyRange Is Nothing Then Exit Function
+
+    For Each columnName In Array("ICAO", "Two", "Three")
+        If TableColumnDataIntersects(tbl, CStr(columnName), changedRange) Then
+            AirportRouteLookupChanged = True
+            Exit Function
+        End If
+    Next columnName
+End Function
+
+Private Function KeywordRouteIgnoreListChanged(ByVal ws As Worksheet, ByVal changedRange As Range) As Boolean
+    Dim tbl As ListObject
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("Keywords")
+    On Error GoTo 0
+    If tbl Is Nothing Then Exit Function
+    If tbl.DataBodyRange Is Nothing Then Exit Function
+
+    KeywordRouteIgnoreListChanged = Not Intersect(changedRange, tbl.DataBodyRange) Is Nothing
+End Function
+
+Private Function TableColumnDataIntersects(ByVal tbl As ListObject, _
+                                           ByVal columnName As String, _
+                                           ByVal targetRange As Range) As Boolean
+    If Not ListColumnExists(tbl, columnName) Then Exit Function
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Function
+
+    TableColumnDataIntersects = Not Intersect(targetRange, tbl.ListColumns(columnName).DataBodyRange) Is Nothing
+End Function
+
+Private Sub LockLogbookDateColumn(ByVal ws As Worksheet)
+    Dim tbl As ListObject
+
+    If LCase$(ws.Name) <> "logbook" Then Exit Sub
+
+    On Error Resume Next
+    Set tbl = ws.ListObjects("Logbook")
+    If Not tbl Is Nothing Then
+        If Not tbl.DataBodyRange Is Nothing Then
+            tbl.ListColumns("Date").DataBodyRange.Locked = True
+        End If
+    End If
     On Error GoTo 0
 End Sub
 

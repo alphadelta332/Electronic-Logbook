@@ -48,16 +48,34 @@ jobs:
           gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName | Out-Null
           if ($LASTEXITCODE -eq 0) {
             Write-Host "Release $tag already exists; leaving immutable release unchanged."
-            exit 0
+          } else {
+            gh release create $tag `
+              updater/dist/ElectronicLogbook.Updater.Wizard.exe `
+              updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
+              dev-wizard-commit.txt `
+              --repo $env:GITHUB_REPOSITORY `
+              --title $title `
+              --notes $notes `
+              --prerelease `
+              --target $env:GITHUB_SHA `
+              --latest=false
           }
 
-          gh release create $tag `
-            updater/dist/ElectronicLogbook.Updater.Wizard.exe `
-            updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
-            dev-wizard-commit.txt `
+          $devReleases = gh release list `
             --repo $env:GITHUB_REPOSITORY `
-            --title $title `
-            --notes $notes `
-            --prerelease `
-            --target $env:GITHUB_SHA `
-            --latest=false
+            --limit 100 `
+            --json tagName,isPrerelease `
+            | ConvertFrom-Json
+
+          foreach ($release in $devReleases) {
+            $oldTag = [string]$release.tagName
+            if ($oldTag -eq $tag) { continue }
+            if (-not $release.isPrerelease) { continue }
+            if (-not $oldTag.StartsWith("dev-wizard-")) { continue }
+
+            Write-Host "Deleting old development wizard release $oldTag."
+            gh release delete $oldTag `
+              --repo $env:GITHUB_REPOSITORY `
+              --cleanup-tag `
+              --yes
+          }
