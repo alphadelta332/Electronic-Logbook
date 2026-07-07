@@ -1521,10 +1521,12 @@ End Sub
 Private Sub CopyRouteCacheState(masterWb As Workbook)
     Dim routesBuilt As Variant
     Dim routesDirty As Variant
+    Dim masterRoutesDirty As Variant
     Dim routeVersion As Variant
 
     routesBuilt = GetWorkbookNameValue(ThisWorkbook, "RoutesBuilt", "")
     routesDirty = GetWorkbookNameValue(ThisWorkbook, "RoutesDirty", False)
+    masterRoutesDirty = GetWorkbookNameValue(masterWb, "RoutesDirty", False)
     routeVersion = GetWorkbookNameValue(ThisWorkbook, "RoutesDefinitionVersion", 0)
 
     If Trim(CStr(routesBuilt)) <> "" Then
@@ -1536,9 +1538,24 @@ Private Sub CopyRouteCacheState(masterWb As Workbook)
     End If
 
     SetWorkbookNameValue masterWb, "RoutesBuilt", routesBuilt
-    SetWorkbookNameValue masterWb, "RoutesDirty", routesDirty
+    SetWorkbookNameValue masterWb, "RoutesDirty", WorkbookBooleanValue(routesDirty) Or WorkbookBooleanValue(masterRoutesDirty)
     SetWorkbookNameValue masterWb, "RoutesDefinitionVersion", routeVersion
 End Sub
+
+Private Function WorkbookBooleanValue(ByVal value As Variant) As Boolean
+    If IsError(value) Then Exit Function
+
+    If VarType(value) = vbBoolean Then
+        WorkbookBooleanValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        WorkbookBooleanValue = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                WorkbookBooleanValue = True
+        End Select
+    End If
+End Function
 
 Private Function GetWorkbookNameValue(wb As Workbook, nameText As String, defaultValue As Variant) As Variant
     On Error GoTo Fail

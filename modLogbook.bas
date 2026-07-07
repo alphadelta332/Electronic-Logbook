@@ -3960,6 +3960,13 @@ Public Sub CheckRoutesTableOnOpen(Optional wb As Workbook = Nothing)
             BuildRoutesTable wb
             MsgBox "Routes table rebuilt successfully.", vbInformation
         End If
+    ElseIf RoutesDirtyState(wb) Then
+        If MsgBox("Your Routes table may be out of date because existing logbook entries or airport codes were changed." & vbCrLf & vbCrLf & _
+                  "Rebuild the Routes table now?", _
+                  vbYesNo + vbExclamation, "Routes May Be Out Of Date") = vbYes Then
+            BuildRoutesTable wb
+            MsgBox "Routes table rebuilt successfully.", vbInformation
+        End If
     End If
 End Sub
 

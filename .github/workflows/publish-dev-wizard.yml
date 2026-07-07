@@ -71,7 +71,7 @@ jobs:
             $oldTag = [string]$release.tagName
             if ($oldTag -eq $tag) { continue }
             if (-not $release.isPrerelease) { continue }
-            if (-not $oldTag.StartsWith("dev-wizard-")) { continue }
+            if ($oldTag -ne "dev-wizard" -and -not $oldTag.StartsWith("dev-wizard-")) { continue }
 
             Write-Host "Deleting old development wizard release $oldTag."
             gh release delete $oldTag `

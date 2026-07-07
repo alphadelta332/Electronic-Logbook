@@ -19,7 +19,6 @@ public sealed class ExcelWorkbookMigrator
     private static readonly string[] PreservedNames =
     [
         "RoutesBuilt",
-        "RoutesDirty",
         "RoutesDefinitionVersion",
         "DateAfterExport",
         "suppressWarningsUntil"
@@ -1427,6 +1426,10 @@ public sealed class ExcelWorkbookMigrator
     {
         dynamic sourceWorkbook = sourceWorkbookObject;
         dynamic outputWorkbook = outputWorkbookObject;
+
+        var routesDirty = ToBoolean(ReadName(outputWorkbook, "RoutesDirty")) ||
+            ToBoolean(ReadName(sourceWorkbook, "RoutesDirty"));
+
         foreach (var name in PreservedNames)
         {
             try
@@ -1438,6 +1441,15 @@ public sealed class ExcelWorkbookMigrator
             {
                 // Preferences added in newer versions may not exist in old workbooks.
             }
+        }
+
+        try
+        {
+            outputWorkbook.Names.Item("RoutesDirty").RefersToRange.Value2 = routesDirty;
+        }
+        catch
+        {
+            // Older workbooks may not have route-cache names.
         }
     }
 
@@ -1546,7 +1558,15 @@ public sealed class ExcelWorkbookMigrator
             string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase))
         {
-            return HasColumn((object)source, "Custom 1") ? "Custom 1" : "Details";
+            if (HasColumn((object)source, name))
+            {
+                return name;
+            }
+            if (HasColumn((object)source, "Custom 1"))
+            {
+                return "Custom 1";
+            }
+            return HasColumn((object)source, "Details") ? "Details" : null;
         }
         if (string.Equals(name, "RNP", StringComparison.OrdinalIgnoreCase))
         {
