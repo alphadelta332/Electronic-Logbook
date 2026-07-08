@@ -625,6 +625,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                 End If
             Next iCol
         End If
+        RefreshLogbookCalculatedFormulas tbl
 
     '--- 5c. Copy Remaining Data
         diagStep = "Step 5c: Copy Data"
@@ -1537,6 +1538,70 @@ Private Sub RefreshDateCalculationFormulas(ByVal tbl As ListObject)
             dateRange.Formula = LogbookDateFormula()
         End If
     End If
+End Sub
+
+Private Sub RefreshLogbookCalculatedFormulas(ByVal tbl As ListObject)
+    If tbl Is Nothing Then Exit Sub
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    SetLogbookColumnFormula tbl, "TotalHours", _
+        "=SUM(Logbook[[#This Row],[SeIcusDay]:[CopilotNight]])"
+    SetLogbookColumnFormula tbl, "TotalApps", _
+        "=SUM(Logbook[[#This Row],[ILS]:[DGA (Azi)]])"
+
+    SetLogbookRunningTotalFormula tbl, "CumLandingsDay", "LandingsDay", _
+        "Logbook[[#This Row],[LandingsDay]]"
+    SetLogbookRunningTotalFormula tbl, "CumLandingsNight", "LandingsNight", _
+        "Logbook[[#This Row],[LandingsNight]]"
+    SetLogbookRunningTotalFormula tbl, "CumILS", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula tbl, "CumVOR", "VOR", _
+        "Logbook[[#This Row],[VOR]]"
+    SetLogbookRunningTotalFormula tbl, "CumRNP", "RNP", _
+        "Logbook[[#This Row],[RNP]]"
+    SetLogbookRunningTotalFormula tbl, "CumNDB", "NDB", _
+        "Logbook[[#This Row],[NDB]]"
+    SetLogbookRunningTotalFormula tbl, "CumDgaCdi", "DGA (CDI)", _
+        "Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula tbl, "CumDgaAzi", "DGA (Azi)", _
+        "Logbook[[#This Row],[DGA (Azi)]]"
+    SetLogbookRunningTotalFormula tbl, "CumCirc", "Circling", _
+        "Logbook[[#This Row],[Circling]]"
+    SetLogbookRunningTotalFormula tbl, "CumTotalApps", "TotalApps", _
+        "Logbook[[#This Row],[TotalApps]]"
+    SetLogbookColumnFormula tbl, "CumTotalHours", _
+        "=SUM(INDEX(Logbook[TotalHours],1):Logbook[[#This Row],[TotalHours]])"
+    SetLogbookRunningTotalFormula tbl, "Cum2D", "VOR", _
+        "SUM(Logbook[[#This Row],[VOR]:[DGA (Azi)]])"
+    SetLogbookRunningTotalFormula tbl, "Cum3D", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula tbl, "CumCDI", "ILS", _
+        "SUM(Logbook[[#This Row],[ILS]:[RNP]])+Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula tbl, "CumAzi", "NDB", _
+        "Logbook[[#This Row],[NDB]]+Logbook[[#This Row],[DGA (Azi)]]"
+End Sub
+
+Private Sub SetLogbookColumnFormula(ByVal tbl As ListObject, _
+                                    ByVal columnName As String, _
+                                    ByVal formulaText As String)
+    If Not ListColumnExists(tbl, columnName) Then Exit Sub
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    tbl.ListColumns(columnName).DataBodyRange.Formula = formulaText
+End Sub
+
+Private Sub SetLogbookRunningTotalFormula(ByVal tbl As ListObject, _
+                                          ByVal columnName As String, _
+                                          ByVal sourceColumnName As String, _
+                                          ByVal currentRowExpression As String)
+    If Not ListColumnExists(tbl, columnName) Then Exit Sub
+    If Not ListColumnExists(tbl, sourceColumnName) Then Exit Sub
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    tbl.ListColumns(columnName).DataBodyRange.FormulaR1C1 = _
+        "=IF(ROW()-ROW(Logbook[#Headers])=ROWS(Logbook[" & columnName & "])," & _
+        currentRowExpression & "," & currentRowExpression & _
+        "+INDEX(Logbook[" & columnName & "],ROW()-ROW(Logbook[#Headers])+1))"
 End Sub
 
 Private Sub SortLogbookByDate(ByVal tbl As ListObject)
@@ -2933,6 +2998,7 @@ Private Sub AppendMappedLogTenRows(ByVal tbl As ListObject, ByVal rowsToImport A
             formulaSource.AutoFill Destination:=formulaTarget
         End If
     Next formulaCol
+    RefreshLogbookCalculatedFormulas tbl
 
     For importIndex = 1 To rowsToImport.Count
         Set mapped = rowsToImport(importIndex)
@@ -2997,6 +3063,7 @@ Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Objec
             End If
         Next iCol
     End If
+    RefreshLogbookCalculatedFormulas tbl
 
     WriteMappedValueToColumn newRow.Range, tbl, "Year", mapped("Year")
     WriteMappedValueToColumn newRow.Range, tbl, "Month", mapped("Month")
@@ -4044,6 +4111,7 @@ Public Sub DeleteSelectedLogbookRows()
         tbl.ListRows(CLng(rowIndexes(key))).Delete
     Next key
 
+    RefreshLogbookCalculatedFormulas tbl
     NormaliseLogbookFormatting tbl
     UpdateHiddenRows ThisWorkbook
     MarkRoutesDirty ThisWorkbook

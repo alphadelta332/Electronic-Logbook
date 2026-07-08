@@ -940,6 +940,7 @@ Private Sub InjectLogbookData(masterWb As Workbook)
         loDst.ShowTotals = False
         loDst.Resize loDst.Range.Resize(userRows + 1, loDst.ListColumns.Count)
         FillLogbookFormulas loDst, masterRows, userRows
+        RefreshLogbookCalculatedFormulas loDst
         loDst.ShowTotals = hasTotals
     ElseIf userRows < masterRows Then
         loDst.ShowTotals = False
@@ -1283,6 +1284,70 @@ Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long
         End If
 NextCol:
     Next colIdx
+End Sub
+
+Private Sub RefreshLogbookCalculatedFormulas(ByVal lo As ListObject)
+    If lo Is Nothing Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    SetLogbookColumnFormula lo, "TotalHours", _
+        "=SUM(Logbook[[#This Row],[SeIcusDay]:[CopilotNight]])"
+    SetLogbookColumnFormula lo, "TotalApps", _
+        "=SUM(Logbook[[#This Row],[ILS]:[DGA (Azi)]])"
+
+    SetLogbookRunningTotalFormula lo, "CumLandingsDay", "LandingsDay", _
+        "Logbook[[#This Row],[LandingsDay]]"
+    SetLogbookRunningTotalFormula lo, "CumLandingsNight", "LandingsNight", _
+        "Logbook[[#This Row],[LandingsNight]]"
+    SetLogbookRunningTotalFormula lo, "CumILS", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula lo, "CumVOR", "VOR", _
+        "Logbook[[#This Row],[VOR]]"
+    SetLogbookRunningTotalFormula lo, "CumRNP", "RNP", _
+        "Logbook[[#This Row],[RNP]]"
+    SetLogbookRunningTotalFormula lo, "CumNDB", "NDB", _
+        "Logbook[[#This Row],[NDB]]"
+    SetLogbookRunningTotalFormula lo, "CumDgaCdi", "DGA (CDI)", _
+        "Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula lo, "CumDgaAzi", "DGA (Azi)", _
+        "Logbook[[#This Row],[DGA (Azi)]]"
+    SetLogbookRunningTotalFormula lo, "CumCirc", "Circling", _
+        "Logbook[[#This Row],[Circling]]"
+    SetLogbookRunningTotalFormula lo, "CumTotalApps", "TotalApps", _
+        "Logbook[[#This Row],[TotalApps]]"
+    SetLogbookColumnFormula lo, "CumTotalHours", _
+        "=SUM(INDEX(Logbook[TotalHours],1):Logbook[[#This Row],[TotalHours]])"
+    SetLogbookRunningTotalFormula lo, "Cum2D", "VOR", _
+        "SUM(Logbook[[#This Row],[VOR]:[DGA (Azi)]])"
+    SetLogbookRunningTotalFormula lo, "Cum3D", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula lo, "CumCDI", "ILS", _
+        "SUM(Logbook[[#This Row],[ILS]:[RNP]])+Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula lo, "CumAzi", "NDB", _
+        "Logbook[[#This Row],[NDB]]+Logbook[[#This Row],[DGA (Azi)]]"
+End Sub
+
+Private Sub SetLogbookColumnFormula(ByVal lo As ListObject, _
+                                    ByVal columnName As String, _
+                                    ByVal formulaText As String)
+    If Not ListColumnExists(lo, columnName) Then Exit Sub
+    If lo.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    lo.ListColumns(columnName).DataBodyRange.Formula = formulaText
+End Sub
+
+Private Sub SetLogbookRunningTotalFormula(ByVal lo As ListObject, _
+                                          ByVal columnName As String, _
+                                          ByVal sourceColumnName As String, _
+                                          ByVal currentRowExpression As String)
+    If Not ListColumnExists(lo, columnName) Then Exit Sub
+    If Not ListColumnExists(lo, sourceColumnName) Then Exit Sub
+    If lo.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    lo.ListColumns(columnName).DataBodyRange.FormulaR1C1 = _
+        "=IF(ROW()-ROW(Logbook[#Headers])=ROWS(Logbook[" & columnName & "])," & _
+        currentRowExpression & "," & currentRowExpression & _
+        "+INDEX(Logbook[" & columnName & "],ROW()-ROW(Logbook[#Headers])+1))"
 End Sub
 
 Private Sub CopyKeywordsData(masterWb As Workbook)

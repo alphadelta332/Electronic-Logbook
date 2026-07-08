@@ -331,6 +331,7 @@ public sealed class ExcelWorkbookMigrator
 
         ResizeTable(destination, sourceRows);
         FillFormulaColumns(destination, destinationDataStart, destinationDataEnd);
+        RefreshLogbookCalculatedFormulas(destination);
 
         for (var sourceIndex = sourceDataStart; sourceIndex <= sourceDataEnd; sourceIndex++)
         {
@@ -2335,6 +2336,115 @@ public sealed class ExcelWorkbookMigrator
                 table.DataBodyRange.Columns.Item(index).FillDown();
             }
         }
+    }
+
+    private static void RefreshLogbookCalculatedFormulas(dynamic table)
+    {
+        if (table.DataBodyRange is null)
+        {
+            return;
+        }
+
+        SetLogbookColumnFormula(
+            table,
+            "TotalHours",
+            "=SUM(Logbook[[#This Row],[SeIcusDay]:[CopilotNight]])");
+        SetLogbookColumnFormula(
+            table,
+            "TotalApps",
+            "=SUM(Logbook[[#This Row],[ILS]:[DGA (Azi)]])");
+
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumLandingsDay",
+            "LandingsDay",
+            "Logbook[[#This Row],[LandingsDay]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumLandingsNight",
+            "LandingsNight",
+            "Logbook[[#This Row],[LandingsNight]]");
+        SetLogbookRunningTotalFormula(table, "CumILS", "ILS", "Logbook[[#This Row],[ILS]]");
+        SetLogbookRunningTotalFormula(table, "CumVOR", "VOR", "Logbook[[#This Row],[VOR]]");
+        SetLogbookRunningTotalFormula(table, "CumRNP", "RNP", "Logbook[[#This Row],[RNP]]");
+        SetLogbookRunningTotalFormula(table, "CumNDB", "NDB", "Logbook[[#This Row],[NDB]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumDgaCdi",
+            "DGA (CDI)",
+            "Logbook[[#This Row],[DGA (CDI)]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumDgaAzi",
+            "DGA (Azi)",
+            "Logbook[[#This Row],[DGA (Azi)]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumCirc",
+            "Circling",
+            "Logbook[[#This Row],[Circling]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumTotalApps",
+            "TotalApps",
+            "Logbook[[#This Row],[TotalApps]]");
+        SetLogbookColumnFormula(
+            table,
+            "CumTotalHours",
+            "=SUM(INDEX(Logbook[TotalHours],1):Logbook[[#This Row],[TotalHours]])");
+        SetLogbookRunningTotalFormula(
+            table,
+            "Cum2D",
+            "VOR",
+            "SUM(Logbook[[#This Row],[VOR]:[DGA (Azi)]])");
+        SetLogbookRunningTotalFormula(table, "Cum3D", "ILS", "Logbook[[#This Row],[ILS]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumCDI",
+            "ILS",
+            "SUM(Logbook[[#This Row],[ILS]:[RNP]])+Logbook[[#This Row],[DGA (CDI)]]");
+        SetLogbookRunningTotalFormula(
+            table,
+            "CumAzi",
+            "NDB",
+            "Logbook[[#This Row],[NDB]]+Logbook[[#This Row],[DGA (Azi)]]");
+    }
+
+    private static void SetLogbookColumnFormula(dynamic table, string columnName, string formula)
+    {
+        if (!HasColumn((object)table, columnName))
+        {
+            return;
+        }
+
+        dynamic range = table.ListColumns.Item(GetColumnIndex(table, columnName)).DataBodyRange;
+        if (range is not null)
+        {
+            range.Formula = formula;
+        }
+    }
+
+    private static void SetLogbookRunningTotalFormula(
+        dynamic table,
+        string columnName,
+        string sourceColumnName,
+        string currentRowExpression)
+    {
+        if (!HasColumn((object)table, columnName) || !HasColumn((object)table, sourceColumnName))
+        {
+            return;
+        }
+
+        dynamic range = table.ListColumns.Item(GetColumnIndex(table, columnName)).DataBodyRange;
+        if (range is null)
+        {
+            return;
+        }
+
+        range.FormulaR1C1 =
+            $"=IF(ROW()-ROW(Logbook[#Headers])=ROWS(Logbook[{columnName}])," +
+            $"{currentRowExpression},{currentRowExpression}" +
+            $"+INDEX(Logbook[{columnName}],ROW()-ROW(Logbook[#Headers])+1))";
     }
 
     private static dynamic GetTable(object workbookObject, string tableName)
