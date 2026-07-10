@@ -345,9 +345,10 @@ Private Sub RunUpdate(newVersion As String)
     Set tblLog = wsLog.ListObjects("Logbook")
     lastDRow = tblLog.DataBodyRange.Row + tblLog.DataBodyRange.Rows.Count - 1
     wsLog.Rows.Hidden = False
-    If lastDRow + 4 <= wsLog.Rows.Count Then
-        wsLog.Rows(lastDRow + 4 & ":" & wsLog.Rows.Count).Hidden = True
+    If lastDRow + 7 <= wsLog.Rows.Count Then
+        wsLog.Rows(lastDRow + 7 & ":" & wsLog.Rows.Count).Hidden = True
     End If
+    RepairExportLogbookButton tblLog
     Set wsLog  = Nothing
     Set tblLog = Nothing
 
@@ -2321,6 +2322,7 @@ Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
     totalsCellLeftOfBlock.HorizontalAlignment = xlRight
     totalsCellLeftOfBlock.WrapText = False
     totalsCellLeftOfBlock.Borders.LineStyle = xlNone
+    SetBorderFormat totalsCellLeftOfBlock.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
     experienceCellLeftOfBlock.Interior.Pattern = experienceCellLeftOfBlock.Offset(0, -1).Interior.Pattern
     experienceCellLeftOfBlock.Interior.Color = experienceCellLeftOfBlock.Offset(0, -1).Interior.Color
     experienceCellLeftOfBlock.Font.Color = experienceCellLeftOfBlock.Offset(0, -1).Font.Color
@@ -2373,6 +2375,129 @@ Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
     SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
     SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
     SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
+End Sub
+
+Private Sub RepairExportLogbookButton(lo As ListObject)
+    Const BUTTON_WIDTH As Double = 121.2
+    Const BUTTON_HEIGHT As Double = 45
+    Const POSITION_TOLERANCE As Double = 1
+
+    Dim ws      As Worksheet
+    Dim btn     As Shape
+    Dim topRow  As Long
+    Dim leftCol As Long
+    Dim targetLeft As Double
+    Dim targetTop  As Double
+
+    On Error GoTo CleanFail
+    Set ws = lo.Parent
+    Set btn = ws.Shapes("ExportLogbookButton")
+
+    topRow = lo.TotalsRowRange.Row + 2
+    leftCol = lo.ListColumns("Year").Range.Column
+    If topRow + 3 > ws.Rows.Count Then Exit Sub
+
+    targetLeft = ws.Cells(topRow, leftCol).Left
+    targetTop = ws.Cells(topRow, leftCol).Top
+
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = BUTTON_WIDTH
+    btn.Height = BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+
+    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
+       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        btn.Left = targetLeft
+        btn.Top = targetTop
+        btn.Width = BUTTON_WIDTH
+        btn.Height = BUTTON_HEIGHT
+        btn.ZOrder msoBringToFront
+    End If
+
+    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
+       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+        RebuildExportLogbookButtonGroup ws, btn, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+    End If
+CleanFail:
+End Sub
+
+Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
+                                                   ByVal topRow As Long, _
+                                                   ByVal leftCol As Long)
+    On Error Resume Next
+    ws.Parent.Activate
+    ws.Activate
+    Application.Goto ws.Cells(topRow, leftCol), True
+    DoEvents
+    On Error GoTo 0
+End Sub
+
+Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
+                                            ByVal btn As Shape, _
+                                            ByVal targetLeft As Double, _
+                                            ByVal targetTop As Double, _
+                                            ByVal buttonWidth As Double, _
+                                            ByVal buttonHeight As Double)
+    Dim oldLeft      As Double
+    Dim oldTop       As Double
+    Dim itemCount    As Long
+    Dim itemNames()  As String
+    Dim itemLefts()  As Double
+    Dim itemTops()   As Double
+    Dim i            As Long
+    Dim sr           As ShapeRange
+    Dim rebuilt      As Shape
+
+    On Error GoTo Fallback
+
+    If btn.Type <> msoGroup Then GoTo Fallback
+
+    oldLeft = btn.Left
+    oldTop = btn.Top
+    itemCount = btn.GroupItems.Count
+    ReDim itemNames(1 To itemCount)
+    ReDim itemLefts(1 To itemCount)
+    ReDim itemTops(1 To itemCount)
+
+    For i = 1 To itemCount
+        itemNames(i) = btn.GroupItems.Item(i).Name
+        itemLefts(i) = btn.GroupItems.Item(i).Left
+        itemTops(i) = btn.GroupItems.Item(i).Top
+    Next i
+
+    Set sr = btn.Ungroup
+    For i = 1 To itemCount
+        ws.Shapes(itemNames(i)).Left = targetLeft + (itemLefts(i) - oldLeft)
+        ws.Shapes(itemNames(i)).Top = targetTop + (itemTops(i) - oldTop)
+        ws.Shapes(itemNames(i)).OnAction = "ExportLogbook"
+    Next i
+
+    Set rebuilt = ws.Shapes.Range(itemNames).Group
+    rebuilt.Name = "ExportLogbookButton"
+    rebuilt.Placement = xlFreeFloating
+    rebuilt.Visible = msoTrue
+    rebuilt.Left = targetLeft
+    rebuilt.Top = targetTop
+    rebuilt.Width = buttonWidth
+    rebuilt.Height = buttonHeight
+    rebuilt.ZOrder msoBringToFront
+    Exit Sub
+
+Fallback:
+    On Error Resume Next
+    btn.Delete
+    Set rebuilt = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, buttonWidth, buttonHeight)
+    rebuilt.Name = "ExportLogbookButton"
+    rebuilt.TextFrame.Characters.Text = "Export Logbook"
+    rebuilt.OnAction = "ExportLogbook"
+    rebuilt.Placement = xlFreeFloating
+    rebuilt.Visible = msoTrue
+    rebuilt.ZOrder msoBringToFront
+    On Error GoTo 0
 End Sub
 
 ' ==============================================================

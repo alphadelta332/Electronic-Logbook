@@ -115,6 +115,7 @@ public partial class MainWindow : Window
 
         var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
+        string? availabilityFailureReason = null;
         if (identifiedInstalledVersion)
         {
             try
@@ -122,6 +123,8 @@ public partial class MainWindow : Window
                 if (!compatibilityPolicy.IsVersionSupported(installedVersion!))
                 {
                     identifiedInstalledVersion = false;
+                    availabilityFailureReason =
+                        "Unable to update - workbook does not meet minimum version requirements.";
                     InstalledVersionText.Text =
                         $"Installed version: {installedVersion} (automatic updates require " +
                         $"{compatibilityPolicy.MinimumSupportedVersion} or newer)";
@@ -130,6 +133,8 @@ public partial class MainWindow : Window
             catch (InvalidDataException)
             {
                 identifiedInstalledVersion = false;
+                availabilityFailureReason =
+                    "Unable to update - workbook version format is not supported.";
                 InstalledVersionText.Text =
                     $"Installed version: {installedVersion} (version format is not supported)";
             }
@@ -171,7 +176,7 @@ public partial class MainWindow : Window
         _isCheckingAvailability = false;
         FooterStatusText.Text = _availabilityReady
             ? "Ready"
-            : "Could not identify installed version or update channel.";
+            : availabilityFailureReason ?? "Could not identify installed version or update channel.";
         UpdateWizardView();
     }
 

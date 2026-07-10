@@ -13,6 +13,9 @@ Private Const AIRCRAFT_TYPES_SHEET As String = "AircraftTypes"
 Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
 Private Const AIRPORT_ICAO_VALIDATION_NAME As String = "AirportIcaoValidationList"
+Private Const REMOTE_AIRPORT_WARNING_THRESHOLD_NM As Double = 3000
+Private Const ADD_LOGBOOK_LAYOUT_DIAG_SHEET As String = "_AddToLogbookLayoutDiagnostics"
+Private Const ADD_LOGBOOK_LAYOUT_DIAG_FLAG As String = "AddToLogbookLayoutDiagnostics"
 Private mApplyingNewEntryLayout As Boolean
 Private mLastLogbookExportError As String
 
@@ -67,15 +70,20 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
     Dim logbookWasProtected As Boolean
     Dim latestLogbookDate As Date
     Dim shouldSortLogbook As Boolean
+    Dim entryWasWritten As Boolean
+    Dim initialLogbookRows As Long
 
         Set wsEntry = ThisWorkbook.Sheets("New Entry")
         Set wsLog = ThisWorkbook.Sheets("Logbook")
         Set tbl = wsLog.ListObjects("Logbook")
+        initialLogbookRows = tbl.ListRows.Count
         logbookWasProtected = wsLog.ProtectContents
+        TraceAddToLogbookLayout "Initial table state", tbl
         If logbookWasProtected Then
             On Error Resume Next
             wsLog.Unprotect Password:=ProtectionPassword()
             On Error GoTo Cleanup
+            TraceAddToLogbookLayout "After unprotect", tbl
         End If
         If Not ListColumnExists(tbl, "Flight ID") Or _
            Not ListColumnExists(tbl, "FR") Or _
@@ -267,6 +275,23 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                                   "Unrecognised Airport")
                 If response = vbCancel Then
                     MarkNewEntryProblemFields unrecognisedAirportFields
+                    GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4c-2. Distant Route Airports
+        If Not suppressWarnings Then
+            Dim distantAirportFields As Variant
+            Dim distantAirportMessage As String
+
+            distantAirportFields = DistantNewEntryAirportFieldNames(distantAirportMessage)
+            If VariantArrayHasItems(distantAirportFields) Then
+                response = MsgBox(distantAirportMessage, _
+                                  vbOKCancel + vbExclamation, _
+                                  "Distant Airport")
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields distantAirportFields
                     GoTo Cleanup
                 End If
             End If
@@ -607,6 +632,8 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         If totalsWereOn Then tbl.ShowTotals = False
 
         Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
+        entryWasWritten = True
+        TraceAddToLogbookLayout "After ListRows.Add", tbl
 
     '--- Copy Year, Month, Day
         WriteValueToLogbookColumn newRow.Range, tbl, "Year", NewEntryValue("neYear")
@@ -661,6 +688,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         tbl.ShowTotals = totalsWereOn
         totalsStateCaptured = False
         NormaliseLogbookFormatting tbl
+        TraceAddToLogbookLayout "After totals restore and formatting", tbl
 
     '--- 5g. Sort Logbook by Date
         diagStep = "Step 5g: Sort Logbook"
@@ -672,6 +700,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         End If
         Application.Calculate
         If shouldSortLogbook Then SortLogbookByDate tbl
+        TraceAddToLogbookLayout "After sort/calculation", tbl
 
     '--- Persist the entry now so it survives a crash in the chart/pivot steps below
         diagStep = "Step 5: Save Entry"
@@ -679,6 +708,12 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         On Error Resume Next
         ThisWorkbook.Save
         On Error GoTo Cleanup
+        TraceAddToLogbookLayout "After Step 5 save", tbl
+        If logbookWasProtected Then
+            diagStep = "Step 5: Re-protect after saved entry"
+            WriteCrumb diagStep
+            ProtectLogbookSheetForRuntime wsLog
+        End If
 
     '===============================
     ' STEP 6: UPDATE CHART DATA
@@ -722,9 +757,6 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         ClearNewEntryFields NewEntryClearFieldNames()
         ResetNewEntryRouteFieldsAfterAdd
 
-    '--- 7d. Update Hidden Rows
-        UpdateHiddenRows ThisWorkbook
-
         On Error GoTo Cleanup
 
     '===============================
@@ -755,6 +787,33 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
     '===============================
     ' STEP 9: SUCCESS MESSAGE
     '===============================
+        diagStep = "Step 9a: Finalise Layout"
+        WriteCrumb diagStep
+        SetAddToLogbookStatus "Finalising layout"
+        On Error Resume Next
+        If logbookWasProtected Then
+            WriteCrumb "Step 9a.0: Unprotect for final layout"
+            wsLog.Unprotect Password:=ProtectionPassword()
+        End If
+        WriteCrumb "Step 9a.1: Prepare export button view"
+        PrepareLogbookButtonRepairView tbl
+        WriteCrumb "Step 9a.2: Update hidden rows"
+        UpdateHiddenRows ThisWorkbook
+        TraceAddToLogbookLayout "After final UpdateHiddenRows", tbl
+        If entryWasWritten Then
+            WriteCrumb "Step 9a.3: Save final layout"
+            ThisWorkbook.Save
+            TraceAddToLogbookLayout "After final layout save", tbl
+        End If
+        If logbookWasProtected Then
+            WriteCrumb "Step 9a.4: Re-protect after final layout"
+            ProtectLogbookSheetForRuntime wsLog
+            TraceAddToLogbookLayout "After final layout protect", tbl
+        End If
+        WriteCrumb "Step 9a.5: Restore New Entry view"
+        RestoreNewEntryView
+        On Error GoTo Cleanup
+
         diagStep = "Step 9: Success"
         SetAddToLogbookStatus "Done"
 
@@ -775,8 +834,11 @@ Cleanup:
             On Error Resume Next
             tbl.ShowTotals = totalsWereOn
             On Error GoTo 0
+            TraceAddToLogbookLayout "Cleanup restored totals", tbl
         End If
 
+        RestoreNewEntryView
+        TraceAddToLogbookLayout "Cleanup before app state restore", tbl
         Application.ScreenUpdating = True
         Application.EnableEvents = True
         Application.Calculation = xlCalculationAutomatic
@@ -791,11 +853,14 @@ Cleanup:
             Application.StatusBar = False
         End If
         Application.DisplayStatusBar = previousDisplayStatusBar
+        TraceAddToLogbookLayout "Cleanup after app state restore", tbl
 
         If logbookWasProtected Then
             On Error Resume Next
+            TraceAddToLogbookLayout "Cleanup before protect", tbl
             ProtectLogbookSheetForRuntime wsLog
             On Error GoTo 0
+            TraceAddToLogbookLayout "Cleanup after protect", tbl
         End If
 
         '--- Report any unexpected error (errNum 0 means clean exit via GoTo Cleanup on cancel)
@@ -1305,6 +1370,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     totalsCellLeftOfBlock.HorizontalAlignment = xlRight
     totalsCellLeftOfBlock.WrapText = False
     totalsCellLeftOfBlock.Borders.LineStyle = xlNone
+    SetBorderFormat totalsCellLeftOfBlock.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
     experienceCellLeftOfBlock.Interior.Pattern = experienceCellLeftOfBlock.Offset(0, -1).Interior.Pattern
     experienceCellLeftOfBlock.Interior.Color = experienceCellLeftOfBlock.Offset(0, -1).Interior.Color
     experienceCellLeftOfBlock.Font.Color = experienceCellLeftOfBlock.Offset(0, -1).Font.Color
@@ -2080,6 +2146,262 @@ Private Function NewEntryAirportIcao(ByVal airportText As String) As String
     Next rowIndex
 
 CleanExit:
+End Function
+
+Private Function DistantNewEntryAirportFieldNames(ByRef warningMessage As String) As Variant
+    Dim problemFields As Collection
+    Dim warningLines As Collection
+    Dim result() As String
+    Dim i As Long
+
+    Set problemFields = New Collection
+    Set warningLines = New Collection
+
+    AddDistantNewEntryAirportWarning "neFrom", "Departure", problemFields, warningLines
+    AddDistantNewEntryAirportWarning "neTo", "Destination", problemFields, warningLines
+    AddDistantNewEntryRouteLegWarning problemFields, warningLines
+
+    If problemFields.Count = 0 Then
+        DistantNewEntryAirportFieldNames = Array()
+        Exit Function
+    End If
+
+    warningMessage = "Warning: One or more route airport distance checks look unusual." & _
+                     vbCrLf & vbCrLf
+    For i = 1 To warningLines.Count
+        warningMessage = warningMessage & CStr(warningLines(i)) & vbCrLf
+    Next i
+    warningMessage = warningMessage & vbCrLf & "Continue?"
+
+    ReDim result(0 To problemFields.Count - 1)
+    For i = 1 To problemFields.Count
+        result(i - 1) = CStr(problemFields(i))
+    Next i
+
+    DistantNewEntryAirportFieldNames = result
+End Function
+
+Private Sub AddDistantNewEntryAirportWarning(ByVal fieldName As String, _
+                                             ByVal fieldLabel As String, _
+                                             ByVal problemFields As Collection, _
+                                             ByVal warningLines As Collection)
+    Dim airportText As String
+    Dim airportIcao As String
+    Dim airportName As String
+    Dim nearestVisitedIcao As String
+    Dim nearestVisitedName As String
+    Dim nearestDistanceNm As Double
+
+    airportText = Trim$(CStr(NewEntryValue(fieldName)))
+    If airportText = "" Then Exit Sub
+
+    airportIcao = NewEntryAirportIcao(airportText)
+    If airportIcao = "" Then Exit Sub
+
+    If Not NearestVisitedAirportDistanceNm(airportIcao, airportName, nearestVisitedIcao, _
+                                           nearestVisitedName, nearestDistanceNm) Then Exit Sub
+    If nearestDistanceNm < REMOTE_AIRPORT_WARNING_THRESHOLD_NM Then Exit Sub
+
+    problemFields.Add fieldName
+    warningLines.Add fieldLabel & " " & airportIcao & AirportNameSuffix(airportName) & _
+                     " is about " & Format$(nearestDistanceNm, "#,##0") & _
+                     " NM from the nearest previously visited airport, " & _
+                     nearestVisitedIcao & AirportNameSuffix(nearestVisitedName) & "."
+End Sub
+
+Private Sub AddDistantNewEntryRouteLegWarning(ByVal problemFields As Collection, _
+                                              ByVal warningLines As Collection)
+    Dim fromText As String
+    Dim toText As String
+    Dim fromIcao As String
+    Dim toIcao As String
+    Dim fromName As String
+    Dim toName As String
+    Dim fromLat As Double
+    Dim fromLon As Double
+    Dim toLat As Double
+    Dim toLon As Double
+    Dim routeDistanceNm As Double
+
+    fromText = Trim$(CStr(NewEntryValue("neFrom")))
+    toText = Trim$(CStr(NewEntryValue("neTo")))
+    If fromText = "" Or toText = "" Then Exit Sub
+
+    fromIcao = NewEntryAirportIcao(fromText)
+    toIcao = NewEntryAirportIcao(toText)
+    If fromIcao = "" Or toIcao = "" Then Exit Sub
+    If fromIcao = toIcao Then Exit Sub
+
+    If Not AirportLocationByIcao(fromIcao, fromName, fromLat, fromLon) Then Exit Sub
+    If Not AirportLocationByIcao(toIcao, toName, toLat, toLon) Then Exit Sub
+
+    routeDistanceNm = GreatCircleDistanceNm(fromLat, fromLon, toLat, toLon)
+    If routeDistanceNm < REMOTE_AIRPORT_WARNING_THRESHOLD_NM Then Exit Sub
+
+    problemFields.Add "neFrom"
+    problemFields.Add "neTo"
+    warningLines.Add "The route from " & fromIcao & AirportNameSuffix(fromName) & _
+                     " to " & toIcao & AirportNameSuffix(toName) & _
+                     " is about " & Format$(routeDistanceNm, "#,##0") & " NM."
+End Sub
+
+Private Function NearestVisitedAirportDistanceNm(ByVal airportIcao As String, _
+                                                 ByRef airportName As String, _
+                                                 ByRef nearestVisitedIcao As String, _
+                                                 ByRef nearestVisitedName As String, _
+                                                 ByRef nearestDistanceNm As Double) As Boolean
+    Dim tblAirports As ListObject
+    Dim targetRow As Long
+    Dim rowIndex As Long
+    Dim icaoCol As Long
+    Dim airportCol As Long
+    Dim latCol As Long
+    Dim lonCol As Long
+    Dim visitsCol As Long
+    Dim targetLat As Double
+    Dim targetLon As Double
+    Dim visitedLat As Double
+    Dim visitedLon As Double
+    Dim distanceNm As Double
+    Dim rowIcao As String
+    Dim visits As Variant
+
+    On Error GoTo CleanExit
+    Set tblAirports = ThisWorkbook.Worksheets("Airports").ListObjects("Airports")
+    If tblAirports.DataBodyRange Is Nothing Then Exit Function
+    If Not ListColumnExists(tblAirports, "ICAO") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Airport") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Latitude") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Longitude") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Visits") Then Exit Function
+
+    icaoCol = tblAirports.ListColumns("ICAO").Index
+    airportCol = tblAirports.ListColumns("Airport").Index
+    latCol = tblAirports.ListColumns("Latitude").Index
+    lonCol = tblAirports.ListColumns("Longitude").Index
+    visitsCol = tblAirports.ListColumns("Visits").Index
+
+    airportIcao = UCase$(Trim$(airportIcao))
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        rowIcao = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, icaoCol).Value)))
+        If rowIcao = airportIcao Then
+            targetRow = rowIndex
+            Exit For
+        End If
+    Next rowIndex
+    If targetRow = 0 Then Exit Function
+    If Not IsNumeric(tblAirports.DataBodyRange.Cells(targetRow, latCol).Value) Then Exit Function
+    If Not IsNumeric(tblAirports.DataBodyRange.Cells(targetRow, lonCol).Value) Then Exit Function
+
+    airportName = Trim$(CStr(tblAirports.DataBodyRange.Cells(targetRow, airportCol).Value))
+    targetLat = CDbl(tblAirports.DataBodyRange.Cells(targetRow, latCol).Value)
+    targetLon = CDbl(tblAirports.DataBodyRange.Cells(targetRow, lonCol).Value)
+    nearestDistanceNm = 0
+
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        visits = tblAirports.DataBodyRange.Cells(rowIndex, visitsCol).Value
+        If Not IsNumeric(visits) Then GoTo NextRow
+        If CDbl(visits) <= 0 Then GoTo NextRow
+        If Not IsNumeric(tblAirports.DataBodyRange.Cells(rowIndex, latCol).Value) Then GoTo NextRow
+        If Not IsNumeric(tblAirports.DataBodyRange.Cells(rowIndex, lonCol).Value) Then GoTo NextRow
+
+        visitedLat = CDbl(tblAirports.DataBodyRange.Cells(rowIndex, latCol).Value)
+        visitedLon = CDbl(tblAirports.DataBodyRange.Cells(rowIndex, lonCol).Value)
+        distanceNm = GreatCircleDistanceNm(targetLat, targetLon, visitedLat, visitedLon)
+
+        If Not NearestVisitedAirportDistanceNm Or distanceNm < nearestDistanceNm Then
+            nearestDistanceNm = distanceNm
+            nearestVisitedIcao = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, icaoCol).Value)))
+            nearestVisitedName = Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, airportCol).Value))
+            NearestVisitedAirportDistanceNm = True
+        End If
+
+NextRow:
+    Next rowIndex
+
+CleanExit:
+End Function
+
+Private Function AirportLocationByIcao(ByVal airportIcao As String, _
+                                       ByRef airportName As String, _
+                                       ByRef latitude As Double, _
+                                       ByRef longitude As Double) As Boolean
+    Dim tblAirports As ListObject
+    Dim rowIndex As Long
+    Dim icaoCol As Long
+    Dim airportCol As Long
+    Dim latCol As Long
+    Dim lonCol As Long
+    Dim rowIcao As String
+
+    On Error GoTo CleanExit
+    Set tblAirports = ThisWorkbook.Worksheets("Airports").ListObjects("Airports")
+    If tblAirports.DataBodyRange Is Nothing Then Exit Function
+    If Not ListColumnExists(tblAirports, "ICAO") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Airport") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Latitude") Then Exit Function
+    If Not ListColumnExists(tblAirports, "Longitude") Then Exit Function
+
+    icaoCol = tblAirports.ListColumns("ICAO").Index
+    airportCol = tblAirports.ListColumns("Airport").Index
+    latCol = tblAirports.ListColumns("Latitude").Index
+    lonCol = tblAirports.ListColumns("Longitude").Index
+    airportIcao = UCase$(Trim$(airportIcao))
+
+    For rowIndex = 1 To tblAirports.DataBodyRange.Rows.Count
+        rowIcao = UCase$(Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, icaoCol).Value)))
+        If rowIcao = airportIcao Then
+            If Not IsNumeric(tblAirports.DataBodyRange.Cells(rowIndex, latCol).Value) Then Exit Function
+            If Not IsNumeric(tblAirports.DataBodyRange.Cells(rowIndex, lonCol).Value) Then Exit Function
+
+            airportName = Trim$(CStr(tblAirports.DataBodyRange.Cells(rowIndex, airportCol).Value))
+            latitude = CDbl(tblAirports.DataBodyRange.Cells(rowIndex, latCol).Value)
+            longitude = CDbl(tblAirports.DataBodyRange.Cells(rowIndex, lonCol).Value)
+            AirportLocationByIcao = True
+            Exit Function
+        End If
+    Next rowIndex
+
+CleanExit:
+End Function
+
+Private Function GreatCircleDistanceNm(ByVal lat1Deg As Double, _
+                                       ByVal lon1Deg As Double, _
+                                       ByVal lat2Deg As Double, _
+                                       ByVal lon2Deg As Double) As Double
+    Const EARTH_RADIUS_NM As Double = 3440.065
+
+    Dim lat1 As Double
+    Dim lat2 As Double
+    Dim dLat As Double
+    Dim dLon As Double
+    Dim a As Double
+    Dim c As Double
+
+    lat1 = DegreesToRadians(lat1Deg)
+    lat2 = DegreesToRadians(lat2Deg)
+    dLat = DegreesToRadians(lat2Deg - lat1Deg)
+    dLon = DegreesToRadians(lon2Deg - lon1Deg)
+
+    a = Sin(dLat / 2) ^ 2 + Cos(lat1) * Cos(lat2) * Sin(dLon / 2) ^ 2
+    If a <= 0 Then
+        c = 0
+    ElseIf a >= 1 Then
+        c = 4 * Atn(1)
+    Else
+        c = 2 * Atn(Sqr(a) / Sqr(1 - a))
+    End If
+
+    GreatCircleDistanceNm = EARTH_RADIUS_NM * c
+End Function
+
+Private Function DegreesToRadians(ByVal degrees As Double) As Double
+    DegreesToRadians = degrees * (Atn(1) / 45)
+End Function
+
+Private Function AirportNameSuffix(ByVal airportName As String) As String
+    airportName = Trim$(airportName)
+    If airportName <> "" Then AirportNameSuffix = " (" & airportName & ")"
 End Function
 
 Private Function NewEntryRouteBooleanValue(ByVal value As Variant) As Boolean
@@ -3569,9 +3891,162 @@ Public Sub UpdateHiddenRows(wb As Workbook)
 
     lastDataRow = tbl.DataBodyRange.row + tbl.DataBodyRange.Rows.Count - 1
     wsLog.Rows.Hidden = False
-    If lastDataRow + 4 <= wsLog.Rows.Count Then
-        wsLog.Rows(lastDataRow + 4 & ":" & wsLog.Rows.Count).Hidden = True
+    If lastDataRow + 7 <= wsLog.Rows.Count Then
+        wsLog.Rows(lastDataRow + 7 & ":" & wsLog.Rows.Count).Hidden = True
     End If
+    RepairExportLogbookButton tbl
+End Sub
+
+Private Sub PrepareLogbookButtonRepairView(ByVal tbl As ListObject)
+    Dim ws        As Worksheet
+    Dim topRow    As Long
+    Dim leftCol   As Long
+    Dim scrollRow As Long
+
+    On Error GoTo CleanExit
+    Set ws = tbl.Parent
+    topRow = tbl.TotalsRowRange.Row + 2
+    leftCol = tbl.ListColumns("Year").Range.Column
+    scrollRow = topRow - 30
+    If scrollRow < 1 Then scrollRow = 1
+
+    ws.Parent.Activate
+    ws.Activate
+    Application.Goto ws.Cells(topRow, leftCol), True
+    ActiveWindow.ScrollRow = scrollRow
+    ActiveWindow.ScrollColumn = 1
+
+CleanExit:
+End Sub
+
+Private Sub RestoreNewEntryView()
+    On Error Resume Next
+    ThisWorkbook.Worksheets(NEW_ENTRY_ACTIVE_SHEET).Activate
+    ActiveWindow.ScrollRow = 1
+    ActiveWindow.ScrollColumn = 1
+    On Error GoTo 0
+End Sub
+
+Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
+    Const BUTTON_WIDTH As Double = 121.2
+    Const BUTTON_HEIGHT As Double = 45
+    Const POSITION_TOLERANCE As Double = 1
+
+    Dim ws        As Worksheet
+    Dim btn       As Shape
+    Dim topRow    As Long
+    Dim leftCol   As Long
+    Dim targetLeft As Double
+    Dim targetTop  As Double
+
+    On Error GoTo CleanFail
+    Set ws = tbl.Parent
+    Set btn = ws.Shapes("ExportLogbookButton")
+
+    topRow = tbl.TotalsRowRange.Row + 2
+    leftCol = tbl.ListColumns("Year").Range.Column
+    If topRow + 3 > ws.Rows.Count Then Exit Sub
+
+    targetLeft = ws.Cells(topRow, leftCol).Left
+    targetTop = ws.Cells(topRow, leftCol).Top
+
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = BUTTON_WIDTH
+    btn.Height = BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+
+    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
+       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        btn.Left = targetLeft
+        btn.Top = targetTop
+        btn.Width = BUTTON_WIDTH
+        btn.Height = BUTTON_HEIGHT
+        btn.ZOrder msoBringToFront
+    End If
+
+    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
+       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+        RebuildExportLogbookButtonGroup ws, btn, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+    End If
+CleanFail:
+End Sub
+
+Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
+                                                   ByVal topRow As Long, _
+                                                   ByVal leftCol As Long)
+    On Error Resume Next
+    ws.Parent.Activate
+    ws.Activate
+    Application.Goto ws.Cells(topRow, leftCol), True
+    On Error GoTo 0
+End Sub
+
+Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
+                                            ByVal btn As Shape, _
+                                            ByVal targetLeft As Double, _
+                                            ByVal targetTop As Double, _
+                                            ByVal buttonWidth As Double, _
+                                            ByVal buttonHeight As Double)
+    Dim oldLeft      As Double
+    Dim oldTop       As Double
+    Dim itemCount    As Long
+    Dim itemNames()  As String
+    Dim itemLefts()  As Double
+    Dim itemTops()   As Double
+    Dim i            As Long
+    Dim sr           As ShapeRange
+    Dim rebuilt      As Shape
+
+    On Error GoTo Fallback
+
+    If btn.Type <> msoGroup Then GoTo Fallback
+
+    oldLeft = btn.Left
+    oldTop = btn.Top
+    itemCount = btn.GroupItems.Count
+    ReDim itemNames(1 To itemCount)
+    ReDim itemLefts(1 To itemCount)
+    ReDim itemTops(1 To itemCount)
+
+    For i = 1 To itemCount
+        itemNames(i) = btn.GroupItems.Item(i).Name
+        itemLefts(i) = btn.GroupItems.Item(i).Left
+        itemTops(i) = btn.GroupItems.Item(i).Top
+    Next i
+
+    Set sr = btn.Ungroup
+    For i = 1 To itemCount
+        ws.Shapes(itemNames(i)).Left = targetLeft + (itemLefts(i) - oldLeft)
+        ws.Shapes(itemNames(i)).Top = targetTop + (itemTops(i) - oldTop)
+        ws.Shapes(itemNames(i)).OnAction = "ExportLogbook"
+    Next i
+
+    Set rebuilt = ws.Shapes.Range(itemNames).Group
+    rebuilt.Name = "ExportLogbookButton"
+    rebuilt.Placement = xlFreeFloating
+    rebuilt.Visible = msoTrue
+    rebuilt.Left = targetLeft
+    rebuilt.Top = targetTop
+    rebuilt.Width = buttonWidth
+    rebuilt.Height = buttonHeight
+    rebuilt.ZOrder msoBringToFront
+    Exit Sub
+
+Fallback:
+    On Error Resume Next
+    btn.Delete
+    Set rebuilt = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, buttonWidth, buttonHeight)
+    rebuilt.Name = "ExportLogbookButton"
+    rebuilt.TextFrame.Characters.Text = "Export Logbook"
+    rebuilt.OnAction = "ExportLogbook"
+    rebuilt.Placement = xlFreeFloating
+    rebuilt.Visible = msoTrue
+    rebuilt.ZOrder msoBringToFront
+    On Error GoTo 0
 End Sub
 
 Public Sub UpdateHoursOverTimeChart(wb As Workbook)
@@ -4453,9 +4928,18 @@ Sub AddNewRoutes()
         Dim tblLog      As ListObject
         Dim tblAirports As ListObject
         Dim tblRoutes   As ListObject
+        Dim routesWasProtected As Boolean
+        Dim errNum As Long
+        Dim errDesc As String
+        Dim errSource As String
+
+        On Error GoTo Fail
 
         Set wsLog = ThisWorkbook.Sheets("Logbook")
         Set wsRoutes = ThisWorkbook.Sheets("Routes")
+        routesWasProtected = wsRoutes.ProtectContents
+        If routesWasProtected Then wsRoutes.Unprotect Password:=ProtectionPassword()
+
         Set tblLog = wsLog.ListObjects("Logbook")
         Set tblAirports = ThisWorkbook.Sheets("Airports").ListObjects("Airports")
         Set tblRoutes = wsRoutes.ListObjects("Routes")
@@ -4494,11 +4978,11 @@ Sub AddNewRoutes()
     '===============================
         Dim lastLogRow As Long
         lastLogRow = tblLog.DataBodyRange.Rows.Count
-        If IsLogbookRowSimOnly(tblLog, lastLogRow) Then Exit Sub
+        If IsLogbookRowSimOnly(tblLog, lastLogRow) Then GoTo CleanExit
 
         Dim details As String
         details = LogbookRouteSourceText(tblLog, lastLogRow)
-        If details = "" Then Exit Sub
+        If details = "" Then GoTo CleanExit
 
     '===============================
     ' STEP 4: TOKENISE AND MATCH
@@ -4567,6 +5051,18 @@ Sub AddNewRoutes()
             End If
         Next p
 
+CleanExit:
+        If routesWasProtected And Not mProtectionDisabledForSession Then ProtectStandardWorksheetForRuntime wsRoutes
+        Exit Sub
+
+Fail:
+        errNum = Err.Number
+        errDesc = Err.Description
+        errSource = Err.Source
+        On Error Resume Next
+        If routesWasProtected And Not mProtectionDisabledForSession Then ProtectStandardWorksheetForRuntime wsRoutes
+        On Error GoTo 0
+        Err.Raise errNum, errSource, errDesc
 End Sub
 
 Private Function IsRouteParserIgnoreToken(ByVal token As String) As Boolean
@@ -6065,6 +6561,175 @@ Public Sub WriteCrumb(step As String)
     On Error GoTo 0
 End Sub
 
+Public Sub EnableAddToLogbookLayoutDiagnostics()
+    Dim ws As Worksheet
+
+    Set ws = EnsureAddToLogbookLayoutDiagnosticSheet(True)
+    ws.Range("AA1").Value = True
+    SetAddToLogbookLayoutDiagnosticsName ws
+    ws.Visible = xlSheetVisible
+    ws.Activate
+End Sub
+
+Public Sub DisableAddToLogbookLayoutDiagnostics()
+    On Error Resume Next
+    ThisWorkbook.Names(ADD_LOGBOOK_LAYOUT_DIAG_FLAG).RefersToRange.Value = False
+    On Error GoTo 0
+End Sub
+
+Public Sub ClearAddToLogbookLayoutDiagnostics()
+    If Not AddToLogbookLayoutDiagnosticsEnabled() Then Exit Sub
+    EnsureAddToLogbookLayoutDiagnosticSheet True
+End Sub
+
+Private Function AddToLogbookLayoutDiagnosticsEnabled() As Boolean
+    On Error GoTo Fail
+    AddToLogbookLayoutDiagnosticsEnabled = CBool( _
+        GetWorkbookNameValue(ThisWorkbook, ADD_LOGBOOK_LAYOUT_DIAG_FLAG, False))
+    Exit Function
+Fail:
+    AddToLogbookLayoutDiagnosticsEnabled = False
+End Function
+
+Private Function EnsureAddToLogbookLayoutDiagnosticSheet(Optional ByVal clearExisting As Boolean = False) As Worksheet
+    Dim ws As Worksheet
+    Dim workbookWasProtected As Boolean
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(ADD_LOGBOOK_LAYOUT_DIAG_SHEET)
+    On Error GoTo 0
+
+    If ws Is Nothing Then
+        workbookWasProtected = ThisWorkbook.ProtectStructure
+        If workbookWasProtected Then ThisWorkbook.Unprotect Password:=ProtectionPassword()
+        Set ws = ThisWorkbook.Worksheets.Add(After:=ThisWorkbook.Worksheets(ThisWorkbook.Worksheets.Count))
+        ws.Name = ADD_LOGBOOK_LAYOUT_DIAG_SHEET
+        If workbookWasProtected Then ThisWorkbook.Protect Password:=ProtectionPassword(), Structure:=True, Windows:=False
+    End If
+
+    If clearExisting Or Len(Trim$(CStr(ws.Cells(1, 1).Value))) = 0 Then
+        ws.Cells.Clear
+        ws.Range("A1:Z1").Value = Array( _
+            "Timestamp", "Stage", "SheetProtected", "ScreenUpdating", "EnableEvents", _
+            "Calculation", "TableRows", "DataBodyLastRow", "TotalsRow", "TargetRow", _
+            "TargetCell", "TargetLeft", "TargetTop", "HiddenFromRow", "ButtonExists", _
+            "ButtonVisible", "ButtonPlacement", "ButtonLeft", "ButtonTop", "ButtonWidth", _
+            "ButtonHeight", "ButtonTopLeftCell", "ButtonBottomRightCell", "ButtonOnAction", _
+            "ButtonName", "Notes")
+        ws.Rows(1).Font.Bold = True
+        ws.Columns("A:Z").EntireColumn.AutoFit
+    End If
+
+    Set EnsureAddToLogbookLayoutDiagnosticSheet = ws
+End Function
+
+Private Sub SetAddToLogbookLayoutDiagnosticsName(ByVal ws As Worksheet)
+    On Error Resume Next
+    ThisWorkbook.Names(ADD_LOGBOOK_LAYOUT_DIAG_FLAG).Delete
+    On Error GoTo 0
+    ThisWorkbook.Names.Add Name:=ADD_LOGBOOK_LAYOUT_DIAG_FLAG, _
+        RefersTo:="='" & ws.Name & "'!$AA$1"
+End Sub
+
+Private Sub TraceAddToLogbookLayout(ByVal stage As String, Optional ByVal tbl As ListObject = Nothing)
+    On Error GoTo CleanExit
+
+    Dim wsDiag          As Worksheet
+    Dim wsLog           As Worksheet
+    Dim btn             As Shape
+    Dim targetCell      As Range
+    Dim nextRow         As Long
+    Dim tableRows       As Variant
+    Dim dataBodyLastRow As Variant
+    Dim totalsRow       As Variant
+    Dim targetRow       As Variant
+    Dim hiddenFromRow   As Variant
+    Dim targetLeft      As Variant
+    Dim targetTop       As Variant
+    Dim buttonExists    As Boolean
+    Dim buttonVisible   As Variant
+    Dim buttonPlacement As Variant
+    Dim buttonLeft      As Variant
+    Dim buttonTop       As Variant
+    Dim buttonWidth     As Variant
+    Dim buttonHeight    As Variant
+    Dim buttonTopLeft   As String
+    Dim buttonBottomRight As String
+    Dim buttonOnAction  As String
+    Dim buttonName      As String
+    Dim sheetProtected  As Variant
+    Dim targetAddress   As String
+    Dim notes           As String
+
+    If Not AddToLogbookLayoutDiagnosticsEnabled() Then Exit Sub
+
+    If tbl Is Nothing Then
+        On Error Resume Next
+        Set tbl = ThisWorkbook.Worksheets("Logbook").ListObjects("Logbook")
+        On Error GoTo CleanExit
+    End If
+
+    If Not tbl Is Nothing Then
+        Set wsLog = tbl.Parent
+        sheetProtected = wsLog.ProtectContents
+        tableRows = tbl.ListRows.Count
+        If Not tbl.DataBodyRange Is Nothing Then
+            dataBodyLastRow = tbl.DataBodyRange.Row + tbl.DataBodyRange.Rows.Count - 1
+            hiddenFromRow = CLng(dataBodyLastRow) + 7
+        End If
+        If tbl.ShowTotals Then
+            totalsRow = tbl.TotalsRowRange.Row
+            targetRow = CLng(totalsRow) + 2
+            Set targetCell = wsLog.Cells(CLng(targetRow), tbl.ListColumns("Year").Range.Column)
+            targetAddress = targetCell.Address(False, False)
+            targetLeft = targetCell.Left
+            targetTop = targetCell.Top
+        Else
+            notes = "Totals row is currently hidden."
+        End If
+
+        On Error Resume Next
+        Set btn = wsLog.Shapes("ExportLogbookButton")
+        buttonExists = Not btn Is Nothing
+        If buttonExists Then
+            buttonVisible = btn.Visible
+            buttonPlacement = btn.Placement
+            buttonLeft = btn.Left
+            buttonTop = btn.Top
+            buttonWidth = btn.Width
+            buttonHeight = btn.Height
+            buttonTopLeft = btn.TopLeftCell.Address(False, False)
+            buttonBottomRight = btn.BottomRightCell.Address(False, False)
+            buttonOnAction = btn.OnAction
+            buttonName = btn.Name
+        End If
+        If Err.Number <> 0 Then
+            If Len(notes) > 0 Then notes = notes & " "
+            notes = notes & "Button read error " & CStr(Err.Number) & ": " & Err.Description
+            Err.Clear
+        End If
+        On Error GoTo CleanExit
+    Else
+        notes = "Logbook table was not available."
+    End If
+
+    Set wsDiag = EnsureAddToLogbookLayoutDiagnosticSheet(False)
+    nextRow = wsDiag.Cells(wsDiag.Rows.Count, 1).End(xlUp).Row + 1
+    If nextRow < 2 Then nextRow = 2
+
+    wsDiag.Cells(nextRow, 1).Resize(1, 26).Value = Array( _
+        Now, stage, sheetProtected, _
+        Application.ScreenUpdating, Application.EnableEvents, Application.Calculation, _
+        tableRows, dataBodyLastRow, totalsRow, targetRow, _
+        targetAddress, _
+        targetLeft, targetTop, hiddenFromRow, buttonExists, _
+        buttonVisible, buttonPlacement, buttonLeft, buttonTop, buttonWidth, _
+        buttonHeight, buttonTopLeft, buttonBottomRight, buttonOnAction, _
+        buttonName, notes)
+
+CleanExit:
+End Sub
+
 Public Function BuildUserFacingErrorMessage(ByVal userMessage As String, _
                                             ByVal recoveryMessage As String, _
                                             ByVal errNum As Long, _
@@ -7362,8 +8027,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
                        UserInterfaceOnly:=True, AllowUsingPivotTables:=True, _
                        AllowFormattingColumns:=True, AllowFormattingRows:=True
         Else
-            ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
-                       UserInterfaceOnly:=True, AllowUsingPivotTables:=True
+            ProtectStandardWorksheetForRuntime ws
         End If
         On Error GoTo 0
     Next ws
@@ -7380,6 +8044,11 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
     Set wsLog = Nothing
     Set wsCharts = Nothing
     Set wb = Nothing
+End Sub
+
+Private Sub ProtectStandardWorksheetForRuntime(ws As Worksheet)
+    ws.Protect Password:=ProtectionPassword(), DrawingObjects:=False, Contents:=True, Scenarios:=True, _
+               UserInterfaceOnly:=True, AllowUsingPivotTables:=True
 End Sub
 
 Private Sub UnlockListColumnDataIfPresent(ByVal wb As Workbook, ByVal tableName As String, ByVal columnName As String)

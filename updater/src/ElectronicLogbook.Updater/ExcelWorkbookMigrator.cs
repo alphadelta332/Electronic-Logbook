@@ -13,6 +13,9 @@ public sealed class ExcelWorkbookMigrator
     private const int XlCalculationManual = -4135;
     private const int XlCalculationAutomatic = -4105;
     private const int XlPasteFormats = -4122;
+    private const int XlFreeFloating = 3;
+    private const int MsoTrue = -1;
+    private const int MsoBringToFront = 0;
     private const int XlUp = -4162;
     private const int BaseAirportsTopCount = 10;
 
@@ -133,6 +136,7 @@ public sealed class ExcelWorkbookMigrator
             SchedulePivotRefresh((object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
+            RepairExportLogbookButton(GetTable((object)outputWorkbook, "Logbook"));
 
             step = SetStep(UpdaterPhaseIds.ValidatePreservedData, "validating preserved data");
             IReadOnlyDictionary<string, string> outputFingerprints =
@@ -1546,9 +1550,48 @@ public sealed class ExcelWorkbookMigrator
         var lastDataRow =
             (int)destination.DataBodyRange.Row + (int)destination.DataBodyRange.Rows.Count - 1;
         worksheet.Rows.Hidden = false;
-        if (lastDataRow + 4 <= (int)worksheet.Rows.Count)
+        if (lastDataRow + 7 <= (int)worksheet.Rows.Count)
         {
-            worksheet.Rows[$"{lastDataRow + 4}:{worksheet.Rows.Count}"].Hidden = true;
+            worksheet.Rows[$"{lastDataRow + 7}:{worksheet.Rows.Count}"].Hidden = true;
+        }
+
+        RepairExportLogbookButton(destination);
+    }
+
+    private static void RepairExportLogbookButton(dynamic destination)
+    {
+        const double buttonWidth = 121.2d;
+        const double buttonHeight = 45d;
+
+        dynamic? button = null;
+        try
+        {
+            dynamic worksheet = destination.Parent;
+            button = worksheet.Shapes.Item("ExportLogbookButton");
+            var topRow = (int)destination.TotalsRowRange.Row + 2;
+            var leftColumn = (int)destination.ListColumns.Item(
+                GetColumnIndex(destination, "Year")).Range.Column;
+
+            if (topRow + 3 > (int)worksheet.Rows.Count)
+            {
+                return;
+            }
+
+            button.Placement = XlFreeFloating;
+            button.Visible = MsoTrue;
+            button.Left = (double)worksheet.Cells.Item(topRow, leftColumn).Left;
+            button.Top = (double)worksheet.Cells.Item(topRow, leftColumn).Top;
+            button.Width = buttonWidth;
+            button.Height = buttonHeight;
+            button.ZOrder(MsoBringToFront);
+        }
+        catch (RuntimeBinderException) when (button is null)
+        {
+            // Older or custom templates may not include this optional button.
+        }
+        catch (COMException) when (button is null)
+        {
+            // Older or custom templates may not include this optional button.
         }
     }
 
@@ -1780,6 +1823,9 @@ public sealed class ExcelWorkbookMigrator
         totalsCellLeftOfBlock.Font.Bold = false;
         totalsCellLeftOfBlock.HorizontalAlignment = -4152;
         totalsCellLeftOfBlock.WrapText = false;
+        totalsCellLeftOfBlock.Borders.Item(8).Weight = -4138;
+        totalsCellLeftOfBlock.Borders.Item(8).Color = 0;
+        totalsCellLeftOfBlock.Borders.Item(8).LineStyle = -4119;
         experienceCellLeftOfBlock.Interior.Pattern = experienceCellLeftFillSource.Interior.Pattern;
         experienceCellLeftOfBlock.Interior.Color = experienceCellLeftFillSource.Interior.Color;
         experienceCellLeftOfBlock.Font.Color = experienceCellLeftFillSource.Font.Color;
@@ -2039,6 +2085,45 @@ public sealed class ExcelWorkbookMigrator
             (int)totals.Row != (int)destination.TotalsRowRange.Row)
         {
             throw new InvalidDataException("LogbookTotals is not anchored to the live two-row totals area.");
+        }
+
+        ValidateExportLogbookButton(destination);
+    }
+
+    private static void ValidateExportLogbookButton(dynamic destination)
+    {
+        const double tolerance = 1d;
+
+        dynamic worksheet = destination.Parent;
+        dynamic button;
+        try
+        {
+            button = worksheet.Shapes.Item("ExportLogbookButton");
+        }
+        catch (RuntimeBinderException)
+        {
+            return;
+        }
+        catch (COMException)
+        {
+            return;
+        }
+
+        var topRow = (int)destination.TotalsRowRange.Row + 2;
+        var leftColumn = (int)destination.ListColumns.Item(
+            GetColumnIndex(destination, "Year")).Range.Column;
+        dynamic targetCell = worksheet.Cells.Item(topRow, leftColumn);
+
+        if (Math.Abs((double)button.Left - (double)targetCell.Left) > tolerance ||
+            Math.Abs((double)button.Top - (double)targetCell.Top) > tolerance)
+        {
+            throw new InvalidDataException(
+                "ExportLogbookButton is not anchored two rows below the Logbook totals row.");
+        }
+
+        if ((int)button.Placement != XlFreeFloating)
+        {
+            throw new InvalidDataException("ExportLogbookButton is not using free-floating placement.");
         }
     }
 
