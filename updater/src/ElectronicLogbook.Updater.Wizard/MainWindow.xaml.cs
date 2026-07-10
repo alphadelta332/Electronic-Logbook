@@ -604,13 +604,18 @@ public partial class MainWindow : Window
 
             _lastOutputPath = stagedOutput;
             _lastBackupPath = null;
-            _lastReportPath = _context.UseInPlaceSwap
-                ? Path.ChangeExtension(source, ".update-report.json")
-                : Path.ChangeExtension(stagedOutput, ".update-report.json");
-            await File.WriteAllTextAsync(
-                _lastReportPath,
-                JsonSerializer.Serialize(report, JsonDefaults.Indented),
-                _updateCts.Token);
+            _lastReportPath = null;
+            if (DetailedLoggingCheckBox.IsChecked == true)
+            {
+                _lastReportPath = _context.UseInPlaceSwap
+                    ? Path.ChangeExtension(source, ".update-report.json")
+                    : Path.ChangeExtension(stagedOutput, ".update-report.json");
+                await File.WriteAllTextAsync(
+                    _lastReportPath,
+                    JsonSerializer.Serialize(report, JsonDefaults.Indented),
+                    _updateCts.Token);
+                AppendLog($"Detailed diagnostic report: {_lastReportPath}");
+            }
             AppendLog(
                 "airport visit stats: " +
                 $"{report.AirportVisitStats.WrittenVisitedAirportRows} written, " +

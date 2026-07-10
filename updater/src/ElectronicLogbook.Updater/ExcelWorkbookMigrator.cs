@@ -132,8 +132,8 @@ public sealed class ExcelWorkbookMigrator
             {
                 worksheet.Calculate();
             }
-            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "scheduling pivot table refresh");
-            SchedulePivotRefresh((object)outputWorkbook);
+            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "disabling pivot table refresh on open");
+            DisablePivotRefreshOnOpen((object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
             RepairExportLogbookButton(GetTable((object)outputWorkbook, "Logbook"));
@@ -1977,7 +1977,7 @@ public sealed class ExcelWorkbookMigrator
         return brightness >= 150 ? 0 : 0xFFFFFF;
     }
 
-    private static void SchedulePivotRefresh(object workbookObject)
+    private static void DisablePivotRefreshOnOpen(object workbookObject)
     {
         try
         {
@@ -1994,7 +1994,7 @@ public sealed class ExcelWorkbookMigrator
                         try
                         {
                             dynamic pivot = pivots.Item(index);
-                            pivot.PivotCache().RefreshOnFileOpen = true;
+                            pivot.PivotCache().RefreshOnFileOpen = false;
                         }
                         catch
                         {
@@ -2012,7 +2012,7 @@ public sealed class ExcelWorkbookMigrator
         catch
         {
             // Pivot data is derived presentation state. Preserve the existing cache rather
-            // than fail migration when a workbook or Excel build cannot schedule refresh.
+            // than fail migration when a workbook or Excel build cannot update refresh settings.
         }
     }
 

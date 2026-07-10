@@ -194,6 +194,7 @@ Private Sub RunUpdate(newVersion As String)
     Dim sourceWorkbookPath As String
     Dim wizardReason As String
     Dim wizardMasterPath As String
+    Dim releaseChannel As Boolean
 
     ' Unique per-run filenames prevent stale leftovers from a prior failed update
     ' from being silently used as the staging input.
@@ -216,7 +217,10 @@ Private Sub RunUpdate(newVersion As String)
     savePath = localPath & "\" & canonicalName
     updatedPath = savePath
     oldPath = BuildOldWorkbookPath(localPath, canonicalName)
-    diagnosticsPath = BuildUpdateDiagnosticsPath(localPath, canonicalName)
+    releaseChannel = (LCase$(Trim$(GetGitHubBranch())) = "main")
+    If Not releaseChannel Then
+        diagnosticsPath = BuildUpdateDiagnosticsPath(localPath, canonicalName)
+    End If
     wizardReportPath = BuildWizardReportPath(localPath, canonicalName)
     sourceWorkbookPath = localPath & "\" & originalName
     WriteUpdateDiagnostic diagnosticsPath, "Update started. Source=" & sourceWorkbookPath & _
@@ -224,7 +228,7 @@ Private Sub RunUpdate(newVersion As String)
 
     ' Prefer the external wizard flow. Development builds may fall back to the
     ' classic updater for diagnostics; release builds abort if the wizard is unavailable.
-    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+    If Not releaseChannel Then
         wizardMasterPath = tempPath
         If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), wizardMasterPath) Then
             wizardReason = "Could not prepare the development master workbook for the updater wizard."
@@ -237,7 +241,7 @@ Private Sub RunUpdate(newVersion As String)
     If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
         WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
         WriteUpdateDiagnostic diagnosticsPath, "Launcher diagnostics stop here because Excel handed off to the external wizard."
-        WriteUpdateDiagnostic diagnosticsPath, "Detailed wizard report path: " & wizardReportPath
+        WriteUpdateDiagnostic diagnosticsPath, "Wizard diagnostic report path if enabled: " & wizardReportPath
         UpdateStatus ""
 
         Dim closeErr As Long
@@ -268,7 +272,7 @@ Private Sub RunUpdate(newVersion As String)
         Exit Sub
     End If
 
-    If wizardReason <> "" And LCase$(Trim$(GetGitHubBranch())) = "main" Then
+    If wizardReason <> "" And releaseChannel Then
         WriteUpdateDiagnostic diagnosticsPath, "External updater wizard unavailable on release channel. Reason=" & wizardReason
         MsgBox "The external updater wizard was not available, so the update cannot continue safely." & vbCrLf & vbCrLf & _
                "Reason: " & wizardReason & vbCrLf & vbCrLf & _

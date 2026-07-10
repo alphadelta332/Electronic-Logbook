@@ -780,8 +780,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         SetAddToLogbookStatus "Refreshing summaries"
         DoEvents
         On Error Resume Next
-        RefreshWorkbookPivotCaches ThisWorkbook
-        FixHoursByYearPivotLayout ThisWorkbook
+        RefreshWorkbookPivotSummariesWithWorkbookProtection ThisWorkbook
         On Error GoTo Cleanup
 
     '===============================
@@ -1703,6 +1702,55 @@ Private Sub RefreshWorkbookPivotCaches(ByVal wb As Workbook)
             End If
         Next pt
     Next ws
+End Sub
+
+Private Sub DisableWorkbookPivotRefreshOnOpen(ByVal wb As Workbook)
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+    Dim cacheKey As String
+    Dim updatedCaches As Object
+
+    Set updatedCaches = CreateObject("Scripting.Dictionary")
+
+    On Error Resume Next
+    For Each ws In wb.Worksheets
+        For Each pt In ws.PivotTables
+            cacheKey = CStr(pt.PivotCache.Index)
+            If Not updatedCaches.Exists(cacheKey) Then
+                pt.PivotCache.RefreshOnFileOpen = False
+                updatedCaches.Add cacheKey, True
+            End If
+        Next pt
+    Next ws
+    On Error GoTo 0
+End Sub
+
+Private Sub RefreshWorkbookPivotSummariesWithWorkbookProtection(ByVal wb As Workbook)
+    Dim protectionWasActive As Boolean
+    Dim errNum As Long
+    Dim errDesc As String
+    Dim errSource As String
+
+    On Error GoTo Fail
+    protectionWasActive = WorkbookProtectionIsActive(wb)
+    If protectionWasActive Then UnprotectWorkbookForEditing wb
+
+    RefreshWorkbookPivotCaches wb
+    FixHoursByYearPivotLayout wb
+    DisableWorkbookPivotRefreshOnOpen wb
+
+CleanExit:
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, wb
+    Exit Sub
+
+Fail:
+    errNum = Err.Number
+    errDesc = Err.Description
+    errSource = Err.Source
+    On Error Resume Next
+    If protectionWasActive And Not mProtectionDisabledForSession Then ApplyWorkbookProtection False, wb
+    On Error GoTo 0
+    Err.Raise errNum, errSource, errDesc
 End Sub
 
 Private Function NewEntryDateFormula() As String
@@ -6967,6 +7015,9 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
         Print #fileNum, "Routes ver   : " & routesVer
         Print #fileNum, "Keywords     : " & kwCount & " row(s)"
         Print #fileNum, ""
+        Print #fileNum, "-- PROTECTION / PIVOTS ---------------------------"
+        PrintPivotProtectionDiagnostics fileNum, wb
+        Print #fileNum, ""
         Print #fileNum, "-- NOTE ------------------------------------------"
         Print #fileNum, "This file contains no personal data, flight records,"
         Print #fileNum, "names, registrations, or file paths."
@@ -6988,6 +7039,33 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
         ExportDiagnosticsInternal = False
     End If
 End Function
+
+Private Sub PrintPivotProtectionDiagnostics(ByVal fileNum As Integer, ByVal wb As Workbook)
+    Dim ws As Worksheet
+    Dim pt As PivotTable
+    Dim pivotCount As Long
+
+    On Error Resume Next
+    Print #fileNum, "Workbook protected: structure=" & CStr(wb.ProtectStructure) & _
+                    ", windows=" & CStr(wb.ProtectWindows)
+    For Each ws In wb.Worksheets
+        pivotCount = 0
+        pivotCount = ws.PivotTables.Count
+        If ws.ProtectContents Or pivotCount > 0 Then
+            Print #fileNum, "Sheet: " & ws.Name & _
+                            " | protected=" & CStr(ws.ProtectContents) & _
+                            " | pivots=" & CStr(pivotCount)
+        End If
+        If pivotCount > 0 Then
+            For Each pt In ws.PivotTables
+                Print #fileNum, "  Pivot: " & pt.Name & _
+                                " | cache=" & CStr(pt.PivotCache.Index) & _
+                                " | refreshOnOpen=" & CStr(pt.PivotCache.RefreshOnFileOpen)
+            Next pt
+        End If
+    Next ws
+    On Error GoTo 0
+End Sub
 
 Public Sub ToggleSuppressWarnings()
     Dim isActive As Boolean
@@ -7986,6 +8064,7 @@ Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False
 
     UnprotectWorkbookForEditing wb
     EnsurePrimarySheetOrder wb
+    DisableWorkbookPivotRefreshOnOpen wb
 
     For Each ws In wb.Worksheets
         On Error Resume Next
