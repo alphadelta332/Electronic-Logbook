@@ -122,6 +122,27 @@ function Get-ListColumnOrNull {
     return $null
 }
 
+function Get-LogbookCustomColumn {
+    param(
+        [Parameter(Mandatory)]
+        $Table
+    )
+
+    $hoursColumn = Get-ListColumnOrNull -Table $Table -Names @("SeIcusDay")
+    if ($null -eq $hoursColumn) {
+        return $null
+    }
+
+    foreach ($anchorName in @("OPC", "Details", "Remarks")) {
+        $anchor = Get-ListColumnOrNull -Table $Table -Names @($anchorName)
+        if ($null -ne $anchor -and $anchor.Index + 1 -lt $hoursColumn.Index) {
+            return $Table.ListColumns.Item($anchor.Index + 1)
+        }
+    }
+
+    return $null
+}
+
 function Get-DataBodyRowCount {
     param([Parameter(Mandatory)]$Table)
 
@@ -255,8 +276,9 @@ try {
                 $yearColumn.DataBodyRange.Cells(1, 1).Value2 = 2026
             }
 
-            if ([int]$logbook.ListColumns.Count -ge 10) {
-                $logbook.ListColumns.Item(10).Name = "Compat Header"
+            $customColumn = Get-LogbookCustomColumn -Table $logbook
+            if ($null -ne $customColumn) {
+                $customColumn.Name = "Compat Header"
             }
 
             $keywords = Get-ListObject -Workbook $Workbook -Name "Keywords"

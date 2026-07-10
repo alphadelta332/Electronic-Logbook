@@ -14,6 +14,7 @@ Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
 Private Const AIRPORT_ICAO_VALIDATION_NAME As String = "AirportIcaoValidationList"
 Private mApplyingNewEntryLayout As Boolean
+Private mLastLogbookExportError As String
 
 Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
@@ -4637,6 +4638,854 @@ Private Function LogbookRemarksColumnName(ByVal tbl As ListObject) As String
     ElseIf ListColumnExists(tbl, "Details") Then
         LogbookRemarksColumnName = "Details"
     End If
+End Function
+
+' ==============================================================
+' LOGBOOK EXPORT
+' ==============================================================
+
+Public Sub ExportLogbook()
+    frmExportLogbook.Show
+End Sub
+
+Public Function ChooseLogbookExportPath(ByVal exportFormat As String) As String
+    Dim selectedPath As Variant
+    Dim fileFilter As String
+    Dim defaultPath As String
+
+    Select Case LCase$(Trim$(exportFormat))
+        Case "xlsx": fileFilter = "Excel Workbook (*.xlsx),*.xlsx"
+        Case "csv": fileFilter = "CSV UTF-8 (*.csv),*.csv"
+        Case "pdf": fileFilter = "PDF (*.pdf),*.pdf"
+        Case Else: Exit Function
+    End Select
+
+    defaultPath = ResolveLocalPath(ThisWorkbook) & Application.PathSeparator & _
+                  "Logbook Export " & Format$(Date, "yyyy-mm-dd") & _
+                  "." & LCase$(Trim$(exportFormat))
+    selectedPath = Application.GetSaveAsFilename( _
+        InitialFileName:=defaultPath, _
+        FileFilter:=fileFilter, Title:="Choose Export Location")
+    If VarType(selectedPath) = vbBoolean Then Exit Function
+    ChooseLogbookExportPath = EnsureLogbookExportExtension( _
+        CStr(selectedPath), exportFormat)
+End Function
+
+Public Function LastLogbookExportError() As String
+    LastLogbookExportError = mLastLogbookExportError
+End Function
+
+Public Function ExportLogbookToFile(ByVal outputPath As String, _
+                                    ByVal exportFormat As String, _
+                                    ByVal combineDetails As Boolean, _
+                                    Optional ByVal startDate As Variant, _
+                                    Optional ByVal endDate As Variant, _
+                                    Optional ByVal showErrors As Boolean = False) As Boolean
+    Dim sourceSheet As Worksheet
+    Dim sourceTable As ListObject
+    Dim selectedRows As Collection
+    Dim outputHeaders As Collection
+    Dim sourceIndexes As Collection
+    Dim outputValues As Variant
+    Dim exportBook As Workbook
+    Dim exportSheet As Worksheet
+    Dim previousScreenUpdating As Boolean
+    Dim previousDisplayAlerts As Boolean
+    Dim previousStatusBar As Variant
+    Dim previousDisplayStatusBar As Boolean
+    Dim errorMessage As String
+
+    On Error GoTo Fail
+    mLastLogbookExportError = vbNullString
+
+    exportFormat = LCase$(Trim$(exportFormat))
+    If exportFormat <> "xlsx" And exportFormat <> "csv" And exportFormat <> "pdf" Then
+        Err.Raise vbObjectError + 2300, "ExportLogbookToFile", _
+                  "The export format must be xlsx, csv, or pdf."
+    End If
+    If Len(Trim$(outputPath)) = 0 Then
+        Err.Raise vbObjectError + 2301, "ExportLogbookToFile", _
+                  "An output path is required."
+    End If
+    If Not IsMissing(startDate) And Not IsEmpty(startDate) And Not IsDate(startDate) Then
+        Err.Raise vbObjectError + 2302, "ExportLogbookToFile", _
+                  "The start date is not valid."
+    End If
+    If Not IsMissing(endDate) And Not IsEmpty(endDate) And Not IsDate(endDate) Then
+        Err.Raise vbObjectError + 2303, "ExportLogbookToFile", _
+                  "The end date is not valid."
+    End If
+    If Not IsMissing(startDate) And Not IsMissing(endDate) Then
+        If Not IsEmpty(startDate) And Not IsEmpty(endDate) Then
+            If CDate(startDate) > CDate(endDate) Then
+                Err.Raise vbObjectError + 2304, "ExportLogbookToFile", _
+                          "The start date cannot be later than the end date."
+            End If
+        End If
+    End If
+
+    previousScreenUpdating = Application.ScreenUpdating
+    previousDisplayAlerts = Application.DisplayAlerts
+    previousDisplayStatusBar = Application.DisplayStatusBar
+    previousStatusBar = Application.StatusBar
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Electronic Logbook: preparing export"
+
+    Set sourceSheet = ThisWorkbook.Worksheets("Logbook")
+    Set sourceTable = sourceSheet.ListObjects("Logbook")
+    ValidateLogbookExportColumns sourceTable
+
+    Set selectedRows = SelectLogbookExportRows(sourceTable, startDate, endDate)
+    If selectedRows.Count = 0 Then
+        Err.Raise vbObjectError + 2305, "ExportLogbookToFile", _
+                  "No logbook entries match the selected date range."
+    End If
+
+    Set outputHeaders = New Collection
+    Set sourceIndexes = New Collection
+    BuildLogbookExportColumns sourceTable, selectedRows, combineDetails, _
+                              outputHeaders, sourceIndexes
+    outputValues = BuildLogbookExportValues(sourceTable, selectedRows, _
+                                            outputHeaders, sourceIndexes, _
+                                            combineDetails)
+
+    outputPath = EnsureLogbookExportExtension(outputPath, exportFormat)
+    If exportFormat = "csv" Then
+        Application.StatusBar = "Electronic Logbook: writing CSV"
+        WriteLogbookCsv outputPath, outputValues
+    Else
+        Application.StatusBar = "Electronic Logbook: building formatted export"
+        Set exportBook = CreateFormattedLogbookExport( _
+            sourceSheet, sourceTable, outputValues, sourceIndexes, _
+            combineDetails, exportFormat = "xlsx", exportSheet)
+
+        If exportFormat = "xlsx" Then
+            Application.StatusBar = "Electronic Logbook: saving XLSX"
+            exportBook.SaveAs Filename:=outputPath, FileFormat:=xlOpenXMLWorkbook, _
+                              CreateBackup:=False
+            exportBook.Close SaveChanges:=False
+            Set exportBook = Application.Workbooks.Open(outputPath)
+            Set exportSheet = exportBook.Worksheets(1)
+            Application.ScreenUpdating = True
+            ConfigureCopiedLogbookView exportBook, exportSheet, _
+                                       exportSheet.ListObjects(1)
+            Application.ScreenUpdating = False
+            exportBook.Save
+        Else
+            Application.StatusBar = "Electronic Logbook: creating PDF"
+            ConfigureLogbookPdf exportSheet
+            exportSheet.ExportAsFixedFormat Type:=xlTypePDF, Filename:=outputPath, _
+                                            Quality:=xlQualityStandard, _
+                                            IncludeDocProperties:=True, _
+                                            IgnorePrintAreas:=False, _
+                                            OpenAfterPublish:=False
+        End If
+    End If
+
+    ExportLogbookToFile = True
+
+Cleanup:
+    On Error Resume Next
+    If Not exportBook Is Nothing Then exportBook.Close SaveChanges:=False
+    Application.CutCopyMode = False
+    Application.StatusBar = previousStatusBar
+    Application.DisplayStatusBar = previousDisplayStatusBar
+    Application.DisplayAlerts = previousDisplayAlerts
+    Application.ScreenUpdating = previousScreenUpdating
+    On Error GoTo 0
+    Exit Function
+
+Fail:
+    errorMessage = Err.Description
+    mLastLogbookExportError = errorMessage
+    ExportLogbookToFile = False
+    If showErrors Then
+        MsgBox "The logbook could not be exported." & vbCrLf & vbCrLf & errorMessage, _
+               vbExclamation, "Export Logbook"
+    End If
+    Resume Cleanup
+End Function
+
+Private Sub ValidateLogbookExportColumns(ByVal sourceTable As ListObject)
+    Dim columnName As Variant
+
+    For Each columnName In Array( _
+        "Date", "Year", "Month", "Day", "Type", "Reg", "Flight ID", "PIC", _
+        "Other Pilot or Crew", "From", "To", "Via", "Remarks", "FR", "IPC", "OPC", _
+        "SeIcusDay", "Circling", "TotalHours", "TotalApps")
+        If Not ListColumnExists(sourceTable, CStr(columnName)) Then
+            Err.Raise vbObjectError + 2310, "ValidateLogbookExportColumns", _
+                      "The Logbook table is missing the required '" & CStr(columnName) & "' column."
+        End If
+    Next columnName
+End Sub
+
+Private Function SelectLogbookExportRows(ByVal sourceTable As ListObject, _
+                                         ByVal startDate As Variant, _
+                                         ByVal endDate As Variant) As Collection
+    Dim rows As New Collection
+    Dim rowIndex As Long
+    Dim entryDate As Date
+    Dim hasStart As Boolean
+    Dim hasEnd As Boolean
+
+    hasStart = Not IsMissing(startDate) And Not IsEmpty(startDate)
+    hasEnd = Not IsMissing(endDate) And Not IsEmpty(endDate)
+
+    If sourceTable.DataBodyRange Is Nothing Then
+        Set SelectLogbookExportRows = rows
+        Exit Function
+    End If
+
+    For rowIndex = 1 To sourceTable.ListRows.Count
+        If LogbookRowHasEntryData(sourceTable, rowIndex) Then
+            If Not TryGetLogbookExportDate(sourceTable, rowIndex, entryDate) Then
+                Err.Raise vbObjectError + 2311, "SelectLogbookExportRows", _
+                          "Logbook row " & CStr(sourceTable.DataBodyRange.Row + rowIndex - 1) & _
+                          " contains data but does not have a valid date."
+            End If
+
+            If (Not hasStart Or entryDate >= DateValue(CDate(startDate))) And _
+               (Not hasEnd Or entryDate <= DateValue(CDate(endDate))) Then
+                rows.Add rowIndex
+            End If
+        End If
+    Next rowIndex
+
+    Set SelectLogbookExportRows = rows
+End Function
+
+Private Function LogbookRowHasEntryData(ByVal sourceTable As ListObject, _
+                                        ByVal rowIndex As Long) As Boolean
+    Dim firstIndex As Long
+    Dim lastIndex As Long
+    Dim columnIndex As Long
+    Dim value As Variant
+
+    firstIndex = sourceTable.ListColumns("Year").Index
+    lastIndex = sourceTable.ListColumns("Circling").Index
+
+    For columnIndex = firstIndex To lastIndex
+        value = sourceTable.DataBodyRange.Cells(rowIndex, columnIndex).Value2
+        If IsError(value) Then
+            LogbookRowHasEntryData = True
+            Exit Function
+        ElseIf VarType(value) = vbBoolean Then
+            If CBool(value) Then
+                LogbookRowHasEntryData = True
+                Exit Function
+            End If
+        ElseIf IsNumeric(value) Then
+            If CDbl(value) <> 0 Then
+                LogbookRowHasEntryData = True
+                Exit Function
+            End If
+        ElseIf Len(Trim$(CStr(value))) > 0 Then
+            LogbookRowHasEntryData = True
+            Exit Function
+        End If
+    Next columnIndex
+End Function
+
+Private Function TryGetLogbookExportDate(ByVal sourceTable As ListObject, _
+                                         ByVal rowIndex As Long, _
+                                         ByRef entryDate As Date) As Boolean
+    Dim value As Variant
+    Dim dateText As String
+
+    On Error GoTo InvalidDate
+
+    value = sourceTable.DataBodyRange.Cells( _
+        rowIndex, sourceTable.ListColumns("Date").Index).Value
+    If Not IsError(value) And IsDate(value) Then
+        entryDate = DateValue(CDate(value))
+        TryGetLogbookExportDate = True
+        Exit Function
+    End If
+
+    dateText = CStr(sourceTable.DataBodyRange.Cells( _
+        rowIndex, sourceTable.ListColumns("Day").Index).Value) & " " & _
+        CStr(sourceTable.DataBodyRange.Cells( _
+        rowIndex, sourceTable.ListColumns("Month").Index).Value) & " " & _
+        CStr(sourceTable.DataBodyRange.Cells( _
+        rowIndex, sourceTable.ListColumns("Year").Index).Value)
+    If IsDate(dateText) Then
+        entryDate = DateValue(CDate(dateText))
+        TryGetLogbookExportDate = True
+    End If
+    Exit Function
+
+InvalidDate:
+    TryGetLogbookExportDate = False
+End Function
+
+Private Sub BuildLogbookExportColumns(ByVal sourceTable As ListObject, _
+                                      ByVal selectedRows As Collection, _
+                                      ByVal combineDetails As Boolean, _
+                                      ByVal outputHeaders As Collection, _
+                                      ByVal sourceIndexes As Collection)
+    Dim columnName As Variant
+    Dim columnIndex As Long
+    Dim customStart As Long
+    Dim customEnd As Long
+
+    For Each columnName In Array( _
+        "Year", "Month", "Day", "Type", "Reg", "Flight ID", "PIC", _
+        "Other Pilot or Crew")
+        AddLogbookExportColumn sourceTable, CStr(columnName), outputHeaders, sourceIndexes
+    Next columnName
+
+    If combineDetails Then
+        outputHeaders.Add "Details"
+        sourceIndexes.Add 0
+    Else
+        For Each columnName In Array("From", "To", "Via", "Remarks", "FR", "IPC", "OPC")
+            AddLogbookExportColumn sourceTable, CStr(columnName), outputHeaders, sourceIndexes
+        Next columnName
+    End If
+
+    customStart = sourceTable.ListColumns("OPC").Index + 1
+    customEnd = sourceTable.ListColumns("SeIcusDay").Index - 1
+    For columnIndex = customStart To customEnd
+        If LogbookExportColumnHasData(sourceTable, columnIndex, selectedRows) Then
+            outputHeaders.Add sourceTable.ListColumns(columnIndex).Name
+            sourceIndexes.Add columnIndex
+        End If
+    Next columnIndex
+
+    For columnIndex = sourceTable.ListColumns("SeIcusDay").Index To _
+                      sourceTable.ListColumns("Circling").Index
+        outputHeaders.Add sourceTable.ListColumns(columnIndex).Name
+        sourceIndexes.Add columnIndex
+    Next columnIndex
+
+    AddLogbookExportColumn sourceTable, "TotalHours", outputHeaders, sourceIndexes
+    AddLogbookExportColumn sourceTable, "TotalApps", outputHeaders, sourceIndexes
+End Sub
+
+Private Sub AddLogbookExportColumn(ByVal sourceTable As ListObject, _
+                                   ByVal columnName As String, _
+                                   ByVal outputHeaders As Collection, _
+                                   ByVal sourceIndexes As Collection)
+    outputHeaders.Add sourceTable.ListColumns(columnName).Name
+    sourceIndexes.Add sourceTable.ListColumns(columnName).Index
+End Sub
+
+Private Function LogbookExportColumnHasData(ByVal sourceTable As ListObject, _
+                                            ByVal columnIndex As Long, _
+                                            ByVal selectedRows As Collection) As Boolean
+    Dim rowItem As Variant
+    Dim value As Variant
+
+    For Each rowItem In selectedRows
+        value = sourceTable.DataBodyRange.Cells(CLng(rowItem), columnIndex).Value2
+        If IsError(value) Then
+            LogbookExportColumnHasData = True
+            Exit Function
+        ElseIf VarType(value) = vbBoolean Then
+            If CBool(value) Then
+                LogbookExportColumnHasData = True
+                Exit Function
+            End If
+        ElseIf IsNumeric(value) Then
+            If CDbl(value) <> 0 Then
+                LogbookExportColumnHasData = True
+                Exit Function
+            End If
+        ElseIf Len(Trim$(CStr(value))) > 0 Then
+            LogbookExportColumnHasData = True
+            Exit Function
+        End If
+    Next rowItem
+End Function
+
+Private Function BuildLogbookExportValues(ByVal sourceTable As ListObject, _
+                                          ByVal selectedRows As Collection, _
+                                          ByVal outputHeaders As Collection, _
+                                          ByVal sourceIndexes As Collection, _
+                                          ByVal combineDetails As Boolean) As Variant
+    Dim values As Variant
+    Dim outputRow As Long
+    Dim outputColumn As Long
+    Dim sourceRow As Long
+    Dim sourceIndex As Long
+
+    ReDim values(1 To selectedRows.Count + 1, 1 To outputHeaders.Count)
+
+    For outputColumn = 1 To outputHeaders.Count
+        values(1, outputColumn) = CStr(outputHeaders(outputColumn))
+    Next outputColumn
+
+    For outputRow = 1 To selectedRows.Count
+        sourceRow = CLng(selectedRows(outputRow))
+        For outputColumn = 1 To outputHeaders.Count
+            sourceIndex = CLng(sourceIndexes(outputColumn))
+            If combineDetails And sourceIndex = 0 Then
+                values(outputRow + 1, outputColumn) = _
+                    CombinedLogbookDetails(sourceTable, sourceRow)
+            Else
+                values(outputRow + 1, outputColumn) = _
+                    sourceTable.DataBodyRange.Cells(sourceRow, sourceIndex).Value2
+            End If
+        Next outputColumn
+    Next outputRow
+
+    BuildLogbookExportValues = values
+End Function
+
+Private Function CombinedLogbookDetails(ByVal sourceTable As ListObject, _
+                                        ByVal rowIndex As Long) As String
+    Dim routeText As String
+    Dim remarksText As String
+    Dim flagsText As String
+
+    AppendLogbookRoutePart routeText, LogbookExportCellText(sourceTable, rowIndex, "From")
+    AppendLogbookRoutePart routeText, LogbookExportCellText(sourceTable, rowIndex, "Via")
+    AppendLogbookRoutePart routeText, LogbookExportCellText(sourceTable, rowIndex, "To")
+
+    remarksText = LogbookExportCellText(sourceTable, rowIndex, "Remarks")
+    If Len(remarksText) > 0 Then AppendLogbookDetailPart routeText, "(" & remarksText & ")"
+
+    If LogbookExportFlagValue(sourceTable, rowIndex, "FR") Then
+        AppendLogbookSlashPart flagsText, "Flight Review"
+    End If
+    If LogbookExportFlagValue(sourceTable, rowIndex, "IPC") Then
+        AppendLogbookSlashPart flagsText, "IPC"
+    End If
+    If LogbookExportFlagValue(sourceTable, rowIndex, "OPC") Then
+        AppendLogbookSlashPart flagsText, "OPC"
+    End If
+    If Len(flagsText) > 0 Then AppendLogbookDetailPart routeText, "(" & flagsText & ")"
+
+    CombinedLogbookDetails = routeText
+End Function
+
+Private Sub AppendLogbookRoutePart(ByRef routeText As String, ByVal partText As String)
+    If Len(partText) = 0 Then Exit Sub
+    If Len(routeText) > 0 Then routeText = routeText & "-"
+    routeText = routeText & partText
+End Sub
+
+Private Sub AppendLogbookDetailPart(ByRef detailsText As String, ByVal partText As String)
+    If Len(partText) = 0 Then Exit Sub
+    If Len(detailsText) > 0 Then detailsText = detailsText & " "
+    detailsText = detailsText & partText
+End Sub
+
+Private Sub AppendLogbookSlashPart(ByRef flagsText As String, ByVal partText As String)
+    If Len(flagsText) > 0 Then flagsText = flagsText & "/"
+    flagsText = flagsText & partText
+End Sub
+
+Private Function LogbookExportCellText(ByVal sourceTable As ListObject, _
+                                       ByVal rowIndex As Long, _
+                                       ByVal columnName As String) As String
+    Dim value As Variant
+
+    value = sourceTable.DataBodyRange.Cells( _
+        rowIndex, sourceTable.ListColumns(columnName).Index).Value2
+    If Not IsError(value) Then LogbookExportCellText = Trim$(CStr(value))
+End Function
+
+Private Function LogbookExportFlagValue(ByVal sourceTable As ListObject, _
+                                        ByVal rowIndex As Long, _
+                                        ByVal columnName As String) As Boolean
+    Dim value As Variant
+
+    value = sourceTable.DataBodyRange.Cells( _
+        rowIndex, sourceTable.ListColumns(columnName).Index).Value2
+    If IsError(value) Or IsEmpty(value) Then Exit Function
+    If VarType(value) = vbBoolean Then
+        LogbookExportFlagValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        LogbookExportFlagValue = (CDbl(value) <> 0)
+    Else
+        LogbookExportFlagValue = (LCase$(Trim$(CStr(value))) = "true" Or _
+                                  LCase$(Trim$(CStr(value))) = "yes")
+    End If
+End Function
+
+Private Function CreateFormattedLogbookExport( _
+    ByVal sourceSheet As Worksheet, _
+    ByVal sourceTable As ListObject, _
+    ByVal outputValues As Variant, _
+    ByVal sourceIndexes As Collection, _
+    ByVal combineDetails As Boolean, _
+    ByVal preserveCalculatedTotals As Boolean, _
+    ByRef exportSheet As Worksheet) As Workbook
+
+    Dim exportBook As Workbook
+    Dim placeholderSheet As Worksheet
+    Dim exportTable As ListObject
+    Dim sourceColumnIndex As Long
+    Dim absoluteColumn As Long
+    Dim targetRows As Long
+    Dim keepColumn As Boolean
+    Dim outputIndex As Variant
+    Dim targetRange As Range
+
+    Set exportBook = Application.Workbooks.Add(xlWBATWorksheet)
+    Set placeholderSheet = exportBook.Worksheets(1)
+    sourceSheet.Copy Before:=placeholderSheet
+    Set exportSheet = exportBook.Worksheets(1)
+    placeholderSheet.Delete
+
+    exportSheet.Name = "Logbook Export"
+    exportSheet.Unprotect Password:=ProtectionPassword()
+    Set exportTable = exportSheet.ListObjects(1)
+
+    ' Delete unwanted worksheet columns from right to left. Working at sheet
+    ' level keeps the multi-row LogbookHeaders block aligned with the table.
+    For sourceColumnIndex = sourceTable.ListColumns.Count To 1 Step -1
+        keepColumn = False
+        For Each outputIndex In sourceIndexes
+            If CLng(outputIndex) = sourceColumnIndex Then
+                keepColumn = True
+                Exit For
+            End If
+        Next outputIndex
+        If combineDetails And _
+           sourceColumnIndex = sourceTable.ListColumns("From").Index Then
+            keepColumn = True
+        End If
+
+        If Not keepColumn Then
+            absoluteColumn = sourceTable.Range.Column + sourceColumnIndex - 1
+            exportSheet.Columns(absoluteColumn).Delete
+        End If
+    Next sourceColumnIndex
+
+    Set exportTable = exportSheet.ListObjects(1)
+    targetRows = UBound(outputValues, 1) - 1
+
+    Do While exportTable.ListRows.Count > targetRows
+        exportTable.ListRows(exportTable.ListRows.Count).Delete
+    Loop
+    Do While exportTable.ListRows.Count < targetRows
+        exportTable.ListRows.Add AlwaysInsert:=True
+    Loop
+
+    Set targetRange = exportSheet.Range( _
+        exportTable.HeaderRowRange.Cells(1, 1), _
+        exportTable.DataBodyRange.Cells(targetRows, exportTable.ListColumns.Count))
+    targetRange.Value2 = outputValues
+
+    If combineDetails Then
+        exportTable.ListColumns("Details").Range.ColumnWidth = 60
+        exportTable.ListColumns("Details").DataBodyRange.WrapText = True
+    End If
+
+    exportTable.ShowTotals = True
+    On Error Resume Next
+    If exportSheet.FilterMode Then exportSheet.ShowAllData
+    exportTable.AutoFilter.ShowAllData
+    On Error GoTo 0
+    exportSheet.Rows("1:" & CStr(exportTable.TotalsRowRange.Row + 2)).Hidden = False
+    exportSheet.Calculate
+    ConfigureCopiedLogbookDateHeader exportBook, exportTable
+    ApplyCopiedLogbookLeftBorder exportBook, exportTable
+    CleanCopiedLogbookWorkbook exportBook, exportSheet
+    Set exportTable = exportSheet.ListObjects(1)
+    RecalculateCopiedLogbookTotals exportBook, exportTable, preserveCalculatedTotals
+    exportSheet.Calculate
+
+    Set CreateFormattedLogbookExport = exportBook
+End Function
+
+Private Sub RecalculateCopiedLogbookTotals(ByVal exportBook As Workbook, _
+                                           ByVal exportTable As ListObject, _
+                                           ByVal preserveFormulas As Boolean)
+    Dim sumTotalsRange As Range
+    Dim totalsBlock As Range
+    Dim totalCell As Range
+    Dim tableColumnIndex As Long
+    Dim grandTotalHours As Double
+    Dim simulatorHours As Double
+    Dim tableName As String
+    Dim columnName As String
+    Dim sumFormula As String
+
+    Set sumTotalsRange = exportBook.Names("LogbookSumTotals").RefersToRange
+    tableName = exportTable.Name
+    For Each totalCell In sumTotalsRange.Cells
+        tableColumnIndex = totalCell.Column - exportTable.Range.Column + 1
+        If tableColumnIndex >= 1 And tableColumnIndex <= exportTable.ListColumns.Count Then
+            If preserveFormulas Then
+                columnName = Replace( _
+                    exportTable.ListColumns(tableColumnIndex).Name, "]", "]]")
+                sumFormula = "=SUBTOTAL(109," & tableName & "[" & columnName & "])"
+                totalCell.Formula = sumFormula
+            Else
+                totalCell.Value2 = SumNumericLogbookExportRange( _
+                    exportTable.ListColumns(tableColumnIndex).DataBodyRange)
+            End If
+        End If
+    Next totalCell
+
+    grandTotalHours = SumNumericLogbookExportRange( _
+        exportTable.ListColumns("TotalHours").DataBodyRange)
+    simulatorHours = SumNumericLogbookExportRange( _
+        exportTable.ListColumns("IfrSim").DataBodyRange)
+
+    Set totalsBlock = exportBook.Names("LogbookTotals").RefersToRange
+    If preserveFormulas Then
+        totalsBlock.Cells(1, totalsBlock.Columns.Count).Formula = _
+            "=SUBTOTAL(109," & tableName & "[TotalHours])"
+        totalsBlock.Cells(2, totalsBlock.Columns.Count).Formula = _
+            "=SUBTOTAL(109," & tableName & "[TotalHours])+" & _
+            "SUBTOTAL(109," & tableName & "[IfrSim])"
+    Else
+        totalsBlock.Cells(1, totalsBlock.Columns.Count).Value2 = grandTotalHours
+        totalsBlock.Cells(2, totalsBlock.Columns.Count).Value2 = _
+            grandTotalHours + simulatorHours
+    End If
+
+    With sumTotalsRange.Cells(1, 1).Offset(0, -1)
+        .Value2 = "TOTALS:"
+        .HorizontalAlignment = xlRight
+    End With
+End Sub
+
+Private Function SumNumericLogbookExportRange(ByVal valuesRange As Range) As Double
+    Dim cell As Range
+    Dim value As Variant
+
+    If valuesRange Is Nothing Then Exit Function
+    For Each cell In valuesRange.Cells
+        value = cell.Value2
+        If Not IsError(value) And IsNumeric(value) Then
+            SumNumericLogbookExportRange = _
+                SumNumericLogbookExportRange + CDbl(value)
+        End If
+    Next cell
+End Function
+
+Private Sub ConfigureCopiedLogbookDateHeader(ByVal exportBook As Workbook, _
+                                             ByVal exportTable As ListObject)
+    Dim headersRange As Range
+    Dim dateHeaderRange As Range
+    Dim firstDatePartColumn As Long
+    Dim lastDatePartColumn As Long
+    Dim firstHeaderRow As Long
+    Dim lastHeaderRow As Long
+
+    Set headersRange = exportBook.Names("LogbookHeaders").RefersToRange
+    firstDatePartColumn = exportTable.ListColumns("Year").Range.Column
+    lastDatePartColumn = exportTable.ListColumns("Day").Range.Column
+    firstHeaderRow = headersRange.Row
+    lastHeaderRow = headersRange.Row + headersRange.Rows.Count - 1
+
+    Set dateHeaderRange = exportTable.Parent.Range( _
+        exportTable.Parent.Cells(firstHeaderRow, firstDatePartColumn), _
+        exportTable.Parent.Cells(lastHeaderRow, lastDatePartColumn))
+    With dateHeaderRange
+        If .MergeCells Then .UnMerge
+        .ClearContents
+        .Merge
+        .Value2 = "DATE"
+        .HorizontalAlignment = xlCenter
+        .VerticalAlignment = xlCenter
+        .Font.Bold = True
+    End With
+End Sub
+
+Private Sub ApplyCopiedLogbookLeftBorder(ByVal exportBook As Workbook, _
+                                         ByVal exportTable As ListObject)
+    Dim headersRange As Range
+    Dim borderRange As Range
+    Dim firstColumn As Long
+    Dim firstRow As Long
+    Dim lastRow As Long
+
+    Set headersRange = exportBook.Names("LogbookHeaders").RefersToRange
+    firstColumn = exportTable.Range.Column
+    firstRow = headersRange.Row
+    lastRow = exportTable.TotalsRowRange.Row
+    Set borderRange = exportTable.Parent.Range( _
+        exportTable.Parent.Cells(firstRow, firstColumn), _
+        exportTable.Parent.Cells(lastRow, firstColumn))
+
+    With borderRange.Borders(xlEdgeLeft)
+        .LineStyle = xlContinuous
+        .Color = vbBlack
+        .Weight = xlThin
+    End With
+
+    With exportTable.Parent.Range( _
+        exportTable.Parent.Cells(lastRow + 1, firstColumn), _
+        exportTable.Parent.Cells(lastRow + 2, firstColumn)).Borders(xlEdgeLeft)
+        .LineStyle = xlNone
+    End With
+End Sub
+
+Private Sub CleanCopiedLogbookWorkbook(ByVal exportBook As Workbook, _
+                                       ByVal exportSheet As Worksheet)
+    Dim nameIndex As Long
+    Dim nameText As String
+    Dim separatorPosition As Long
+    Dim cleanupStep As String
+    Dim formulaCells As Range
+    Dim formulaArea As Range
+
+    On Error GoTo CleanupFailed
+
+    ' The export is a snapshot. Remove formula dependencies and input
+    ' validation before discarding unrelated source-workbook names.
+    cleanupStep = "freezing exported values"
+    On Error Resume Next
+    Set formulaCells = exportSheet.UsedRange.SpecialCells(xlCellTypeFormulas)
+    On Error GoTo CleanupFailed
+    If Not formulaCells Is Nothing Then
+        For Each formulaArea In formulaCells.Areas
+            formulaArea.Value2 = formulaArea.Value2
+        Next formulaArea
+    End If
+    On Error Resume Next
+    exportSheet.Cells.Validation.Delete
+    On Error GoTo 0
+
+    cleanupStep = "removing unrelated workbook names"
+    For nameIndex = exportBook.Names.Count To 1 Step -1
+        nameText = exportBook.Names(nameIndex).Name
+        separatorPosition = InStrRev(nameText, "!")
+        If separatorPosition > 0 Then nameText = Mid$(nameText, separatorPosition + 1)
+        nameText = Replace(nameText, "'", vbNullString)
+
+        If LCase$(nameText) <> "logbookheaders" And _
+           LCase$(nameText) <> "logbooktotals" And _
+           LCase$(nameText) <> "logbooksumtotals" Then
+            On Error Resume Next
+            exportBook.Names(nameIndex).Delete
+            On Error GoTo 0
+        End If
+    Next nameIndex
+    Exit Sub
+
+CleanupFailed:
+    Err.Raise Err.Number, "CleanCopiedLogbookWorkbook", _
+              cleanupStep & ": " & Err.Description
+End Sub
+
+Private Sub ConfigureCopiedLogbookView(ByVal exportBook As Workbook, _
+                                       ByVal exportSheet As Worksheet, _
+                                       ByVal exportTable As ListObject)
+    exportBook.Activate
+    exportSheet.Activate
+    exportBook.Windows(1).DisplayGridlines = False
+    exportBook.Windows(1).Zoom = ThisWorkbook.Windows(1).Zoom
+    exportBook.Windows(1).Activate
+    exportSheet.Activate
+    With exportBook.Windows(1)
+        .FreezePanes = False
+        .Split = False
+    End With
+    exportSheet.Cells(exportTable.HeaderRowRange.Row + 1, 1).Select
+    exportBook.Windows(1).FreezePanes = True
+End Sub
+
+Private Sub ConfigureLogbookPdf(ByVal exportSheet As Worksheet)
+    Dim exportTable As ListObject
+    Dim lastPrintRow As Long
+    Dim lastPrintColumn As Long
+
+    Set exportTable = exportSheet.ListObjects(1)
+    lastPrintRow = exportTable.TotalsRowRange.Row + 2
+    lastPrintColumn = exportTable.Range.Column + exportTable.ListColumns.Count
+
+    With exportSheet.PageSetup
+        .PrintArea = exportSheet.Range( _
+            exportSheet.Cells(1, 1), _
+            exportSheet.Cells(lastPrintRow, lastPrintColumn)).Address
+        .PrintTitleRows = "$2:$5"
+        .Orientation = xlLandscape
+        .PaperSize = xlPaperA3
+        .Zoom = False
+        .FitToPagesWide = 1
+        .FitToPagesTall = False
+        .CenterHorizontally = True
+        .LeftMargin = Application.CentimetersToPoints(0.5)
+        .RightMargin = Application.CentimetersToPoints(0.5)
+        .TopMargin = Application.CentimetersToPoints(0.8)
+        .BottomMargin = Application.CentimetersToPoints(0.8)
+        .FooterMargin = Application.CentimetersToPoints(0.3)
+        .CenterFooter = "Page &P of &N"
+    End With
+End Sub
+
+Private Sub WriteLogbookCsv(ByVal outputPath As String, ByVal outputValues As Variant)
+    Const adTypeBinary As Long = 1
+    Const adTypeText As Long = 2
+    Const adSaveCreateOverWrite As Long = 2
+    Dim textStream As Object
+    Dim binaryStream As Object
+    Dim rowIndex As Long
+    Dim columnIndex As Long
+    Dim lineText As String
+
+    Set textStream = CreateObject("ADODB.Stream")
+    textStream.Type = adTypeText
+    textStream.Charset = "utf-8"
+    textStream.Open
+
+    For rowIndex = 1 To UBound(outputValues, 1)
+        lineText = vbNullString
+        For columnIndex = 1 To UBound(outputValues, 2)
+            If columnIndex > 1 Then lineText = lineText & ","
+            lineText = lineText & CsvLogbookValue(outputValues(rowIndex, columnIndex))
+        Next columnIndex
+        textStream.WriteText lineText & vbCrLf
+    Next rowIndex
+
+    textStream.Position = 0
+    textStream.Type = adTypeBinary
+    textStream.Position = 3
+
+    Set binaryStream = CreateObject("ADODB.Stream")
+    binaryStream.Type = adTypeBinary
+    binaryStream.Open
+    textStream.CopyTo binaryStream
+    binaryStream.SaveToFile outputPath, adSaveCreateOverWrite
+
+    binaryStream.Close
+    textStream.Close
+End Sub
+
+Private Function CsvLogbookValue(ByVal value As Variant) As String
+    Dim textValue As String
+
+    If IsError(value) Then
+        textValue = "#ERROR"
+    ElseIf IsEmpty(value) Then
+        textValue = vbNullString
+    ElseIf VarType(value) = vbBoolean Then
+        If CBool(value) Then
+            textValue = "TRUE"
+        Else
+            textValue = "FALSE"
+        End If
+    Else
+        textValue = CStr(value)
+    End If
+
+    If InStr(textValue, """") > 0 Then textValue = Replace(textValue, """", """""")
+    If InStr(textValue, ",") > 0 Or InStr(textValue, """") > 0 Or _
+       InStr(textValue, vbCr) > 0 Or InStr(textValue, vbLf) > 0 Then
+        textValue = """" & textValue & """"
+    End If
+    CsvLogbookValue = textValue
+End Function
+
+Public Function EnsureLogbookExportExtension(ByVal outputPath As String, _
+                                             ByVal exportFormat As String) As String
+    Dim expectedExtension As String
+
+    expectedExtension = "." & LCase$(Trim$(exportFormat))
+    If LCase$(Right$(outputPath, Len(expectedExtension))) <> expectedExtension Then
+        outputPath = outputPath & expectedExtension
+    End If
+    EnsureLogbookExportExtension = outputPath
 End Function
 
 Sub ExportKeplerJSON()

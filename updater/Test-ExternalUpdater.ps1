@@ -41,6 +41,11 @@ try {
         $customColumnIndex = $logbook.ListColumns("OPC").Index + 1
         $logbook.ListColumns.Item($customColumnIndex).Name = "Updater Test"
         $logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 = "TESTREG"
+        $testBaseIcao = [string]$Workbook.Sheets("Airports").ListObjects("Airports").ListColumns("ICAO").DataBodyRange.Cells(1, 1).Value2
+        if ([string]::IsNullOrWhiteSpace($testBaseIcao)) {
+            throw "Could not find an airport to seed base-airport migration coverage."
+        }
+        $logbook.ListColumns("From").DataBodyRange.Cells(1, 1).Value2 = $testBaseIcao
         $newLogbookRow = $logbook.ListRows.Add()
         $newLogbookRow.Range.Cells(1, $logbook.ListColumns("Year").Index).Value2 = 2026
         $newLogbookRow.Range.Cells(1, $logbook.ListColumns("Reg").Index).Value2 = "TESTREG2"
@@ -52,6 +57,10 @@ try {
         $route = $routes.ListRows.Add()
         $route.Range.Cells(1, 1).Value2 = "YTEST"
         $route.Range.Cells(1, 2).Value2 = "YDEST"
+
+        $baseAirports = $Workbook.Sheets("Stats").ListObjects("BaseAirportsTop10")
+        $baseAirports.ListColumns("ICAO").DataBodyRange.Cells(1, 1).Value2 = $testBaseIcao
+        $baseAirports.ListColumns("Base").DataBodyRange.Cells(1, 1).Value2 = $true
 
         $Workbook.Names.Item("DateAfterExport").RefersToRange.Value2 = 3
         $Workbook.Names.Item("RoutesDirty").RefersToRange.Value2 = $false
@@ -82,11 +91,19 @@ try {
         }
 
         $updaterLines = @()
-        & dotnet $updaterDllPath `
-            --source $sourcePath `
-            --master $masterPath `
-            --output $outputPath 2>&1 | Tee-Object -Variable updaterLines
-        $exitCode = $LASTEXITCODE
+        $previousErrorActionPreference = $ErrorActionPreference
+        try {
+            # Native stderr is updater output, not a PowerShell failure. Capture it
+            # so the retry policy below can classify transient Excel COM errors.
+            $ErrorActionPreference = "Continue"
+            & dotnet $updaterDllPath `
+                --source $sourcePath `
+                --master $masterPath `
+                --output $outputPath 2>&1 | Tee-Object -Variable updaterLines
+            $exitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
         $updaterOutput = ($updaterLines | Out-String)
 
         if ($exitCode -eq 0) {
@@ -120,6 +137,7 @@ try {
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
         $keywords = $Workbook.Sheets("Currency + Recency").ListObjects("Keywords")
         $routes = $Workbook.Sheets("Routes").ListObjects("Routes")
+        $baseAirports = $Workbook.Sheets("Stats").ListObjects("BaseAirportsTop10")
 
         $customColumnIndex = $logbook.ListColumns("OPC").Index + 1
         if ($logbook.ListColumns.Item($customColumnIndex).Name -ne "Updater Test") {
@@ -150,6 +168,18 @@ try {
         }
         if ($routes.ListRows.Count -ne 1) {
             throw "Routes data was not preserved."
+        }
+        $testBaseIcao = [string]$logbook.ListColumns("From").DataBodyRange.Cells(1, 1).Value2
+        $preservedBase = $false
+        for ($row = 1; $row -le $baseAirports.ListRows.Count; $row++) {
+            $icao = [string]$baseAirports.ListColumns("ICAO").DataBodyRange.Cells($row, 1).Value2
+            if ($icao -eq $testBaseIcao) {
+                $preservedBase = [bool]$baseAirports.ListColumns("Base").DataBodyRange.Cells($row, 1).Value2
+                break
+            }
+        }
+        if (-not $preservedBase) {
+            throw "Base-airport selection was not preserved."
         }
         if ($Workbook.Names.Item("DateAfterExport").RefersToRange.Value2 -ne 3) {
             throw "Named preference was not preserved."

@@ -2,28 +2,31 @@ namespace ElectronicLogbook.Updater.Tests;
 
 public sealed class CompatibilityPolicyTests
 {
+    private const string CompatibilityFloor = "1.4.1";
+    private const string CompatibilityFloorTag = "v" + CompatibilityFloor;
+
     [Fact]
     public void SupportedTagsIncludesFloorAndExcludesOlderTags()
     {
-        var policy = new CompatibilityPolicy("1.4.2", "git-tags");
+        var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
 
         var tags = policy.SupportedTags(
-            ["v1.3.1", "v1.4.0", "v1.4.1", "v1.4.2", "v1.5.0", "v2.0.0"],
+            ["v1.3.1", "v1.4.0", CompatibilityFloorTag, "v1.4.2", "v1.5.0", "v2.0.0"],
             "2.0.0");
 
-        Assert.Equal(["v1.4.2", "v1.5.0"], tags);
+        Assert.Equal([CompatibilityFloorTag, "v1.4.2", "v1.5.0"], tags);
     }
 
     [Fact]
     public void SupportedTagsSortsSemantically()
     {
-        var policy = new CompatibilityPolicy("1.4.2", "git-tags");
+        var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
 
         var tags = policy.SupportedTags(
-            ["v1.10.0", "v1.4.2", "v1.9.0"],
+            ["v1.10.0", "v1.4.2", CompatibilityFloorTag, "v1.9.0"],
             "2.0.0");
 
-        Assert.Equal(["v1.4.2", "v1.9.0", "v1.10.0"], tags);
+        Assert.Equal([CompatibilityFloorTag, "v1.4.2", "v1.9.0", "v1.10.0"], tags);
     }
 
     [Fact]
@@ -33,7 +36,7 @@ public sealed class CompatibilityPolicyTests
 
         var policy = CompatibilityPolicy.Load(policyPath);
 
-        Assert.Equal("1.4.2", policy.MinimumSupportedVersion);
+        Assert.Equal(CompatibilityFloor, policy.MinimumSupportedVersion);
         Assert.Equal("git-tags", policy.Source);
     }
 

@@ -62,6 +62,13 @@ public sealed class UpdaterOptionsTests : IDisposable
         Assert.True(options.InPlaceSwap);
     }
 
+    [Fact]
+    public void HelpDescribesSeparateOutputAsDefault()
+    {
+        Assert.Contains("separate file (the default)", UpdaterOptions.HelpText);
+        Assert.Contains("source workbook is left unchanged", UpdaterOptions.HelpText);
+    }
+
     public void Dispose()
     {
         Directory.Delete(_directory, recursive: true);

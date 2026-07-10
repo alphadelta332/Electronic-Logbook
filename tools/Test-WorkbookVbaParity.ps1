@@ -20,7 +20,7 @@ $workbookPath = (Resolve-Path $WorkbookPath).Path
 $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) (
     "ElectronicLogbookParity-{0}.xlsm" -f [guid]::NewGuid().ToString("N")
 )
-$componentNames = @("modBoot", "modAirports", "modLogbook", "ThisWorkbook")
+$componentNames = @("modBoot", "modAirports", "modLogbook", "frmExportLogbook", "ThisWorkbook")
 $issues = New-Object System.Collections.Generic.List[string]
 
 function Get-WorkbookVbaSnapshot {
@@ -82,7 +82,10 @@ try {
             continue
         }
 
-        if ($embeddedSnapshot[$componentName] -cne $trackedSnapshot[$componentName]) {
+        # The VBIDE normalises identifier casing to the casing already present in
+        # the project. VBA itself is case-insensitive, so casing-only differences
+        # do not indicate a behavioural or source-parity mismatch.
+        if ($embeddedSnapshot[$componentName] -ne $trackedSnapshot[$componentName]) {
             $issues.Add("Workbook component '$componentName' differs from tracked source.")
         }
     }

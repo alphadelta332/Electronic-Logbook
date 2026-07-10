@@ -59,8 +59,8 @@ Run the disposable Excel migration test locally with:
 ## Backward Compatibility Policy
 
 The supported automatic-update floor is defined in `updater/compatibility-policy.json`.
-By default, the updater must migrate every tagged release from `v1.4.2` onward directly
-to the current master workbook.
+The updater must migrate every tagged release at or newer than `minimumSupportedVersion`
+directly to the current master workbook.
 
 Run the full Excel compatibility matrix before releases:
 
@@ -103,7 +103,7 @@ Upload at least one of these assets to the GitHub release. The in-workbook launc
 After the release tag exists, upload the wizard assets with:
 
 ```powershell
-.\updater\Upload-WizardAsset.ps1 -Tag v1.4.2
+.\updater\Upload-WizardAsset.ps1 -Tag vX.Y.Z
 ```
 
 Add `-Clobber` if replacing an existing draft-release asset.

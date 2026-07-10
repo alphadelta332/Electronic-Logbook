@@ -125,8 +125,8 @@ public sealed class ExcelWorkbookMigrator
             {
                 worksheet.Calculate();
             }
-            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "refreshing pivot tables");
-            RefreshPivots((object)outputWorkbook);
+            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "scheduling pivot table refresh");
+            SchedulePivotRefresh((object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
 
@@ -1916,27 +1916,28 @@ public sealed class ExcelWorkbookMigrator
         return brightness >= 150 ? 0 : 0xFFFFFF;
     }
 
-    private static void RefreshPivots(object workbookObject)
+    private static void SchedulePivotRefresh(object workbookObject)
     {
         try
         {
             dynamic workbook = workbookObject;
-            foreach (dynamic worksheet in workbook.Worksheets)
+            var worksheetCount = (int)workbook.Worksheets.Count;
+            for (var worksheetIndex = 1; worksheetIndex <= worksheetCount; worksheetIndex++)
             {
                 try
                 {
+                    dynamic worksheet = workbook.Worksheets.Item(worksheetIndex);
                     dynamic pivots = worksheet.PivotTables();
                     for (var index = 1; index <= (int)pivots.Count; index++)
                     {
                         try
                         {
                             dynamic pivot = pivots.Item(index);
-                            pivot.RefreshTable();
+                            pivot.PivotCache().RefreshOnFileOpen = true;
                         }
                         catch
                         {
-                            // Some Excel builds intermittently fail COM pivot refresh calls.
-                            // Continue so migration can complete and users can refresh manually later.
+                            // Leave this pivot's existing cache intact if its refresh setting is unavailable.
                         }
                     }
                 }
@@ -1946,21 +1947,11 @@ public sealed class ExcelWorkbookMigrator
                 }
             }
 
-            try
-            {
-                dynamic hoursByYear = workbook.Worksheets.Item("ChartData")
-                    .PivotTables("HoursByYear");
-                hoursByYear.PivotFields("Quarters (Date)").Orientation = 0;
-                hoursByYear.RefreshTable();
-            }
-            catch
-            {
-                // Older workbooks may not have this pivot/grouping, and some Excel builds can fail COM refresh calls.
-            }
         }
         catch
         {
-            // Keep migration non-blocking if Excel COM becomes unstable during pivot refresh.
+            // Pivot data is derived presentation state. Preserve the existing cache rather
+            // than fail migration when a workbook or Excel build cannot schedule refresh.
         }
     }
 

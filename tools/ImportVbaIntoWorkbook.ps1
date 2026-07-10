@@ -21,7 +21,7 @@ if ([string]::IsNullOrWhiteSpace($WorkbookPath)) {
 }
 
 $standardModules = @("modBoot.bas", "modAirports.bas", "modLogbook.bas")
-$removedUserForms = @("frmVerifyCurrency")
+$removedUserForms = @("frmVerifyCurrency", "frmExportLogbook")
 if ($IncludeModUpdate) {
     $standardModules += "modUpdate.bas"
 }
@@ -75,6 +75,9 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
         $components.Import($modulePath) | Out-Null
         Write-Host "  Imported $moduleFile"
     }
+
+    . (Join-Path $repoRoot "tools\BuildExportLogbookForm.ps1")
+    Add-ExportLogbookForm -Workbook $Workbook
 
     if (-not $IncludeModUpdate) {
         try {
