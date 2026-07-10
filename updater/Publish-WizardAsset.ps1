@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Sign,
+    [string]$CertificateThumbprint,
+    [string]$TimestampServer = "http://timestamp.digicert.com"
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +38,28 @@ if (-not (Test-Path $publishedExe)) {
     throw "Wizard publish output not found: $publishedExe"
 }
 
+if ($Sign) {
+    if ([string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+        throw "Use -CertificateThumbprint when -Sign is specified."
+    }
+
+    $certificate = Get-ChildItem Cert:\CurrentUser\My, Cert:\LocalMachine\My |
+        Where-Object { $_.Thumbprint -eq $CertificateThumbprint } |
+        Select-Object -First 1
+    if ($null -eq $certificate) {
+        throw "Code-signing certificate not found: $CertificateThumbprint"
+    }
+
+    $signature = Set-AuthenticodeSignature `
+        -FilePath $publishedExe `
+        -Certificate $certificate `
+        -TimestampServer $TimestampServer `
+        -HashAlgorithm SHA256
+    if ($signature.Status -ne "Valid") {
+        throw "Wizard executable signing failed: $($signature.Status) $($signature.StatusMessage)"
+    }
+}
+
 Copy-Item $publishedExe $assetExe -Force
 if (Test-Path $assetZip) {
     Remove-Item $assetZip -Force
@@ -45,4 +70,7 @@ Compress-Archive -Path $publishedExe -DestinationPath $assetZip -Force
 Write-Host "Wizard assets ready:" -ForegroundColor Green
 Write-Host "  EXE: $assetExe"
 Write-Host "  ZIP: $assetZip"
+if ($Sign) {
+    Write-Host "  Signature: Authenticode signed with $CertificateThumbprint"
+}
 Write-Host "After the release tag exists, upload with updater\Upload-WizardAsset.ps1." -ForegroundColor Yellow

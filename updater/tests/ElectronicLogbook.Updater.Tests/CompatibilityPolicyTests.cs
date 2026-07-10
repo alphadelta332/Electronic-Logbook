@@ -41,6 +41,39 @@ public sealed class CompatibilityPolicyTests
     }
 
     [Fact]
+    public void LoadDefaultReadsEmbeddedPolicy()
+    {
+        var policy = CompatibilityPolicy.LoadDefault();
+
+        Assert.Equal(CompatibilityFloor, policy.MinimumSupportedVersion);
+        Assert.Equal("git-tags", policy.Source);
+    }
+
+    [Theory]
+    [InlineData("1.4.0", false)]
+    [InlineData("1.4.1", true)]
+    [InlineData("v1.4.1", true)]
+    [InlineData("1.5.0", true)]
+    public void IsVersionSupportedAppliesFloor(string version, bool expected)
+    {
+        var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
+
+        Assert.Equal(expected, policy.IsVersionSupported(version));
+    }
+
+    [Fact]
+    public void ThrowIfUnsupportedDescribesFloor()
+    {
+        var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            policy.ThrowIfUnsupported("1.4.0"));
+
+        Assert.Contains("1.4.0", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(CompatibilityFloor, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LoadRejectsInvalidVersion()
     {
         var directory = Path.Combine(

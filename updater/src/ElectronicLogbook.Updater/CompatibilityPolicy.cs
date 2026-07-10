@@ -14,8 +14,41 @@ public sealed record CompatibilityPolicy(
             throw new FileNotFoundException("Compatibility policy not found.", path);
         }
 
+        return Parse(File.ReadAllText(path));
+    }
+
+    public static CompatibilityPolicy LoadDefault()
+    {
+        var localPath = Path.Combine(AppContext.BaseDirectory, "compatibility-policy.json");
+        if (File.Exists(localPath))
+        {
+            return Load(localPath);
+        }
+
+        var assembly = typeof(CompatibilityPolicy).Assembly;
+        var resourceName = assembly.GetManifestResourceNames()
+            .SingleOrDefault(name => name.EndsWith(
+                "compatibility-policy.json",
+                StringComparison.OrdinalIgnoreCase));
+        if (resourceName is null)
+        {
+            throw new FileNotFoundException(
+                "Embedded compatibility policy not found.",
+                "compatibility-policy.json");
+        }
+
+        using var stream = assembly.GetManifestResourceStream(resourceName) ??
+            throw new FileNotFoundException(
+                "Embedded compatibility policy could not be opened.",
+                "compatibility-policy.json");
+        using var reader = new StreamReader(stream);
+        return Parse(reader.ReadToEnd());
+    }
+
+    public static CompatibilityPolicy Parse(string json)
+    {
         var policy = JsonSerializer.Deserialize<CompatibilityPolicy>(
-            File.ReadAllText(path),
+            json,
             JsonDefaults.Web) ?? throw new InvalidDataException("Compatibility policy could not be parsed.");
 
         _ = SemVer.Parse(policy.MinimumSupportedVersion);
@@ -26,6 +59,23 @@ public sealed record CompatibilityPolicy(
         }
 
         return policy;
+    }
+
+    public bool IsVersionSupported(string version)
+    {
+        var sourceVersion = SemVer.Parse(version);
+        var minimum = SemVer.Parse(MinimumSupportedVersion);
+        return sourceVersion.CompareTo(minimum) >= 0;
+    }
+
+    public void ThrowIfUnsupported(string version)
+    {
+        if (!IsVersionSupported(version))
+        {
+            throw new InvalidDataException(
+                $"This workbook is version {version}. Automatic updates are supported from " +
+                $"{MinimumSupportedVersion} or newer.");
+        }
     }
 
     public IReadOnlyList<string> SupportedTags(

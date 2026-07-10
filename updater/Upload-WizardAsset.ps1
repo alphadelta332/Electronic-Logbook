@@ -4,6 +4,9 @@ param(
     [string]$Repository = "alphadelta332/Electronic-Logbook",
     [string]$AssetDirectory,
     [switch]$SkipBuild,
+    [switch]$Sign,
+    [string]$CertificateThumbprint,
+    [string]$TimestampServer = "http://timestamp.digicert.com",
     [switch]$Clobber,
     [switch]$DryRun
 )
@@ -28,6 +31,15 @@ $publishArgs = @(
 )
 if ($SkipBuild) {
     $publishArgs += "-SkipBuild"
+}
+if ($Sign) {
+    $publishArgs += @(
+        "-Sign"
+        "-CertificateThumbprint"
+        $CertificateThumbprint
+        "-TimestampServer"
+        $TimestampServer
+    )
 }
 
 Write-Host "Preparing wizard assets for $Tag..."

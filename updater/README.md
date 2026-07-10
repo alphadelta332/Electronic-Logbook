@@ -61,6 +61,8 @@ Run the disposable Excel migration test locally with:
 The supported automatic-update floor is defined in `updater/compatibility-policy.json`.
 The updater must migrate every tagged release at or newer than `minimumSupportedVersion`
 directly to the current master workbook.
+At runtime, the external updater refuses source workbooks older than that floor before
+copying user data into a staged output workbook.
 
 Run the full Excel compatibility matrix before releases:
 
@@ -93,6 +95,15 @@ Build release-ready wizard assets with:
 .\updater\Publish-WizardAsset.ps1
 ```
 
+To Authenticode-sign the wizard executable during packaging, install the code-signing
+certificate in the current user or local machine certificate store and run:
+
+```powershell
+.\updater\Publish-WizardAsset.ps1 `
+  -Sign `
+  -CertificateThumbprint "THUMBPRINT"
+```
+
 This script outputs:
 
 - `updater/dist/ElectronicLogbook.Updater.Wizard.exe`
@@ -107,6 +118,7 @@ After the release tag exists, upload the wizard assets with:
 ```
 
 Add `-Clobber` if replacing an existing draft-release asset.
+Add `-Sign -CertificateThumbprint "THUMBPRINT"` to sign during the publish step before upload.
 
 ## Product Direction (Implemented)
 
@@ -161,6 +173,8 @@ Current MVP behavior:
 6. Local-master mode and release-download mode support
 7. End-user fields are read-only; source/output/channel are resolved automatically
 8. In-place swap is enabled by default (`*_Old` backup + original filename preserved)
+9. Finish screen can open the updated workbook via a checkbox
+10. Update cancellation is honoured at migration phase checkpoints
 
 Optional launch arguments are supported for integration/testing:
 
@@ -207,5 +221,5 @@ This is an MVP implementation and intentionally does not yet include:
 
 - polished installer theming
 - file picker dialogs
-- full cancellation semantics within Excel COM migration internals
+- interruption inside individual Excel COM calls
 - packaged installer distribution

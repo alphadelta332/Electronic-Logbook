@@ -8,7 +8,7 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
-### [2.0.0] - 2026-07-05
+### [2.0.0] - 2026-07-10
 - Redesigned the Logbook and New Entry sheets so route details are entered in separate fields: Flight ID, From, To, Via, and Remarks.
 - Added direct checkboxes for Flight Review, IPC, and OPC entries, replacing the old currency verification pop-up.
 - Added clearer New Entry warnings, including highlighted fields when something needs to be fixed or reviewed.

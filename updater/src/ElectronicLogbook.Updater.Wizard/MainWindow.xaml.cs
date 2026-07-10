@@ -113,7 +113,27 @@ public partial class MainWindow : Window
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
+        var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
+        if (identifiedInstalledVersion)
+        {
+            try
+            {
+                if (!compatibilityPolicy.IsVersionSupported(installedVersion!))
+                {
+                    identifiedInstalledVersion = false;
+                    InstalledVersionText.Text =
+                        $"Installed version: {installedVersion} (automatic updates require " +
+                        $"{compatibilityPolicy.MinimumSupportedVersion} or newer)";
+                }
+            }
+            catch (InvalidDataException)
+            {
+                identifiedInstalledVersion = false;
+                InstalledVersionText.Text =
+                    $"Installed version: {installedVersion} (version format is not supported)";
+            }
+        }
         var identifiedUpdateChannel = false;
 
         if (_context.UsesProvidedMaster)
@@ -472,6 +492,11 @@ public partial class MainWindow : Window
     {
         if (_stepIndex == 5)
         {
+            if (OpenUpdatedCheckBox.IsEnabled && OpenUpdatedCheckBox.IsChecked == true)
+            {
+                OpenLastOutputWorkbook();
+            }
+
             Close();
             return;
         }
@@ -570,7 +595,7 @@ public partial class MainWindow : Window
                 source,
                 resolvedMaster,
                 stagedOutput,
-                manifest)), _updateCts.Token);
+                manifest), _updateCts.Token), _updateCts.Token);
 
             _lastOutputPath = stagedOutput;
             _lastBackupPath = null;
@@ -610,7 +635,8 @@ public partial class MainWindow : Window
             CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
                 ? string.Empty
                 : $"Backup workbook: {_lastBackupPath}";
-            OpenUpdatedButton.IsEnabled = finalWorkbookReady;
+            OpenUpdatedCheckBox.IsEnabled = finalWorkbookReady;
+            OpenUpdatedCheckBox.IsChecked = finalWorkbookReady;
             FooterStatusText.Text = finalWorkbookReady
                 ? "Update completed."
                 : "Update completed. Wait for sync before opening.";
@@ -623,7 +649,8 @@ public partial class MainWindow : Window
             CompleteSummaryText.Text = "Update was cancelled before completion.";
             CompleteOutputPathText.Text = "Updated workbook: not created";
             CompleteBackupPathText.Text = string.Empty;
-            OpenUpdatedButton.IsEnabled = false;
+            OpenUpdatedCheckBox.IsEnabled = false;
+            OpenUpdatedCheckBox.IsChecked = false;
             FooterStatusText.Text = "Update cancelled.";
             _stepIndex = 5;
         }
@@ -633,7 +660,8 @@ public partial class MainWindow : Window
             CompleteSummaryText.Text = ex.Message;
             CompleteOutputPathText.Text = "Updated workbook: not available";
             CompleteBackupPathText.Text = string.Empty;
-            OpenUpdatedButton.IsEnabled = false;
+            OpenUpdatedCheckBox.IsEnabled = false;
+            OpenUpdatedCheckBox.IsChecked = false;
             FooterStatusText.Text = "Update failed.";
             AppendLog($"ERROR: {ex.Message}");
             _stepIndex = 5;
@@ -697,7 +725,7 @@ public partial class MainWindow : Window
         UpdateLogTextBox.ScrollToEnd();
     }
 
-    private void OpenUpdatedButton_OnClick(object sender, RoutedEventArgs e)
+    private void OpenLastOutputWorkbook()
     {
         if (string.IsNullOrWhiteSpace(_lastOutputPath) || !File.Exists(_lastOutputPath))
         {

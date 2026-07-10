@@ -31,13 +31,14 @@ public sealed class ExcelWorkbookMigrator
         _progressSink = progressSink;
     }
 
-    public MigrationReport Migrate(MigrationRequest request)
+    public MigrationReport Migrate(MigrationRequest request, CancellationToken cancellationToken = default)
     {
         string phaseId = UpdaterPhaseIds.StartExcel;
 
         string SetStep(string newPhaseId, string message)
         {
             phaseId = newPhaseId;
+            cancellationToken.ThrowIfCancellationRequested();
             _progressSink?.Report(new UpdaterProgressEvent(
                 UpdaterProgressEventTypes.PhaseStarted,
                 phaseId,
@@ -48,9 +49,11 @@ public sealed class ExcelWorkbookMigrator
         }
 
         request = ValidateRequest(request);
+        cancellationToken.ThrowIfCancellationRequested();
 
         var outputDirectory = Path.GetDirectoryName(request.OutputPath)!;
         Directory.CreateDirectory(outputDirectory);
+        cancellationToken.ThrowIfCancellationRequested();
         File.Copy(request.MasterPath, request.OutputPath, overwrite: false);
 
         dynamic? excel = null;
@@ -85,6 +88,7 @@ public sealed class ExcelWorkbookMigrator
 
             step = SetStep(UpdaterPhaseIds.ReadSourceValidationData, "reading source validation data");
             var sourceVersion = ReadName((object)sourceWorkbook, "LogbookVersion");
+            CompatibilityPolicy.LoadDefault().ThrowIfUnsupported(sourceVersion);
             IReadOnlyDictionary<string, string> sourceFingerprints =
                 ReadPreservedFingerprints((object)sourceWorkbook);
 
@@ -180,6 +184,21 @@ public sealed class ExcelWorkbookMigrator
                 sourceFingerprints,
                 DateTimeOffset.UtcNow,
                 "validated");
+        }
+        catch (OperationCanceledException)
+        {
+            _progressSink?.Report(new UpdaterProgressEvent(
+                UpdaterProgressEventTypes.PhaseFailed,
+                phaseId,
+                "migration cancelled",
+                Percent: null,
+                DateTimeOffset.UtcNow));
+
+            CloseWorkbook(outputWorkbook);
+            outputWorkbook = null;
+            CloseWorkbook(sourceWorkbook);
+            sourceWorkbook = null;
+            throw;
         }
         catch (Exception ex)
         {
@@ -1559,10 +1578,6 @@ public sealed class ExcelWorkbookMigrator
             string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase))
         {
-            if (HasColumn((object)source, name))
-            {
-                return name;
-            }
             if (HasColumn((object)source, "Custom 1"))
             {
                 return "Custom 1";
