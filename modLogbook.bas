@@ -4592,6 +4592,15 @@ Public Sub DeleteSelectedLogbookRows()
     Dim key As Variant
     Dim rowIndex As Long
     Dim logbookWasProtected As Boolean
+    Dim previousScreenUpdating As Boolean
+    Dim previousEnableEvents As Boolean
+    Dim previousDisplayAlerts As Boolean
+    Dim previousCalculation As XlCalculation
+    Dim previousDisplayStatusBar As Boolean
+    Dim previousStatusBar As Variant
+    Dim appStateCaptured As Boolean
+    Dim previousAutoSaveOn As Boolean
+    Dim autoSaveStateCaptured As Boolean
 
     On Error GoTo Fail
 
@@ -4622,14 +4631,32 @@ Public Sub DeleteSelectedLogbookRows()
     If MsgBox("Delete " & rowIndexes.Count & " selected Logbook row(s)?", _
               vbOKCancel + vbExclamation, "Delete Logbook Rows") = vbCancel Then Exit Sub
 
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
+    previousDisplayAlerts = Application.DisplayAlerts
+    previousCalculation = Application.Calculation
+    previousDisplayStatusBar = Application.DisplayStatusBar
+    previousStatusBar = Application.StatusBar
+    appStateCaptured = True
+
+    autoSaveStateCaptured = TryPauseWorkbookAutoSave(ThisWorkbook, previousAutoSaveOn)
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Electronic Logbook: deleting selected rows..."
+    Application.CutCopyMode = False
+
     logbookWasProtected = ws.ProtectContents
     If logbookWasProtected Then ws.Unprotect Password:=ProtectionPassword()
 
-    Application.ScreenUpdating = False
     For Each key In SortedDictionaryKeysDescending(rowIndexes)
         tbl.ListRows(CLng(rowIndexes(key))).Delete
     Next key
 
+    Application.StatusBar = "Electronic Logbook: refreshing logbook summaries..."
     RefreshLogbookCalculatedFormulas tbl
     NormaliseLogbookFormatting tbl
     UpdateHiddenRows ThisWorkbook
@@ -4638,8 +4665,20 @@ Public Sub DeleteSelectedLogbookRows()
     RefreshWorkbookPivotSummariesWithWorkbookProtection ThisWorkbook
 
 CleanExit:
-    Application.ScreenUpdating = True
     If logbookWasProtected Then ProtectLogbookSheetForRuntime ws
+    RestoreWorkbookAutoSave ThisWorkbook, autoSaveStateCaptured, previousAutoSaveOn
+    If appStateCaptured Then
+        Application.Calculation = previousCalculation
+        Application.DisplayAlerts = previousDisplayAlerts
+        Application.EnableEvents = previousEnableEvents
+        Application.ScreenUpdating = previousScreenUpdating
+        If previousDisplayStatusBar Then
+            Application.StatusBar = previousStatusBar
+        Else
+            Application.StatusBar = False
+        End If
+        Application.DisplayStatusBar = previousDisplayStatusBar
+    End If
     Exit Sub
 
 Fail:
@@ -4648,14 +4687,48 @@ Fail:
     errNum = Err.Number
     errDesc = Err.Description
     On Error Resume Next
-    Application.ScreenUpdating = True
     If logbookWasProtected Then ProtectLogbookSheetForRuntime ws
+    RestoreWorkbookAutoSave ThisWorkbook, autoSaveStateCaptured, previousAutoSaveOn
+    If appStateCaptured Then
+        Application.Calculation = previousCalculation
+        Application.DisplayAlerts = previousDisplayAlerts
+        Application.EnableEvents = previousEnableEvents
+        Application.ScreenUpdating = previousScreenUpdating
+        If previousDisplayStatusBar Then
+            Application.StatusBar = previousStatusBar
+        Else
+            Application.StatusBar = False
+        End If
+        Application.DisplayStatusBar = previousDisplayStatusBar
+    Else
+        Application.ScreenUpdating = True
+        Application.EnableEvents = True
+        Application.DisplayAlerts = True
+    End If
     On Error GoTo 0
     MsgBox BuildUserFacingErrorMessage( _
            "The selected Logbook rows could not be deleted.", _
            "No further rows were intentionally deleted. Check the Logbook table and try again after closing any dialogs or filters.", _
            errNum, "DeleteSelectedLogbookRows", errDesc, "Deleting selected Logbook rows"), _
            vbCritical, "Delete Logbook Rows"
+End Sub
+
+Private Function TryPauseWorkbookAutoSave(ByVal wb As Workbook, ByRef previousAutoSaveOn As Boolean) As Boolean
+    On Error GoTo CleanExit
+
+    previousAutoSaveOn = wb.AutoSaveOn
+    If previousAutoSaveOn Then wb.AutoSaveOn = False
+    TryPauseWorkbookAutoSave = True
+
+CleanExit:
+End Function
+
+Private Sub RestoreWorkbookAutoSave(ByVal wb As Workbook, _
+                                    ByVal autoSaveStateCaptured As Boolean, _
+                                    ByVal previousAutoSaveOn As Boolean)
+    On Error Resume Next
+    If autoSaveStateCaptured And previousAutoSaveOn Then wb.AutoSaveOn = True
+    On Error GoTo 0
 End Sub
 
 Private Function SortedDictionaryKeysDescending(ByVal dict As Object) As Variant
