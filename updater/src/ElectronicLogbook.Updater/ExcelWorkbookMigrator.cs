@@ -18,6 +18,7 @@ public sealed class ExcelWorkbookMigrator
     private const int XlPivotFieldRow = 1;
     private const int MsoTrue = -1;
     private const int MsoBringToFront = 0;
+    private const int MsoGroup = 6;
     private const int XlUp = -4162;
     private const int BaseAirportsTopCount = 10;
 
@@ -138,7 +139,7 @@ public sealed class ExcelWorkbookMigrator
             RefreshWorkbookPivotSummaries((object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
-            RepairExportLogbookButton(GetTable((object)outputWorkbook, "Logbook"));
+            RepairLogbookActionButtons(GetTable((object)outputWorkbook, "Logbook"));
 
             step = SetStep(UpdaterPhaseIds.ValidatePreservedData, "validating preserved data");
             IReadOnlyDictionary<string, string> outputFingerprints =
@@ -1557,6 +1558,12 @@ public sealed class ExcelWorkbookMigrator
             worksheet.Rows[$"{lastDataRow + 7}:{worksheet.Rows.Count}"].Hidden = true;
         }
 
+        RepairLogbookActionButtons(destination);
+    }
+
+    private static void RepairLogbookActionButtons(dynamic destination)
+    {
+        RepairDeleteSelectedLogbookRowsButton(destination);
         RepairExportLogbookButton(destination);
     }
 
@@ -1572,13 +1579,13 @@ public sealed class ExcelWorkbookMigrator
             button = worksheet.Shapes.Item("ExportLogbookButton");
             var topRow = (int)destination.TotalsRowRange.Row + 2;
             var leftColumn = (int)destination.ListColumns.Item(
-                GetColumnIndex(destination, "Year")).Range.Column;
-
+                GetColumnIndex(destination, "To")).Range.Column;
             if (topRow + 3 > (int)worksheet.Rows.Count)
             {
                 return;
             }
 
+            ConfigureShapeAction(button, "ExportLogbook");
             button.Placement = XlFreeFloating;
             button.Visible = MsoTrue;
             button.Left = (double)worksheet.Cells.Item(topRow, leftColumn).Left;
@@ -1594,6 +1601,67 @@ public sealed class ExcelWorkbookMigrator
         catch (COMException) when (button is null)
         {
             // Older or custom templates may not include this optional button.
+        }
+    }
+
+    private static void RepairDeleteSelectedLogbookRowsButton(dynamic destination)
+    {
+        const double buttonWidth = 121.2d;
+        const double buttonHeight = 45d;
+
+        dynamic? button = null;
+        try
+        {
+            dynamic worksheet = destination.Parent;
+            button = worksheet.Shapes.Item("DeleteSelectedLogbookRowsButton");
+            var topRow = (int)destination.TotalsRowRange.Row + 2;
+            var leftColumn = (int)destination.ListColumns.Item(
+                GetColumnIndex(destination, "Year")).Range.Column;
+            if (topRow + 3 > (int)worksheet.Rows.Count)
+            {
+                return;
+            }
+
+            ConfigureShapeAction(button, "DeleteSelectedLogbookRows");
+            button.Placement = XlFreeFloating;
+            button.Visible = MsoTrue;
+            button.Left = (double)worksheet.Cells.Item(topRow, leftColumn).Left;
+            button.Top = (double)worksheet.Cells.Item(topRow, leftColumn).Top;
+            button.Width = buttonWidth;
+            button.Height = buttonHeight;
+            button.ZOrder(MsoBringToFront);
+        }
+        catch (RuntimeBinderException) when (button is null)
+        {
+            // Older or custom templates may not include this optional button.
+        }
+        catch (COMException) when (button is null)
+        {
+            // Older or custom templates may not include this optional button.
+        }
+    }
+
+    private static void ConfigureShapeAction(dynamic shape, string actionName)
+    {
+        try
+        {
+            shape.OnAction = actionName;
+            if ((int)shape.Type == MsoGroup)
+            {
+                var itemCount = (int)shape.GroupItems.Count;
+                for (var i = 1; i <= itemCount; i++)
+                {
+                    shape.GroupItems.Item(i).OnAction = actionName;
+                }
+            }
+        }
+        catch (RuntimeBinderException)
+        {
+            // Non-standard shapes can reject OnAction; placement repair should still continue.
+        }
+        catch (COMException)
+        {
+            // Non-standard shapes can reject OnAction; placement repair should still continue.
         }
     }
 
@@ -2338,10 +2406,11 @@ public sealed class ExcelWorkbookMigrator
             throw new InvalidDataException("LogbookTotals is not anchored to the live two-row totals area.");
         }
 
-        ValidateExportLogbookButton(destination);
+        ValidateLogbookActionButton(destination, "ExportLogbookButton", "To");
+        ValidateLogbookActionButton(destination, "DeleteSelectedLogbookRowsButton", "Year");
     }
 
-    private static void ValidateExportLogbookButton(dynamic destination)
+    private static void ValidateLogbookActionButton(dynamic destination, string buttonName, string alignColumnName)
     {
         const double tolerance = 1d;
 
@@ -2349,7 +2418,7 @@ public sealed class ExcelWorkbookMigrator
         dynamic button;
         try
         {
-            button = worksheet.Shapes.Item("ExportLogbookButton");
+            button = worksheet.Shapes.Item(buttonName);
         }
         catch (RuntimeBinderException)
         {
@@ -2362,19 +2431,19 @@ public sealed class ExcelWorkbookMigrator
 
         var topRow = (int)destination.TotalsRowRange.Row + 2;
         var leftColumn = (int)destination.ListColumns.Item(
-            GetColumnIndex(destination, "Year")).Range.Column;
+            GetColumnIndex(destination, alignColumnName)).Range.Column;
         dynamic targetCell = worksheet.Cells.Item(topRow, leftColumn);
 
         if (Math.Abs((double)button.Left - (double)targetCell.Left) > tolerance ||
             Math.Abs((double)button.Top - (double)targetCell.Top) > tolerance)
         {
             throw new InvalidDataException(
-                "ExportLogbookButton is not anchored two rows below the Logbook totals row.");
+                $"{buttonName} is not anchored two rows below the Logbook totals row at Logbook[{alignColumnName}].");
         }
 
         if ((int)button.Placement != XlFreeFloating)
         {
-            throw new InvalidDataException("ExportLogbookButton is not using free-floating placement.");
+            throw new InvalidDataException($"{buttonName} is not using free-floating placement.");
         }
     }
 
@@ -2675,7 +2744,8 @@ public sealed class ExcelWorkbookMigrator
             dynamic firstCell = table.DataBodyRange.Cells.Item(1, index);
             if ((bool)firstCell.HasFormula)
             {
-                table.DataBodyRange.Columns.Item(index).FillDown();
+                dynamic columnRange = table.DataBodyRange.Columns.Item(index).Resize[rows, 1];
+                columnRange.FormulaR1C1 = firstCell.FormulaR1C1;
             }
         }
     }

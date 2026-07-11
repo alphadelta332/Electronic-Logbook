@@ -761,6 +761,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         End If
         WriteCrumb "Step 9a.1: Update hidden rows"
         UpdateHiddenRows ThisWorkbook
+        RestoreNewEntryView
         TraceAddToLogbookLayout "After final UpdateHiddenRows", tbl
         If entryWasWritten Then
             WriteCrumb "Step 9a.2: Save final layout"
@@ -3835,7 +3836,7 @@ Public Sub UpdateHiddenRows(wb As Workbook)
     If lastDataRow + 7 <= wsLog.Rows.Count Then
         wsLog.Rows(lastDataRow + 7 & ":" & wsLog.Rows.Count).Hidden = True
     End If
-    RepairExportLogbookButton tbl
+    RepairLogbookActionButtons tbl
 End Sub
 
 Private Sub RestoreNewEntryView()
@@ -3844,6 +3845,11 @@ Private Sub RestoreNewEntryView()
     ActiveWindow.ScrollRow = 1
     ActiveWindow.ScrollColumn = 1
     On Error GoTo 0
+End Sub
+
+Private Sub RepairLogbookActionButtons(ByVal tbl As ListObject)
+    RepairDeleteSelectedLogbookRowsButton tbl
+    RepairExportLogbookButton tbl
 End Sub
 
 Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
@@ -3862,7 +3868,7 @@ Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
     Set ws = tbl.Parent
 
     topRow = tbl.TotalsRowRange.Row + 2
-    leftCol = tbl.ListColumns("Year").Range.Column
+    leftCol = tbl.ListColumns("To").Range.Column
     If topRow + 3 > ws.Rows.Count Then Exit Sub
 
     targetLeft = ws.Cells(topRow, leftCol).Left
@@ -3891,13 +3897,67 @@ Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
 
     If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
        Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
-        Err.Clear
-        On Error Resume Next
-        btn.Delete
-        Err.Clear
-        CreateExportLogbookButtonShape ws, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
-        On Error GoTo CleanFail
+        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        btn.Left = targetLeft
+        btn.Top = targetTop
+        btn.Width = BUTTON_WIDTH
+        btn.Height = BUTTON_HEIGHT
+        btn.ZOrder msoBringToFront
     End If
+
+CleanFail:
+End Sub
+
+Private Sub RepairDeleteSelectedLogbookRowsButton(ByVal tbl As ListObject)
+    Const BUTTON_WIDTH As Double = 121.2
+    Const BUTTON_HEIGHT As Double = 45
+    Const POSITION_TOLERANCE As Double = 1
+
+    Dim ws        As Worksheet
+    Dim btn       As Shape
+    Dim topRow    As Long
+    Dim leftCol   As Long
+    Dim targetLeft As Double
+    Dim targetTop  As Double
+
+    On Error GoTo CleanFail
+    Set ws = tbl.Parent
+
+    topRow = tbl.TotalsRowRange.Row + 2
+    leftCol = tbl.ListColumns("Year").Range.Column
+    If topRow + 3 > ws.Rows.Count Then Exit Sub
+
+    targetLeft = ws.Cells(topRow, leftCol).Left
+    targetTop = ws.Cells(topRow, leftCol).Top
+
+    On Error Resume Next
+    Set btn = ws.Shapes("DeleteSelectedLogbookRowsButton")
+    On Error GoTo CleanFail
+
+    If btn Is Nothing Then Exit Sub
+
+    ConfigureDeleteSelectedLogbookRowsShapeAction btn
+
+    On Error Resume Next
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = BUTTON_WIDTH
+    btn.Height = BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+    On Error GoTo CleanFail
+
+    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
+       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        btn.Left = targetLeft
+        btn.Top = targetTop
+        btn.Width = BUTTON_WIDTH
+        btn.Height = BUTTON_HEIGHT
+        btn.ZOrder msoBringToFront
+    End If
+
 CleanFail:
 End Sub
 
@@ -3911,6 +3971,40 @@ Private Sub ConfigureExportLogbookShapeAction(ByVal shp As Shape)
             item.OnAction = "ExportLogbook"
         Next item
     End If
+    On Error GoTo 0
+End Sub
+
+Private Sub ConfigureDeleteSelectedLogbookRowsShapeAction(ByVal shp As Shape)
+    Dim item As Shape
+
+    On Error Resume Next
+    shp.OnAction = "DeleteSelectedLogbookRows"
+    If shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            item.OnAction = "DeleteSelectedLogbookRows"
+        Next item
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
+                                                   ByVal topRow As Long, _
+                                                   ByVal leftCol As Long)
+    Dim restoreRow As Long
+    Dim previousScreenUpdating As Boolean
+
+    On Error Resume Next
+    previousScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    ws.Parent.Activate
+    ws.Activate
+    Application.Goto ws.Cells(topRow, leftCol), True
+    restoreRow = topRow - 30
+    If restoreRow < 1 Then restoreRow = 1
+    ActiveWindow.ScrollColumn = 1
+    ActiveWindow.ScrollRow = restoreRow
+    Application.ScreenUpdating = previousScreenUpdating
+    If previousScreenUpdating Then DoEvents
     On Error GoTo 0
 End Sub
 
@@ -4541,6 +4635,7 @@ Public Sub DeleteSelectedLogbookRows()
     UpdateHiddenRows ThisWorkbook
     MarkRoutesDirty ThisWorkbook
     RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook, False
+    RefreshWorkbookPivotSummariesWithWorkbookProtection ThisWorkbook
 
 CleanExit:
     Application.ScreenUpdating = True
@@ -7086,6 +7181,7 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
     Dim fieldValues() As Variant
     Dim i As Long
     Dim nameText As String
+    Dim dateAfterExportId As Long
     Dim previousScreenUpdating As Boolean
     Dim previousEnableEvents As Boolean
     Dim previousCalculation As XlCalculation
@@ -7103,6 +7199,8 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
     Application.Calculation = xlCalculationManual
 
     layoutId = ResolveNewEntryLayoutId(requestedLayout)
+    dateAfterExportId = ResolveDateAfterExportId( _
+        GetWorkbookNameValue(ThisWorkbook, "DateAfterExport", 1))
     fieldNames = NewEntryLayoutFieldNames()
     RepairNewEntryLayoutNames fieldNames
 
@@ -7134,8 +7232,10 @@ Public Sub ApplyConfiguredNewEntryLayout(Optional ByVal requestedLayout As Varia
 
     SyncNewEntryLayoutButtons layoutId
 
+    SetWorkbookNameValue ThisWorkbook, "DateAfterExport", dateAfterExportId
     ConfigureNewEntryLayoutControls
     EnforceNewEntrySheetRoles
+    SetWorkbookNameValue ThisWorkbook, "DateAfterExport", dateAfterExportId
     If layoutChanged Then ActivateNewEntrySheet
 
 CleanExit:
@@ -7191,6 +7291,7 @@ Public Sub ConfigureNewEntryLayoutControls()
             On Error GoTo 0
         End If
 
+        ConfigureNewEntryDateResetControls ws
         ConfigureNewEntryCommandButtons ws
 
         RemoveRadioGroupOutlines ws
@@ -7201,6 +7302,68 @@ NextSheet:
         Set ws = Nothing
     Next sheetName
 End Sub
+
+Private Sub ConfigureNewEntryDateResetControls(ByVal ws As Worksheet)
+    Dim buttons As Collection
+    Dim button As Shape
+    Dim dateAfterExportId As Long
+
+    Set buttons = FindDateAfterExportButtons(ws)
+    If buttons.Count = 0 Then Exit Sub
+
+    dateAfterExportId = ResolveDateAfterExportId( _
+        GetWorkbookNameValue(ThisWorkbook, "DateAfterExport", 1))
+
+    For Each button In buttons
+        On Error Resume Next
+        button.ControlFormat.LinkedCell = "DateAfterExport"
+        On Error GoTo 0
+    Next button
+
+    SetWorkbookNameValue ThisWorkbook, "DateAfterExport", dateAfterExportId
+End Sub
+
+Private Function FindDateAfterExportButtons(ByVal ws As Worksheet) As Collection
+    Dim buttons As Collection
+    Dim shp As Shape
+
+    Set buttons = New Collection
+
+    For Each shp In ws.Shapes
+        If IsDateAfterExportOptionButton(shp) Then buttons.Add shp
+    Next shp
+
+    Set FindDateAfterExportButtons = buttons
+End Function
+
+Private Function IsDateAfterExportOptionButton(ByVal shp As Shape) As Boolean
+    Dim buttonId As String
+
+    On Error GoTo Fail
+    If shp.Type <> msoFormControl Then Exit Function
+    If shp.FormControlType <> xlOptionButton Then Exit Function
+
+    buttonId = LCase$(Trim$(shp.Name & " " & shp.OnAction & " " & _
+                             ShapeText(shp) & " " & shp.ControlFormat.LinkedCell))
+    IsDateAfterExportOptionButton = (InStr(buttonId, "dateafterexport") > 0 Or _
+                                     InStr(buttonId, "resetdateto") > 0 Or _
+                                     InStr(buttonId, "leavedateasis") > 0)
+    Exit Function
+
+Fail:
+    IsDateAfterExportOptionButton = False
+End Function
+
+Private Function ResolveDateAfterExportId(ByVal candidate As Variant) As Long
+    If IsNumeric(candidate) Then
+        If CLng(candidate) >= 1 And CLng(candidate) <= 3 Then
+            ResolveDateAfterExportId = CLng(candidate)
+            Exit Function
+        End If
+    End If
+
+    ResolveDateAfterExportId = 1
+End Function
 
 Private Sub ConfigureNewEntryCommandButtons(ByVal ws As Worksheet)
     Dim shp As Shape

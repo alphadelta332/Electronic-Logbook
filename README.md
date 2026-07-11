@@ -263,8 +263,11 @@ You can edit existing entries directly in the **Logbook** sheet. The following r
 
 To delete one or more logbook entries:
 
-1. In the **Logbook** sheet, click the row number(s) on the left to select the entire row(s)
-2. Right-click and select **Delete**
+1. In the **Logbook** sheet, select one or more cells in the entry row(s) you want to remove
+2. Click **Delete Selected** below the Logbook table
+3. Confirm the deletion when prompted
+
+Use the **Delete Selected** button instead of Excel's right-click **Delete** command. The Logbook sheet is protected to prevent accidental formula edits, and Excel may block native row deletion while protected formula cells are present.
 
 > **Important:** Do not delete the placeholder entries until you have added at least two of your own entries. The placeholder rows are required to maintain the correct table and formula structure during the initial setup period.
 

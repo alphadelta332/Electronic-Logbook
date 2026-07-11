@@ -352,7 +352,7 @@ Private Sub RunUpdate(newVersion As String)
     If lastDRow + 7 <= wsLog.Rows.Count Then
         wsLog.Rows(lastDRow + 7 & ":" & wsLog.Rows.Count).Hidden = True
     End If
-    RepairExportLogbookButton tblLog
+    RepairLogbookActionButtons tblLog
     Set wsLog  = Nothing
     Set tblLog = Nothing
 
@@ -2381,6 +2381,11 @@ Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
     SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
 End Sub
 
+Private Sub RepairLogbookActionButtons(lo As ListObject)
+    RepairDeleteSelectedLogbookRowsButton lo
+    RepairExportLogbookButton lo
+End Sub
+
 Private Sub RepairExportLogbookButton(lo As ListObject)
     Const BUTTON_WIDTH As Double = 121.2
     Const BUTTON_HEIGHT As Double = 45
@@ -2398,11 +2403,12 @@ Private Sub RepairExportLogbookButton(lo As ListObject)
     Set btn = ws.Shapes("ExportLogbookButton")
 
     topRow = lo.TotalsRowRange.Row + 2
-    leftCol = lo.ListColumns("Year").Range.Column
+    leftCol = lo.ListColumns("To").Range.Column
     If topRow + 3 > ws.Rows.Count Then Exit Sub
 
     targetLeft = ws.Cells(topRow, leftCol).Left
     targetTop = ws.Cells(topRow, leftCol).Top
+    ConfigureExportLogbookShapeAction btn
 
     btn.Placement = xlFreeFloating
     btn.Visible = msoTrue
@@ -2429,14 +2435,95 @@ Private Sub RepairExportLogbookButton(lo As ListObject)
 CleanFail:
 End Sub
 
+Private Sub RepairDeleteSelectedLogbookRowsButton(lo As ListObject)
+    Const BUTTON_WIDTH As Double = 121.2
+    Const BUTTON_HEIGHT As Double = 45
+    Const POSITION_TOLERANCE As Double = 1
+
+    Dim ws      As Worksheet
+    Dim btn     As Shape
+    Dim topRow  As Long
+    Dim leftCol As Long
+    Dim targetLeft As Double
+    Dim targetTop  As Double
+
+    On Error GoTo CleanFail
+    Set ws = lo.Parent
+    Set btn = ws.Shapes("DeleteSelectedLogbookRowsButton")
+
+    topRow = lo.TotalsRowRange.Row + 2
+    leftCol = lo.ListColumns("Year").Range.Column
+    If topRow + 3 > ws.Rows.Count Then Exit Sub
+
+    targetLeft = ws.Cells(topRow, leftCol).Left
+    targetTop = ws.Cells(topRow, leftCol).Top
+    ConfigureDeleteSelectedLogbookRowsShapeAction btn
+
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = BUTTON_WIDTH
+    btn.Height = BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+
+    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
+       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        btn.Left = targetLeft
+        btn.Top = targetTop
+        btn.Width = BUTTON_WIDTH
+        btn.Height = BUTTON_HEIGHT
+        btn.ZOrder msoBringToFront
+    End If
+
+CleanFail:
+End Sub
+
+Private Sub ConfigureExportLogbookShapeAction(ByVal shp As Shape)
+    Dim item As Shape
+
+    On Error Resume Next
+    shp.OnAction = "ExportLogbook"
+    If shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            item.OnAction = "ExportLogbook"
+        Next item
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub ConfigureDeleteSelectedLogbookRowsShapeAction(ByVal shp As Shape)
+    Dim item As Shape
+
+    On Error Resume Next
+    shp.OnAction = "DeleteSelectedLogbookRows"
+    If shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            item.OnAction = "DeleteSelectedLogbookRows"
+        Next item
+    End If
+    On Error GoTo 0
+End Sub
+
 Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
                                                    ByVal topRow As Long, _
                                                    ByVal leftCol As Long)
+    Dim restoreRow As Long
+    Dim previousScreenUpdating As Boolean
+
     On Error Resume Next
+    previousScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
     ws.Parent.Activate
     ws.Activate
     Application.Goto ws.Cells(topRow, leftCol), True
-    DoEvents
+    restoreRow = topRow - 30
+    If restoreRow < 1 Then restoreRow = 1
+    ActiveWindow.ScrollColumn = 1
+    ActiveWindow.ScrollRow = restoreRow
+    Application.ScreenUpdating = previousScreenUpdating
+    If previousScreenUpdating Then DoEvents
     On Error GoTo 0
 End Sub
 
