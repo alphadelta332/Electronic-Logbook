@@ -60,10 +60,9 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
     Dim todayDate As Date
     Dim entryDate As Date
     Dim diagStep As String
-    Dim ipcDetected As Boolean
-    Dim opcDetected As Boolean
-    Dim flightReviewDetected As Boolean
-    Dim currencyExcluded As Boolean
+    Dim ipcSelected As Boolean
+    Dim opcSelected As Boolean
+    Dim flightReviewSelected As Boolean
     Dim totalsWereOn As Boolean
     Dim totalsStateCaptured As Boolean
     Dim tableStyleName As String
@@ -93,19 +92,12 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             MsgBox "ERROR: The Logbook table is missing one or more New Entry columns. Please update the workbook structure before adding entries.", vbCritical
             GoTo Cleanup
         End If
-        If Not KeywordTableIsValid() Then
-            MsgBox "ERROR: The Keywords table is missing or does not contain the Flight Review, IPC and OPC columns. Please update the workbook structure before adding entries.", vbCritical
-            GoTo Cleanup
-        End If
         RefreshTodayValue
         SetAddToLogbookStatus "Validating entry"
         todayDate = CDate(GetWorkbookNameValue(ThisWorkbook, "today", Date))
-        ipcDetected = NewEntryBooleanValue("neIPC") Or _
-                      KeywordDetected(CStr(NewEntryValue("neRemarks")), "IPC")
-        opcDetected = NewEntryBooleanValue("neOPC") Or _
-                      KeywordDetected(CStr(NewEntryValue("neRemarks")), "OPC")
-        flightReviewDetected = NewEntryBooleanValue("neFR") Or ipcDetected Or _
-                               KeywordDetected(CStr(NewEntryValue("neRemarks")), "Flight Review")
+        ipcSelected = NewEntryBooleanValue("neIPC")
+        opcSelected = NewEntryBooleanValue("neOPC")
+        flightReviewSelected = NewEntryBooleanValue("neFR")
         RefreshDateCalculationFormulas tbl
         ClearNewEntryValidationHighlights
 
@@ -386,49 +378,22 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4h. IPC / OPC / Flight Review Detection Check
+    '--- 4h. OPC Without Instrument Hours / Approaches Check
         If Not suppressWarnings Then
-            If ipcDetected Or opcDetected Or flightReviewDetected Then
-                Dim detectionMessage As String
-                detectionMessage = "This entry will be counted as " & _
-                                   DetectedCurrencyItemsText(ipcDetected, opcDetected, flightReviewDetected) & _
-                                   "."
-                If opcDetected Then
-                    detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
-                                       "Only use an OPC keyword if this was a qualifying operator proficiency check covering IFR operations."
-                End If
-                detectionMessage = detectionMessage & vbCrLf & vbCrLf & _
-                                   "Yes: save and count the detected currency items." & vbCrLf & _
-                                   "No: save without counting them." & vbCrLf & _
-                                   "Cancel: return to the entry form."
-                response = MsgBox( _
-                    detectionMessage, _
-                    vbYesNoCancel + vbInformation, _
-                    "Currency Detection")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields NewEntryCurrencyDetectionFieldNames()
-                    GoTo Cleanup
-                End If
-                If response = vbNo Then currencyExcluded = True
-            End If
-        End If
-
-    '--- 4i. OPC Without Instrument Hours / Approaches Check
-        If Not suppressWarnings Then
-            If opcDetected And Not currencyExcluded Then
-                     If NewEntryNumericValue("neIfrIf") = 0 And _
-                         NewEntryNumericValue("neIfrSim") = 0 And _
-                   CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
-                    response = MsgBox("OPC detected but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
+            If opcSelected Then
+                      If NewEntryNumericValue("neIfrIf") = 0 And _
+                          NewEntryNumericValue("neIfrSim") = 0 And _
+                    CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
+                    response = MsgBox("OPC is ticked but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
                     If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryCurrencyDetectionFieldNames(), Array("neIfrIf", "neIfrSim"), NewEntryApproachFieldNames())
+                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryCurrencyFieldNames(), Array("neIfrIf", "neIfrSim"), NewEntryApproachFieldNames())
                         GoTo Cleanup
                     End If
                 End If
             End If
         End If
 
-    '--- 4j. Approaches Without Instrument Hours Check
+    '--- 4i. Approaches Without Instrument Hours Check
         If Not suppressWarnings Then
             If CountPositiveNewEntryFields(NewEntryApproachFieldNames()) > 0 Then
                      If NewEntryNumericValue("neIfrIf") = 0 And _
@@ -442,7 +407,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4k. High Landings vs Hours Check
+    '--- 4j. High Landings vs Hours Check
         'Total landings (day + night) should not exceed 6x total flight hours
         If Not suppressWarnings Then
             If (NewEntryNumericValue("neLandingsDay") + NewEntryNumericValue("neLandingsNight")) > _
@@ -455,7 +420,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4l. High Approaches vs Hours Check
+    '--- 4k. High Approaches vs Hours Check
         'Total approaches should not exceed 3x total flight hours
         If Not suppressWarnings Then
             If SumNewEntryFields(NewEntryApproachFieldNames()) > _
@@ -468,7 +433,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4m. Dual / ICUS / Copilot Without Other Crew Check
+    '--- 4l. Dual / ICUS / Copilot Without Other Crew Check
         If Not suppressWarnings Then
             If NewEntryValue("neOtherCrew") = "" Then
                 If SumNewEntryFields(Array( _
@@ -486,7 +451,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4n. Single and Multi Engine Hours in Same Entry Check
+    '--- 4m. Single and Multi Engine Hours in Same Entry Check
         If Not suppressWarnings Then
             Dim currentSingleEngineHours As Double
             Dim currentMultiEngineHours As Double
@@ -505,7 +470,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4o. Aircraft Type Engine Class History Check
+    '--- 4n. Aircraft Type Engine Class History Check
         If Not suppressWarnings Then
             Dim hasSingleEngineHistory As Boolean
             Dim hasMultiEngineHistory As Boolean
@@ -554,7 +519,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         typeCol = tbl.ListColumns("Type").Index
         regCol = tbl.ListColumns("Reg").Index
 
-    '--- 4p. Aircraft Type and Registration Mismatch History Check
+    '--- 4o. Aircraft Type and Registration Mismatch History Check
         If Not suppressWarnings Then
             Dim currentType As String
             Dim currentReg As String
@@ -589,7 +554,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             End If
         End If
 
-    '--- 4q. Duplicate Entry Check
+    '--- 4p. Duplicate Entry Check
         'Warn if an entry with the same Date, Type, Reg and Remarks already exists in the logbook
         dupFound = False
 
@@ -659,9 +624,9 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         diagStep = "Step 5c: Copy Data"
         WriteCrumb diagStep
         CopyNewEntryFieldsToLogbookRow newRow.Range, tbl, _
-                                       flightReviewDetected And Not currencyExcluded, _
-                                       ipcDetected And Not currencyExcluded, _
-                                       opcDetected And Not currencyExcluded
+                                       flightReviewSelected, _
+                                       ipcSelected, _
+                                       opcSelected
 
     '--- 5d. Fix Month Formatting (always Proper Case e.g. Mar)
         If VarType(newRow.Range.cells(1, 3).Value) = vbString Then
@@ -794,22 +759,20 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             WriteCrumb "Step 9a.0: Unprotect for final layout"
             wsLog.Unprotect Password:=ProtectionPassword()
         End If
-        WriteCrumb "Step 9a.1: Prepare export button view"
-        PrepareLogbookButtonRepairView tbl
-        WriteCrumb "Step 9a.2: Update hidden rows"
+        WriteCrumb "Step 9a.1: Update hidden rows"
         UpdateHiddenRows ThisWorkbook
         TraceAddToLogbookLayout "After final UpdateHiddenRows", tbl
         If entryWasWritten Then
-            WriteCrumb "Step 9a.3: Save final layout"
+            WriteCrumb "Step 9a.2: Save final layout"
             ThisWorkbook.Save
             TraceAddToLogbookLayout "After final layout save", tbl
         End If
         If logbookWasProtected Then
-            WriteCrumb "Step 9a.4: Re-protect after final layout"
+            WriteCrumb "Step 9a.3: Re-protect after final layout"
             ProtectLogbookSheetForRuntime wsLog
             TraceAddToLogbookLayout "After final layout protect", tbl
         End If
-        WriteCrumb "Step 9a.5: Restore New Entry view"
+        WriteCrumb "Step 9a.4: Restore New Entry view"
         RestoreNewEntryView
         On Error GoTo Cleanup
 
@@ -1433,47 +1396,6 @@ Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As S
     On Error GoTo 0
 End Function
 
-Private Function KeywordTableIsValid() As Boolean
-    Dim tblKeywords As ListObject
-
-    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
-    If tblKeywords Is Nothing Then Exit Function
-
-    KeywordTableIsValid = _
-        ListColumnExists(tblKeywords, "Flight Review") And _
-        ListColumnExists(tblKeywords, "IPC") And _
-        ListColumnExists(tblKeywords, "OPC")
-End Function
-
-Private Function KeywordDetected(ByVal details As String, ByVal keywordColumn As String) As Boolean
-    Dim tblKeywords As ListObject
-    Dim keywordRange As Range
-    Dim keywordCell As Range
-    Dim NormalisedDetails As String
-    Dim NormalisedKeyword As String
-
-    Set tblKeywords = FindListObject(ThisWorkbook, "Keywords")
-    If tblKeywords Is Nothing Then Exit Function
-
-    On Error Resume Next
-    Set keywordRange = tblKeywords.ListColumns(keywordColumn).DataBodyRange
-    On Error GoTo 0
-    If keywordRange Is Nothing Then Exit Function
-
-    NormalisedDetails = NormaliseKeywordText(details, True)
-    For Each keywordCell In keywordRange.Cells
-        If Not IsError(keywordCell.Value) Then
-            If Trim$(CStr(keywordCell.Value)) <> "" Then
-                NormalisedKeyword = NormaliseKeywordText(CStr(keywordCell.Value))
-                If InStr(1, NormalisedDetails, NormalisedKeyword, vbBinaryCompare) > 0 Then
-                    KeywordDetected = True
-                    Exit Function
-                End If
-            End If
-        End If
-    Next keywordCell
-End Function
-
 Private Function NormaliseKeywordText(ByVal value As String, _
                                       Optional ByVal removeSeparator As Boolean = False) As String
     If removeSeparator Then value = Replace(value, "|", "")
@@ -1485,35 +1407,6 @@ Private Function NormaliseKeywordText(ByVal value As String, _
     value = Replace(value, " ", "|")
     value = Replace(value, "&", "|")
     NormaliseKeywordText = "|" & value & "|"
-End Function
-
-Private Function DetectedCurrencyItemsText(ByVal ipcDetected As Boolean, _
-                                           ByVal opcDetected As Boolean, _
-                                           ByVal flightReviewDetected As Boolean) As String
-    Dim items(1 To 3) As String
-    Dim itemCount As Long
-
-    If ipcDetected Then
-        itemCount = itemCount + 1
-        items(itemCount) = "an IPC"
-    End If
-    If opcDetected Then
-        itemCount = itemCount + 1
-        items(itemCount) = "an OPC"
-    End If
-    If flightReviewDetected Then
-        itemCount = itemCount + 1
-        items(itemCount) = "a Flight Review"
-    End If
-
-    Select Case itemCount
-        Case 1
-            DetectedCurrencyItemsText = items(1)
-        Case 2
-            DetectedCurrencyItemsText = items(1) & " and " & items(2)
-        Case 3
-            DetectedCurrencyItemsText = items(1) & ", " & items(2) & " and " & items(3)
-    End Select
 End Function
 
 Private Function FindListObject(ByVal wb As Workbook, ByVal tableName As String) As ListObject
@@ -2622,8 +2515,8 @@ Private Function NewEntryDateInputFieldNames() As Variant
     NewEntryDateInputFieldNames = Array("neYear", "neMonth", "neDay")
 End Function
 
-Private Function NewEntryCurrencyDetectionFieldNames() As Variant
-    NewEntryCurrencyDetectionFieldNames = Array("neFR", "neIPC", "neOPC", "neRemarks")
+Private Function NewEntryCurrencyFieldNames() As Variant
+    NewEntryCurrencyFieldNames = Array("neFR", "neIPC", "neOPC")
 End Function
 
 Private Function NewEntryOtherCrewWarningFieldNames() As Variant
@@ -3945,28 +3838,6 @@ Public Sub UpdateHiddenRows(wb As Workbook)
     RepairExportLogbookButton tbl
 End Sub
 
-Private Sub PrepareLogbookButtonRepairView(ByVal tbl As ListObject)
-    Dim ws        As Worksheet
-    Dim topRow    As Long
-    Dim leftCol   As Long
-    Dim scrollRow As Long
-
-    On Error GoTo CleanExit
-    Set ws = tbl.Parent
-    topRow = tbl.TotalsRowRange.Row + 2
-    leftCol = tbl.ListColumns("Year").Range.Column
-    scrollRow = topRow - 30
-    If scrollRow < 1 Then scrollRow = 1
-
-    ws.Parent.Activate
-    ws.Activate
-    Application.Goto ws.Cells(topRow, leftCol), True
-    ActiveWindow.ScrollRow = scrollRow
-    ActiveWindow.ScrollColumn = 1
-
-CleanExit:
-End Sub
-
 Private Sub RestoreNewEntryView()
     On Error Resume Next
     ThisWorkbook.Worksheets(NEW_ENTRY_ACTIVE_SHEET).Activate
@@ -3989,7 +3860,6 @@ Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
 
     On Error GoTo CleanFail
     Set ws = tbl.Parent
-    Set btn = ws.Shapes("ExportLogbookButton")
 
     topRow = tbl.TotalsRowRange.Row + 2
     leftCol = tbl.ListColumns("Year").Range.Column
@@ -3998,6 +3868,18 @@ Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
     targetLeft = ws.Cells(topRow, leftCol).Left
     targetTop = ws.Cells(topRow, leftCol).Top
 
+    On Error Resume Next
+    Set btn = ws.Shapes("ExportLogbookButton")
+    On Error GoTo CleanFail
+
+    If btn Is Nothing Then
+        CreateExportLogbookButtonShape ws, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+        Exit Sub
+    End If
+
+    ConfigureExportLogbookShapeAction btn
+
+    On Error Resume Next
     btn.Placement = xlFreeFloating
     btn.Visible = msoTrue
     btn.Left = targetLeft
@@ -4005,33 +3887,52 @@ Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
     btn.Width = BUTTON_WIDTH
     btn.Height = BUTTON_HEIGHT
     btn.ZOrder msoBringToFront
+    On Error GoTo CleanFail
 
     If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
        Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
-        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
-        btn.Left = targetLeft
-        btn.Top = targetTop
-        btn.Width = BUTTON_WIDTH
-        btn.Height = BUTTON_HEIGHT
-        btn.ZOrder msoBringToFront
-    End If
-
-    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
-       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
-        RebuildExportLogbookButtonGroup ws, btn, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+        Err.Clear
+        On Error Resume Next
+        btn.Delete
+        Err.Clear
+        CreateExportLogbookButtonShape ws, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+        On Error GoTo CleanFail
     End If
 CleanFail:
 End Sub
 
-Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
-                                                   ByVal topRow As Long, _
-                                                   ByVal leftCol As Long)
+Private Sub ConfigureExportLogbookShapeAction(ByVal shp As Shape)
+    Dim item As Shape
+
     On Error Resume Next
-    ws.Parent.Activate
-    ws.Activate
-    Application.Goto ws.Cells(topRow, leftCol), True
+    shp.OnAction = "ExportLogbook"
+    If shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            item.OnAction = "ExportLogbook"
+        Next item
+    End If
     On Error GoTo 0
 End Sub
+
+Private Function CreateExportLogbookButtonShape(ByVal ws As Worksheet, _
+                                                ByVal targetLeft As Double, _
+                                                ByVal targetTop As Double, _
+                                                ByVal buttonWidth As Double, _
+                                                ByVal buttonHeight As Double) As Shape
+    Dim btn As Shape
+
+    On Error GoTo CleanExit
+    Set btn = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, buttonWidth, buttonHeight)
+    btn.Name = "ExportLogbookButton"
+    btn.TextFrame.Characters.Text = "Export Logbook"
+    btn.OnAction = "ExportLogbook"
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.ZOrder msoBringToFront
+    Set CreateExportLogbookButtonShape = btn
+
+CleanExit:
+End Function
 
 Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
                                             ByVal btn As Shape, _
@@ -6822,21 +6723,16 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
 
     Dim fDate    As String
     Dim fType    As String
-    Dim fIpcDetected As String
-    Dim fOpcDetected As String
-    Dim fFlightReviewDetected As String
+    Dim fIpcSelected As String
+    Dim fOpcSelected As String
+    Dim fFlightReviewSelected As String
     Dim fRows    As String
     Dim fCrumb   As String
     fDate    = CStr(Range("neDate").Value)
     fType    = CStr(Range("neType").Value)
-    ' Evaluate keyword detection flags without retaining the personal Details text.
-    Dim detailsVal As String
-    detailsVal = CStr(Range("neRemarks").Value)
-    fIpcDetected          = IIf(KeywordDetected(detailsVal, "IPC"), "Yes", "No")
-    fOpcDetected          = IIf(KeywordDetected(detailsVal, "OPC"), "Yes", "No")
-    fFlightReviewDetected = IIf(KeywordDetected(detailsVal, "IPC") Or _
-                                KeywordDetected(detailsVal, "Flight Review"), "Yes", "No")
-    detailsVal = ""   ' Clear from memory immediately
+    fIpcSelected          = IIf(NewEntryBooleanValue("neIPC"), "Yes", "No")
+    fOpcSelected          = IIf(NewEntryBooleanValue("neOPC"), "Yes", "No")
+    fFlightReviewSelected = IIf(NewEntryBooleanValue("neFR"), "Yes", "No")
     fRows    = CStr(ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
 
     ' Read the last crash breadcrumb if one exists
@@ -6883,9 +6779,9 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "-- ENTRY STATE ----------------------------------"
         Print #fileNum, "Date         : " & fDate
         Print #fileNum, "Type         : " & fType
-        Print #fileNum, "IPC detected : " & fIpcDetected
-        Print #fileNum, "OPC detected : " & fOpcDetected
-        Print #fileNum, "FR detected  : " & fFlightReviewDetected
+        Print #fileNum, "IPC selected : " & fIpcSelected
+        Print #fileNum, "OPC selected : " & fOpcSelected
+        Print #fileNum, "FR selected  : " & fFlightReviewSelected
         Print #fileNum, "Logbook rows : " & fRows
         Print #fileNum, ""
     Close #fileNum

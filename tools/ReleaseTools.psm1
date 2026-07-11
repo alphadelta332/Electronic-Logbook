@@ -158,12 +158,16 @@ function Set-LogbookWorkbookState {
     Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Operation {
         param($Workbook)
 
+        # Keep public/user-started workbooks usable. Release safety is enforced by
+        # explicit readiness checks, not Excel's modal Document Inspector save flag.
+        $Workbook.RemovePersonalInformation = $false
         Set-WorkbookNameValue -Workbook $Workbook -Name "GitHubBranch" -Value $Branch
         if (-not [string]::IsNullOrWhiteSpace($Version)) {
             Set-WorkbookNameValue -Workbook $Workbook -Name "LogbookVersion" -Value $Version
         }
     }
 
+    Write-Host "  RemovePersonalInformation = False" -ForegroundColor Green
     Write-Host "  GitHubBranch = $Branch" -ForegroundColor Green
     if (-not [string]::IsNullOrWhiteSpace($Version)) {
         Write-Host "  LogbookVersion = $Version" -ForegroundColor Green
