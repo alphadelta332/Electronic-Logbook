@@ -14,6 +14,8 @@ public sealed class ExcelWorkbookMigrator
     private const int XlCalculationAutomatic = -4105;
     private const int XlPasteFormats = -4122;
     private const int XlFreeFloating = 3;
+    private const int XlPivotFieldHidden = 0;
+    private const int XlPivotFieldRow = 1;
     private const int MsoTrue = -1;
     private const int MsoBringToFront = 0;
     private const int XlUp = -4162;
@@ -132,8 +134,8 @@ public sealed class ExcelWorkbookMigrator
             {
                 worksheet.Calculate();
             }
-            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "disabling pivot table refresh on open");
-            DisablePivotRefreshOnOpen((object)outputWorkbook);
+            step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "refreshing pivot tables");
+            RefreshWorkbookPivotSummaries((object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
             RepairExportLogbookButton(GetTable((object)outputWorkbook, "Logbook"));
@@ -1975,6 +1977,255 @@ public sealed class ExcelWorkbookMigrator
         var blue = (backgroundColor >> 16) & 0xFF;
         var brightness = ((red * 299) + (green * 587) + (blue * 114)) / 1000.0;
         return brightness >= 150 ? 0 : 0xFFFFFF;
+    }
+
+    private static void RefreshWorkbookPivotSummaries(object workbookObject)
+    {
+        var failures = new List<string>();
+        var dateFormulaRestore = TemporarilyBlankLogbookDateErrors(workbookObject);
+
+        try
+        {
+            PrepareHoursByYearPivotLayout(workbookObject);
+
+            dynamic workbook = workbookObject;
+            var worksheetCount = (int)workbook.Worksheets.Count;
+            for (var worksheetIndex = 1; worksheetIndex <= worksheetCount; worksheetIndex++)
+            {
+                dynamic worksheet = workbook.Worksheets.Item(worksheetIndex);
+                var worksheetName = SafeComName(worksheet, $"Worksheet{worksheetIndex}");
+                dynamic pivots;
+                try
+                {
+                    pivots = worksheet.PivotTables();
+                }
+                catch
+                {
+                    continue;
+                }
+
+                for (var pivotIndex = 1; pivotIndex <= (int)pivots.Count; pivotIndex++)
+                {
+                    dynamic pivot = pivots.Item(pivotIndex);
+                    var pivotName = SafeComName(pivot, $"Pivot{pivotIndex}");
+                    if (string.Equals(pivotName, "HoursByYear", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        pivot.RefreshTable();
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Add($"{worksheetName}.{pivotName}: {ex.Message}");
+                    }
+                }
+            }
+
+            if (failures.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Some pivot tables could not be refreshed: " + string.Join("; ", failures));
+            }
+
+            RestoreHoursByYearPivotLayout(workbookObject);
+
+            DisablePivotRefreshOnOpen(workbookObject);
+        }
+        finally
+        {
+            RestoreLogbookDateFormula(dateFormulaRestore);
+        }
+    }
+
+    private static string SafeComName(dynamic item, string fallback)
+    {
+        try
+        {
+            return Convert.ToString(item.Name, CultureInfo.InvariantCulture) ?? fallback;
+        }
+        catch
+        {
+            return fallback;
+        }
+    }
+
+    private static void PrepareHoursByYearPivotLayout(object workbookObject)
+    {
+        dynamic pivot = GetHoursByYearPivot(workbookObject);
+        TrySetPivotFieldOrientation(pivot, "Date", XlPivotFieldHidden);
+    }
+
+    private static void RestoreHoursByYearPivotLayout(object workbookObject)
+    {
+        dynamic pivot = GetHoursByYearPivot(workbookObject);
+
+        if (TrySetPivotFieldOrientation(pivot, "Date", XlPivotFieldRow))
+        {
+            try
+            {
+                pivot.PivotFields("Date").Position = 1;
+            }
+            catch
+            {
+                // Older grouped layouts may reject Position changes; fallback layout handles them.
+            }
+
+            if (!TryGroupDateByMonthAndYear(pivot))
+            {
+                ApplyHoursByYearPivotFallbackLayout(pivot);
+                return;
+            }
+        }
+
+        ApplyHoursByYearPivotFallbackLayout(pivot);
+    }
+
+    private static dynamic GetHoursByYearPivot(object workbookObject)
+    {
+        dynamic workbook = workbookObject;
+        try
+        {
+            return workbook.Worksheets.Item("ChartData").PivotTables("HoursByYear");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                "The HoursByYear pivot table could not be found after refresh.", ex);
+        }
+    }
+
+    private static PivotDateFormulaRestore? TemporarilyBlankLogbookDateErrors(
+        object workbookObject)
+    {
+        dynamic? table = GetTableOrNull(workbookObject, "Logbook");
+        if (table is null || !HasColumn((object)table, "Date") || table.DataBodyRange is null)
+        {
+            return null;
+        }
+
+        dynamic dateRange = table.ListColumns.Item(GetColumnIndex(table, "Date")).DataBodyRange;
+        var rowCount = (int)dateRange.Rows.Count;
+        string? formula = null;
+        for (var row = 1; row <= rowCount; row++)
+        {
+            dynamic cell = dateRange.Cells.Item(row, 1);
+            try
+            {
+                if (formula is null && (bool)cell.HasFormula)
+                {
+                    formula = (string)cell.Formula;
+                }
+
+                string text = (string)cell.Text;
+                if (text.StartsWith('#'))
+                {
+                    cell.Value2 = string.Empty;
+                }
+            }
+            catch
+            {
+                // Keep scanning other rows; the subsequent pivot refresh will surface hard failures.
+            }
+        }
+
+        return formula is null ? null : new PivotDateFormulaRestore(dateRange, formula);
+    }
+
+    private static void RestoreLogbookDateFormula(PivotDateFormulaRestore? restore)
+    {
+        if (restore is null)
+        {
+            return;
+        }
+
+        try
+        {
+            dynamic dateRange = restore.DateRange;
+            dateRange.Formula = restore.Formula;
+            dateRange.Calculate();
+        }
+        catch
+        {
+            // If Excel is already unavailable, preserve the original pivot failure.
+        }
+    }
+
+    private sealed record PivotDateFormulaRestore(object DateRange, string Formula);
+
+    private static void ApplyHoursByYearPivotFallbackLayout(dynamic pivot)
+    {
+        if (PivotFieldExists(pivot, "Years (Date)"))
+        {
+            TrySetPivotFieldOrientation(pivot, "Years (Date)", XlPivotFieldRow);
+            try
+            {
+                pivot.PivotFields("Years (Date)").Position = 1;
+                pivot.PivotFields("Years (Date)").ShowDetail = false;
+            }
+            catch
+            {
+                // Keep the refreshed cache even if this Excel build rejects grouped-field tweaks.
+            }
+
+            TrySetPivotFieldOrientation(pivot, "Date", XlPivotFieldHidden);
+            TrySetPivotFieldOrientation(pivot, "Months (Date)", XlPivotFieldHidden);
+            TrySetPivotFieldOrientation(pivot, "Days (Date)", XlPivotFieldHidden);
+            TrySetPivotFieldOrientation(pivot, "Quarters (Date)", XlPivotFieldHidden);
+        }
+        else
+        {
+            TrySetPivotFieldOrientation(pivot, "Date", XlPivotFieldRow);
+        }
+    }
+
+    private static bool TryGroupDateByMonthAndYear(dynamic pivot)
+    {
+        try
+        {
+            var periods = new object[] { false, false, false, false, true, false, true };
+            pivot.PivotFields("Date").LabelRange.Cells.Item(2).Group(
+                true,
+                true,
+                Type.Missing,
+                periods);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool TrySetPivotFieldOrientation(
+        dynamic pivot,
+        string fieldName,
+        int orientation)
+    {
+        try
+        {
+            pivot.PivotFields(fieldName).Orientation = orientation;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool PivotFieldExists(dynamic pivot, string fieldName)
+    {
+        try
+        {
+            _ = pivot.PivotFields(fieldName);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static void DisablePivotRefreshOnOpen(object workbookObject)

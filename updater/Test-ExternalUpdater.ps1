@@ -138,6 +138,7 @@ try {
         $keywords = $Workbook.Sheets("Currency + Recency").ListObjects("Keywords")
         $routes = $Workbook.Sheets("Routes").ListObjects("Routes")
         $baseAirports = $Workbook.Sheets("Stats").ListObjects("BaseAirportsTop10")
+        $chartData = $Workbook.Sheets("ChartData")
 
         $customColumnIndex = $logbook.ListColumns("OPC").Index + 1
         if ($logbook.ListColumns.Item($customColumnIndex).Name -ne "Updater Test") {
@@ -186,6 +187,16 @@ try {
         }
         if (-not [bool]$Workbook.Names.Item("RoutesDirty").RefersToRange.Value2) {
             throw "RoutesDirty did not preserve the master route-cache invalidation state."
+        }
+        $logbookPivot = $chartData.PivotTables("Top5HoursByType")
+        if ([int]$logbookPivot.PivotCache().RecordCount -lt [int]$logbook.ListRows.Count) {
+            throw "Logbook pivot cache was not refreshed after migration."
+        }
+        $hoursByYear = $chartData.PivotTables("HoursByYear")
+        try {
+            $null = $hoursByYear.PivotFields("Years (Date)")
+        } catch {
+            throw "HoursByYear date grouping was not restored after migration."
         }
     }
 
