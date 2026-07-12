@@ -341,8 +341,7 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
-    NormaliseLogbookFormatting masterWb.Sheets("Logbook").ListObjects("Logbook"), masterWb
-    ApplyNativeCheckboxesIfAvailable masterWb.Sheets("Logbook").ListObjects("Logbook")
+    ApplyMasterLogbookFormatting masterWb
     ApplyBaseAirportCheckboxesIfAvailable FindListObject(masterWb, "BaseAirportsTop10")
 
     diagStep = "Updating hidden rows"
@@ -1420,6 +1419,31 @@ Private Sub ApplyBaseAirportCheckboxesIfAvailable(ByVal lo As ListObject)
     lo.ListColumns("Base").DataBodyRange.CellControl.SetCheckbox
     Err.Clear
     On Error GoTo 0
+End Sub
+
+Private Sub ApplyMasterLogbookFormatting(ByVal masterWb As Workbook)
+    Dim lo As ListObject
+
+    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
+
+    Application.Run "'" & masterWb.Name & "'!modLogbook.NormaliseLogbookFormatting", lo, masterWb
+    ApplyLogbookNativeCheckboxesIfAvailable lo
+End Sub
+
+Private Sub ApplyLogbookNativeCheckboxesIfAvailable(ByVal lo As ListObject)
+    Dim columnName As Variant
+
+    If lo Is Nothing Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    For Each columnName In Array("FR", "IPC", "OPC")
+        If ListColumnExists(lo, CStr(columnName)) Then
+            On Error Resume Next
+            lo.ListColumns(CStr(columnName)).DataBodyRange.CellControl.SetCheckbox
+            Err.Clear
+            On Error GoTo 0
+        End If
+    Next columnName
 End Sub
 
 Private Function LegacyBaseValueIsChecked(ByVal value As Variant) As Boolean

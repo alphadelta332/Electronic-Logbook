@@ -1,4 +1,4 @@
-# Verifies tracked VBA source edits are paired with the master workbook.
+# Verifies embedded VBA source edits are paired with the master workbook.
 
 [CmdletBinding()]
 param(
@@ -8,12 +8,14 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
-$vbaSourceFiles = @(
+$embeddedVbaSourceFiles = @(
     "modBoot.bas",
     "modAirports.bas",
     "modLogbook.bas",
-    "modUpdate.bas",
     "ThisWorkbook.cls"
+)
+$runtimeVbaSourceFiles = @(
+    "modUpdate.bas"
 )
 $masterWorkbook = "Electronic_Logbook_Master.xlsm"
 
@@ -48,8 +50,8 @@ function Get-GitChangedPaths {
     return @($changed)
 }
 
-$changedPaths = Get-GitChangedPaths -Root $repoRoot -Paths ($vbaSourceFiles + $masterWorkbook)
-$changedVba = @($vbaSourceFiles | Where-Object { $changedPaths -contains $_ })
+$changedPaths = Get-GitChangedPaths -Root $repoRoot -Paths ($embeddedVbaSourceFiles + $runtimeVbaSourceFiles + $masterWorkbook)
+$changedVba = @($embeddedVbaSourceFiles | Where-Object { $changedPaths -contains $_ })
 $workbookChanged = $changedPaths -contains $masterWorkbook
 
 if ($changedVba.Count -gt 0 -and -not $workbookChanged) {
@@ -62,7 +64,7 @@ Changed VBA source:
 Run this before finishing the change:
   .\tools\ImportVbaIntoWorkbook.ps1 -WorkbookPath .\$masterWorkbook
 
-VBA source and the master .xlsm must stay paired for every master-workbook VBA change.
+Embedded VBA source and the master .xlsm must stay paired for every master-workbook VBA change.
 "@
 }
 
