@@ -6013,7 +6013,9 @@ Private Sub ConfigureLogbookPdf(ByVal exportSheet As Worksheet)
             exportSheet.Cells(lastPrintRow, lastPrintColumn)).Address
         .PrintTitleRows = "$2:$5"
         .Orientation = xlLandscape
-        .PaperSize = xlPaperA3
+        If Not TrySetLogbookPdfPaperSize(exportSheet.PageSetup, xlPaperA3) Then
+            TrySetLogbookPdfPaperSize exportSheet.PageSetup, xlPaperA4
+        End If
         .Zoom = False
         .FitToPagesWide = 1
         .FitToPagesTall = False
@@ -6026,6 +6028,15 @@ Private Sub ConfigureLogbookPdf(ByVal exportSheet As Worksheet)
         .CenterFooter = "Page &P of &N"
     End With
 End Sub
+
+Private Function TrySetLogbookPdfPaperSize(ByVal pageSetup As PageSetup, _
+                                           ByVal paperSize As XlPaperSize) As Boolean
+    On Error Resume Next
+    pageSetup.PaperSize = paperSize
+    TrySetLogbookPdfPaperSize = (Err.Number = 0)
+    Err.Clear
+    On Error GoTo 0
+End Function
 
 Private Sub WriteLogbookCsv(ByVal outputPath As String, ByVal outputValues As Variant)
     Const adTypeBinary As Long = 1

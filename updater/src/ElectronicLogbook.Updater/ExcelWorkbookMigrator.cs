@@ -1563,36 +1563,50 @@ public sealed class ExcelWorkbookMigrator
 
     private static void RepairLogbookActionButtons(dynamic destination)
     {
-        RepairDeleteSelectedLogbookRowsButton(destination);
-        RepairExportLogbookButton(destination);
+        RepairLogbookActionButton(
+            destination,
+            "DeleteSelectedLogbookRowsButton",
+            "DeleteSelectedLogbookRows",
+            "Year");
+        RepairLogbookActionButton(
+            destination,
+            "ExportLogbookButton",
+            "ExportLogbook",
+            "To");
     }
 
-    private static void RepairExportLogbookButton(dynamic destination)
+    private static void RepairLogbookActionButton(
+        dynamic destination,
+        string buttonName,
+        string actionName,
+        string alignColumnName)
     {
         const double buttonWidth = 121.2d;
         const double buttonHeight = 45d;
+        const double positionTolerance = 1d;
 
         dynamic? button = null;
         try
         {
             dynamic worksheet = destination.Parent;
-            button = worksheet.Shapes.Item("ExportLogbookButton");
+            button = worksheet.Shapes.Item(buttonName);
             var topRow = (int)destination.TotalsRowRange.Row + 2;
             var leftColumn = (int)destination.ListColumns.Item(
-                GetColumnIndex(destination, "To")).Range.Column;
+                GetColumnIndex(destination, alignColumnName)).Range.Column;
             if (topRow + 3 > (int)worksheet.Rows.Count)
             {
                 return;
             }
 
-            ConfigureShapeAction(button, "ExportLogbook");
-            button.Placement = XlFreeFloating;
-            button.Visible = MsoTrue;
-            button.Left = (double)worksheet.Cells.Item(topRow, leftColumn).Left;
-            button.Top = (double)worksheet.Cells.Item(topRow, leftColumn).Top;
-            button.Width = buttonWidth;
-            button.Height = buttonHeight;
-            button.ZOrder(MsoBringToFront);
+            dynamic targetCell = worksheet.Cells.Item(topRow, leftColumn);
+            ConfigureShapeAction(button, actionName);
+            MoveLogbookActionButton(button, targetCell, buttonWidth, buttonHeight);
+
+            if (ShapeIsAwayFromCell(button, targetCell, positionTolerance))
+            {
+                BringLogbookButtonTargetIntoView(worksheet, targetCell, topRow);
+                MoveLogbookActionButton(button, targetCell, buttonWidth, buttonHeight);
+            }
         }
         catch (RuntimeBinderException) when (button is null)
         {
@@ -1604,40 +1618,48 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static void RepairDeleteSelectedLogbookRowsButton(dynamic destination)
+    private static void MoveLogbookActionButton(
+        dynamic button,
+        dynamic targetCell,
+        double buttonWidth,
+        double buttonHeight)
     {
-        const double buttonWidth = 121.2d;
-        const double buttonHeight = 45d;
+        button.Placement = XlFreeFloating;
+        button.Visible = MsoTrue;
+        button.Left = (double)targetCell.Left;
+        button.Top = (double)targetCell.Top;
+        button.Width = buttonWidth;
+        button.Height = buttonHeight;
+        button.ZOrder(MsoBringToFront);
+    }
 
-        dynamic? button = null;
+    private static bool ShapeIsAwayFromCell(dynamic shape, dynamic targetCell, double tolerance)
+    {
+        return Math.Abs((double)shape.Left - (double)targetCell.Left) > tolerance ||
+            Math.Abs((double)shape.Top - (double)targetCell.Top) > tolerance;
+    }
+
+    private static void BringLogbookButtonTargetIntoView(
+        dynamic worksheet,
+        dynamic targetCell,
+        int topRow)
+    {
+        var restoreRow = Math.Max(1, topRow - 30);
+        dynamic application = worksheet.Application;
+        var previousScreenUpdating = (bool)application.ScreenUpdating;
+
         try
         {
-            dynamic worksheet = destination.Parent;
-            button = worksheet.Shapes.Item("DeleteSelectedLogbookRowsButton");
-            var topRow = (int)destination.TotalsRowRange.Row + 2;
-            var leftColumn = (int)destination.ListColumns.Item(
-                GetColumnIndex(destination, "Year")).Range.Column;
-            if (topRow + 3 > (int)worksheet.Rows.Count)
-            {
-                return;
-            }
-
-            ConfigureShapeAction(button, "DeleteSelectedLogbookRows");
-            button.Placement = XlFreeFloating;
-            button.Visible = MsoTrue;
-            button.Left = (double)worksheet.Cells.Item(topRow, leftColumn).Left;
-            button.Top = (double)worksheet.Cells.Item(topRow, leftColumn).Top;
-            button.Width = buttonWidth;
-            button.Height = buttonHeight;
-            button.ZOrder(MsoBringToFront);
+            application.ScreenUpdating = false;
+            worksheet.Parent.Activate();
+            worksheet.Activate();
+            application.Goto(targetCell, true);
+            application.ActiveWindow.ScrollColumn = 1;
+            application.ActiveWindow.ScrollRow = restoreRow;
         }
-        catch (RuntimeBinderException) when (button is null)
+        finally
         {
-            // Older or custom templates may not include this optional button.
-        }
-        catch (COMException) when (button is null)
-        {
-            // Older or custom templates may not include this optional button.
+            application.ScreenUpdating = previousScreenUpdating;
         }
     }
 

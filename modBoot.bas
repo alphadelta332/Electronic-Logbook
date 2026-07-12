@@ -110,8 +110,8 @@ Private Sub WarnUpdateCheckUnavailable(isManual As Boolean)
     If Not isManual And HasShownTrustWarning() Then Exit Sub
 
     MsgBox "The Electronic Logbook could not run its update check." & vbCrLf & vbCrLf & _
-           "This usually means Excel is blocking the logbook from refreshing its updater code." & vbCrLf & vbCrLf & _
-           "Please enable File > Options > Trust Center > Trust Center Settings > Macro Settings > ""Trust access to the VBA project object model"", then close and reopen this workbook.", _
+           "This can happen when there is no internet connection, GitHub is temporarily unavailable, or Excel is blocking the logbook from refreshing its updater code." & vbCrLf & vbCrLf & _
+           "Check your internet connection and try again. If this keeps happening, enable File > Options > Trust Center > Trust Center Settings > Macro Settings > ""Trust access to the VBA project object model"", then close and reopen this workbook.", _
            vbExclamation, "Update Check Unavailable"
 End Sub
 
