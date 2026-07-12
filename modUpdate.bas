@@ -1270,6 +1270,89 @@ NextCol:
     Next colIdx
 End Sub
 
+Private Sub RefreshLogbookCalculatedFormulas(ByVal tbl As ListObject)
+    If tbl Is Nothing Then Exit Sub
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    SetLogbookColumnFormula tbl, "TotalHours", _
+        "=SUM(Logbook[[#This Row],[SeIcusDay]:[CopilotNight]])"
+    SetLogbookColumnFormula tbl, "TotalApps", _
+        "=SUM(Logbook[[#This Row],[ILS]:[DGA (Azi)]])"
+
+    SetLogbookRunningTotalFormula tbl, "CumLandingsDay", "LandingsDay", _
+        "Logbook[[#This Row],[LandingsDay]]"
+    SetLogbookRunningTotalFormula tbl, "CumLandingsNight", "LandingsNight", _
+        "Logbook[[#This Row],[LandingsNight]]"
+    SetLogbookRunningTotalFormula tbl, "CumILS", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula tbl, "CumVOR", "VOR", _
+        "Logbook[[#This Row],[VOR]]"
+    SetLogbookRunningTotalFormula tbl, "CumRNP", "RNP", _
+        "Logbook[[#This Row],[RNP]]"
+    SetLogbookRunningTotalFormula tbl, "CumNDB", "NDB", _
+        "Logbook[[#This Row],[NDB]]"
+    SetLogbookRunningTotalFormula tbl, "CumDgaCdi", "DGA (CDI)", _
+        "Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula tbl, "CumDgaAzi", "DGA (Azi)", _
+        "Logbook[[#This Row],[DGA (Azi)]]"
+    SetLogbookRunningTotalFormula tbl, "CumCirc", "Circling", _
+        "Logbook[[#This Row],[Circling]]"
+    SetLogbookRunningTotalFormula tbl, "CumTotalApps", "TotalApps", _
+        "Logbook[[#This Row],[TotalApps]]"
+    SetLogbookColumnFormula tbl, "CumTotalHours", _
+        "=SUM(INDEX(Logbook[TotalHours],1):Logbook[[#This Row],[TotalHours]])"
+    SetLogbookRunningTotalFormula tbl, "Cum2D", "VOR", _
+        "SUM(Logbook[[#This Row],[VOR]:[DGA (Azi)]])"
+    SetLogbookRunningTotalFormula tbl, "Cum3D", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula tbl, "CumCDI", "ILS", _
+        "SUM(Logbook[[#This Row],[ILS]:[RNP]])+Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula tbl, "CumAzi", "NDB", _
+        "Logbook[[#This Row],[NDB]]+Logbook[[#This Row],[DGA (Azi)]]"
+End Sub
+
+Private Sub SetLogbookColumnFormula(ByVal tbl As ListObject, _
+                                    ByVal columnName As String, _
+                                    ByVal formulaText As String)
+    If Not ListColumnExists(tbl, columnName) Then Exit Sub
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    tbl.ListColumns(columnName).DataBodyRange.Formula = formulaText
+End Sub
+
+Private Sub SetLogbookRunningTotalFormula(ByVal tbl As ListObject, _
+                                          ByVal columnName As String, _
+                                          ByVal sourceColumnName As String, _
+                                          ByVal currentRowExpression As String)
+    If Not ListColumnExists(tbl, columnName) Then Exit Sub
+    If Not ListColumnExists(tbl, sourceColumnName) Then Exit Sub
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    tbl.ListColumns(columnName).DataBodyRange.FormulaR1C1 = _
+        "=IF(ROW()-ROW(Logbook[#Headers])=ROWS(Logbook[" & columnName & "])," & _
+        currentRowExpression & "," & currentRowExpression & _
+        "+INDEX(Logbook[" & columnName & "],ROW()-ROW(Logbook[#Headers])+1))"
+End Sub
+
+Private Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
+    Dim firstHoursColumn As Long
+
+    firstHoursColumn = tbl.ListColumns("SeIcusDay").Index
+    If ListColumnExists(tbl, "OPC") And tbl.ListColumns("OPC").Index < firstHoursColumn Then
+        LogbookCustomStartColumn = tbl.ListColumns("OPC").Index + 1
+    ElseIf ListColumnExists(tbl, "Details") Then
+        LogbookCustomStartColumn = tbl.ListColumns("Details").Index + 1
+    ElseIf ListColumnExists(tbl, "Remarks") Then
+        LogbookCustomStartColumn = tbl.ListColumns("Remarks").Index + 1
+    End If
+End Function
+
+Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
+    On Error Resume Next
+    ListColumnExists = Not tbl.ListColumns(columnName) Is Nothing
+    On Error GoTo 0
+End Function
+
 Private Sub CopyKeywordsData(masterWb As Workbook)
     Dim loSrc      As ListObject
     Dim loDst      As ListObject
@@ -1846,6 +1929,22 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
 Fail:
     Application.CutCopyMode = False
     Err.Clear
+End Sub
+
+Private Sub HideRowsBelowLogbookData(ByVal lo As ListObject, Optional ByVal bufferRows As Long = 7)
+    Dim ws As Worksheet
+    Dim lastDataRow As Long
+
+    If lo Is Nothing Then Exit Sub
+
+    Set ws = lo.Parent
+    ws.Rows.Hidden = False
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    lastDataRow = lo.DataBodyRange.Row + lo.DataBodyRange.Rows.Count - 1
+    If lastDataRow + bufferRows <= ws.Rows.Count Then
+        ws.Rows(lastDataRow + bufferRows & ":" & ws.Rows.Count).Hidden = True
+    End If
 End Sub
 
 Private Sub RepairLogbookActionButtons(lo As ListObject)
