@@ -19,6 +19,7 @@ $requiredTooling = @(
     "PrepareForTesting.ps1",
     "tools\ReleaseChecklist.ps1",
     "tools\Test-VbaSourceQuality.ps1",
+    "tools\Test-VbaWorkbookPairing.ps1",
     "tools\Test-VbaCompileDisposable.ps1",
     "tools\Test-WorkbookPublicReadiness.ps1",
     "tools\Test-WorkbookVbaParity.ps1",
@@ -70,6 +71,8 @@ foreach ($entry in $moduleExpectations.GetEnumerator()) {
         throw "$($entry.Key) has unexpected first line. Expected: $($entry.Value)"
     }
 }
+
+& (Join-Path $repoRoot "tools\Test-VbaWorkbookPairing.ps1") -RepoRoot $repoRoot
 
 $modLogbook = Get-Content (Join-Path $repoRoot "modLogbook.bas") -Raw -Encoding UTF8
 if ($modLogbook -notmatch "Public Sub ReportBug\(\)") {

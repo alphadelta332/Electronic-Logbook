@@ -16,6 +16,9 @@ Private Const AIRPORT_ICAO_VALIDATION_NAME As String = "AirportIcaoValidationLis
 Private Const REMOTE_AIRPORT_WARNING_THRESHOLD_NM As Double = 3000
 Private Const ADD_LOGBOOK_LAYOUT_DIAG_SHEET As String = "_AddToLogbookLayoutDiagnostics"
 Private Const ADD_LOGBOOK_LAYOUT_DIAG_FLAG As String = "AddToLogbookLayoutDiagnostics"
+Private Const LOGBOOK_ACTION_BUTTON_WIDTH As Double = 121.2
+Private Const LOGBOOK_ACTION_BUTTON_HEIGHT As Double = 45
+Private Const LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE As Double = 1
 Private mApplyingNewEntryLayout As Boolean
 Private mLastLogbookExportError As String
 
@@ -917,15 +920,18 @@ Fail:
            vbCritical, "Formatting Reset Failed"
 End Sub
 
-Private Sub NormaliseLogbookFormatting(ByVal tbl As ListObject)
+Public Sub NormaliseLogbookFormatting(ByVal tbl As ListObject, _
+                                      Optional ByVal targetWorkbook As Workbook = Nothing)
+    If targetWorkbook Is Nothing Then Set targetWorkbook = tbl.Parent.Parent
+
     NormaliseLogbookDataFormatting tbl
     NormaliseLogbookDataBorders tbl
     NormaliseLogbookTotalsFormatting tbl
-    UpdateLogbookTotalsNamedRanges tbl
-    UpdateLogbookFilterHeadersNamedRange tbl
-    ApplyLogbookPalette tbl
+    UpdateLogbookTotalsNamedRanges tbl, targetWorkbook
+    UpdateLogbookFilterHeadersNamedRange tbl, targetWorkbook
+    ApplyLogbookPalette tbl, targetWorkbook
     ApplyLogbookTotalsRowBorders tbl
-    ApplyLogbookTotalsFormatting tbl
+    ApplyLogbookTotalsFormatting tbl, targetWorkbook
     ApplyVisibleLogbookOutsideBorder tbl
     ApplyNativeCheckboxesIfAvailable tbl
 End Sub
@@ -1018,7 +1024,8 @@ Private Sub SetBorderFormat(ByVal targetBorder As Border, _
     targetBorder.LineStyle = lineStyle
 End Sub
 
-Private Sub UpdateLogbookTotalsNamedRanges(ByVal tbl As ListObject)
+Private Sub UpdateLogbookTotalsNamedRanges(ByVal tbl As ListObject, _
+                                           ByVal targetWorkbook As Workbook)
     Dim ws As Worksheet
     Dim totalsBlock As Range
     Dim sumTotalsRange As Range
@@ -1037,21 +1044,22 @@ Private Sub UpdateLogbookTotalsNamedRanges(ByVal tbl As ListObject)
     sumTotalsFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & sumTotalsRange.Address
 
     On Error Resume Next
-    ThisWorkbook.Names("LogbookTotals").RefersTo = totalsFormula
+    targetWorkbook.Names("LogbookTotals").RefersTo = totalsFormula
     If Err.Number <> 0 Then
         Err.Clear
-        ThisWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=totalsFormula
+        targetWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=totalsFormula
     End If
     Err.Clear
-    ThisWorkbook.Names("LogbookSumTotals").RefersTo = sumTotalsFormula
+    targetWorkbook.Names("LogbookSumTotals").RefersTo = sumTotalsFormula
     If Err.Number <> 0 Then
         Err.Clear
-        ThisWorkbook.Names.Add Name:="LogbookSumTotals", RefersTo:=sumTotalsFormula
+        targetWorkbook.Names.Add Name:="LogbookSumTotals", RefersTo:=sumTotalsFormula
     End If
     On Error GoTo 0
 End Sub
 
-Private Sub UpdateLogbookFilterHeadersNamedRange(ByVal tbl As ListObject)
+Private Sub UpdateLogbookFilterHeadersNamedRange(ByVal tbl As ListObject, _
+                                                 ByVal targetWorkbook As Workbook)
     Dim ws As Worksheet
     Dim dateHeader As Range
     Dim entryHeaders As Range
@@ -1066,15 +1074,16 @@ Private Sub UpdateLogbookFilterHeadersNamedRange(ByVal tbl As ListObject)
                     ",'" & Replace(ws.Name, "'", "''") & "'!" & entryHeaders.Address
 
     On Error Resume Next
-    ThisWorkbook.Names("LogbookFilterHeaders").RefersTo = filterFormula
+    targetWorkbook.Names("LogbookFilterHeaders").RefersTo = filterFormula
     If Err.Number <> 0 Then
         Err.Clear
-        ThisWorkbook.Names.Add Name:="LogbookFilterHeaders", RefersTo:=filterFormula
+        targetWorkbook.Names.Add Name:="LogbookFilterHeaders", RefersTo:=filterFormula
     End If
     On Error GoTo 0
 End Sub
 
-Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
+Private Sub ApplyLogbookPalette(ByVal tbl As ListObject, _
+                                ByVal targetWorkbook As Workbook)
     Const SUM_TOTALS_LIGHTNESS As Double = 0.2
     Dim headerRange As Range
     Dim sumTotalsRange As Range
@@ -1085,8 +1094,8 @@ Private Sub ApplyLogbookPalette(ByVal tbl As ListObject)
     secondaryColor = tbl.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
 
     On Error Resume Next
-    Set headerRange = ThisWorkbook.Names("LogbookHeaders").RefersToRange
-    Set sumTotalsRange = ThisWorkbook.Names("LogbookSumTotals").RefersToRange
+    Set headerRange = targetWorkbook.Names("LogbookHeaders").RefersToRange
+    Set sumTotalsRange = targetWorkbook.Names("LogbookSumTotals").RefersToRange
     On Error GoTo 0
 
     If Not headerRange Is Nothing Then
@@ -1258,7 +1267,8 @@ Private Sub NormaliseLogbookTotalsFormatting(ByVal tbl As ListObject)
     totalsRange.Font.Size = tableFontSize
 End Sub
 
-Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
+Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject, _
+                                         ByVal targetWorkbook As Workbook)
     Dim ws As Worksheet
     Dim totalsBlock As Range
     Dim topRow As Range
@@ -1291,10 +1301,10 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
 
     nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
     On Error Resume Next
-    ThisWorkbook.Names("LogbookTotals").RefersTo = nameFormula
+    targetWorkbook.Names("LogbookTotals").RefersTo = nameFormula
     If Err.Number <> 0 Then
         Err.Clear
-        ThisWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
+        targetWorkbook.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
     End If
     On Error GoTo 0
 
@@ -1343,7 +1353,7 @@ Private Sub ApplyLogbookTotalsFormatting(ByVal tbl As ListObject)
     experienceCellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
 
-Private Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
+Public Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
     Dim firstHoursColumn As Long
 
     firstHoursColumn = tbl.ListColumns("SeIcusDay").Index
@@ -1356,7 +1366,7 @@ Private Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
     End If
 End Function
 
-Private Sub ApplyNativeCheckboxesIfAvailable(ByVal tbl As ListObject)
+Public Sub ApplyNativeCheckboxesIfAvailable(ByVal tbl As ListObject)
     Dim columnName As Variant
 
     If tbl.DataBodyRange Is Nothing Then Exit Sub
@@ -1391,7 +1401,7 @@ Private Sub ApplyVisibleLogbookOutsideBorder(ByVal tbl As ListObject)
     SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
 End Sub
 
-Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
+Public Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
     On Error Resume Next
     ListColumnExists = Not tbl.ListColumns(columnName) Is Nothing
     On Error GoTo 0
@@ -1500,7 +1510,7 @@ Private Sub RefreshDateCalculationFormulas(ByVal tbl As ListObject)
     End If
 End Sub
 
-Private Sub RefreshLogbookCalculatedFormulas(ByVal tbl As ListObject)
+Public Sub RefreshLogbookCalculatedFormulas(ByVal tbl As ListObject)
     If tbl Is Nothing Then Exit Sub
     If tbl.DataBodyRange Is Nothing Then Exit Sub
 
@@ -3831,11 +3841,7 @@ Public Sub UpdateHiddenRows(wb As Workbook)
     Set wsLog = wb.Sheets("Logbook")
     Set tbl = wsLog.ListObjects("Logbook")
 
-    lastDataRow = tbl.DataBodyRange.row + tbl.DataBodyRange.Rows.Count - 1
-    wsLog.Rows.Hidden = False
-    If lastDataRow + 7 <= wsLog.Rows.Count Then
-        wsLog.Rows(lastDataRow + 7 & ":" & wsLog.Rows.Count).Hidden = True
-    End If
+    HideRowsBelowLogbookData tbl
     RepairLogbookActionButtons tbl
 End Sub
 
@@ -3847,16 +3853,43 @@ Private Sub RestoreNewEntryView()
     On Error GoTo 0
 End Sub
 
-Private Sub RepairLogbookActionButtons(ByVal tbl As ListObject)
-    RepairDeleteSelectedLogbookRowsButton tbl
-    RepairExportLogbookButton tbl
+Public Sub HideRowsBelowLogbookData(ByVal tbl As ListObject, Optional ByVal bufferRows As Long = 7)
+    Dim ws As Worksheet
+    Dim lastDataRow As Long
+
+    If tbl Is Nothing Then Exit Sub
+
+    Set ws = tbl.Parent
+    ws.Rows.Hidden = False
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    lastDataRow = tbl.DataBodyRange.Row + tbl.DataBodyRange.Rows.Count - 1
+    If lastDataRow + bufferRows <= ws.Rows.Count Then
+        ws.Rows(lastDataRow + bufferRows & ":" & ws.Rows.Count).Hidden = True
+    End If
 End Sub
 
-Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
-    Const BUTTON_WIDTH As Double = 121.2
-    Const BUTTON_HEIGHT As Double = 45
-    Const POSITION_TOLERANCE As Double = 1
+Private Sub RepairLogbookActionButtons(ByVal tbl As ListObject)
+    RepairLogbookActionButton tbl, _
+                           "DeleteSelectedLogbookRowsButton", _
+                           "DeleteSelectedLogbookRows", _
+                           "Year", _
+                           False, _
+                           False
+    RepairLogbookActionButton tbl, _
+                           "ExportLogbookButton", _
+                           "ExportLogbook", _
+                           "To", _
+                           True, _
+                           True
+End Sub
 
+Private Sub RepairLogbookActionButton(ByVal tbl As ListObject, _
+                                      ByVal buttonName As String, _
+                                      ByVal actionName As String, _
+                                      ByVal alignColumnName As String, _
+                                      ByVal createMissing As Boolean, _
+                                      ByVal rebuildIfStillAway As Boolean)
     Dim ws        As Worksheet
     Dim btn       As Shape
     Dim topRow    As Long
@@ -3868,120 +3901,50 @@ Private Sub RepairExportLogbookButton(ByVal tbl As ListObject)
     Set ws = tbl.Parent
 
     topRow = tbl.TotalsRowRange.Row + 2
-    leftCol = tbl.ListColumns("To").Range.Column
+    leftCol = tbl.ListColumns(alignColumnName).Range.Column
     If topRow + 3 > ws.Rows.Count Then Exit Sub
 
     targetLeft = ws.Cells(topRow, leftCol).Left
     targetTop = ws.Cells(topRow, leftCol).Top
 
     On Error Resume Next
-    Set btn = ws.Shapes("ExportLogbookButton")
+    Set btn = ws.Shapes(buttonName)
     On Error GoTo CleanFail
 
     If btn Is Nothing Then
-        CreateExportLogbookButtonShape ws, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+        If createMissing Then
+            CreateLogbookActionButtonShape ws, buttonName, actionName, targetLeft, targetTop
+        End If
         Exit Sub
     End If
 
-    ConfigureExportLogbookShapeAction btn
+    ConfigureShapeAction btn, actionName
 
     On Error Resume Next
-    btn.Placement = xlFreeFloating
-    btn.Visible = msoTrue
-    btn.Left = targetLeft
-    btn.Top = targetTop
-    btn.Width = BUTTON_WIDTH
-    btn.Height = BUTTON_HEIGHT
-    btn.ZOrder msoBringToFront
+    MoveLogbookActionButton btn, targetLeft, targetTop
     On Error GoTo CleanFail
 
-    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
-       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+    If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
         BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
-        btn.Left = targetLeft
-        btn.Top = targetTop
-        btn.Width = BUTTON_WIDTH
-        btn.Height = BUTTON_HEIGHT
-        btn.ZOrder msoBringToFront
+        MoveLogbookActionButton btn, targetLeft, targetTop
     End If
 
+    If rebuildIfStillAway Then
+        If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
+            RebuildLogbookActionButtonGroup ws, btn, buttonName, actionName, targetLeft, targetTop
+        End If
+    End If
 CleanFail:
 End Sub
 
-Private Sub RepairDeleteSelectedLogbookRowsButton(ByVal tbl As ListObject)
-    Const BUTTON_WIDTH As Double = 121.2
-    Const BUTTON_HEIGHT As Double = 45
-    Const POSITION_TOLERANCE As Double = 1
-
-    Dim ws        As Worksheet
-    Dim btn       As Shape
-    Dim topRow    As Long
-    Dim leftCol   As Long
-    Dim targetLeft As Double
-    Dim targetTop  As Double
-
-    On Error GoTo CleanFail
-    Set ws = tbl.Parent
-
-    topRow = tbl.TotalsRowRange.Row + 2
-    leftCol = tbl.ListColumns("Year").Range.Column
-    If topRow + 3 > ws.Rows.Count Then Exit Sub
-
-    targetLeft = ws.Cells(topRow, leftCol).Left
-    targetTop = ws.Cells(topRow, leftCol).Top
-
-    On Error Resume Next
-    Set btn = ws.Shapes("DeleteSelectedLogbookRowsButton")
-    On Error GoTo CleanFail
-
-    If btn Is Nothing Then Exit Sub
-
-    ConfigureDeleteSelectedLogbookRowsShapeAction btn
-
-    On Error Resume Next
-    btn.Placement = xlFreeFloating
-    btn.Visible = msoTrue
-    btn.Left = targetLeft
-    btn.Top = targetTop
-    btn.Width = BUTTON_WIDTH
-    btn.Height = BUTTON_HEIGHT
-    btn.ZOrder msoBringToFront
-    On Error GoTo CleanFail
-
-    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
-       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
-        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
-        btn.Left = targetLeft
-        btn.Top = targetTop
-        btn.Width = BUTTON_WIDTH
-        btn.Height = BUTTON_HEIGHT
-        btn.ZOrder msoBringToFront
-    End If
-
-CleanFail:
-End Sub
-
-Private Sub ConfigureExportLogbookShapeAction(ByVal shp As Shape)
+Private Sub ConfigureShapeAction(ByVal shp As Shape, ByVal actionName As String)
     Dim item As Shape
 
     On Error Resume Next
-    shp.OnAction = "ExportLogbook"
+    shp.OnAction = actionName
     If shp.Type = msoGroup Then
         For Each item In shp.GroupItems
-            item.OnAction = "ExportLogbook"
-        Next item
-    End If
-    On Error GoTo 0
-End Sub
-
-Private Sub ConfigureDeleteSelectedLogbookRowsShapeAction(ByVal shp As Shape)
-    Dim item As Shape
-
-    On Error Resume Next
-    shp.OnAction = "DeleteSelectedLogbookRows"
-    If shp.Type = msoGroup Then
-        For Each item In shp.GroupItems
-            item.OnAction = "DeleteSelectedLogbookRows"
+            item.OnAction = actionName
         Next item
     End If
     On Error GoTo 0
@@ -4008,32 +3971,60 @@ Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
     On Error GoTo 0
 End Sub
 
-Private Function CreateExportLogbookButtonShape(ByVal ws As Worksheet, _
+Private Function CreateLogbookActionButtonShape(ByVal ws As Worksheet, _
+                                                ByVal buttonName As String, _
+                                                ByVal actionName As String, _
                                                 ByVal targetLeft As Double, _
-                                                ByVal targetTop As Double, _
-                                                ByVal buttonWidth As Double, _
-                                                ByVal buttonHeight As Double) As Shape
+                                                ByVal targetTop As Double) As Shape
     Dim btn As Shape
 
     On Error GoTo CleanExit
-    Set btn = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, buttonWidth, buttonHeight)
-    btn.Name = "ExportLogbookButton"
-    btn.TextFrame.Characters.Text = "Export Logbook"
-    btn.OnAction = "ExportLogbook"
-    btn.Placement = xlFreeFloating
-    btn.Visible = msoTrue
-    btn.ZOrder msoBringToFront
-    Set CreateExportLogbookButtonShape = btn
+    Set btn = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, _
+                                 LOGBOOK_ACTION_BUTTON_WIDTH, LOGBOOK_ACTION_BUTTON_HEIGHT)
+    btn.Name = buttonName
+    btn.TextFrame.Characters.Text = LogbookActionButtonFallbackText(buttonName)
+    ConfigureShapeAction btn, actionName
+    MoveLogbookActionButton btn, targetLeft, targetTop
+    Set CreateLogbookActionButtonShape = btn
 
 CleanExit:
 End Function
 
-Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
+Private Sub MoveLogbookActionButton(ByVal btn As Shape, _
+                                    ByVal targetLeft As Double, _
+                                    ByVal targetTop As Double)
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = LOGBOOK_ACTION_BUTTON_WIDTH
+    btn.Height = LOGBOOK_ACTION_BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+End Sub
+
+Private Function LogbookActionButtonIsAwayFromTarget(ByVal btn As Shape, _
+                                                     ByVal targetLeft As Double, _
+                                                     ByVal targetTop As Double) As Boolean
+    LogbookActionButtonIsAwayFromTarget = _
+        Abs(btn.Left - targetLeft) > LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE Or _
+        Abs(btn.Top - targetTop) > LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE
+End Function
+
+Private Function LogbookActionButtonFallbackText(ByVal buttonName As String) As String
+    Select Case buttonName
+        Case "DeleteSelectedLogbookRowsButton"
+            LogbookActionButtonFallbackText = "Delete Selected"
+        Case Else
+            LogbookActionButtonFallbackText = "Export Logbook"
+    End Select
+End Function
+
+Private Sub RebuildLogbookActionButtonGroup(ByVal ws As Worksheet, _
                                             ByVal btn As Shape, _
+                                            ByVal buttonName As String, _
+                                            ByVal actionName As String, _
                                             ByVal targetLeft As Double, _
-                                            ByVal targetTop As Double, _
-                                            ByVal buttonWidth As Double, _
-                                            ByVal buttonHeight As Double)
+                                            ByVal targetTop As Double)
     Dim oldLeft      As Double
     Dim oldTop       As Double
     Dim itemCount    As Long
@@ -4065,30 +4056,18 @@ Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
     For i = 1 To itemCount
         ws.Shapes(itemNames(i)).Left = targetLeft + (itemLefts(i) - oldLeft)
         ws.Shapes(itemNames(i)).Top = targetTop + (itemTops(i) - oldTop)
-        ws.Shapes(itemNames(i)).OnAction = "ExportLogbook"
+        ws.Shapes(itemNames(i)).OnAction = actionName
     Next i
 
     Set rebuilt = ws.Shapes.Range(itemNames).Group
-    rebuilt.Name = "ExportLogbookButton"
-    rebuilt.Placement = xlFreeFloating
-    rebuilt.Visible = msoTrue
-    rebuilt.Left = targetLeft
-    rebuilt.Top = targetTop
-    rebuilt.Width = buttonWidth
-    rebuilt.Height = buttonHeight
-    rebuilt.ZOrder msoBringToFront
+    rebuilt.Name = buttonName
+    MoveLogbookActionButton rebuilt, targetLeft, targetTop
     Exit Sub
 
 Fallback:
     On Error Resume Next
     btn.Delete
-    Set rebuilt = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, buttonWidth, buttonHeight)
-    rebuilt.Name = "ExportLogbookButton"
-    rebuilt.TextFrame.Characters.Text = "Export Logbook"
-    rebuilt.OnAction = "ExportLogbook"
-    rebuilt.Placement = xlFreeFloating
-    rebuilt.Visible = msoTrue
-    rebuilt.ZOrder msoBringToFront
+    Set rebuilt = CreateLogbookActionButtonShape(ws, buttonName, actionName, targetLeft, targetTop)
     On Error GoTo 0
 End Sub
 
@@ -6416,7 +6395,7 @@ Sub SetLogbookFilterArrows()
     typeIndex = tbl.ListColumns("Type").Index
     circlingIndex = tbl.ListColumns("Circling").Index
 
-    UpdateLogbookFilterHeadersNamedRange tbl
+    UpdateLogbookFilterHeadersNamedRange tbl, ThisWorkbook
 
     '--- Show arrows on Date and on every logbook-entry column from Type through Circling.
     For i = 1 To tbl.ListColumns.Count

@@ -8,6 +8,9 @@ Option Explicit
 Private mResolvedRef As String
 Private mLastUpdateFailureReason As String
 Private Const ROUTE_CACHE_DEFINITION_VERSION As Long = 1
+Private Const LOGBOOK_ACTION_BUTTON_WIDTH As Double = 121.2
+Private Const LOGBOOK_ACTION_BUTTON_HEIGHT As Double = 45
+Private Const LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE As Double = 1
 
 ' -- GITHUB CONFIG --------------------------------------------
 Private Const GITHUB_USER  As String = "alphadelta332"
@@ -338,20 +341,16 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
-    NormaliseLogbookFormatting masterWb
-    ApplyNativeCheckboxesIfAvailable masterWb
+    NormaliseLogbookFormatting masterWb.Sheets("Logbook").ListObjects("Logbook"), masterWb
+    ApplyNativeCheckboxesIfAvailable masterWb.Sheets("Logbook").ListObjects("Logbook")
+    ApplyBaseAirportCheckboxesIfAvailable FindListObject(masterWb, "BaseAirportsTop10")
 
     diagStep = "Updating hidden rows"
     Dim wsLog     As Worksheet
     Dim tblLog    As ListObject
-    Dim lastDRow  As Long
     Set wsLog  = masterWb.Sheets("Logbook")
     Set tblLog = wsLog.ListObjects("Logbook")
-    lastDRow = tblLog.DataBodyRange.Row + tblLog.DataBodyRange.Rows.Count - 1
-    wsLog.Rows.Hidden = False
-    If lastDRow + 7 <= wsLog.Rows.Count Then
-        wsLog.Rows(lastDRow + 7 & ":" & wsLog.Rows.Count).Hidden = True
-    End If
+    HideRowsBelowLogbookData tblLog
     RepairLogbookActionButtons tblLog
     Set wsLog  = Nothing
     Set tblLog = Nothing
@@ -1010,25 +1009,6 @@ NextSourceColumn:
     loDst.DataBodyRange.Font.Bold = False
 End Sub
 
-Private Function LogbookCustomStartColumn(ByVal lo As ListObject) As Long
-    Dim firstHoursColumn As Long
-
-    firstHoursColumn = lo.ListColumns("SeIcusDay").Index
-    If ListColumnExists(lo, "OPC") And lo.ListColumns("OPC").Index < firstHoursColumn Then
-        LogbookCustomStartColumn = lo.ListColumns("OPC").Index + 1
-    ElseIf ListColumnExists(lo, "Details") Then
-        LogbookCustomStartColumn = lo.ListColumns("Details").Index + 1
-    ElseIf ListColumnExists(lo, "Remarks") Then
-        LogbookCustomStartColumn = lo.ListColumns("Remarks").Index + 1
-    End If
-End Function
-
-Private Function ListColumnExists(ByVal lo As ListObject, ByVal columnName As String) As Boolean
-    On Error Resume Next
-    ListColumnExists = Not lo.ListColumns(columnName) Is Nothing
-    On Error GoTo 0
-End Function
-
 Private Function DestinationLogbookColumnName(ByVal loDst As ListObject, ByVal sourceName As String) As String
     If ListColumnExists(loDst, sourceName) Then
         DestinationLogbookColumnName = sourceName
@@ -1289,70 +1269,6 @@ Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long
         End If
 NextCol:
     Next colIdx
-End Sub
-
-Private Sub RefreshLogbookCalculatedFormulas(ByVal lo As ListObject)
-    If lo Is Nothing Then Exit Sub
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    SetLogbookColumnFormula lo, "TotalHours", _
-        "=SUM(Logbook[[#This Row],[SeIcusDay]:[CopilotNight]])"
-    SetLogbookColumnFormula lo, "TotalApps", _
-        "=SUM(Logbook[[#This Row],[ILS]:[DGA (Azi)]])"
-
-    SetLogbookRunningTotalFormula lo, "CumLandingsDay", "LandingsDay", _
-        "Logbook[[#This Row],[LandingsDay]]"
-    SetLogbookRunningTotalFormula lo, "CumLandingsNight", "LandingsNight", _
-        "Logbook[[#This Row],[LandingsNight]]"
-    SetLogbookRunningTotalFormula lo, "CumILS", "ILS", _
-        "Logbook[[#This Row],[ILS]]"
-    SetLogbookRunningTotalFormula lo, "CumVOR", "VOR", _
-        "Logbook[[#This Row],[VOR]]"
-    SetLogbookRunningTotalFormula lo, "CumRNP", "RNP", _
-        "Logbook[[#This Row],[RNP]]"
-    SetLogbookRunningTotalFormula lo, "CumNDB", "NDB", _
-        "Logbook[[#This Row],[NDB]]"
-    SetLogbookRunningTotalFormula lo, "CumDgaCdi", "DGA (CDI)", _
-        "Logbook[[#This Row],[DGA (CDI)]]"
-    SetLogbookRunningTotalFormula lo, "CumDgaAzi", "DGA (Azi)", _
-        "Logbook[[#This Row],[DGA (Azi)]]"
-    SetLogbookRunningTotalFormula lo, "CumCirc", "Circling", _
-        "Logbook[[#This Row],[Circling]]"
-    SetLogbookRunningTotalFormula lo, "CumTotalApps", "TotalApps", _
-        "Logbook[[#This Row],[TotalApps]]"
-    SetLogbookColumnFormula lo, "CumTotalHours", _
-        "=SUM(INDEX(Logbook[TotalHours],1):Logbook[[#This Row],[TotalHours]])"
-    SetLogbookRunningTotalFormula lo, "Cum2D", "VOR", _
-        "SUM(Logbook[[#This Row],[VOR]:[DGA (Azi)]])"
-    SetLogbookRunningTotalFormula lo, "Cum3D", "ILS", _
-        "Logbook[[#This Row],[ILS]]"
-    SetLogbookRunningTotalFormula lo, "CumCDI", "ILS", _
-        "SUM(Logbook[[#This Row],[ILS]:[RNP]])+Logbook[[#This Row],[DGA (CDI)]]"
-    SetLogbookRunningTotalFormula lo, "CumAzi", "NDB", _
-        "Logbook[[#This Row],[NDB]]+Logbook[[#This Row],[DGA (Azi)]]"
-End Sub
-
-Private Sub SetLogbookColumnFormula(ByVal lo As ListObject, _
-                                    ByVal columnName As String, _
-                                    ByVal formulaText As String)
-    If Not ListColumnExists(lo, columnName) Then Exit Sub
-    If lo.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
-
-    lo.ListColumns(columnName).DataBodyRange.Formula = formulaText
-End Sub
-
-Private Sub SetLogbookRunningTotalFormula(ByVal lo As ListObject, _
-                                          ByVal columnName As String, _
-                                          ByVal sourceColumnName As String, _
-                                          ByVal currentRowExpression As String)
-    If Not ListColumnExists(lo, columnName) Then Exit Sub
-    If Not ListColumnExists(lo, sourceColumnName) Then Exit Sub
-    If lo.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
-
-    lo.ListColumns(columnName).DataBodyRange.FormulaR1C1 = _
-        "=IF(ROW()-ROW(Logbook[#Headers])=ROWS(Logbook[" & columnName & "])," & _
-        currentRowExpression & "," & currentRowExpression & _
-        "+INDEX(Logbook[" & columnName & "],ROW()-ROW(Logbook[#Headers])+1))"
 End Sub
 
 Private Sub CopyKeywordsData(masterWb As Workbook)
@@ -1908,489 +1824,24 @@ Fail:
     Err.Clear
 End Sub
 
-Private Sub NormaliseLogbookFormatting(masterWb As Workbook)
-    Dim lo As ListObject
-
-    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
-    NormaliseLogbookDataFormatting lo
-    NormaliseLogbookDataBorders lo
-    NormaliseLogbookTotalsFormatting lo
-    UpdateLogbookTotalsNamedRanges masterWb, lo
-    UpdateLogbookFilterHeadersNamedRange masterWb, lo
-    ApplyLogbookPalette masterWb, lo
-    ApplyLogbookTotalsRowBorders lo
-    ApplyLogbookTotalsFormatting masterWb, lo
-    ApplyVisibleLogbookOutsideBorder lo
-End Sub
-
-Private Sub NormaliseLogbookDataFormatting(lo As ListObject)
-    Dim templateRow As Range
-    Dim dataColumn As Range
-    Dim colIndex As Long
-
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    Set templateRow = lo.DataBodyRange.Rows(1)
-    lo.DataBodyRange.Font.Name = templateRow.Cells(1, 1).Font.Name
-    lo.DataBodyRange.Font.Size = templateRow.Cells(1, 1).Font.Size
-
-    For colIndex = 1 To lo.ListColumns.Count
-        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
-        With templateRow.Cells(1, colIndex)
-            dataColumn.HorizontalAlignment = .HorizontalAlignment
-            dataColumn.VerticalAlignment = .VerticalAlignment
-            dataColumn.WrapText = .WrapText
-            dataColumn.Orientation = .Orientation
-            dataColumn.IndentLevel = .IndentLevel
-            dataColumn.ShrinkToFit = .ShrinkToFit
-            dataColumn.ReadingOrder = .ReadingOrder
-        End With
-    Next colIndex
-End Sub
-
-Private Sub NormaliseLogbookDataBorders(lo As ListObject)
-    Dim templateRow As Range
-    Dim dataColumn As Range
-    Dim colIndex As Long
-    Dim leftLineStyle() As Variant
-    Dim leftWeight() As Variant
-    Dim leftColor() As Variant
-    Dim rightLineStyle() As Variant
-    Dim rightWeight() As Variant
-    Dim rightColor() As Variant
-
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    Set templateRow = lo.DataBodyRange.Rows(1)
-    ReDim leftLineStyle(1 To lo.ListColumns.Count)
-    ReDim leftWeight(1 To lo.ListColumns.Count)
-    ReDim leftColor(1 To lo.ListColumns.Count)
-    ReDim rightLineStyle(1 To lo.ListColumns.Count)
-    ReDim rightWeight(1 To lo.ListColumns.Count)
-    ReDim rightColor(1 To lo.ListColumns.Count)
-
-    For colIndex = 1 To lo.ListColumns.Count
-        With templateRow.Cells(1, colIndex).Borders(xlEdgeLeft)
-            leftLineStyle(colIndex) = .LineStyle
-            leftWeight(colIndex) = .Weight
-            leftColor(colIndex) = .Color
-        End With
-        With templateRow.Cells(1, colIndex).Borders(xlEdgeRight)
-            rightLineStyle(colIndex) = .LineStyle
-            rightWeight(colIndex) = .Weight
-            rightColor(colIndex) = .Color
-        End With
-    Next colIndex
-
-    lo.DataBodyRange.Borders.LineStyle = xlNone
-
-    For colIndex = 1 To lo.ListColumns.Count
-        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
-        If leftLineStyle(colIndex) <> xlNone Then
-            SetBorderFormat dataColumn.Borders(xlEdgeLeft), _
-                            leftLineStyle(colIndex), leftWeight(colIndex), leftColor(colIndex)
-        End If
-        If rightLineStyle(colIndex) <> xlNone Then
-            SetBorderFormat dataColumn.Borders(xlEdgeRight), _
-                            rightLineStyle(colIndex), rightWeight(colIndex), rightColor(colIndex)
-        End If
-    Next colIndex
-End Sub
-
-Private Sub SetBorderFormat(ByVal targetBorder As Border, _
-                            ByVal lineStyle As Variant, _
-                            ByVal weight As Variant, _
-                            ByVal color As Variant)
-    If lineStyle = xlNone Then
-        targetBorder.LineStyle = xlNone
-        Exit Sub
-    End If
-
-    targetBorder.Weight = weight
-    targetBorder.Color = color
-    targetBorder.LineStyle = lineStyle
-End Sub
-
-Private Sub UpdateLogbookTotalsNamedRanges(masterWb As Workbook, lo As ListObject)
-    Dim ws As Worksheet
-    Dim totalsBlock As Range
-    Dim sumTotalsRange As Range
-    Dim totalsFormula As String
-    Dim sumTotalsFormula As String
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set ws = lo.Parent
-    Set totalsBlock = ws.Range(ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Flight ID").Range.Column), _
-                               ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
-    Set sumTotalsRange = ws.Range(ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns(LogbookCustomStartColumn(lo)).Range.Column), _
-                                  ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("TotalApps").Range.Column))
-
-    totalsFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
-    sumTotalsFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & sumTotalsRange.Address
-
-    On Error Resume Next
-    masterWb.Names("LogbookTotals").RefersTo = totalsFormula
-    If Err.Number <> 0 Then
-        Err.Clear
-        masterWb.Names.Add Name:="LogbookTotals", RefersTo:=totalsFormula
-    End If
-    Err.Clear
-    masterWb.Names("LogbookSumTotals").RefersTo = sumTotalsFormula
-    If Err.Number <> 0 Then
-        Err.Clear
-        masterWb.Names.Add Name:="LogbookSumTotals", RefersTo:=sumTotalsFormula
-    End If
-    On Error GoTo 0
-End Sub
-
-Private Sub UpdateLogbookFilterHeadersNamedRange(masterWb As Workbook, lo As ListObject)
-    Dim ws As Worksheet
-    Dim dateHeader As Range
-    Dim entryHeaders As Range
-    Dim filterFormula As String
-
-    Set ws = lo.Parent
-    Set dateHeader = lo.HeaderRowRange.Cells(1, lo.ListColumns("Date").Index)
-    Set entryHeaders = ws.Range(ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("Type").Range.Column), _
-                                ws.Cells(lo.HeaderRowRange.Row, lo.ListColumns("Circling").Range.Column))
-
-    filterFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & dateHeader.Address & _
-                    ",'" & Replace(ws.Name, "'", "''") & "'!" & entryHeaders.Address
-
-    On Error Resume Next
-    masterWb.Names("LogbookFilterHeaders").RefersTo = filterFormula
-    If Err.Number <> 0 Then
-        Err.Clear
-        masterWb.Names.Add Name:="LogbookFilterHeaders", RefersTo:=filterFormula
-    End If
-    On Error GoTo 0
-End Sub
-
-Private Sub ApplyLogbookPalette(masterWb As Workbook, lo As ListObject)
-    Const SUM_TOTALS_LIGHTNESS As Double = 0.2
-    Dim headerRange As Range
-    Dim sumTotalsRange As Range
-    Dim secondaryColor As Long
-
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    secondaryColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
-
-    On Error Resume Next
-    Set headerRange = masterWb.Names("LogbookHeaders").RefersToRange
-    Set sumTotalsRange = masterWb.Names("LogbookSumTotals").RefersToRange
-    On Error GoTo 0
-
-    If Not headerRange Is Nothing Then
-        headerRange.Interior.Pattern = xlSolid
-        headerRange.Interior.Color = secondaryColor
-        headerRange.Font.Color = ContrastingTextColor(secondaryColor)
-    End If
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    lo.TotalsRowRange.Interior.Pattern = xlSolid
-    lo.TotalsRowRange.Interior.Color = vbBlack
-    lo.TotalsRowRange.Font.Color = vbWhite
-
-    If Not sumTotalsRange Is Nothing Then
-        sumTotalsRange.Interior.Pattern = xlSolid
-        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
-        sumTotalsRange.Font.Color = vbWhite
-        sumTotalsRange.Cells(1, 1).Offset(0, -1).HorizontalAlignment = xlRight
-        sumTotalsRange.Cells(1, 1).Offset(0, -1).WrapText = False
-    End If
-End Sub
-
-Private Function ColorWithLightness(ByVal sourceColor As Long, ByVal targetLightness As Double) As Long
-    Dim redValue As Double
-    Dim greenValue As Double
-    Dim blueValue As Double
-    Dim maximumValue As Double
-    Dim minimumValue As Double
-    Dim hue As Double
-    Dim saturation As Double
-    Dim lightness As Double
-    Dim firstChannel As Double
-    Dim secondChannel As Double
-
-    redValue = (sourceColor And &HFF&) / 255
-    greenValue = ((sourceColor \ &H100&) And &HFF&) / 255
-    blueValue = ((sourceColor \ &H10000) And &HFF&) / 255
-    maximumValue = WorksheetFunction.Max(redValue, greenValue, blueValue)
-    minimumValue = WorksheetFunction.Min(redValue, greenValue, blueValue)
-    lightness = (maximumValue + minimumValue) / 2
-
-    If maximumValue = minimumValue Then
-        ColorWithLightness = RGB(targetLightness * 255, targetLightness * 255, targetLightness * 255)
-        Exit Function
-    End If
-
-    If lightness > 0.5 Then
-        saturation = (maximumValue - minimumValue) / (2 - maximumValue - minimumValue)
-    Else
-        saturation = (maximumValue - minimumValue) / (maximumValue + minimumValue)
-    End If
-
-    If maximumValue = redValue Then
-        hue = (greenValue - blueValue) / (maximumValue - minimumValue)
-        If greenValue < blueValue Then hue = hue + 6
-    ElseIf maximumValue = greenValue Then
-        hue = (blueValue - redValue) / (maximumValue - minimumValue) + 2
-    Else
-        hue = (redValue - greenValue) / (maximumValue - minimumValue) + 4
-    End If
-    hue = hue / 6
-
-    secondChannel = targetLightness * (1 + saturation)
-    If targetLightness >= 0.5 Then secondChannel = targetLightness + saturation - targetLightness * saturation
-    firstChannel = 2 * targetLightness - secondChannel
-
-    ColorWithLightness = RGB(255 * HueChannel(firstChannel, secondChannel, hue + 1 / 3), _
-                             255 * HueChannel(firstChannel, secondChannel, hue), _
-                             255 * HueChannel(firstChannel, secondChannel, hue - 1 / 3))
-End Function
-
-Private Function HueChannel(ByVal firstChannel As Double, _
-                            ByVal secondChannel As Double, _
-                            ByVal hue As Double) As Double
-    If hue < 0 Then hue = hue + 1
-    If hue > 1 Then hue = hue - 1
-
-    If hue < 1 / 6 Then
-        HueChannel = firstChannel + (secondChannel - firstChannel) * 6 * hue
-    ElseIf hue < 1 / 2 Then
-        HueChannel = secondChannel
-    ElseIf hue < 2 / 3 Then
-        HueChannel = firstChannel + (secondChannel - firstChannel) * (2 / 3 - hue) * 6
-    Else
-        HueChannel = firstChannel
-    End If
-End Function
-
-Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
-    Dim redValue As Long
-    Dim greenValue As Long
-    Dim blueValue As Long
-    Dim perceivedBrightness As Double
-
-    redValue = backgroundColor And &HFF&
-    greenValue = (backgroundColor \ &H100&) And &HFF&
-    blueValue = (backgroundColor \ &H10000) And &HFF&
-    perceivedBrightness = (redValue * 299 + greenValue * 587 + blueValue * 114) / 1000
-
-    If perceivedBrightness >= 150 Then
-        ContrastingTextColor = vbBlack
-    Else
-        ContrastingTextColor = vbWhite
-    End If
-End Function
-
-Private Sub ApplyLogbookTotalsRowBorders(lo As ListObject)
-    Dim totalsRange As Range
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set totalsRange = lo.TotalsRowRange
-    totalsRange.Borders.LineStyle = xlNone
-    SetBorderFormat totalsRange.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
-    SetBorderFormat totalsRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
-End Sub
-
-Private Sub NormaliseLogbookTotalsFormatting(lo As ListObject)
-    Dim totalsRange            As Range
-    Dim tableStyleName         As String
-    Dim tableFontName          As String
-    Dim tableFontSize          As Double
-    Dim columnCount            As Long
-    Dim colIndex               As Long
-    Dim numberFormats()        As Variant
-    Dim horizontalAlignments() As Variant
-    Dim verticalAlignments()   As Variant
-    Dim wrapTextValues()       As Variant
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set totalsRange = lo.TotalsRowRange
-    tableStyleName = lo.TableStyle.Name
-    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
-    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
-    columnCount = lo.ListColumns.Count
-
-    ReDim numberFormats(1 To columnCount)
-    ReDim horizontalAlignments(1 To columnCount)
-    ReDim verticalAlignments(1 To columnCount)
-    ReDim wrapTextValues(1 To columnCount)
-
-    For colIndex = 1 To columnCount
-        With totalsRange.Cells(1, colIndex)
-            numberFormats(colIndex) = .NumberFormat
-            horizontalAlignments(colIndex) = .HorizontalAlignment
-            verticalAlignments(colIndex) = .VerticalAlignment
-            wrapTextValues(colIndex) = .WrapText
-        End With
-    Next colIndex
-
-    totalsRange.ClearFormats
-
-    For colIndex = 1 To columnCount
-        With totalsRange.Cells(1, colIndex)
-            .NumberFormat = numberFormats(colIndex)
-            .HorizontalAlignment = horizontalAlignments(colIndex)
-            .VerticalAlignment = verticalAlignments(colIndex)
-            .WrapText = wrapTextValues(colIndex)
-        End With
-    Next colIndex
-
-    lo.TableStyle = tableStyleName
-    totalsRange.Font.Name = tableFontName
-    totalsRange.Font.Size = tableFontSize
-End Sub
-
-Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
-    Dim ws As Worksheet
-    Dim totalsBlock As Range
-    Dim topRow As Range
-    Dim bottomRow As Range
-    Dim firstColumnCells As Range
-    Dim labelCells As Range
-    Dim hoursCells As Range
-    Dim totalsCellLeftOfBlock As Range
-    Dim experienceCellLeftOfBlock As Range
-    Dim nameFormula As String
-    Dim tableFontName As String
-    Dim tableFontSize As Double
-    Dim secondaryColor As Long
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set ws = lo.Parent
-    Set totalsBlock = ws.Range(ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Flight ID").Range.Column), _
-                               ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
-    Set topRow = totalsBlock.Rows(1)
-    Set bottomRow = totalsBlock.Rows(2)
-    Set firstColumnCells = Union(topRow.Cells(1, 1), bottomRow.Cells(1, 1))
-    Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
-    Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
-    Set totalsCellLeftOfBlock = topRow.Cells(1, 1).Offset(0, -1)
-    Set experienceCellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
-    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
-    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
-    secondaryColor = LogbookSecondaryFillColor(lo)
-
-    nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
-    On Error Resume Next
-    masterWb.Names("LogbookTotals").RefersTo = nameFormula
-    If Err.Number <> 0 Then
-        Err.Clear
-        masterWb.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
-    End If
-    On Error GoTo 0
-
-    topRow.Interior.Pattern = xlNone
-    topRow.Font.Color = vbBlack
-    topRow.Font.Bold = False
-    topRow.Cells(1, 3).Font.Bold = True
-
-    bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = secondaryColor
-    bottomRow.Font.Color = ContrastingTextColor(secondaryColor)
-    bottomRow.Font.Bold = True
-    totalsBlock.Font.Name = tableFontName
-    totalsBlock.Font.Size = tableFontSize
-
-    firstColumnCells.HorizontalAlignment = xlRight
-    firstColumnCells.WrapText = False
-    labelCells.HorizontalAlignment = xlRight
-    labelCells.WrapText = False
-    hoursCells.HorizontalAlignment = xlCenter
-    hoursCells.VerticalAlignment = xlCenter
-    hoursCells.WrapText = False
-    bottomRow.Cells(1, 3).NumberFormat = topRow.Cells(1, 3).NumberFormat
-
-    totalsBlock.Borders.LineStyle = xlNone
-    SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
-    totalsCellLeftOfBlock.Interior.Pattern = xlSolid
-    totalsCellLeftOfBlock.Interior.Color = vbBlack
-    totalsCellLeftOfBlock.Font.Color = vbWhite
-    totalsCellLeftOfBlock.Font.Bold = False
-    totalsCellLeftOfBlock.HorizontalAlignment = xlRight
-    totalsCellLeftOfBlock.WrapText = False
-    totalsCellLeftOfBlock.Borders.LineStyle = xlNone
-    SetBorderFormat totalsCellLeftOfBlock.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
-    experienceCellLeftOfBlock.Interior.Pattern = experienceCellLeftOfBlock.Offset(0, -1).Interior.Pattern
-    experienceCellLeftOfBlock.Interior.Color = experienceCellLeftOfBlock.Offset(0, -1).Interior.Color
-    experienceCellLeftOfBlock.Font.Color = experienceCellLeftOfBlock.Offset(0, -1).Font.Color
-    experienceCellLeftOfBlock.Font.Bold = experienceCellLeftOfBlock.Offset(0, -1).Font.Bold
-    experienceCellLeftOfBlock.HorizontalAlignment = xlRight
-    experienceCellLeftOfBlock.WrapText = False
-    experienceCellLeftOfBlock.Borders.LineStyle = xlNone
-End Sub
-
-Private Sub ApplyNativeCheckboxesIfAvailable(masterWb As Workbook)
-    Dim lo As ListObject
-    Dim loBase As ListObject
-    Dim columnName As Variant
-
-    On Error GoTo Fail
-    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    For Each columnName In Array("FR", "IPC", "OPC")
-        If ListColumnExists(lo, CStr(columnName)) Then
-            On Error Resume Next
-            lo.ListColumns(CStr(columnName)).DataBodyRange.CellControl.SetCheckbox
-            Err.Clear
-            On Error GoTo Fail
-        End If
-    Next columnName
-
-    Set loBase = FindListObject(masterWb, "BaseAirportsTop10")
-    ApplyBaseAirportCheckboxesIfAvailable loBase
-    Exit Sub
-Fail:
-    Err.Clear
-End Sub
-
-Private Function LogbookSecondaryFillColor(lo As ListObject) As Long
-    LogbookSecondaryFillColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
-End Function
-
-Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
-    Dim visibleRange As Range
-    Dim ws As Worksheet
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set ws = lo.Parent
-    Set visibleRange = ws.Range(ws.Cells(2, lo.ListColumns("Date").Range.Column), _
-                                ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Circling").Range.Column))
-
-    SetBorderFormat visibleRange.Borders(xlEdgeTop), xlContinuous, xlThin, vbBlack
-    SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
-    SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
-    SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
-End Sub
-
 Private Sub RepairLogbookActionButtons(lo As ListObject)
-    RepairDeleteSelectedLogbookRowsButton lo
-    RepairExportLogbookButton lo
+    RepairLogbookActionButton lo, _
+                           "DeleteSelectedLogbookRowsButton", _
+                           "DeleteSelectedLogbookRows", _
+                           "Year", _
+                           False
+    RepairLogbookActionButton lo, _
+                           "ExportLogbookButton", _
+                           "ExportLogbook", _
+                           "To", _
+                           True
 End Sub
 
-Private Sub RepairExportLogbookButton(lo As ListObject)
-    Const BUTTON_WIDTH As Double = 121.2
-    Const BUTTON_HEIGHT As Double = 45
-    Const POSITION_TOLERANCE As Double = 1
-
+Private Sub RepairLogbookActionButton(lo As ListObject, _
+                                      ByVal buttonName As String, _
+                                      ByVal actionName As String, _
+                                      ByVal alignColumnName As String, _
+                                      ByVal rebuildIfStillAway As Boolean)
     Dim ws      As Worksheet
     Dim btn     As Shape
     Dim topRow  As Long
@@ -2400,107 +1851,39 @@ Private Sub RepairExportLogbookButton(lo As ListObject)
 
     On Error GoTo CleanFail
     Set ws = lo.Parent
-    Set btn = ws.Shapes("ExportLogbookButton")
+    Set btn = ws.Shapes(buttonName)
 
     topRow = lo.TotalsRowRange.Row + 2
-    leftCol = lo.ListColumns("To").Range.Column
+    leftCol = lo.ListColumns(alignColumnName).Range.Column
     If topRow + 3 > ws.Rows.Count Then Exit Sub
 
     targetLeft = ws.Cells(topRow, leftCol).Left
     targetTop = ws.Cells(topRow, leftCol).Top
-    ConfigureExportLogbookShapeAction btn
+    ConfigureShapeAction btn, actionName
 
-    btn.Placement = xlFreeFloating
-    btn.Visible = msoTrue
-    btn.Left = targetLeft
-    btn.Top = targetTop
-    btn.Width = BUTTON_WIDTH
-    btn.Height = BUTTON_HEIGHT
-    btn.ZOrder msoBringToFront
+    MoveLogbookActionButton btn, targetLeft, targetTop
 
-    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
-       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
+    If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
         BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
-        btn.Left = targetLeft
-        btn.Top = targetTop
-        btn.Width = BUTTON_WIDTH
-        btn.Height = BUTTON_HEIGHT
-        btn.ZOrder msoBringToFront
+        MoveLogbookActionButton btn, targetLeft, targetTop
     End If
 
-    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
-       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
-        RebuildExportLogbookButtonGroup ws, btn, targetLeft, targetTop, BUTTON_WIDTH, BUTTON_HEIGHT
+    If rebuildIfStillAway Then
+        If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
+            RebuildLogbookActionButtonGroup ws, btn, buttonName, actionName, targetLeft, targetTop
+        End If
     End If
 CleanFail:
 End Sub
 
-Private Sub RepairDeleteSelectedLogbookRowsButton(lo As ListObject)
-    Const BUTTON_WIDTH As Double = 121.2
-    Const BUTTON_HEIGHT As Double = 45
-    Const POSITION_TOLERANCE As Double = 1
-
-    Dim ws      As Worksheet
-    Dim btn     As Shape
-    Dim topRow  As Long
-    Dim leftCol As Long
-    Dim targetLeft As Double
-    Dim targetTop  As Double
-
-    On Error GoTo CleanFail
-    Set ws = lo.Parent
-    Set btn = ws.Shapes("DeleteSelectedLogbookRowsButton")
-
-    topRow = lo.TotalsRowRange.Row + 2
-    leftCol = lo.ListColumns("Year").Range.Column
-    If topRow + 3 > ws.Rows.Count Then Exit Sub
-
-    targetLeft = ws.Cells(topRow, leftCol).Left
-    targetTop = ws.Cells(topRow, leftCol).Top
-    ConfigureDeleteSelectedLogbookRowsShapeAction btn
-
-    btn.Placement = xlFreeFloating
-    btn.Visible = msoTrue
-    btn.Left = targetLeft
-    btn.Top = targetTop
-    btn.Width = BUTTON_WIDTH
-    btn.Height = BUTTON_HEIGHT
-    btn.ZOrder msoBringToFront
-
-    If Abs(btn.Left - targetLeft) > POSITION_TOLERANCE Or _
-       Abs(btn.Top - targetTop) > POSITION_TOLERANCE Then
-        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
-        btn.Left = targetLeft
-        btn.Top = targetTop
-        btn.Width = BUTTON_WIDTH
-        btn.Height = BUTTON_HEIGHT
-        btn.ZOrder msoBringToFront
-    End If
-
-CleanFail:
-End Sub
-
-Private Sub ConfigureExportLogbookShapeAction(ByVal shp As Shape)
+Private Sub ConfigureShapeAction(ByVal shp As Shape, ByVal actionName As String)
     Dim item As Shape
 
     On Error Resume Next
-    shp.OnAction = "ExportLogbook"
+    shp.OnAction = actionName
     If shp.Type = msoGroup Then
         For Each item In shp.GroupItems
-            item.OnAction = "ExportLogbook"
-        Next item
-    End If
-    On Error GoTo 0
-End Sub
-
-Private Sub ConfigureDeleteSelectedLogbookRowsShapeAction(ByVal shp As Shape)
-    Dim item As Shape
-
-    On Error Resume Next
-    shp.OnAction = "DeleteSelectedLogbookRows"
-    If shp.Type = msoGroup Then
-        For Each item In shp.GroupItems
-            item.OnAction = "DeleteSelectedLogbookRows"
+            item.OnAction = actionName
         Next item
     End If
     On Error GoTo 0
@@ -2527,12 +1910,41 @@ Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
     On Error GoTo 0
 End Sub
 
-Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
+Private Sub MoveLogbookActionButton(ByVal btn As Shape, _
+                                    ByVal targetLeft As Double, _
+                                    ByVal targetTop As Double)
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = LOGBOOK_ACTION_BUTTON_WIDTH
+    btn.Height = LOGBOOK_ACTION_BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+End Sub
+
+Private Function LogbookActionButtonIsAwayFromTarget(ByVal btn As Shape, _
+                                                     ByVal targetLeft As Double, _
+                                                     ByVal targetTop As Double) As Boolean
+    LogbookActionButtonIsAwayFromTarget = _
+        Abs(btn.Left - targetLeft) > LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE Or _
+        Abs(btn.Top - targetTop) > LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE
+End Function
+
+Private Function LogbookActionButtonFallbackText(ByVal buttonName As String) As String
+    Select Case buttonName
+        Case "DeleteSelectedLogbookRowsButton"
+            LogbookActionButtonFallbackText = "Delete Selected"
+        Case Else
+            LogbookActionButtonFallbackText = "Export Logbook"
+    End Select
+End Function
+
+Private Sub RebuildLogbookActionButtonGroup(ByVal ws As Worksheet, _
                                             ByVal btn As Shape, _
+                                            ByVal buttonName As String, _
+                                            ByVal actionName As String, _
                                             ByVal targetLeft As Double, _
-                                            ByVal targetTop As Double, _
-                                            ByVal buttonWidth As Double, _
-                                            ByVal buttonHeight As Double)
+                                            ByVal targetTop As Double)
     Dim oldLeft      As Double
     Dim oldTop       As Double
     Dim itemCount    As Long
@@ -2564,30 +1976,23 @@ Private Sub RebuildExportLogbookButtonGroup(ByVal ws As Worksheet, _
     For i = 1 To itemCount
         ws.Shapes(itemNames(i)).Left = targetLeft + (itemLefts(i) - oldLeft)
         ws.Shapes(itemNames(i)).Top = targetTop + (itemTops(i) - oldTop)
-        ws.Shapes(itemNames(i)).OnAction = "ExportLogbook"
+        ws.Shapes(itemNames(i)).OnAction = actionName
     Next i
 
     Set rebuilt = ws.Shapes.Range(itemNames).Group
-    rebuilt.Name = "ExportLogbookButton"
-    rebuilt.Placement = xlFreeFloating
-    rebuilt.Visible = msoTrue
-    rebuilt.Left = targetLeft
-    rebuilt.Top = targetTop
-    rebuilt.Width = buttonWidth
-    rebuilt.Height = buttonHeight
-    rebuilt.ZOrder msoBringToFront
+    rebuilt.Name = buttonName
+    MoveLogbookActionButton rebuilt, targetLeft, targetTop
     Exit Sub
 
 Fallback:
     On Error Resume Next
     btn.Delete
-    Set rebuilt = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, buttonWidth, buttonHeight)
-    rebuilt.Name = "ExportLogbookButton"
-    rebuilt.TextFrame.Characters.Text = "Export Logbook"
-    rebuilt.OnAction = "ExportLogbook"
-    rebuilt.Placement = xlFreeFloating
-    rebuilt.Visible = msoTrue
-    rebuilt.ZOrder msoBringToFront
+    Set rebuilt = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, _
+                                     LOGBOOK_ACTION_BUTTON_WIDTH, LOGBOOK_ACTION_BUTTON_HEIGHT)
+    rebuilt.Name = buttonName
+    rebuilt.TextFrame.Characters.Text = LogbookActionButtonFallbackText(buttonName)
+    ConfigureShapeAction rebuilt, actionName
+    MoveLogbookActionButton rebuilt, targetLeft, targetTop
     On Error GoTo 0
 End Sub
 
