@@ -4570,6 +4570,9 @@ Public Sub DeleteSelectedLogbookRows()
     Dim rowIndexes As Object
     Dim key As Variant
     Dim rowIndex As Long
+    Dim bottomDeletedRowIndex As Long
+    Dim postDeleteRowIndex As Long
+    Dim dateColumnIndex As Long
     Dim logbookWasProtected As Boolean
     Dim previousScreenUpdating As Boolean
     Dim previousEnableEvents As Boolean
@@ -4597,7 +4600,10 @@ Public Sub DeleteSelectedLogbookRows()
     For Each area In selectedRows.Areas
         For Each rowRange In area.Rows
             rowIndex = rowRange.Row - tbl.DataBodyRange.Row + 1
-            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then rowIndexes(CStr(rowIndex)) = rowIndex
+            If rowIndex >= 1 And rowIndex <= tbl.ListRows.Count Then
+                rowIndexes(CStr(rowIndex)) = rowIndex
+                If rowIndex > bottomDeletedRowIndex Then bottomDeletedRowIndex = rowIndex
+            End If
         Next rowRange
     Next area
 
@@ -4609,6 +4615,8 @@ Public Sub DeleteSelectedLogbookRows()
 
     If MsgBox("Delete " & rowIndexes.Count & " selected Logbook row(s)?", _
               vbOKCancel + vbExclamation, "Delete Logbook Rows") = vbCancel Then Exit Sub
+
+    dateColumnIndex = tbl.ListColumns("Date").Index
 
     previousScreenUpdating = Application.ScreenUpdating
     previousEnableEvents = Application.EnableEvents
@@ -4642,6 +4650,9 @@ Public Sub DeleteSelectedLogbookRows()
     MarkRoutesDirty ThisWorkbook
     RefreshAirportVisitStatsWithWorkbookProtection ThisWorkbook, False
     RefreshWorkbookPivotSummariesWithWorkbookProtection ThisWorkbook
+    postDeleteRowIndex = bottomDeletedRowIndex
+    If postDeleteRowIndex > tbl.ListRows.Count Then postDeleteRowIndex = tbl.ListRows.Count
+    RestoreLogbookSelectionAfterDelete ws, tbl, dateColumnIndex, postDeleteRowIndex
 
 CleanExit:
     If logbookWasProtected Then ProtectLogbookSheetForRuntime ws
@@ -4690,6 +4701,23 @@ Fail:
            "No further rows were intentionally deleted. Check the Logbook table and try again after closing any dialogs or filters.", _
            errNum, "DeleteSelectedLogbookRows", errDesc, "Deleting selected Logbook rows"), _
            vbCritical, "Delete Logbook Rows"
+End Sub
+
+Private Sub RestoreLogbookSelectionAfterDelete(ByVal ws As Worksheet, _
+                                               ByVal tbl As ListObject, _
+                                               ByVal dateColumnIndex As Long, _
+                                               ByVal targetRowIndex As Long)
+    On Error Resume Next
+    If ws Is Nothing Then Exit Sub
+    If tbl Is Nothing Then Exit Sub
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+    If targetRowIndex < 1 Then targetRowIndex = 1
+    If targetRowIndex > tbl.ListRows.Count Then targetRowIndex = tbl.ListRows.Count
+
+    ThisWorkbook.Activate
+    ws.Activate
+    tbl.DataBodyRange.Cells(targetRowIndex, dateColumnIndex).Select
+    On Error GoTo 0
 End Sub
 
 Private Function TryPauseWorkbookAutoSave(ByVal wb As Workbook, ByRef previousAutoSaveOn As Boolean) As Boolean
@@ -5344,6 +5372,7 @@ Public Function ExportLogbookToFile(ByVal outputPath As String, _
                                             combineDetails)
 
     outputPath = EnsureLogbookExportExtension(outputPath, exportFormat)
+    PrepareLogbookExportOutputFile outputPath
     If exportFormat = "csv" Then
         Application.StatusBar = "Electronic Logbook: writing CSV"
         WriteLogbookCsv outputPath, outputValues
@@ -5356,7 +5385,7 @@ Public Function ExportLogbookToFile(ByVal outputPath As String, _
         If exportFormat = "xlsx" Then
             Application.StatusBar = "Electronic Logbook: saving XLSX"
             exportBook.SaveAs Filename:=outputPath, FileFormat:=xlOpenXMLWorkbook, _
-                              CreateBackup:=False
+                              CreateBackup:=False, Local:=True
             exportBook.Close SaveChanges:=False
             Set exportBook = Application.Workbooks.Open(outputPath)
             Set exportSheet = exportBook.Worksheets(1)
@@ -5399,6 +5428,21 @@ Fail:
     End If
     Resume Cleanup
 End Function
+
+Private Sub PrepareLogbookExportOutputFile(ByVal outputPath As String)
+    If Len(Dir$(outputPath)) = 0 Then Exit Sub
+
+    On Error GoTo DeleteFailed
+    SetAttr outputPath, vbNormal
+    Kill outputPath
+    On Error GoTo 0
+    Exit Sub
+
+DeleteFailed:
+    Err.Raise vbObjectError + 2306, "PrepareLogbookExportOutputFile", _
+              "The selected export file could not be replaced. Close the existing file and try again:" & _
+              vbCrLf & outputPath
+End Sub
 
 Private Sub ValidateLogbookExportColumns(ByVal sourceTable As ListObject)
     Dim columnName As Variant
@@ -5983,6 +6027,7 @@ Private Sub ConfigureLogbookPdf(ByVal exportSheet As Worksheet)
     Dim lastPrintColumn As Long
 
     Set exportTable = exportSheet.ListObjects(1)
+    HideLogbookPdfDrawingObjects exportSheet
     lastPrintRow = exportTable.TotalsRowRange.Row + 2
     lastPrintColumn = exportTable.Range.Column + exportTable.ListColumns.Count
 
@@ -6006,6 +6051,23 @@ Private Sub ConfigureLogbookPdf(ByVal exportSheet As Worksheet)
         .FooterMargin = Application.CentimetersToPoints(0.3)
         .CenterFooter = "Page &P of &N"
     End With
+End Sub
+
+Private Sub HideLogbookPdfDrawingObjects(ByVal exportSheet As Worksheet)
+    Dim shp As Shape
+    Dim oleObject As OLEObject
+
+    On Error Resume Next
+    For Each shp In exportSheet.Shapes
+        shp.PrintObject = False
+        shp.Visible = msoFalse
+    Next shp
+
+    For Each oleObject In exportSheet.OLEObjects
+        oleObject.PrintObject = False
+        oleObject.Visible = False
+    Next oleObject
+    On Error GoTo 0
 End Sub
 
 Private Function TrySetLogbookPdfPaperSize(ByVal pageSetup As PageSetup, _
