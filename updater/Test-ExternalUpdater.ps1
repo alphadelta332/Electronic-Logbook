@@ -33,11 +33,14 @@ try {
     Copy-Item -LiteralPath $repoMasterPath -Destination $masterPath
 
     Write-Step "Seeding source workbook with known test data"
-    Invoke-WorkbookEdit -WorkbookPath $sourcePath -Operation {
+    $sourceTableStyle = Invoke-WorkbookEdit -WorkbookPath $sourcePath -Operation {
         param($Workbook)
 
+        foreach ($worksheet in $Workbook.Worksheets) {
+            try { $worksheet.Unprotect("") } catch {}
+        }
+
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
-        $logbook.TableStyle = $Workbook.TableStyles.Item("TableStyleLight16")
         $customColumnIndex = $logbook.ListColumns("OPC").Index + 1
         $logbook.ListColumns.Item($customColumnIndex).Name = "Updater Test"
         $logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 = "TESTREG"
@@ -64,11 +67,17 @@ try {
 
         $Workbook.Names.Item("DateAfterExport").RefersToRange.Value2 = 3
         $Workbook.Names.Item("RoutesDirty").RefersToRange.Value2 = $false
+
+        [string]$logbook.TableStyle.Name
     }
 
     Write-Step "Seeding disposable master workbook route cache state"
     Invoke-WorkbookEdit -WorkbookPath $masterPath -Operation {
         param($Workbook)
+
+        foreach ($worksheet in $Workbook.Worksheets) {
+            try { $worksheet.Unprotect("") } catch {}
+        }
 
         $Workbook.Names.Item("RoutesDirty").RefersToRange.Value2 = $true
     }
@@ -150,7 +159,7 @@ try {
         if ($logbook.ListRows.Count -ne 3) {
             throw "Logbook row count was not preserved."
         }
-        if ($logbook.TableStyle.Name -ne "TableStyleLight16") {
+        if ($logbook.TableStyle.Name -ne $sourceTableStyle) {
             throw "Logbook table style was not preserved."
         }
         if ($logbook.Range.Rows.Hidden) {
