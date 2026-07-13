@@ -108,14 +108,23 @@ public partial class MainWindow : Window
         FooterStatusText.Text = "Checking update channel...";
         UpdateWizardView();
 
-        var installedVersion = await Task.Run(() => TryReadWorkbookVersion(_context.SourcePath));
+        // Excel starts this wizard before it saves and closes the source workbook.
+        // Do not race that hand-off by trying to automate the workbook immediately:
+        // an AutoSave/OneDrive workbook can still be locked or mid-save, which made
+        // the version look missing even though the workbook was valid.
+        FooterStatusText.Text = "Waiting for source workbook to close...";
+        UpdateWizardView();
+        var sourceCheck = await WaitForSourceWorkbookAsync(_context.SourcePath);
+        var installedVersion = sourceCheck.IsOk
+            ? await TryReadWorkbookVersionWithRetryAsync(_context.SourcePath)
+            : null;
         InstalledVersionText.Text = string.IsNullOrWhiteSpace(installedVersion)
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
         var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
-        string? availabilityFailureReason = null;
+        string? availabilityFailureReason = sourceCheck.IsOk ? null : sourceCheck.Message;
         if (identifiedInstalledVersion)
         {
             try
@@ -793,6 +802,28 @@ public partial class MainWindow : Window
                 try { Marshal.FinalReleaseComObject(excel); } catch { }
             }
         }
+    }
+
+    private static async Task<string?> TryReadWorkbookVersionWithRetryAsync(string workbookPath)
+    {
+        // The lock can be released before Excel or the OneDrive sync client has
+        // finished replacing the saved file. Retry the read-only COM open instead
+        // of treating that short settling window as an unknown workbook version.
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var version = await Task.Run(() => TryReadWorkbookVersion(workbookPath));
+            if (!string.IsNullOrWhiteSpace(version))
+            {
+                return version;
+            }
+
+            if (attempt < 9)
+            {
+                await Task.Delay(1000);
+            }
+        }
+
+        return null;
     }
 
     private static RunContext ResolveRunContext()
