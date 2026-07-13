@@ -8,16 +8,32 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
-### [2.0.0] - 2026-07-10
+### [2.0.0] - 2026-07-13
+#### General
+- Improved workbook opening feedback so Excel shows what the logbook is working on during startup.
 - Redesigned the Logbook and New Entry sheets so route details are entered in separate fields: Flight ID, From, To, Via, and Remarks.
+- Expanded airport data to better support international flying, with improved airport visit and base-airport statistics.
+- Updated route map handling to use the new route fields, with prompts to rebuild route data when needed.
+
+#### Updater
+- Improved the update process for this larger upgrade, including better backups, clearer error messages, and extra checks that migrated logbooks were saved correctly.
+- Added an Update Compatibility Floor of `v1.4.1`
+
+#### New Entry
 - Added direct checkboxes for Flight Review, IPC, and OPC entries, replacing the old currency verification pop-up.
 - Added clearer New Entry warnings, including highlighted fields when something needs to be fixed or reviewed.
 - Added airport-code suggestions and warnings for unrecognised departure, destination, or via airports.
-- Expanded airport data to better support international flying, with improved airport visit and base-airport statistics.
-- Added LogTen import support for compatible dynamic exports, including duplicate checks and an import report.
-- Updated route map handling to use the new route fields, with prompts to rebuild route data when needed.
-- Improved workbook opening feedback so Excel shows what the logbook is working on during startup.
-- Improved the update process for this larger upgrade, including better backups, clearer error messages, and extra checks that migrated logbooks were saved correctly.
+
+#### Logbook
+- Added new **Delete Selected Rows** button to allow deleting entries with workbook protection
+- Added **Export Logbook** feature, to allow for XLSX, CSV, and PDF exports
+
+#### Currency + Recency
+- Adjusted table layout to more accurately show which items are specific to Engine Class
+- Fixed some incorrectly calculating recency items
+
+#### Stats
+- Added **Base** table, allowing user to select and deselect their Base Airports, sorted by Top 10 visits
 
 ### [1.4.2] - 2026-06-25
 - Improved protected Logbook row deletion for removing placeholder entries
@@ -236,9 +252,9 @@ Always add entries using the **New Entry** sheet -- do not attempt to add rows m
 
 After an entry is added, the Logbook table is automatically sorted by Date. Depending on your date reset setting, the New Entry date can reset to today or to the day after the entry you just added.
 
-The Details field is checked against the workbook's **Keywords** table to identify IPC, OPC, and Flight Review entries. Matching entries feed the relevant currency and recency calculations, and the logbook asks for confirmation before saving them. Keywords can be configured to match the terms you normally use.
+Use the **FR**, **IPC**, and **OPC** checkboxes on the New Entry sheet to record qualifying currency items. These selections feed the relevant currency and recency calculations; they are not inferred from the Remarks field.
 
-Only use an OPC keyword for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption. If an OPC also qualifies as an IPC for 61.880 proficiency validity or circling currency, tick IPC as well; the IPC checkbox is the source of truth for those calculations.
+Only tick **OPC** for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption. If an OPC also qualifies as an IPC for 61.880 proficiency validity or circling currency, tick **IPC** as well; the IPC checkbox is the source of truth for those calculations.
 
 The entry form includes validation that will warn you of potential errors before saving, including:
 
