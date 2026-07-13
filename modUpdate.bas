@@ -6,7 +6,11 @@ Attribute VB_Name = "modUpdate"
 Option Explicit
 
 Private mResolvedRef As String
+Private mLastUpdateFailureReason As String
 Private Const ROUTE_CACHE_DEFINITION_VERSION As Long = 1
+Private Const LOGBOOK_ACTION_BUTTON_WIDTH As Double = 121.2
+Private Const LOGBOOK_ACTION_BUTTON_HEIGHT As Double = 45
+Private Const LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE As Double = 1
 
 ' -- GITHUB CONFIG --------------------------------------------
 Private Const GITHUB_USER  As String = "alphadelta332"
@@ -14,6 +18,8 @@ Private Const GITHUB_REPO  As String = "Electronic-Logbook"
 Private Const MASTER_FILE  As String = "Electronic_Logbook_Master.xlsm"
 Private Const WIZARD_EXE_NAME As String = "ElectronicLogbook.Updater.Wizard.exe"
 Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+Private Const DEV_WIZARD_TAG_PREFIX As String = "dev-wizard-"
+Private Const DEV_WIZARD_COMMIT_NAME As String = "dev-wizard-commit.txt"
 ' -------------------------------------------------------------
 
 ' ==============================================================
@@ -158,8 +164,9 @@ End Function
 '
 ' Data preserved from user:
 '   Logbook[Year] through Logbook[Circling]  (raw flight entries)
-'   Logbook[CurrencyExclusions]               (currency detection opt-outs)
-'   Airports[Base]                            (matched by ICAO)
+'   Legacy Logbook[Details] split into From, To, Via, and Remarks
+'   Legacy currency detection helper columns converted to FR, IPC, and OPC
+'   BaseAirportsTop10                         (matched by ICAO)
 '   Keywords table                            (user detection terms)
 '   Routes table and route cache state
 '
@@ -179,17 +186,23 @@ Private Sub RunUpdate(newVersion As String)
     Dim errNum        As Long
     Dim diagStep      As String
     Dim finalHandoffStarted As Boolean
-    Dim usedSaveCopyFallback As Boolean
     Dim finalReady As Boolean
     Dim readinessNote As String
     Dim sessionId     As String
     Dim expectedRows  As Long
     Dim expectedTotalHours As Double
     Dim expectedTotalKnown As Boolean
+    Dim diagnosticsPath As String
+    Dim wizardReportPath As String
+    Dim sourceWorkbookPath As String
+    Dim wizardReason As String
+    Dim wizardMasterPath As String
+    Dim releaseChannel As Boolean
 
     ' Unique per-run filenames prevent stale leftovers from a prior failed update
     ' from being silently used as the staging input.
     sessionId = Format(Now, "yyyymmdd_hhmmss")
+    mLastUpdateFailureReason = ""
     On Error Resume Next
     expectedRows = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count
     expectedTotalHours = GetLogbookTotalHours(ThisWorkbook)
@@ -207,14 +220,18 @@ Private Sub RunUpdate(newVersion As String)
     savePath = localPath & "\" & canonicalName
     updatedPath = savePath
     oldPath = BuildOldWorkbookPath(localPath, canonicalName)
-
-    ' Prefer the external wizard flow when available.
-    ' If launch fails for any reason, keep the legacy in-workbook update path.
-    Dim sourceWorkbookPath As String
-    Dim wizardReason As String
-    Dim wizardMasterPath As String
+    releaseChannel = (LCase$(Trim$(GetGitHubBranch())) = "main")
+    If Not releaseChannel Then
+        diagnosticsPath = BuildUpdateDiagnosticsPath(localPath, canonicalName)
+    End If
+    wizardReportPath = BuildWizardReportPath(localPath, canonicalName)
     sourceWorkbookPath = localPath & "\" & originalName
-    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+    WriteUpdateDiagnostic diagnosticsPath, "Update started. Source=" & sourceWorkbookPath & _
+        "; targetVersion=" & newVersion & "; branch=" & GetGitHubBranch()
+
+    ' Prefer the external wizard flow. Development builds may fall back to the
+    ' classic updater for diagnostics; release builds abort if the wizard is unavailable.
+    If Not releaseChannel Then
         wizardMasterPath = tempPath
         If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), wizardMasterPath) Then
             wizardReason = "Could not prepare the development master workbook for the updater wizard."
@@ -225,6 +242,9 @@ Private Sub RunUpdate(newVersion As String)
     End If
 
     If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
+        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
+        WriteUpdateDiagnostic diagnosticsPath, "Launcher diagnostics stop here because Excel handed off to the external wizard."
+        WriteUpdateDiagnostic diagnosticsPath, "Wizard diagnostic report path if enabled: " & wizardReportPath
         UpdateStatus ""
 
         Dim closeErr As Long
@@ -255,14 +275,26 @@ Private Sub RunUpdate(newVersion As String)
         Exit Sub
     End If
 
+    If wizardReason <> "" And releaseChannel Then
+        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard unavailable on release channel. Reason=" & wizardReason
+        MsgBox "The external updater wizard was not available, so the update cannot continue safely." & vbCrLf & vbCrLf & _
+               "Reason: " & wizardReason & vbCrLf & vbCrLf & _
+               "Your workbook has not been changed.", vbCritical, "Update Failed"
+        UpdateStatus ""
+        Exit Sub
+    End If
+
     If wizardReason <> "" Then
+        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard unavailable. Reason=" & wizardReason
         MsgBox "The external updater wizard was not available, so the classic updater will be used for this run." & vbCrLf & vbCrLf & _
                "Reason: " & wizardReason, vbInformation, "Using Classic Updater"
     End If
 
     diagStep = "Downloading master workbook"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Downloading update (version " & newVersion & ")..."
     If Not DownloadFile(RawURL(MASTER_FILE, mResolvedRef), tempPath) Then
+        WriteUpdateDiagnostic diagnosticsPath, "Failed: could not download master workbook."
         MsgBox "Could not download the update file." & vbCrLf & _
                "Check your internet connection and try again.", _
                vbExclamation, "Download Failed"
@@ -277,17 +309,23 @@ Private Sub RunUpdate(newVersion As String)
     On Error GoTo UpdateFailed
 
     diagStep = "Opening master workbook"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     Set masterWb = Workbooks.Open(tempPath, ReadOnly:=False, UpdateLinks:=False)
 
     diagStep = "Unprotecting master workbook"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     PrepareMasterWorkbookForMigration masterWb
 
     diagStep = "Copying Logbook data into master"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Copying flight data..."
     InjectLogbookData masterWb
 
     diagStep = "Copying Keywords data into master"
     CopyKeywordsData masterWb
+
+    diagStep = "Copying base airport selections into master"
+    CopyBaseAirportSelections masterWb
 
     diagStep = "Copying Routes data into master"
     UpdateStatus "Copying route cache..."
@@ -303,21 +341,23 @@ Private Sub RunUpdate(newVersion As String)
 
     diagStep = "Copying totals area formatting"
     CopyTotalsFormatting masterWb
-    NormaliseLogbookFormatting masterWb
+    ApplyMasterLogbookFormatting masterWb
+    ApplyBaseAirportCheckboxesIfAvailable FindListObject(masterWb, "BaseAirportsTop10")
 
     diagStep = "Updating hidden rows"
     Dim wsLog     As Worksheet
     Dim tblLog    As ListObject
-    Dim lastDRow  As Long
     Set wsLog  = masterWb.Sheets("Logbook")
     Set tblLog = wsLog.ListObjects("Logbook")
-    lastDRow = tblLog.DataBodyRange.Row + tblLog.DataBodyRange.Rows.Count - 1
-    wsLog.Rows.Hidden = False
-    If lastDRow + 4 <= wsLog.Rows.Count Then
-        wsLog.Rows(lastDRow + 4 & ":" & wsLog.Rows.Count).Hidden = True
-    End If
+    HideRowsBelowLogbookData tblLog
+    RepairLogbookActionButtons tblLog
     Set wsLog  = Nothing
     Set tblLog = Nothing
+
+    diagStep = "Refreshing airport visit stats"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
+    UpdateStatus "Refreshing airport visit stats..."
+    Application.Run "'" & masterWb.Name & "'!RefreshAirportVisitStats", masterWb
 
     diagStep = "Stamping version number"
     masterWb.Names("LogbookVersion").RefersToRange.Value = newVersion
@@ -411,8 +451,10 @@ Private Sub RunUpdate(newVersion As String)
     ' This is the last safe abort point: the original file has not been touched.
     On Error GoTo 0
     diagStep = "Validating staged update"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Validating update..."
     If Not ValidateStagedUpdate(localSavePath, newVersion, expectedRows, expectedTotalHours, expectedTotalKnown) Then
+        WriteUpdateDiagnostic diagnosticsPath, "Staged update validation failed. Reason=" & mLastUpdateFailureReason
         On Error Resume Next
         Kill localSavePath
         On Error GoTo 0
@@ -421,64 +463,62 @@ Private Sub RunUpdate(newVersion As String)
         Application.EnableEvents = True
         UpdateStatus ""
         MsgBox "The staged update failed validation. Your logbook has not been changed." & vbCrLf & vbCrLf & _
+               "Reason: " & mLastUpdateFailureReason & vbCrLf & vbCrLf & _
+               "Diagnostics were written to:" & vbCrLf & diagnosticsPath & vbCrLf & vbCrLf & _
                "Please try updating again. If the problem persists, use the Report a Bug button.", _
                vbCritical, "Update Validation Failed"
         Exit Sub
     End If
     On Error GoTo UpdateFailed
 
-    diagStep = "Renaming current file to old copy"
-    UpdateStatus "Renaming previous logbook..."
+    diagStep = "Saving backup copy"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
+    UpdateStatus "Saving backup copy..."
     finalHandoffStarted = True
     Application.DisplayAlerts = False
     On Error Resume Next
-    ThisWorkbook.SaveAs Filename:=oldPath, FileFormat:=xlOpenXMLWorkbookMacroEnabled
+    ThisWorkbook.SaveCopyAs Filename:=oldPath
     If Err.Number <> 0 Then
+        Dim backupErr As String
+        backupErr = Err.Description
         Err.Clear
-        ' OneDrive/AutoSave workbooks can reject SaveAs during handoff.
-        ' Fallback: preserve a backup copy without renaming the open workbook.
-        ThisWorkbook.SaveCopyAs Filename:=oldPath
-        If Err.Number <> 0 Then
-            Dim renameErr As String
-            renameErr = Err.Description
-            Err.Clear
-            Application.DisplayAlerts = True
-            On Error GoTo UpdateFailed
-            Err.Raise vbObjectError + 931, "modUpdate.RunUpdate", _
-                      "Could not create backup old-copy file. " & renameErr
-        End If
-        usedSaveCopyFallback = True
+        Application.DisplayAlerts = True
+        On Error GoTo UpdateFailed
+        Err.Raise vbObjectError + 931, "modUpdate.RunUpdate", _
+                  "Could not create backup old-copy file. " & backupErr
     End If
     On Error GoTo UpdateFailed
     Application.DisplayAlerts = True
 
     diagStep = "Validating backup file"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Validating backup..."
     If Not ValidateBackupWorkbook(oldPath, ThisWorkbook) Then
+        WriteUpdateDiagnostic diagnosticsPath, "Backup validation failed. Reason=" & mLastUpdateFailureReason
         Application.Calculation = xlCalculationAutomatic
         Application.ScreenUpdating = True
         Application.EnableEvents = True
         UpdateStatus ""
         MsgBox "The previous-version backup could not be validated after save." & vbCrLf & vbCrLf & _
+               "Reason: " & mLastUpdateFailureReason & vbCrLf & vbCrLf & _
                "Your workbook has been kept as:" & vbCrLf & oldPath & vbCrLf & vbCrLf & _
+               "Diagnostics were written to:" & vbCrLf & diagnosticsPath & vbCrLf & vbCrLf & _
                "The update was stopped before replacing the original filename.", _
                vbCritical, "Backup Validation Failed"
         Exit Sub
     End If
 
-    diagStep = "Moving updated file to original filename"
+    diagStep = "Moving updated file to updated copy"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "Saving updated logbook..."
-    If usedSaveCopyFallback Then
-        updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
-    Else
-        updatedPath = savePath
-    End If
+    updatedPath = BuildUpdatedWorkbookPath(localPath, canonicalName)
     ReplaceFileWithRetry localSavePath, updatedPath
     On Error Resume Next
     Kill localSavePath
     On Error GoTo 0
 
     diagStep = "Waiting for final workbook readiness"
+    WriteUpdateDiagnostic diagnosticsPath, diagStep
     UpdateStatus "finalising updated file..."
     finalReady = WaitForUpdatedWorkbookReady(updatedPath, newVersion, 90)
 
@@ -488,33 +528,23 @@ Private Sub RunUpdate(newVersion As String)
     UpdateStatus ""
 
     If finalReady Then
+        WriteUpdateDiagnostic diagnosticsPath, "Final workbook readiness verified."
         readinessNote = vbCrLf & vbCrLf & _
                         "Ready to open: the updated workbook was verified after handoff."
     Else
+        WriteUpdateDiagnostic diagnosticsPath, "Final workbook readiness timed out."
         readinessNote = vbCrLf & vbCrLf & _
                         "OneDrive is still finalising this file. Do not open it yet." & vbCrLf & _
                         "Wait for sync to finish (pending icon clears), then open from Explorer."
     End If
 
-        If usedSaveCopyFallback Then
-         MsgBox "Update complete with OneDrive fallback." & vbCrLf & vbCrLf & _
-             "Your current open workbook could not be renamed while AutoSave/OneDrive locking was active." & vbCrLf & vbCrLf & _
-             "Updated workbook saved as:" & vbCrLf & vbCrLf & _
-             updatedPath & vbCrLf & vbCrLf & _
-             "Backup copy saved as:" & vbCrLf & vbCrLf & _
-             oldPath & vbCrLf & vbCrLf & _
-             "Please close this workbook and open the updated file above." & readinessNote, _
-             vbInformation, "Update Ready"
-        Else
-         MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
-             updatedPath & vbCrLf & vbCrLf & _
-             "Your previous logbook has been saved as:" & vbCrLf & vbCrLf & _
-             oldPath & vbCrLf & vbCrLf & _
-             "Please close this old file, then reopen your logbook from the original filename." & vbCrLf & vbCrLf & _
-             "Please verify that your total hours, " & _
-               "Charts page, and Currency + Recency page match what you had before." & readinessNote, _
-             vbInformation, "Update Ready"
-        End If
+    MsgBox "Update complete! Your updated logbook has been saved as:" & vbCrLf & vbCrLf & _
+        updatedPath & vbCrLf & vbCrLf & _
+        "Backup copy saved as:" & vbCrLf & vbCrLf & _
+        oldPath & vbCrLf & vbCrLf & _
+        "Please close this old file and open the updated file above." & vbCrLf & vbCrLf & _
+        "Please verify that your total hours, Charts page, and Currency + Recency page match what you had before." & readinessNote, _
+        vbInformation, "Update Ready"
     Exit Sub
 
 UpdateFailed:
@@ -528,6 +558,8 @@ UpdateFailed:
     On Error Resume Next
     Application.Run "WriteDebugLog", "modUpdate.RunUpdate", errNum, errMsg, diagStep
     On Error GoTo 0
+    WriteUpdateDiagnostic diagnosticsPath, "Update failed at step=" & diagStep & _
+        "; error=" & CStr(errNum) & "; description=" & errMsg
     If Not masterWb Is Nothing Then
         On Error Resume Next
         masterWb.Close SaveChanges:=False
@@ -545,9 +577,11 @@ UpdateFailed:
         failureNote = "Your current file has not been changed."
     End If
 
-    MsgBox "Update failed at step: " & diagStep & vbCrLf & vbCrLf & _
-           "Error " & errNum & ": " & errMsg & vbCrLf & vbCrLf & _
-           failureNote, _
+    MsgBox BuildUpdateUserFacingErrorMessage( _
+           "The workbook update could not be completed.", _
+           failureNote & vbCrLf & vbCrLf & _
+           "Please try updating again. If the problem persists, use the Report a Bug button and include the update diagnostics file.", _
+           errNum, "modUpdate.RunUpdate", errMsg, diagStep, diagnosticsPath), _
            vbCritical, "Update Failed"
 End Sub
 
@@ -757,6 +791,68 @@ Private Function BuildUpdatedWorkbookPath(folderPath As String, workbookName As 
     BuildUpdatedWorkbookPath = candidate
 End Function
 
+Private Function BuildUpdateDiagnosticsPath(ByVal folderPath As String, ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+    Else
+        baseName = workbookName
+    End If
+
+    BuildUpdateDiagnosticsPath = folderPath & "\" & baseName & "_UpdateDiagnostics.txt"
+End Function
+
+Private Function BuildUpdateUserFacingErrorMessage(ByVal userMessage As String, _
+                                                   ByVal recoveryMessage As String, _
+                                                   ByVal errNum As Long, _
+                                                   ByVal errSource As String, _
+                                                   ByVal errDesc As String, _
+                                                   Optional ByVal diagStep As String = "", _
+                                                   Optional ByVal diagnosticsPath As String = "") As String
+    Dim details As String
+
+    details = "Technical details for support:" & vbCrLf & _
+              "Error " & CStr(errNum)
+    If Trim$(errSource) <> "" Then details = details & " in " & errSource
+    If Trim$(errDesc) <> "" Then details = details & ": " & errDesc
+    If Trim$(diagStep) <> "" Then details = details & vbCrLf & "Step: " & diagStep
+    If Trim$(diagnosticsPath) <> "" Then details = details & vbCrLf & "Diagnostics: " & diagnosticsPath
+
+    BuildUpdateUserFacingErrorMessage = userMessage & vbCrLf & vbCrLf & _
+                                        recoveryMessage & vbCrLf & vbCrLf & _
+                                        details
+End Function
+
+Private Function BuildWizardReportPath(ByVal folderPath As String, ByVal workbookName As String) As String
+    Dim dotPos As Long
+    Dim baseName As String
+
+    dotPos = InStrRev(workbookName, ".")
+    If dotPos > 0 Then
+        baseName = Left$(workbookName, dotPos - 1)
+    Else
+        baseName = workbookName
+    End If
+
+    BuildWizardReportPath = folderPath & "\" & baseName & ".update-report.json"
+End Function
+
+Private Sub WriteUpdateDiagnostic(ByVal diagnosticsPath As String, ByVal message As String)
+    Dim fileNumber As Integer
+
+    If diagnosticsPath = "" Then Exit Sub
+
+    On Error Resume Next
+    fileNumber = FreeFile
+    Open diagnosticsPath For Append As #fileNumber
+    Print #fileNumber, Format$(Now, "yyyy-mm-dd hh:nn:ss") & " | " & message
+    Close #fileNumber
+    On Error GoTo 0
+End Sub
+
 Private Sub PrepareMasterWorkbookForMigration(masterWb As Workbook)
     Dim ws As Worksheet
 
@@ -809,6 +905,8 @@ Private Function ValidateBackupWorkbook(backupPath As String, Optional backupWb 
 
 Fail:
     On Error Resume Next
+    mLastUpdateFailureReason = Err.Description
+    If mLastUpdateFailureReason = "" Then mLastUpdateFailureReason = "Backup validation failed."
     Application.Run "WriteDebugLog", "modUpdate.ValidateBackupWorkbook", Err.Number, Err.Description, "Validating backup file"
     On Error GoTo 0
     ValidateBackupWorkbook = False
@@ -823,10 +921,10 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     Dim loDst        As ListObject
     Dim dataColStart As Long
     Dim dataColEnd   As Long
-    Dim numCols      As Long
     Dim userRows     As Long
     Dim masterRows   As Long
     Dim hasTotals    As Boolean
+    Dim airportLookup As Object
 
     Set loSrc = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
     Set loDst = masterWb.Sheets("Logbook").ListObjects("Logbook")
@@ -836,15 +934,16 @@ Private Sub InjectLogbookData(masterWb As Workbook)
 
     dataColStart = loSrc.ListColumns("Year").Index
     dataColEnd   = loSrc.ListColumns("Circling").Index
-    numCols      = dataColEnd - dataColStart + 1
     userRows     = loSrc.DataBodyRange.Rows.Count
     masterRows   = loDst.DataBodyRange.Rows.Count
     hasTotals    = loDst.ShowTotals
+    Set airportLookup = BuildAirportAliasLookup(masterWb)
 
     If userRows > masterRows Then
         loDst.ShowTotals = False
         loDst.Resize loDst.Range.Resize(userRows + 1, loDst.ListColumns.Count)
         FillLogbookFormulas loDst, masterRows, userRows
+        RefreshLogbookCalculatedFormulas loDst
         loDst.ShowTotals = hasTotals
     ElseIf userRows < masterRows Then
         loDst.ShowTotals = False
@@ -863,9 +962,9 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     Dim customCount    As Long
     Dim c              As Long
 
-    customSrcStart = loSrc.ListColumns("Details").Index + 1
+    customSrcStart = LogbookCustomStartColumn(loSrc)
     customSrcEnd   = loSrc.ListColumns("SeIcusDay").Index - 1
-    customDstStart = loDst.ListColumns("Details").Index + 1
+    customDstStart = LogbookCustomStartColumn(loDst)
     customDstEnd   = loDst.ListColumns("SeIcusDay").Index - 1
     customCount    = customSrcEnd - customSrcStart + 1
 
@@ -880,12 +979,16 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     ' Copy column by column by name - handles schema differences between
     ' user and master (extra/missing columns are safely skipped).
     Dim srcCol    As ListColumn
+    Dim dstColName As String
     Dim dstColIdx As Long
     For Each srcCol In loSrc.ListColumns
         If (srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd) Or _
            srcCol.Name = "CurrencyExclusions" Then
+            dstColName = DestinationLogbookColumnName(loDst, srcCol.Name)
+            If Len(dstColName) = 0 Then GoTo NextSourceColumn
+
             On Error Resume Next
-            dstColIdx = loDst.ListColumns(srcCol.Name).Index
+            dstColIdx = loDst.ListColumns(dstColName).Index
             If Err.Number = 0 Then
                 loDst.DataBodyRange.Columns(dstColIdx).Resize(userRows, 1).Value = _
                     srcCol.DataBodyRange.Resize(userRows, 1).Value
@@ -893,13 +996,244 @@ Private Sub InjectLogbookData(masterWb As Workbook)
             Err.Clear
             On Error GoTo 0
         End If
+NextSourceColumn:
     Next srcCol
+
+    SplitLegacyDetailsIntoNewEntryColumns loSrc, loDst, airportLookup, userRows
+    ConvertLegacyCurrencyColumns loSrc, loDst, userRows
 
     ' Clear explicit cell fills and bold accumulated from prior AddToLogbook
     ' PasteSpecial calls. Lets the table's built-in stripe style show cleanly.
     loDst.DataBodyRange.Interior.Pattern = xlNone
     loDst.DataBodyRange.Font.Bold = False
 End Sub
+
+Private Function DestinationLogbookColumnName(ByVal loDst As ListObject, ByVal sourceName As String) As String
+    If ListColumnExists(loDst, sourceName) Then
+        DestinationLogbookColumnName = sourceName
+    ElseIf LCase$(sourceName) = "rnav" And ListColumnExists(loDst, "RNP") Then
+        DestinationLogbookColumnName = "RNP"
+    ElseIf LCase$(sourceName) = "cumrnav" And ListColumnExists(loDst, "CumRNP") Then
+        DestinationLogbookColumnName = "CumRNP"
+    End If
+End Function
+
+Private Sub SplitLegacyDetailsIntoNewEntryColumns(ByVal loSrc As ListObject, _
+                                                  ByVal loDst As ListObject, _
+                                                  ByVal airportLookup As Object, _
+                                                  ByVal rowCount As Long)
+    Dim sourceDetailsColumn As String
+    Dim rowIndex As Long
+    Dim splitValues As Variant
+
+    If rowCount <= 0 Then Exit Sub
+    If Not ListColumnExists(loDst, "From") Then Exit Sub
+    If Not ListColumnExists(loDst, "To") Then Exit Sub
+    If Not ListColumnExists(loDst, "Via") Then Exit Sub
+    If Not ListColumnExists(loDst, "Remarks") Then Exit Sub
+
+    If ListColumnExists(loSrc, "Remarks") Then
+        CopyColumnIfPresent loSrc, loDst, "From", rowCount
+        CopyColumnIfPresent loSrc, loDst, "To", rowCount
+        CopyColumnIfPresent loSrc, loDst, "Via", rowCount
+        CopyColumnIfPresent loSrc, loDst, "Remarks", rowCount
+        Exit Sub
+    End If
+
+    If Not ListColumnExists(loSrc, "Details") Then Exit Sub
+    sourceDetailsColumn = "Details"
+
+    For rowIndex = 1 To rowCount
+        splitValues = SplitLegacyDetailsText( _
+            CStr(loSrc.ListColumns(sourceDetailsColumn).DataBodyRange.Cells(rowIndex, 1).Value), _
+            airportLookup)
+
+        loDst.ListColumns("From").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(0)
+        loDst.ListColumns("To").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(1)
+        loDst.ListColumns("Via").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(2)
+        loDst.ListColumns("Remarks").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(3)
+    Next rowIndex
+End Sub
+
+Private Sub ConvertLegacyCurrencyColumns(ByVal loSrc As ListObject, _
+                                         ByVal loDst As ListObject, _
+                                         ByVal rowCount As Long)
+    Dim rowIndex As Long
+    Dim excluded As Boolean
+
+    If rowCount <= 0 Then Exit Sub
+    If Not ListColumnExists(loDst, "FR") Then Exit Sub
+    If Not ListColumnExists(loDst, "IPC") Then Exit Sub
+    If Not ListColumnExists(loDst, "OPC") Then Exit Sub
+
+    For rowIndex = 1 To rowCount
+        excluded = False
+        If ListColumnExists(loSrc, "CurrencyExclusions") Then
+            excluded = LogbookBooleanValue(loSrc, "CurrencyExclusions", rowIndex)
+        End If
+
+        If excluded Then
+            loDst.ListColumns("FR").DataBodyRange.Cells(rowIndex, 1).Value = False
+            loDst.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value = False
+            loDst.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value = False
+        Else
+            loDst.ListColumns("FR").DataBodyRange.Cells(rowIndex, 1).Value = _
+                LogbookCurrencyCheckValue(loSrc, "FR", rowIndex) Or _
+                LogbookCurrencyCheckValue(loSrc, "FlightReview", rowIndex) Or _
+                LogbookCurrencyCheckValue(loSrc, "IPC", rowIndex)
+            loDst.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value = _
+                LogbookCurrencyCheckValue(loSrc, "IPC", rowIndex)
+            loDst.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value = _
+                LogbookCurrencyCheckValue(loSrc, "OPC", rowIndex)
+        End If
+    Next rowIndex
+End Sub
+
+Private Function LogbookCurrencyCheckValue(ByVal lo As ListObject, _
+                                           ByVal columnName As String, _
+                                           ByVal rowIndex As Long) As Boolean
+    Dim value As Variant
+    Dim textValue As String
+
+    If Not ListColumnExists(lo, columnName) Then Exit Function
+    value = lo.ListColumns(columnName).DataBodyRange.Cells(rowIndex, 1).Value
+    If IsError(value) Then Exit Function
+
+    If VarType(value) = vbBoolean Then
+        LogbookCurrencyCheckValue = CBool(value)
+    ElseIf IsDate(value) Then
+        LogbookCurrencyCheckValue = True
+    Else
+        textValue = LCase$(Trim$(CStr(value)))
+        Select Case textValue
+            Case "true", "yes", "y", "1", "x"
+                LogbookCurrencyCheckValue = True
+        End Select
+    End If
+End Function
+
+Private Function LogbookBooleanValue(ByVal lo As ListObject, _
+                                     ByVal columnName As String, _
+                                     ByVal rowIndex As Long) As Boolean
+    Dim value As Variant
+
+    If Not ListColumnExists(lo, columnName) Then Exit Function
+    value = lo.ListColumns(columnName).DataBodyRange.Cells(rowIndex, 1).Value
+    If VarType(value) = vbBoolean Then
+        LogbookBooleanValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        LogbookBooleanValue = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                LogbookBooleanValue = True
+        End Select
+    End If
+End Function
+
+Private Sub CopyColumnIfPresent(ByVal loSrc As ListObject, _
+                                ByVal loDst As ListObject, _
+                                ByVal columnName As String, _
+                                ByVal rowCount As Long)
+    If Not ListColumnExists(loSrc, columnName) Then Exit Sub
+    If Not ListColumnExists(loDst, columnName) Then Exit Sub
+
+    loDst.ListColumns(columnName).DataBodyRange.Resize(rowCount, 1).Value = _
+        loSrc.ListColumns(columnName).DataBodyRange.Resize(rowCount, 1).Value
+End Sub
+
+Private Function BuildAirportAliasLookup(ByVal wb As Workbook) As Object
+    Dim lookup As Object
+    Dim loAirports As ListObject
+    Dim rowIndex As Long
+    Dim icao As String
+
+    Set lookup = CreateObject("Scripting.Dictionary")
+    lookup.CompareMode = 1
+
+    On Error Resume Next
+    Set loAirports = wb.Sheets("Airports").ListObjects("Airports")
+    On Error GoTo 0
+    If loAirports Is Nothing Then
+        Set BuildAirportAliasLookup = lookup
+        Exit Function
+    End If
+    If loAirports.DataBodyRange Is Nothing Then
+        Set BuildAirportAliasLookup = lookup
+        Exit Function
+    End If
+
+    For rowIndex = 1 To loAirports.DataBodyRange.Rows.Count
+        icao = UCase$(Trim$(CStr(loAirports.ListColumns("ICAO").DataBodyRange.Cells(rowIndex, 1).Value)))
+        If Len(icao) > 0 Then
+            AddAirportAlias lookup, icao, icao
+            AddAirportAlias lookup, CStr(loAirports.ListColumns("Two").DataBodyRange.Cells(rowIndex, 1).Value), icao
+            AddAirportAlias lookup, CStr(loAirports.ListColumns("Three").DataBodyRange.Cells(rowIndex, 1).Value), icao
+        End If
+    Next rowIndex
+
+    Set BuildAirportAliasLookup = lookup
+End Function
+
+Private Sub AddAirportAlias(ByVal lookup As Object, ByVal aliasText As String, ByVal icao As String)
+    aliasText = UCase$(Trim$(aliasText))
+    If Len(aliasText) = 0 Then Exit Sub
+    If Not lookup.Exists(aliasText) Then lookup.Add aliasText, icao
+End Sub
+
+Private Function SplitLegacyDetailsText(ByVal detailsText As String, ByVal airportLookup As Object) As Variant
+    Dim normalised As String
+    Dim delimiters As Variant
+    Dim delimiter As Variant
+    Dim tokens As Variant
+    Dim token As Variant
+    Dim tokenText As String
+    Dim matchedIcaos As Collection
+    Dim remarkTokens As Collection
+    Dim result(0 To 3) As String
+    Dim i As Long
+    Dim routeText As String
+    Dim remarksText As String
+
+    Set matchedIcaos = New Collection
+    Set remarkTokens = New Collection
+
+    normalised = Replace(detailsText, "|", "")
+    delimiters = Array("-", " ", ",", "(", ")")
+    For Each delimiter In delimiters
+        normalised = Replace(normalised, CStr(delimiter), "|")
+    Next delimiter
+
+    tokens = Split(normalised, "|")
+    For Each token In tokens
+        tokenText = Trim$(CStr(token))
+        If Len(tokenText) > 0 Then
+            If airportLookup.Exists(UCase$(tokenText)) Then
+                matchedIcaos.Add CStr(airportLookup(UCase$(tokenText)))
+            Else
+                remarkTokens.Add tokenText
+            End If
+        End If
+    Next token
+
+    If matchedIcaos.Count >= 1 Then result(0) = CStr(matchedIcaos(1))
+    If matchedIcaos.Count >= 2 Then result(1) = CStr(matchedIcaos(matchedIcaos.Count))
+    If matchedIcaos.Count > 2 Then
+        For i = 2 To matchedIcaos.Count - 1
+            If Len(routeText) > 0 Then routeText = routeText & "-"
+            routeText = routeText & CStr(matchedIcaos(i))
+        Next i
+        result(2) = routeText
+    End If
+
+    For i = 1 To remarkTokens.Count
+        If Len(remarksText) > 0 Then remarksText = remarksText & " "
+        remarksText = remarksText & CStr(remarkTokens(i))
+    Next i
+    result(3) = remarksText
+
+    SplitLegacyDetailsText = result
+End Function
 
 Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long)
     ' Fills formula columns from fromRow+1 down to toRow.
@@ -935,6 +1269,89 @@ Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long
 NextCol:
     Next colIdx
 End Sub
+
+Private Sub RefreshLogbookCalculatedFormulas(ByVal tbl As ListObject)
+    If tbl Is Nothing Then Exit Sub
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    SetLogbookColumnFormula tbl, "TotalHours", _
+        "=SUM(Logbook[[#This Row],[SeIcusDay]:[CopilotNight]])"
+    SetLogbookColumnFormula tbl, "TotalApps", _
+        "=SUM(Logbook[[#This Row],[ILS]:[DGA (Azi)]])"
+
+    SetLogbookRunningTotalFormula tbl, "CumLandingsDay", "LandingsDay", _
+        "Logbook[[#This Row],[LandingsDay]]"
+    SetLogbookRunningTotalFormula tbl, "CumLandingsNight", "LandingsNight", _
+        "Logbook[[#This Row],[LandingsNight]]"
+    SetLogbookRunningTotalFormula tbl, "CumILS", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula tbl, "CumVOR", "VOR", _
+        "Logbook[[#This Row],[VOR]]"
+    SetLogbookRunningTotalFormula tbl, "CumRNP", "RNP", _
+        "Logbook[[#This Row],[RNP]]"
+    SetLogbookRunningTotalFormula tbl, "CumNDB", "NDB", _
+        "Logbook[[#This Row],[NDB]]"
+    SetLogbookRunningTotalFormula tbl, "CumDgaCdi", "DGA (CDI)", _
+        "Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula tbl, "CumDgaAzi", "DGA (Azi)", _
+        "Logbook[[#This Row],[DGA (Azi)]]"
+    SetLogbookRunningTotalFormula tbl, "CumCirc", "Circling", _
+        "Logbook[[#This Row],[Circling]]"
+    SetLogbookRunningTotalFormula tbl, "CumTotalApps", "TotalApps", _
+        "Logbook[[#This Row],[TotalApps]]"
+    SetLogbookColumnFormula tbl, "CumTotalHours", _
+        "=SUM(INDEX(Logbook[TotalHours],1):Logbook[[#This Row],[TotalHours]])"
+    SetLogbookRunningTotalFormula tbl, "Cum2D", "VOR", _
+        "SUM(Logbook[[#This Row],[VOR]:[DGA (Azi)]])"
+    SetLogbookRunningTotalFormula tbl, "Cum3D", "ILS", _
+        "Logbook[[#This Row],[ILS]]"
+    SetLogbookRunningTotalFormula tbl, "CumCDI", "ILS", _
+        "SUM(Logbook[[#This Row],[ILS]:[RNP]])+Logbook[[#This Row],[DGA (CDI)]]"
+    SetLogbookRunningTotalFormula tbl, "CumAzi", "NDB", _
+        "Logbook[[#This Row],[NDB]]+Logbook[[#This Row],[DGA (Azi)]]"
+End Sub
+
+Private Sub SetLogbookColumnFormula(ByVal tbl As ListObject, _
+                                    ByVal columnName As String, _
+                                    ByVal formulaText As String)
+    If Not ListColumnExists(tbl, columnName) Then Exit Sub
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    tbl.ListColumns(columnName).DataBodyRange.Formula = formulaText
+End Sub
+
+Private Sub SetLogbookRunningTotalFormula(ByVal tbl As ListObject, _
+                                          ByVal columnName As String, _
+                                          ByVal sourceColumnName As String, _
+                                          ByVal currentRowExpression As String)
+    If Not ListColumnExists(tbl, columnName) Then Exit Sub
+    If Not ListColumnExists(tbl, sourceColumnName) Then Exit Sub
+    If tbl.ListColumns(columnName).DataBodyRange Is Nothing Then Exit Sub
+
+    tbl.ListColumns(columnName).DataBodyRange.FormulaR1C1 = _
+        "=IF(ROW()-ROW(Logbook[#Headers])=ROWS(Logbook[" & columnName & "])," & _
+        currentRowExpression & "," & currentRowExpression & _
+        "+INDEX(Logbook[" & columnName & "],ROW()-ROW(Logbook[#Headers])+1))"
+End Sub
+
+Private Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
+    Dim firstHoursColumn As Long
+
+    firstHoursColumn = tbl.ListColumns("SeIcusDay").Index
+    If ListColumnExists(tbl, "OPC") And tbl.ListColumns("OPC").Index < firstHoursColumn Then
+        LogbookCustomStartColumn = tbl.ListColumns("OPC").Index + 1
+    ElseIf ListColumnExists(tbl, "Details") Then
+        LogbookCustomStartColumn = tbl.ListColumns("Details").Index + 1
+    ElseIf ListColumnExists(tbl, "Remarks") Then
+        LogbookCustomStartColumn = tbl.ListColumns("Remarks").Index + 1
+    End If
+End Function
+
+Private Function ListColumnExists(ByVal tbl As ListObject, ByVal columnName As String) As Boolean
+    On Error Resume Next
+    ListColumnExists = Not tbl.ListColumns(columnName) Is Nothing
+    On Error GoTo 0
+End Function
 
 Private Sub CopyKeywordsData(masterWb As Workbook)
     Dim loSrc      As ListObject
@@ -984,6 +1401,146 @@ Private Sub CopyKeywordsData(masterWb As Workbook)
 Fail:
     Err.Clear
 End Sub
+
+Private Sub CopyBaseAirportSelections(masterWb As Workbook)
+    Dim loSrc As ListObject
+    Dim loDst As ListObject
+
+    On Error GoTo Fail
+
+    Set loSrc = FindListObject(ThisWorkbook, "BaseAirportsTop10")
+    Set loDst = FindListObject(masterWb, "BaseAirportsTop10")
+
+    If Not loSrc Is Nothing And Not loDst Is Nothing Then
+        CopyTableDataByMatchingColumns loSrc, loDst
+        ApplyBaseAirportCheckboxesIfAvailable loDst
+        Exit Sub
+    End If
+
+    If loDst Is Nothing Then Exit Sub
+    MigrateLegacyAirportBaseFlags loDst
+    ApplyBaseAirportCheckboxesIfAvailable loDst
+    Exit Sub
+Fail:
+    Err.Clear
+End Sub
+
+Private Sub CopyTableDataByMatchingColumns(ByVal loSrc As ListObject, ByVal loDst As ListObject)
+    Dim srcCol As ListColumn
+    Dim dstColIdx As Long
+    Dim sourceRows As Long
+    Dim destRows As Long
+
+    If loSrc Is Nothing Or loDst Is Nothing Then Exit Sub
+    If loSrc.DataBodyRange Is Nothing Then Exit Sub
+
+    sourceRows = loSrc.DataBodyRange.Rows.Count
+    If loDst.DataBodyRange Is Nothing Then
+        destRows = 0
+    Else
+        destRows = loDst.DataBodyRange.Rows.Count
+    End If
+
+    If destRows = 0 Then
+        loDst.ListRows.Add
+        destRows = 1
+    End If
+
+    If sourceRows > destRows Then
+        loDst.Resize loDst.Range.Resize(sourceRows + 1, loDst.ListColumns.Count)
+    ElseIf sourceRows < destRows Then
+        loDst.DataBodyRange.Rows(sourceRows + 1).Resize(destRows - sourceRows).Delete
+    End If
+
+    For Each srcCol In loSrc.ListColumns
+        dstColIdx = 0
+        On Error Resume Next
+        dstColIdx = loDst.ListColumns(srcCol.Name).Index
+        On Error GoTo 0
+        If dstColIdx > 0 Then
+            loDst.DataBodyRange.Columns(dstColIdx).Resize(sourceRows, 1).Value = _
+                srcCol.DataBodyRange.Resize(sourceRows, 1).Value
+        End If
+    Next srcCol
+End Sub
+
+Private Sub MigrateLegacyAirportBaseFlags(ByVal loDst As ListObject)
+    Dim loAirports As ListObject
+    Dim rowIndex As Long
+    Dim outputRow As Long
+    Dim icao As String
+    Dim airportName As String
+
+    Set loAirports = FindListObject(ThisWorkbook, "Airports")
+    If loAirports Is Nothing Then Exit Sub
+    If loAirports.DataBodyRange Is Nothing Then Exit Sub
+    If Not ListColumnExists(loAirports, "Base") Then Exit Sub
+
+    If loDst.DataBodyRange Is Nothing Then loDst.ListRows.Add
+    loDst.DataBodyRange.ClearContents
+    outputRow = 1
+
+    For rowIndex = 1 To loAirports.DataBodyRange.Rows.Count
+        If LegacyBaseValueIsChecked(loAirports.DataBodyRange.Cells(rowIndex, loAirports.ListColumns("Base").Index).Value) Then
+            If outputRow > loDst.DataBodyRange.Rows.Count Then loDst.ListRows.Add
+            icao = UCase$(Trim$(CStr(loAirports.DataBodyRange.Cells(rowIndex, loAirports.ListColumns("ICAO").Index).Value)))
+            airportName = Trim$(CStr(loAirports.DataBodyRange.Cells(rowIndex, loAirports.ListColumns("Airport").Index).Value))
+            loDst.DataBodyRange.Cells(outputRow, loDst.ListColumns("ICAO").Index).Value = icao
+            loDst.DataBodyRange.Cells(outputRow, loDst.ListColumns("Airport").Index).Value = airportName
+            loDst.DataBodyRange.Cells(outputRow, loDst.ListColumns("Base").Index).Value = True
+            outputRow = outputRow + 1
+        End If
+    Next rowIndex
+End Sub
+
+Private Sub ApplyBaseAirportCheckboxesIfAvailable(ByVal lo As ListObject)
+    If lo Is Nothing Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+    If Not ListColumnExists(lo, "Base") Then Exit Sub
+
+    On Error Resume Next
+    lo.ListColumns("Base").DataBodyRange.CellControl.SetCheckbox
+    Err.Clear
+    On Error GoTo 0
+End Sub
+
+Private Sub ApplyMasterLogbookFormatting(ByVal masterWb As Workbook)
+    Dim lo As ListObject
+
+    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
+
+    Application.Run "'" & masterWb.Name & "'!modLogbook.NormaliseLogbookFormatting", lo, masterWb
+    ApplyLogbookNativeCheckboxesIfAvailable lo
+End Sub
+
+Private Sub ApplyLogbookNativeCheckboxesIfAvailable(ByVal lo As ListObject)
+    Dim columnName As Variant
+
+    If lo Is Nothing Then Exit Sub
+    If lo.DataBodyRange Is Nothing Then Exit Sub
+
+    For Each columnName In Array("FR", "IPC", "OPC")
+        If ListColumnExists(lo, CStr(columnName)) Then
+            On Error Resume Next
+            lo.ListColumns(CStr(columnName)).DataBodyRange.CellControl.SetCheckbox
+            Err.Clear
+            On Error GoTo 0
+        End If
+    Next columnName
+End Sub
+
+Private Function LegacyBaseValueIsChecked(ByVal value As Variant) As Boolean
+    If VarType(value) = vbBoolean Then
+        LegacyBaseValueIsChecked = CBool(value)
+    ElseIf IsNumeric(value) Then
+        LegacyBaseValueIsChecked = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                LegacyBaseValueIsChecked = True
+        End Select
+    End If
+End Function
 
 Private Function FindListObject(ByVal wb As Workbook, ByVal tableName As String) As ListObject
     Dim ws As Worksheet
@@ -1057,10 +1614,12 @@ End Sub
 Private Sub CopyRouteCacheState(masterWb As Workbook)
     Dim routesBuilt As Variant
     Dim routesDirty As Variant
+    Dim masterRoutesDirty As Variant
     Dim routeVersion As Variant
 
     routesBuilt = GetWorkbookNameValue(ThisWorkbook, "RoutesBuilt", "")
     routesDirty = GetWorkbookNameValue(ThisWorkbook, "RoutesDirty", False)
+    masterRoutesDirty = GetWorkbookNameValue(masterWb, "RoutesDirty", False)
     routeVersion = GetWorkbookNameValue(ThisWorkbook, "RoutesDefinitionVersion", 0)
 
     If Trim(CStr(routesBuilt)) <> "" Then
@@ -1072,9 +1631,24 @@ Private Sub CopyRouteCacheState(masterWb As Workbook)
     End If
 
     SetWorkbookNameValue masterWb, "RoutesBuilt", routesBuilt
-    SetWorkbookNameValue masterWb, "RoutesDirty", routesDirty
+    SetWorkbookNameValue masterWb, "RoutesDirty", WorkbookBooleanValue(routesDirty) Or WorkbookBooleanValue(masterRoutesDirty)
     SetWorkbookNameValue masterWb, "RoutesDefinitionVersion", routeVersion
 End Sub
+
+Private Function WorkbookBooleanValue(ByVal value As Variant) As Boolean
+    If IsError(value) Then Exit Function
+
+    If VarType(value) = vbBoolean Then
+        WorkbookBooleanValue = CBool(value)
+    ElseIf IsNumeric(value) Then
+        WorkbookBooleanValue = (CDbl(value) <> 0)
+    Else
+        Select Case LCase$(Trim$(CStr(value)))
+            Case "true", "yes", "y", "1", "x"
+                WorkbookBooleanValue = True
+        End Select
+    End If
+End Function
 
 Private Function GetWorkbookNameValue(wb As Workbook, nameText As String, defaultValue As Variant) As Variant
     On Error GoTo Fail
@@ -1135,6 +1709,7 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
     Dim srcCol            As ListColumn
     Dim srcRng            As Range
     Dim dstRng            As Range
+    Dim sourceFormatName  As String
     Dim masterHeaderFont  As String
     Dim masterDataFont    As String
     Dim masterTotalsFont  As String
@@ -1156,22 +1731,26 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
         masterTotalsFont = dstLo.TotalsRowRange.Cells(1, 1).Font.Name
     End If
 		
-	' Copy the table style name from user to master
-    ' xlPasteFormats does not transfer ListObject.TableStyle
+    ' Copy the source workbook's table style and stripe settings. The migration
+    ' changes the schema, but the user's Logbook palette belongs to their file.
     On Error Resume Next
     dstLo.TableStyle = srcLo.TableStyle
+    dstLo.ShowTableStyleRowStripes = srcLo.ShowTableStyleRowStripes
+    dstLo.ShowTableStyleColumnStripes = srcLo.ShowTableStyleColumnStripes
+    dstLo.ShowTableStyleFirstColumn = srcLo.ShowTableStyleFirstColumn
+    dstLo.ShowTableStyleLastColumn = srcLo.ShowTableStyleLastColumn
     On Error GoTo Fail
 
-    ' Copy table formats by column name, not by rectangular position.
-    ' Data migration is name-based, so formatting must follow the same rule;
-    ' otherwise schema changes can shift a neighbouring column's number format
-    ' onto a correctly migrated column such as CumAzi.
+    ' Copy full table formats by destination column name, using source-template
+    ' columns for 2.0.0 columns that did not exist in older workbooks.
     For Each dstCol In dstLo.ListColumns
         If dstCol.Index > dstLo.ListColumns("CumAzi").Index Then Exit For
+        sourceFormatName = LogbookSourceFormatColumnName(srcLo, dstCol.Name)
+        If sourceFormatName = "" Then GoTo NextDestinationColumn
 
         Set srcCol = Nothing
         On Error Resume Next
-        Set srcCol = srcLo.ListColumns(dstCol.Name)
+        Set srcCol = srcLo.ListColumns(sourceFormatName)
         On Error GoTo Fail
 
         If Not srcCol Is Nothing Then
@@ -1182,6 +1761,7 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
             dstRng.PasteSpecial xlPasteFormats
             Application.CutCopyMode = False
         End If
+NextDestinationColumn:
     Next dstCol
 
     If masterHeaderFont <> "" Then dstLo.HeaderRowRange.Font.Name = masterHeaderFont
@@ -1205,6 +1785,48 @@ Fail:
     Application.CutCopyMode = False
     Err.Clear
 End Sub
+
+Private Function LogbookSourceFormatColumnName(ByVal srcLo As ListObject, _
+                                               ByVal columnName As String) As String
+    Select Case LCase$(columnName)
+        Case "details", "flightreview", "currencyexclusions", "rnav", "cumrnav"
+            LogbookSourceFormatColumnName = ""
+        Case "flight id"
+            If ListColumnExists(srcLo, "Flight ID") Then
+                LogbookSourceFormatColumnName = "Flight ID"
+            Else
+                LogbookSourceFormatColumnName = "Reg"
+            End If
+        Case "from", "to", "via", "remarks"
+            If ListColumnExists(srcLo, "Details") Then
+                LogbookSourceFormatColumnName = "Details"
+            Else
+                LogbookSourceFormatColumnName = columnName
+            End If
+        Case "fr", "ipc", "opc"
+            If ListColumnExists(srcLo, "Custom 1") Then
+                LogbookSourceFormatColumnName = "Custom 1"
+            Else
+                LogbookSourceFormatColumnName = "Details"
+            End If
+        Case "rnp"
+            If ListColumnExists(srcLo, "RNP") Then
+                LogbookSourceFormatColumnName = "RNP"
+            ElseIf ListColumnExists(srcLo, "RNAV") Then
+                LogbookSourceFormatColumnName = "RNAV"
+            End If
+        Case "cumrnp"
+            If ListColumnExists(srcLo, "CumRNP") Then
+                LogbookSourceFormatColumnName = "CumRNP"
+            ElseIf ListColumnExists(srcLo, "CumRNAV") Then
+                LogbookSourceFormatColumnName = "CumRNAV"
+            End If
+        Case Else
+            If ListColumnExists(srcLo, columnName) Then
+                LogbookSourceFormatColumnName = columnName
+            End If
+    End Select
+End Function
 
 Private Sub ApplyHiddenHourHeaderFormatting(masterWb As Workbook)
     Dim lo          As ListObject
@@ -1244,10 +1866,14 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
     Dim dstWs    As Worksheet
     Dim srcRow   As Long
     Dim dstRow   As Long
-    Dim regCol   As Long
-    Dim otherCol As Long
+    Dim srcFirstCol As Long
+    Dim srcOtherCol As Long
+    Dim dstFirstCol As Long
+    Dim dstOtherCol As Long
     Dim srcRange As Range
     Dim dstRange As Range
+    Dim srcSumRange As Range
+    Dim dstSumRange As Range
     Dim masterFont As String
 
     On Error GoTo Fail
@@ -1262,15 +1888,25 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
 
     ' Source: user's totals row + 1 row below - has the correct formatting
     srcRow   = srcLo.TotalsRowRange.Row
-    regCol   = srcLo.ListColumns("Reg").Range.Column
-    otherCol = srcLo.ListColumns("Other Pilot or Crew").Range.Column
-    Set srcRange = srcWs.Range(srcWs.Cells(srcRow, regCol), _
-                               srcWs.Cells(srcRow + 1, otherCol))
+    If ListColumnExists(srcLo, "Flight ID") Then
+        srcFirstCol = srcLo.ListColumns("Flight ID").Range.Column
+    Else
+        srcFirstCol = srcLo.ListColumns("Reg").Range.Column
+    End If
+    srcOtherCol = srcLo.ListColumns("Other Pilot or Crew").Range.Column
+    Set srcRange = srcWs.Range(srcWs.Cells(srcRow, srcFirstCol), _
+                               srcWs.Cells(srcRow + 1, srcOtherCol))
 
     ' Destination: master's totals row + 1 row below (same columns)
     dstRow = dstLo.TotalsRowRange.Row
-    Set dstRange = dstWs.Range(dstWs.Cells(dstRow, regCol), _
-                               dstWs.Cells(dstRow + 1, otherCol))
+    If ListColumnExists(dstLo, "Flight ID") Then
+        dstFirstCol = dstLo.ListColumns("Flight ID").Range.Column
+    Else
+        dstFirstCol = dstLo.ListColumns("Reg").Range.Column
+    End If
+    dstOtherCol = dstLo.ListColumns("Other Pilot or Crew").Range.Column
+    Set dstRange = dstWs.Range(dstWs.Cells(dstRow, dstFirstCol), _
+                               dstWs.Cells(dstRow + 1, dstOtherCol))
     If Not dstLo.DataBodyRange Is Nothing Then
         masterFont = dstLo.DataBodyRange.Cells(1, 1).Font.Name
     End If
@@ -1278,6 +1914,16 @@ Private Sub CopyTotalsFormatting(masterWb As Workbook)
     srcRange.Copy
     dstRange.PasteSpecial xlPasteFormats
     Application.CutCopyMode = False
+
+    Set srcSumRange = srcWs.Range(srcWs.Cells(srcRow, srcLo.ListColumns(LogbookCustomStartColumn(srcLo)).Range.Column), _
+                                  srcWs.Cells(srcRow, srcLo.ListColumns("TotalApps").Range.Column))
+    Set dstSumRange = dstWs.Range(dstWs.Cells(dstRow, dstLo.ListColumns(LogbookCustomStartColumn(dstLo)).Range.Column), _
+                                  dstWs.Cells(dstRow, dstLo.ListColumns("TotalApps").Range.Column))
+    srcSumRange.Copy
+    dstSumRange.PasteSpecial xlPasteFormats
+    Application.CutCopyMode = False
+    dstSumRange.WrapText = False
+
     If masterFont <> "" Then dstRange.Font.Name = masterFont
     Exit Sub
 Fail:
@@ -1285,374 +1931,192 @@ Fail:
     Err.Clear
 End Sub
 
-Private Sub NormaliseLogbookFormatting(masterWb As Workbook)
-    Dim lo As ListObject
-
-    Set lo = masterWb.Sheets("Logbook").ListObjects("Logbook")
-    NormaliseLogbookDataFormatting lo
-    NormaliseLogbookDataBorders lo
-    NormaliseLogbookTotalsFormatting lo
-    ApplyLogbookPalette masterWb, lo
-    ApplyLogbookTotalsRowBorders lo
-    ApplyLogbookTotalsFormatting masterWb, lo
-    ApplyVisibleLogbookOutsideBorder lo
-End Sub
-
-Private Sub NormaliseLogbookDataFormatting(lo As ListObject)
-    Dim templateRow As Range
-    Dim dataColumn As Range
-    Dim colIndex As Long
-
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    Set templateRow = lo.DataBodyRange.Rows(1)
-    lo.DataBodyRange.Font.Name = templateRow.Cells(1, 1).Font.Name
-    lo.DataBodyRange.Font.Size = templateRow.Cells(1, 1).Font.Size
-
-    For colIndex = 1 To lo.ListColumns.Count
-        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
-        With templateRow.Cells(1, colIndex)
-            dataColumn.HorizontalAlignment = .HorizontalAlignment
-            dataColumn.VerticalAlignment = .VerticalAlignment
-            dataColumn.WrapText = .WrapText
-            dataColumn.Orientation = .Orientation
-            dataColumn.IndentLevel = .IndentLevel
-            dataColumn.ShrinkToFit = .ShrinkToFit
-            dataColumn.ReadingOrder = .ReadingOrder
-        End With
-    Next colIndex
-End Sub
-
-Private Sub NormaliseLogbookDataBorders(lo As ListObject)
-    Dim templateRow As Range
-    Dim dataColumn As Range
-    Dim colIndex As Long
-    Dim leftLineStyle() As Variant
-    Dim leftWeight() As Variant
-    Dim leftColor() As Variant
-    Dim rightLineStyle() As Variant
-    Dim rightWeight() As Variant
-    Dim rightColor() As Variant
-
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    Set templateRow = lo.DataBodyRange.Rows(1)
-    ReDim leftLineStyle(1 To lo.ListColumns.Count)
-    ReDim leftWeight(1 To lo.ListColumns.Count)
-    ReDim leftColor(1 To lo.ListColumns.Count)
-    ReDim rightLineStyle(1 To lo.ListColumns.Count)
-    ReDim rightWeight(1 To lo.ListColumns.Count)
-    ReDim rightColor(1 To lo.ListColumns.Count)
-
-    For colIndex = 1 To lo.ListColumns.Count
-        With templateRow.Cells(1, colIndex).Borders(xlEdgeLeft)
-            leftLineStyle(colIndex) = .LineStyle
-            leftWeight(colIndex) = .Weight
-            leftColor(colIndex) = .Color
-        End With
-        With templateRow.Cells(1, colIndex).Borders(xlEdgeRight)
-            rightLineStyle(colIndex) = .LineStyle
-            rightWeight(colIndex) = .Weight
-            rightColor(colIndex) = .Color
-        End With
-    Next colIndex
-
-    lo.DataBodyRange.Borders.LineStyle = xlNone
-
-    For colIndex = 1 To lo.ListColumns.Count
-        Set dataColumn = lo.DataBodyRange.Columns(colIndex)
-        If leftLineStyle(colIndex) <> xlNone Then
-            SetBorderFormat dataColumn.Borders(xlEdgeLeft), _
-                            leftLineStyle(colIndex), leftWeight(colIndex), leftColor(colIndex)
-        End If
-        If rightLineStyle(colIndex) <> xlNone Then
-            SetBorderFormat dataColumn.Borders(xlEdgeRight), _
-                            rightLineStyle(colIndex), rightWeight(colIndex), rightColor(colIndex)
-        End If
-    Next colIndex
-End Sub
-
-Private Sub SetBorderFormat(ByVal targetBorder As Border, _
-                            ByVal lineStyle As Variant, _
-                            ByVal weight As Variant, _
-                            ByVal color As Variant)
-    If lineStyle = xlNone Then
-        targetBorder.LineStyle = xlNone
-        Exit Sub
-    End If
-
-    targetBorder.Weight = weight
-    targetBorder.Color = color
-    targetBorder.LineStyle = lineStyle
-End Sub
-
-Private Sub ApplyLogbookPalette(masterWb As Workbook, lo As ListObject)
-    Const SUM_TOTALS_LIGHTNESS As Double = 0.2
-    Dim headerRange As Range
-    Dim sumTotalsRange As Range
-    Dim secondaryColor As Long
-
-    If lo.DataBodyRange Is Nothing Then Exit Sub
-
-    secondaryColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
-
-    On Error Resume Next
-    Set headerRange = masterWb.Names("LogbookHeaders").RefersToRange
-    Set sumTotalsRange = masterWb.Names("LogbookSumTotals").RefersToRange
-    On Error GoTo 0
-
-    If Not headerRange Is Nothing Then
-        headerRange.Interior.Pattern = xlSolid
-        headerRange.Interior.Color = secondaryColor
-        headerRange.Font.Color = ContrastingTextColor(secondaryColor)
-    End If
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    lo.TotalsRowRange.Interior.Pattern = xlSolid
-    lo.TotalsRowRange.Interior.Color = vbBlack
-    lo.TotalsRowRange.Font.Color = vbWhite
-
-    If Not sumTotalsRange Is Nothing Then
-        sumTotalsRange.Interior.Pattern = xlSolid
-        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, SUM_TOTALS_LIGHTNESS)
-        sumTotalsRange.Font.Color = vbWhite
-    End If
-End Sub
-
-Private Function ColorWithLightness(ByVal sourceColor As Long, ByVal targetLightness As Double) As Long
-    Dim redValue As Double
-    Dim greenValue As Double
-    Dim blueValue As Double
-    Dim maximumValue As Double
-    Dim minimumValue As Double
-    Dim hue As Double
-    Dim saturation As Double
-    Dim lightness As Double
-    Dim firstChannel As Double
-    Dim secondChannel As Double
-
-    redValue = (sourceColor And &HFF&) / 255
-    greenValue = ((sourceColor \ &H100&) And &HFF&) / 255
-    blueValue = ((sourceColor \ &H10000) And &HFF&) / 255
-    maximumValue = WorksheetFunction.Max(redValue, greenValue, blueValue)
-    minimumValue = WorksheetFunction.Min(redValue, greenValue, blueValue)
-    lightness = (maximumValue + minimumValue) / 2
-
-    If maximumValue = minimumValue Then
-        ColorWithLightness = RGB(targetLightness * 255, targetLightness * 255, targetLightness * 255)
-        Exit Function
-    End If
-
-    If lightness > 0.5 Then
-        saturation = (maximumValue - minimumValue) / (2 - maximumValue - minimumValue)
-    Else
-        saturation = (maximumValue - minimumValue) / (maximumValue + minimumValue)
-    End If
-
-    If maximumValue = redValue Then
-        hue = (greenValue - blueValue) / (maximumValue - minimumValue)
-        If greenValue < blueValue Then hue = hue + 6
-    ElseIf maximumValue = greenValue Then
-        hue = (blueValue - redValue) / (maximumValue - minimumValue) + 2
-    Else
-        hue = (redValue - greenValue) / (maximumValue - minimumValue) + 4
-    End If
-    hue = hue / 6
-
-    secondChannel = targetLightness * (1 + saturation)
-    If targetLightness >= 0.5 Then secondChannel = targetLightness + saturation - targetLightness * saturation
-    firstChannel = 2 * targetLightness - secondChannel
-
-    ColorWithLightness = RGB(255 * HueChannel(firstChannel, secondChannel, hue + 1 / 3), _
-                             255 * HueChannel(firstChannel, secondChannel, hue), _
-                             255 * HueChannel(firstChannel, secondChannel, hue - 1 / 3))
-End Function
-
-Private Function HueChannel(ByVal firstChannel As Double, _
-                            ByVal secondChannel As Double, _
-                            ByVal hue As Double) As Double
-    If hue < 0 Then hue = hue + 1
-    If hue > 1 Then hue = hue - 1
-
-    If hue < 1 / 6 Then
-        HueChannel = firstChannel + (secondChannel - firstChannel) * 6 * hue
-    ElseIf hue < 1 / 2 Then
-        HueChannel = secondChannel
-    ElseIf hue < 2 / 3 Then
-        HueChannel = firstChannel + (secondChannel - firstChannel) * (2 / 3 - hue) * 6
-    Else
-        HueChannel = firstChannel
-    End If
-End Function
-
-Private Function ContrastingTextColor(ByVal backgroundColor As Long) As Long
-    Dim redValue As Long
-    Dim greenValue As Long
-    Dim blueValue As Long
-    Dim perceivedBrightness As Double
-
-    redValue = backgroundColor And &HFF&
-    greenValue = (backgroundColor \ &H100&) And &HFF&
-    blueValue = (backgroundColor \ &H10000) And &HFF&
-    perceivedBrightness = (redValue * 299 + greenValue * 587 + blueValue * 114) / 1000
-
-    If perceivedBrightness >= 150 Then
-        ContrastingTextColor = vbBlack
-    Else
-        ContrastingTextColor = vbWhite
-    End If
-End Function
-
-Private Sub ApplyLogbookTotalsRowBorders(lo As ListObject)
-    Dim totalsRange As Range
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set totalsRange = lo.TotalsRowRange
-    totalsRange.Borders.LineStyle = xlNone
-    SetBorderFormat totalsRange.Borders(xlEdgeTop), xlDouble, xlMedium, vbBlack
-    SetBorderFormat totalsRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsRange.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
-End Sub
-
-Private Sub NormaliseLogbookTotalsFormatting(lo As ListObject)
-    Dim totalsRange            As Range
-    Dim tableStyleName         As String
-    Dim tableFontName          As String
-    Dim tableFontSize          As Double
-    Dim columnCount            As Long
-    Dim colIndex               As Long
-    Dim numberFormats()        As Variant
-    Dim horizontalAlignments() As Variant
-    Dim verticalAlignments()   As Variant
-    Dim wrapTextValues()       As Variant
-
-    If Not lo.ShowTotals Then Exit Sub
-
-    Set totalsRange = lo.TotalsRowRange
-    tableStyleName = lo.TableStyle.Name
-    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
-    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
-    columnCount = lo.ListColumns.Count
-
-    ReDim numberFormats(1 To columnCount)
-    ReDim horizontalAlignments(1 To columnCount)
-    ReDim verticalAlignments(1 To columnCount)
-    ReDim wrapTextValues(1 To columnCount)
-
-    For colIndex = 1 To columnCount
-        With totalsRange.Cells(1, colIndex)
-            numberFormats(colIndex) = .NumberFormat
-            horizontalAlignments(colIndex) = .HorizontalAlignment
-            verticalAlignments(colIndex) = .VerticalAlignment
-            wrapTextValues(colIndex) = .WrapText
-        End With
-    Next colIndex
-
-    totalsRange.ClearFormats
-
-    For colIndex = 1 To columnCount
-        With totalsRange.Cells(1, colIndex)
-            .NumberFormat = numberFormats(colIndex)
-            .HorizontalAlignment = horizontalAlignments(colIndex)
-            .VerticalAlignment = verticalAlignments(colIndex)
-            .WrapText = wrapTextValues(colIndex)
-        End With
-    Next colIndex
-
-    lo.TableStyle = tableStyleName
-    totalsRange.Font.Name = tableFontName
-    totalsRange.Font.Size = tableFontSize
-End Sub
-
-Private Sub ApplyLogbookTotalsFormatting(masterWb As Workbook, lo As ListObject)
+Private Sub HideRowsBelowLogbookData(ByVal lo As ListObject, Optional ByVal bufferRows As Long = 7)
     Dim ws As Worksheet
-    Dim totalsBlock As Range
-    Dim topRow As Range
-    Dim bottomRow As Range
-    Dim labelCells As Range
-    Dim hoursCells As Range
-    Dim cellLeftOfBlock As Range
-    Dim nameFormula As String
-    Dim tableFontName As String
-    Dim tableFontSize As Double
-    Dim secondaryColor As Long
+    Dim lastDataRow As Long
 
-    If Not lo.ShowTotals Then Exit Sub
+    If lo Is Nothing Then Exit Sub
 
     Set ws = lo.Parent
-    Set totalsBlock = ws.Range(ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Reg").Range.Column), _
-                               ws.Cells(lo.TotalsRowRange.Row + 1, lo.ListColumns("Other Pilot or Crew").Range.Column))
-    Set topRow = totalsBlock.Rows(1)
-    Set bottomRow = totalsBlock.Rows(2)
-    Set labelCells = Union(topRow.Cells(1, 2), bottomRow.Cells(1, 2))
-    Set hoursCells = Union(topRow.Cells(1, 3), bottomRow.Cells(1, 3))
-    Set cellLeftOfBlock = bottomRow.Cells(1, 1).Offset(0, -1)
-    tableFontName = lo.DataBodyRange.Cells(1, 1).Font.Name
-    tableFontSize = lo.DataBodyRange.Cells(1, 1).Font.Size
-    secondaryColor = LogbookSecondaryFillColor(lo)
+    ws.Rows.Hidden = False
+    If lo.DataBodyRange Is Nothing Then Exit Sub
 
-    nameFormula = "='" & Replace(ws.Name, "'", "''") & "'!" & totalsBlock.Address
-    On Error Resume Next
-    masterWb.Names("LogbookTotals").RefersTo = nameFormula
-    If Err.Number <> 0 Then
-        Err.Clear
-        masterWb.Names.Add Name:="LogbookTotals", RefersTo:=nameFormula
+    lastDataRow = lo.DataBodyRange.Row + lo.DataBodyRange.Rows.Count - 1
+    If lastDataRow + bufferRows <= ws.Rows.Count Then
+        ws.Rows(lastDataRow + bufferRows & ":" & ws.Rows.Count).Hidden = True
     End If
-    On Error GoTo 0
-
-    topRow.Interior.Pattern = xlNone
-    topRow.Font.Color = vbBlack
-    topRow.Font.Bold = False
-    topRow.Cells(1, 3).Font.Bold = True
-
-    bottomRow.Interior.Pattern = xlSolid
-    bottomRow.Interior.Color = secondaryColor
-    bottomRow.Font.Color = ContrastingTextColor(secondaryColor)
-    bottomRow.Font.Bold = True
-    totalsBlock.Font.Name = tableFontName
-    totalsBlock.Font.Size = tableFontSize
-
-    labelCells.HorizontalAlignment = xlRight
-    labelCells.WrapText = False
-    hoursCells.HorizontalAlignment = xlCenter
-    hoursCells.VerticalAlignment = xlCenter
-    hoursCells.WrapText = False
-    bottomRow.Cells(1, 3).NumberFormat = topRow.Cells(1, 3).NumberFormat
-
-    totalsBlock.Borders.LineStyle = xlNone
-    SetBorderFormat totalsBlock.Borders(xlEdgeTop), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeLeft), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeRight), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlEdgeBottom), xlContinuous, xlMedium, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlInsideVertical), xlContinuous, xlThin, vbBlack
-    SetBorderFormat totalsBlock.Borders(xlInsideHorizontal), xlContinuous, xlThin, vbBlack
-    cellLeftOfBlock.Interior.Pattern = cellLeftOfBlock.Offset(0, -1).Interior.Pattern
-    cellLeftOfBlock.Interior.Color = cellLeftOfBlock.Offset(0, -1).Interior.Color
-    cellLeftOfBlock.Borders.LineStyle = xlNone
 End Sub
 
-Private Function LogbookSecondaryFillColor(lo As ListObject) As Long
-    LogbookSecondaryFillColor = lo.DataBodyRange.Rows(1).Cells(1, 1).DisplayFormat.Interior.Color
+Private Sub RepairLogbookActionButtons(lo As ListObject)
+    RepairLogbookActionButton lo, _
+                           "DeleteSelectedLogbookRowsButton", _
+                           "DeleteSelectedLogbookRows", _
+                           "Year", _
+                           False
+    RepairLogbookActionButton lo, _
+                           "ExportLogbookButton", _
+                           "ExportLogbook", _
+                           "To", _
+                           True
+End Sub
+
+Private Sub RepairLogbookActionButton(lo As ListObject, _
+                                      ByVal buttonName As String, _
+                                      ByVal actionName As String, _
+                                      ByVal alignColumnName As String, _
+                                      ByVal rebuildIfStillAway As Boolean)
+    Dim ws      As Worksheet
+    Dim btn     As Shape
+    Dim topRow  As Long
+    Dim leftCol As Long
+    Dim targetLeft As Double
+    Dim targetTop  As Double
+
+    On Error GoTo CleanFail
+    Set ws = lo.Parent
+    Set btn = ws.Shapes(buttonName)
+
+    topRow = lo.TotalsRowRange.Row + 2
+    leftCol = lo.ListColumns(alignColumnName).Range.Column
+    If topRow + 3 > ws.Rows.Count Then Exit Sub
+
+    targetLeft = ws.Cells(topRow, leftCol).Left
+    targetTop = ws.Cells(topRow, leftCol).Top
+    ConfigureShapeAction btn, actionName
+
+    MoveLogbookActionButton btn, targetLeft, targetTop
+
+    If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
+        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        MoveLogbookActionButton btn, targetLeft, targetTop
+    End If
+
+    If rebuildIfStillAway Then
+        If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
+            RebuildLogbookActionButtonGroup ws, btn, buttonName, actionName, targetLeft, targetTop
+        End If
+    End If
+CleanFail:
+End Sub
+
+Private Sub ConfigureShapeAction(ByVal shp As Shape, ByVal actionName As String)
+    Dim item As Shape
+
+    On Error Resume Next
+    shp.OnAction = actionName
+    If shp.Type = msoGroup Then
+        For Each item In shp.GroupItems
+            item.OnAction = actionName
+        Next item
+    End If
+    On Error GoTo 0
+End Sub
+
+Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
+                                                   ByVal topRow As Long, _
+                                                   ByVal leftCol As Long)
+    Dim restoreRow As Long
+    Dim previousScreenUpdating As Boolean
+
+    On Error Resume Next
+    previousScreenUpdating = Application.ScreenUpdating
+    Application.ScreenUpdating = False
+    ws.Parent.Activate
+    ws.Activate
+    Application.Goto ws.Cells(topRow, leftCol), True
+    restoreRow = topRow - 30
+    If restoreRow < 1 Then restoreRow = 1
+    ActiveWindow.ScrollColumn = 1
+    ActiveWindow.ScrollRow = restoreRow
+    Application.ScreenUpdating = previousScreenUpdating
+    If previousScreenUpdating Then DoEvents
+    On Error GoTo 0
+End Sub
+
+Private Sub MoveLogbookActionButton(ByVal btn As Shape, _
+                                    ByVal targetLeft As Double, _
+                                    ByVal targetTop As Double)
+    btn.Placement = xlFreeFloating
+    btn.Visible = msoTrue
+    btn.Left = targetLeft
+    btn.Top = targetTop
+    btn.Width = LOGBOOK_ACTION_BUTTON_WIDTH
+    btn.Height = LOGBOOK_ACTION_BUTTON_HEIGHT
+    btn.ZOrder msoBringToFront
+End Sub
+
+Private Function LogbookActionButtonIsAwayFromTarget(ByVal btn As Shape, _
+                                                     ByVal targetLeft As Double, _
+                                                     ByVal targetTop As Double) As Boolean
+    LogbookActionButtonIsAwayFromTarget = _
+        Abs(btn.Left - targetLeft) > LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE Or _
+        Abs(btn.Top - targetTop) > LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE
 End Function
 
-Private Sub ApplyVisibleLogbookOutsideBorder(lo As ListObject)
-    Dim visibleRange As Range
-    Dim ws As Worksheet
+Private Function LogbookActionButtonFallbackText(ByVal buttonName As String) As String
+    Select Case buttonName
+        Case "DeleteSelectedLogbookRowsButton"
+            LogbookActionButtonFallbackText = "Delete Selected"
+        Case Else
+            LogbookActionButtonFallbackText = "Export Logbook"
+    End Select
+End Function
 
-    If Not lo.ShowTotals Then Exit Sub
+Private Sub RebuildLogbookActionButtonGroup(ByVal ws As Worksheet, _
+                                            ByVal btn As Shape, _
+                                            ByVal buttonName As String, _
+                                            ByVal actionName As String, _
+                                            ByVal targetLeft As Double, _
+                                            ByVal targetTop As Double)
+    Dim oldLeft      As Double
+    Dim oldTop       As Double
+    Dim itemCount    As Long
+    Dim itemNames()  As String
+    Dim itemLefts()  As Double
+    Dim itemTops()   As Double
+    Dim i            As Long
+    Dim sr           As ShapeRange
+    Dim rebuilt      As Shape
 
-    Set ws = lo.Parent
-    Set visibleRange = ws.Range(ws.Cells(2, lo.ListColumns("Date").Range.Column), _
-                                ws.Cells(lo.TotalsRowRange.Row, lo.ListColumns("Circling").Range.Column))
+    On Error GoTo Fallback
 
-    SetBorderFormat visibleRange.Borders(xlEdgeTop), xlContinuous, xlThin, vbBlack
-    SetBorderFormat visibleRange.Borders(xlEdgeLeft), xlContinuous, xlThin, vbBlack
-    SetBorderFormat visibleRange.Borders(xlEdgeRight), xlContinuous, xlThin, vbBlack
-    SetBorderFormat visibleRange.Borders(xlEdgeBottom), xlContinuous, xlThin, vbBlack
+    If btn.Type <> msoGroup Then GoTo Fallback
+
+    oldLeft = btn.Left
+    oldTop = btn.Top
+    itemCount = btn.GroupItems.Count
+    ReDim itemNames(1 To itemCount)
+    ReDim itemLefts(1 To itemCount)
+    ReDim itemTops(1 To itemCount)
+
+    For i = 1 To itemCount
+        itemNames(i) = btn.GroupItems.Item(i).Name
+        itemLefts(i) = btn.GroupItems.Item(i).Left
+        itemTops(i) = btn.GroupItems.Item(i).Top
+    Next i
+
+    Set sr = btn.Ungroup
+    For i = 1 To itemCount
+        ws.Shapes(itemNames(i)).Left = targetLeft + (itemLefts(i) - oldLeft)
+        ws.Shapes(itemNames(i)).Top = targetTop + (itemTops(i) - oldTop)
+        ws.Shapes(itemNames(i)).OnAction = actionName
+    Next i
+
+    Set rebuilt = ws.Shapes.Range(itemNames).Group
+    rebuilt.Name = buttonName
+    MoveLogbookActionButton rebuilt, targetLeft, targetTop
+    Exit Sub
+
+Fallback:
+    On Error Resume Next
+    btn.Delete
+    Set rebuilt = ws.Shapes.AddShape(msoShapeRoundedRectangle, targetLeft, targetTop, _
+                                     LOGBOOK_ACTION_BUTTON_WIDTH, LOGBOOK_ACTION_BUTTON_HEIGHT)
+    rebuilt.Name = buttonName
+    rebuilt.TextFrame.Characters.Text = LogbookActionButtonFallbackText(buttonName)
+    ConfigureShapeAction rebuilt, actionName
+    MoveLogbookActionButton rebuilt, targetLeft, targetTop
+    On Error GoTo 0
 End Sub
 
 ' ==============================================================
@@ -1722,13 +2186,15 @@ Private Sub RefreshAndRegroupPivots(masterWb As Workbook)
     Exit Sub
 
 GroupFail:
-    MsgBox "Warning: HoursByYear date grouping could not be automatically restored." & vbCrLf & vbCrLf & _
-           "Error " & Err.Number & ": " & Err.Description & vbCrLf & vbCrLf & _
-           "To fix manually in the updated file:" & vbCrLf & _
+    MsgBox BuildUpdateUserFacingErrorMessage( _
+           "HoursByYear date grouping could not be automatically restored.", _
+           "The update can still be used, but the Hours by Year chart may need a manual refresh." & vbCrLf & vbCrLf & _
+           "To fix it in the updated file:" & vbCrLf & _
            "  1. Open the HoursByYear pivot table" & vbCrLf & _
            "  2. Remove 'Date' from the Rows field" & vbCrLf & _
            "  3. Press Ctrl+Alt+F5 to refresh all" & vbCrLf & _
            "  4. Re-add 'Date' to the Rows field", _
+           Err.Number, Err.Source, Err.Description, "Restoring HoursByYear pivot date grouping"), _
            vbExclamation, "Pivot Grouping Warning"
     Err.Clear
 End Sub
@@ -1909,7 +2375,13 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
 
     wizardPath = ResolveWizardExecutablePath(repository, targetVersion)
     If wizardPath = "" Then
-        If reason = "" Then reason = "No wizard asset was found in release assets."
+        If reason = "" Then
+            If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
+                reason = "Development updater wizard could not be found or downloaded."
+            Else
+                reason = "No wizard asset was found in release assets."
+            End If
+        End If
         Exit Function
     End If
     If Dir$(wizardPath) = "" Then
@@ -1968,12 +2440,22 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
 
     If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
         tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
-        candidate = tempFolder & "\" & WIZARD_EXE_NAME
-        If Dir$(candidate) <> "" Then
-            ResolveWizardExecutablePath = candidate
-        Else
-            ResolveWizardExecutablePath = ""
+        If mResolvedRef <> "" Then
+            tempFolder = tempFolder & "_" & SafePathSegment(Left$(mResolvedRef, 12))
+        ElseIf targetVersion <> "" Then
+            tempFolder = tempFolder & "_" & SafePathSegment(targetVersion)
         End If
+        If Dir$(tempFolder, vbDirectory) = "" Then MkDir tempFolder
+
+        candidate = tempFolder & "\" & WIZARD_EXE_NAME
+        If Dir$(candidate) = "" Then
+            If Not DownloadDevelopmentWizardPackage(repository, candidate, tempFolder) Then
+                ResolveWizardExecutablePath = ""
+                Exit Function
+            End If
+        End If
+
+        ResolveWizardExecutablePath = candidate
         Exit Function
     End If
 
@@ -1992,6 +2474,34 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     End If
 
     ResolveWizardExecutablePath = candidate
+End Function
+
+Private Function DownloadDevelopmentWizardPackage(ByVal repository As String, _
+                                                  ByVal destinationExePath As String, _
+                                                  ByVal tempFolder As String) As Boolean
+    Dim downloadUrl As String
+    Dim commitPath As String
+    Dim publishedCommit As String
+    Dim devWizardTag As String
+
+    If mResolvedRef = "" Then Exit Function
+    devWizardTag = DEV_WIZARD_TAG_PREFIX & SafePathSegment(Left$(mResolvedRef, 12))
+
+    commitPath = tempFolder & "\" & DEV_WIZARD_COMMIT_NAME
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & devWizardTag & "/" & DEV_WIZARD_COMMIT_NAME
+    If Not DownloadFile(downloadUrl, commitPath) Then Exit Function
+
+    publishedCommit = Trim$(ReadFirstTextLine(commitPath))
+    If StrComp(publishedCommit, mResolvedRef, vbTextCompare) <> 0 Then Exit Function
+
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & devWizardTag & "/" & WIZARD_EXE_NAME
+    If TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder) Then
+        DownloadDevelopmentWizardPackage = True
+        Exit Function
+    End If
+
+    downloadUrl = "https://github.com/" & repository & "/releases/download/" & devWizardTag & "/" & WIZARD_ZIP_NAME
+    DownloadDevelopmentWizardPackage = TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder)
 End Function
 
 Private Function SafePathSegment(ByVal value As String) As String
@@ -2014,6 +2524,25 @@ Private Function SafePathSegment(ByVal value As String) As String
 
     If result = "" Then result = "current"
     SafePathSegment = result
+End Function
+
+Private Function ReadFirstTextLine(ByVal filePath As String) As String
+    Dim fileNumber As Integer
+    Dim lineText As String
+
+    On Error GoTo Fail
+    fileNumber = FreeFile
+    Open filePath For Input As #fileNumber
+    Line Input #fileNumber, lineText
+    Close #fileNumber
+    ReadFirstTextLine = lineText
+    Exit Function
+
+Fail:
+    On Error Resume Next
+    If fileNumber <> 0 Then Close #fileNumber
+    On Error GoTo 0
+    ReadFirstTextLine = ""
 End Function
 
 Private Function DownloadLatestWizardPackage(ByVal repository As String, _
@@ -2518,6 +3047,8 @@ ValidationFailed:
     errN = Err.Number
     errD = Err.Description
     If failReason = "" Then failReason = errD
+    If failReason = "" Then failReason = "Staged update validation failed."
+    mLastUpdateFailureReason = failReason
     On Error Resume Next
     If Not stagedWb Is Nothing Then stagedWb.Close SaveChanges:=False
     Application.AutomationSecurity = prevSec

@@ -18,7 +18,6 @@ if ([string]::IsNullOrWhiteSpace($WorkbookPath)) {
 }
 
 $standardModules = @("modBoot", "modLogbook")
-$userForms = @("frmVerifyCurrency")
 if ($IncludeModUpdate) {
     $standardModules += "modUpdate"
 }
@@ -38,19 +37,6 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -ReadOnly -Visible:$Visible -Ope
         }
         $components.Item($moduleName).Export($destination)
         Write-Host "  Exported $moduleName.bas"
-    }
-
-    foreach ($formName in $userForms) {
-        $destination = Join-Path $repoRoot "$formName.frm"
-        $binaryCompanion = Join-Path $repoRoot "$formName.frx"
-        if (Test-Path $destination) {
-            Remove-Item -LiteralPath $destination -Force
-        }
-        if (Test-Path $binaryCompanion) {
-            Remove-Item -LiteralPath $binaryCompanion -Force
-        }
-        $components.Item($formName).Export($destination)
-        Write-Host "  Exported $formName.frm"
     }
 
     $thisWorkbookComponent = $components.Item("ThisWorkbook")

@@ -20,13 +20,13 @@ public sealed record UpdaterOptions(
           --master <master.xlsm>   Use a local master workbook instead of GitHub latest release.
           --report <report.json>   Write the validation report to a specific path.
           --repo <owner/name>      GitHub repository. Defaults to alphadelta332/Electronic-Logbook.
-                    --inplace                Replace source filename with updated file and keep *_Old backup.
-                    --no-inplace             Disable in-place swap behavior.
+          --inplace                Replace source filename with updated file and keep *_Old backup.
+          --no-inplace             Keep output as a separate file (the default).
           --help                   Show this help.
 
         Safety:
-                    By default, the source workbook is replaced in-place after validation and a
-                    timestamped *_Old backup is created in the same folder.
+          By default, the source workbook is left unchanged and the validated workbook remains at
+          the output path. With --inplace, a timestamped *_Old backup is created beside the source.
           The output path must not already exist.
         """;
 

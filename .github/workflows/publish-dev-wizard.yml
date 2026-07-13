@@ -1,0 +1,81 @@
+name: Publish dev wizard
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-dev-wizard
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish dev wizard asset
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Build wizard asset
+        shell: pwsh
+        run: ./updater/Publish-WizardAsset.ps1
+
+      - name: Publish dev wizard release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          $tag = "dev-wizard-$shortSha"
+          $title = "Development updater wizard $shortSha"
+          Set-Content -Path dev-wizard-commit.txt -Value $env:GITHUB_SHA -Encoding ascii
+          $notes = @"
+          Development wizard asset for dev-channel workbook update testing.
+
+          Commit: $env:GITHUB_SHA
+          Branch: $env:GITHUB_REF_NAME
+          "@
+
+          gh release view $tag --repo $env:GITHUB_REPOSITORY --json tagName | Out-Null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release $tag already exists; leaving immutable release unchanged."
+          } else {
+            gh release create $tag `
+              updater/dist/ElectronicLogbook.Updater.Wizard.exe `
+              updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
+              dev-wizard-commit.txt `
+              --repo $env:GITHUB_REPOSITORY `
+              --title $title `
+              --notes $notes `
+              --prerelease `
+              --target $env:GITHUB_SHA `
+              --latest=false
+          }
+
+          $devReleases = gh release list `
+            --repo $env:GITHUB_REPOSITORY `
+            --limit 100 `
+            --json tagName,isPrerelease `
+            | ConvertFrom-Json
+
+          foreach ($release in $devReleases) {
+            $oldTag = [string]$release.tagName
+            if ($oldTag -eq $tag) { continue }
+            if (-not $release.isPrerelease) { continue }
+            if ($oldTag -ne "dev-wizard" -and -not $oldTag.StartsWith("dev-wizard-")) { continue }
+
+            Write-Host "Deleting old development wizard release $oldTag."
+            gh release delete $oldTag `
+              --repo $env:GITHUB_REPOSITORY `
+              --cleanup-tag `
+              --yes
+          }

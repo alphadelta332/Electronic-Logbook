@@ -8,6 +8,33 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [2.0.0] - 2026-07-13
+#### General
+- Improved workbook opening feedback so Excel shows what the logbook is working on during startup.
+- Redesigned the Logbook and New Entry sheets so route details are entered in separate fields: Flight ID, From, To, Via, and Remarks.
+- Expanded airport data to better support international flying, with improved airport visit and base-airport statistics.
+- Updated route map handling to use the new route fields, with prompts to rebuild route data when needed.
+
+#### Updater
+- Improved the update process for this larger upgrade, including better backups, clearer error messages, and extra checks that migrated logbooks were saved correctly.
+- Added an Update Compatibility Floor of `v1.4.1`
+
+#### New Entry
+- Added direct checkboxes for Flight Review, IPC, and OPC entries, replacing the old currency verification pop-up.
+- Added clearer New Entry warnings, including highlighted fields when something needs to be fixed or reviewed.
+- Added airport-code suggestions and warnings for unrecognised departure, destination, or via airports.
+
+#### Logbook
+- Added new **Delete Selected Rows** button to allow deleting entries with workbook protection
+- Added **Export Logbook** feature, to allow for XLSX, CSV, and PDF exports
+
+#### Currency + Recency
+- Adjusted table layout to more accurately show which items are specific to Engine Class
+- Fixed some incorrectly calculating recency items
+
+#### Stats
+- Added **Base** table, allowing user to select and deselect their Base Airports, sorted by Top 10 visits
+
 ### [1.4.2] - 2026-06-25
 - Improved protected Logbook row deletion for removing placeholder entries
 - Reduced Add To Logbook sorting work when new entries are already in date order
@@ -179,15 +206,20 @@ Only enable macros and VBA project access for workbooks downloaded from this rep
 
 The release workbook may run in protected mode to reduce accidental edits. Intended input areas remain editable, including New Entry (`ne*`) fields, supported override/settings cells, and editable Logbook table data.
 
-For development workflows, protection can be toggled with macros:
+Protection follows the workbook's `GitHubBranch` named range:
 
-1. `DisableProtectionForDevelopment`
-2. `EnableProtectionForRelease`
+- `dev`: protection is removed automatically each time the workbook opens.
+- `main`: protection is applied automatically each time the workbook opens.
+
+For development workflows, protection mode can be toggled persistently with macros:
+
+1. `DisableProtectionForDevelopment` sets `GitHubBranch` to `dev` and removes protection.
+2. `EnableProtectionForRelease` sets `GitHubBranch` to `main` and applies protection.
 
 Preparation scripts also attempt to call these macros automatically:
 
-- `PrepareForTesting.ps1` disables protection mode when available.
-- `PrepareForRelease.ps1` enables protection mode when available.
+- `PrepareForTesting.ps1` sets `GitHubBranch` to `dev`, so protection stays off across launches.
+- `PrepareForRelease.ps1` sets `GitHubBranch` to `main`, so protection is restored for release.
 
 ### 4. First open -- build the Routes table
 
@@ -220,9 +252,9 @@ Always add entries using the **New Entry** sheet -- do not attempt to add rows m
 
 After an entry is added, the Logbook table is automatically sorted by Date. Depending on your date reset setting, the New Entry date can reset to today or to the day after the entry you just added.
 
-The Details field is checked against the workbook's **Keywords** table to identify IPC, OPC, and Flight Review entries. Matching entries feed the relevant currency and recency calculations, and the logbook asks for confirmation before saving them. Keywords can be configured to match the terms you normally use.
+Use the **FR**, **IPC**, and **OPC** checkboxes on the New Entry sheet to record qualifying currency items. These selections feed the relevant currency and recency calculations; they are not inferred from the Remarks field.
 
-Only use an OPC keyword for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption and 61.880 proficiency-validity logic.
+Only tick **OPC** for a qualifying operator proficiency check that covered IFR operations. Qualifying OPC entries feed the 61.870 3-month recency exemption. If an OPC also qualifies as an IPC for 61.880 proficiency validity or circling currency, tick **IPC** as well; the IPC checkbox is the source of truth for those calculations.
 
 The entry form includes validation that will warn you of potential errors before saving, including:
 
@@ -247,8 +279,11 @@ You can edit existing entries directly in the **Logbook** sheet. The following r
 
 To delete one or more logbook entries:
 
-1. In the **Logbook** sheet, click the row number(s) on the left to select the entire row(s)
-2. Right-click and select **Delete**
+1. In the **Logbook** sheet, select one or more cells in the entry row(s) you want to remove
+2. Click **Delete Selected** below the Logbook table
+3. Confirm the deletion when prompted
+
+Use the **Delete Selected** button instead of Excel's right-click **Delete** command. The Logbook sheet is protected to prevent accidental formula edits, and Excel may block native row deletion while protected formula cells are present.
 
 > **Important:** Do not delete the placeholder entries until you have added at least two of your own entries. The placeholder rows are required to maintain the correct table and formula structure during the initial setup period.
 

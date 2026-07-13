@@ -57,6 +57,14 @@ Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
         $issues.Add("LogbookVersion is '$workbookVersion' but version.txt is '$version'.")
     }
 
+    try {
+        if ($Workbook.RemovePersonalInformation) {
+            $issues.Add("RemovePersonalInformation is enabled. Public workbooks should rely on explicit readiness checks, not Excel's modal Document Inspector save flag.")
+        }
+    } catch {
+        $issues.Add("Could not inspect RemovePersonalInformation workbook setting.")
+    }
+
     if ($CheckExternalLinks) {
         foreach ($connection in @($Workbook.Connections)) {
             $issues.Add("Workbook contains external connection '$($connection.Name)'. Review before publishing.")

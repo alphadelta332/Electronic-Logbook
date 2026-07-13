@@ -10,10 +10,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $sourceFiles = @(
     "modBoot.bas",
+    "modAirports.bas",
     "modLogbook.bas",
     "modUpdate.bas",
-    "ThisWorkbook.cls",
-    "frmVerifyCurrency.frm"
+    "ThisWorkbook.cls"
 )
 $issues = New-Object System.Collections.Generic.List[string]
 
@@ -43,5 +43,7 @@ foreach ($relativePath in $sourceFiles) {
 if ($issues.Count -gt 0) {
     throw "VBA source quality checks failed:`n - " + ($issues -join "`n - ")
 }
+
+& (Join-Path $repoRoot "tools\Test-VbaWorkbookPairing.ps1") -RepoRoot $repoRoot
 
 Write-Host "VBA source quality checks passed." -ForegroundColor Green

@@ -35,7 +35,7 @@ public partial class MainWindow : Window
         [UpdaterPhaseIds.CopyLogbookData] = 40,
         [UpdaterPhaseIds.CopyKeywordsData] = 50,
         [UpdaterPhaseIds.CopyRoutesData] = 58,
-        [UpdaterPhaseIds.CopyAirportBaseFlags] = 64,
+        [UpdaterPhaseIds.CopyBaseAirportSelections] = 64,
         [UpdaterPhaseIds.CopyNamedPreferences] = 70,
         [UpdaterPhaseIds.RestoreLogbookPresentation] = 76,
         [UpdaterPhaseIds.CalculateOutputWorkbook] = 82,
@@ -113,7 +113,32 @@ public partial class MainWindow : Window
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
+        var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
+        string? availabilityFailureReason = null;
+        if (identifiedInstalledVersion)
+        {
+            try
+            {
+                if (!compatibilityPolicy.IsVersionSupported(installedVersion!))
+                {
+                    identifiedInstalledVersion = false;
+                    availabilityFailureReason =
+                        "Unable to update - workbook does not meet minimum version requirements.";
+                    InstalledVersionText.Text =
+                        $"Installed version: {installedVersion} (automatic updates require " +
+                        $"{compatibilityPolicy.MinimumSupportedVersion} or newer)";
+                }
+            }
+            catch (InvalidDataException)
+            {
+                identifiedInstalledVersion = false;
+                availabilityFailureReason =
+                    "Unable to update - workbook version format is not supported.";
+                InstalledVersionText.Text =
+                    $"Installed version: {installedVersion} (version format is not supported)";
+            }
+        }
         var identifiedUpdateChannel = false;
 
         if (_context.UsesProvidedMaster)
@@ -151,7 +176,7 @@ public partial class MainWindow : Window
         _isCheckingAvailability = false;
         FooterStatusText.Text = _availabilityReady
             ? "Ready"
-            : "Could not identify installed version or update channel.";
+            : availabilityFailureReason ?? "Could not identify installed version or update channel.";
         UpdateWizardView();
     }
 
@@ -472,6 +497,11 @@ public partial class MainWindow : Window
     {
         if (_stepIndex == 5)
         {
+            if (OpenUpdatedCheckBox.IsEnabled && OpenUpdatedCheckBox.IsChecked == true)
+            {
+                OpenLastOutputWorkbook();
+            }
+
             Close();
             return;
         }
@@ -570,20 +600,27 @@ public partial class MainWindow : Window
                 source,
                 resolvedMaster,
                 stagedOutput,
-                manifest)), _updateCts.Token);
+                manifest), _updateCts.Token), _updateCts.Token);
 
             _lastOutputPath = stagedOutput;
             _lastBackupPath = null;
-            _lastReportPath = _context.UseInPlaceSwap
-                ? Path.ChangeExtension(source, ".update-report.json")
-                : Path.ChangeExtension(stagedOutput, ".update-report.json");
-            if (DetailedLoggingCheckBox.IsChecked != false)
+            _lastReportPath = null;
+            if (DetailedLoggingCheckBox.IsChecked == true)
             {
+                _lastReportPath = _context.UseInPlaceSwap
+                    ? Path.ChangeExtension(source, ".update-report.json")
+                    : Path.ChangeExtension(stagedOutput, ".update-report.json");
                 await File.WriteAllTextAsync(
                     _lastReportPath,
                     JsonSerializer.Serialize(report, JsonDefaults.Indented),
                     _updateCts.Token);
+                AppendLog($"Detailed diagnostic report: {_lastReportPath}");
             }
+            AppendLog(
+                "airport visit stats: " +
+                $"{report.AirportVisitStats.WrittenVisitedAirportRows} written, " +
+                $"{report.AirportVisitStats.SavedNonBlankVisitRows} saved, " +
+                $"{report.AirportVisitStats.LogbookRowsWithRecognisedAirports} recognised logbook rows");
 
             if (_context.UseInPlaceSwap)
             {
@@ -608,7 +645,8 @@ public partial class MainWindow : Window
             CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
                 ? string.Empty
                 : $"Backup workbook: {_lastBackupPath}";
-            OpenUpdatedButton.IsEnabled = finalWorkbookReady;
+            OpenUpdatedCheckBox.IsEnabled = finalWorkbookReady;
+            OpenUpdatedCheckBox.IsChecked = finalWorkbookReady;
             FooterStatusText.Text = finalWorkbookReady
                 ? "Update completed."
                 : "Update completed. Wait for sync before opening.";
@@ -621,7 +659,8 @@ public partial class MainWindow : Window
             CompleteSummaryText.Text = "Update was cancelled before completion.";
             CompleteOutputPathText.Text = "Updated workbook: not created";
             CompleteBackupPathText.Text = string.Empty;
-            OpenUpdatedButton.IsEnabled = false;
+            OpenUpdatedCheckBox.IsEnabled = false;
+            OpenUpdatedCheckBox.IsChecked = false;
             FooterStatusText.Text = "Update cancelled.";
             _stepIndex = 5;
         }
@@ -631,7 +670,8 @@ public partial class MainWindow : Window
             CompleteSummaryText.Text = ex.Message;
             CompleteOutputPathText.Text = "Updated workbook: not available";
             CompleteBackupPathText.Text = string.Empty;
-            OpenUpdatedButton.IsEnabled = false;
+            OpenUpdatedCheckBox.IsEnabled = false;
+            OpenUpdatedCheckBox.IsChecked = false;
             FooterStatusText.Text = "Update failed.";
             AppendLog($"ERROR: {ex.Message}");
             _stepIndex = 5;
@@ -695,7 +735,7 @@ public partial class MainWindow : Window
         UpdateLogTextBox.ScrollToEnd();
     }
 
-    private void OpenUpdatedButton_OnClick(object sender, RoutedEventArgs e)
+    private void OpenLastOutputWorkbook()
     {
         if (string.IsNullOrWhiteSpace(_lastOutputPath) || !File.Exists(_lastOutputPath))
         {

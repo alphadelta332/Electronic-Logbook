@@ -7,6 +7,7 @@
 - [ ] `modUpdate.bas` was not embedded in the workbook
 - [ ] `tools/Test-VbaSourceQuality.ps1` passed
 - [ ] `tools/Test-WorkbookVbaParity.ps1` passed
+- [ ] `updater/Test-CompatibilityMatrix.ps1` passed locally, or compatibility impact is not applicable
 - [ ] Master workbook `GitHubBranch` is set correctly for this PR/release
 - [ ] Master workbook `LogbookVersion` matches `version.txt`
 - [ ] Master workbook `GitHubToken` is empty

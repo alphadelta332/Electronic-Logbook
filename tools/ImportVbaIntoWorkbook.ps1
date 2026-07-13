@@ -20,8 +20,8 @@ if ([string]::IsNullOrWhiteSpace($WorkbookPath)) {
     $WorkbookPath = $config.MasterWorkbook
 }
 
-$standardModules = @("modBoot.bas", "modLogbook.bas")
-$userForms = @("frmVerifyCurrency.frm")
+$standardModules = @("modBoot.bas", "modAirports.bas", "modLogbook.bas")
+$removedUserForms = @("frmVerifyCurrency", "frmExportLogbook")
 if ($IncludeModUpdate) {
     $standardModules += "modUpdate.bas"
 }
@@ -34,37 +34,31 @@ if (-not $IncludeModUpdate) {
 
 # Excel caches removed UserForm component names until the workbook closes.
 # Remove forms in a separate save/close pass so they re-import as forms, not standard modules.
+Write-Host "Pass 1/2: checking VBA project access and removing obsolete forms..."
 Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     param($Workbook)
 
     Assert-VbaProjectAccess -Workbook $Workbook
+    Write-Host "  VBA project access confirmed"
     $components = $Workbook.VBProject.VBComponents
 
-    foreach ($formFile in $userForms) {
-        $formName = [System.IO.Path]::GetFileNameWithoutExtension($formFile)
+    foreach ($formName in $removedUserForms) {
         try {
             $existing = $components.Item($formName)
             $components.Remove($existing)
-            Write-Host "  Removed existing $formName before UserForm import"
+            Write-Host "  Removed obsolete $formName"
         } catch {}
     }
 }
+Write-Host "Pass 1/2 complete."
 
+Write-Host "Pass 2/2: importing tracked VBA source..."
 Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     param($Workbook)
 
     Assert-VbaProjectAccess -Workbook $Workbook
+    Write-Host "  VBA project access confirmed"
     $components = $Workbook.VBProject.VBComponents
-
-    foreach ($formFile in $userForms) {
-        $formPath = Join-Path $repoRoot $formFile
-        if (-not (Test-Path $formPath)) {
-            throw "VBA UserForm source not found: $formPath"
-        }
-
-        $components.Import($formPath) | Out-Null
-        Write-Host "  Imported $formFile"
-    }
 
     foreach ($moduleFile in $standardModules) {
         $modulePath = Join-Path $repoRoot $moduleFile
@@ -81,6 +75,9 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
         $components.Import($modulePath) | Out-Null
         Write-Host "  Imported $moduleFile"
     }
+
+    . (Join-Path $repoRoot "tools\BuildExportLogbookForm.ps1")
+    Add-ExportLogbookForm -Workbook $Workbook
 
     if (-not $IncludeModUpdate) {
         try {
@@ -107,5 +104,6 @@ Invoke-WorkbookEdit -WorkbookPath $WorkbookPath -Visible:$Visible -Operation {
     Set-WorkbookNameValue -Workbook $Workbook -Name "LogbookVersion" -Value $version
     Write-Host "  Stamped LogbookVersion = $version"
 }
+Write-Host "Pass 2/2 complete."
 
 Write-Host "VBA import complete." -ForegroundColor Green

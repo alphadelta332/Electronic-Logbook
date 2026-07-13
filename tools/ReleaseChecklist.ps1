@@ -3,12 +3,14 @@
 [CmdletBinding()]
 param(
     [switch]$SkipVbaImport,
+    [switch]$SkipAirportDataset,
     [switch]$SkipPdf,
     [switch]$SkipWorkbookPrep,
     [switch]$SkipWorkingCopy,
     [switch]$SkipWizardAsset,
     [switch]$SkipVbaCompile,
     [switch]$SkipVbaParity,
+    [switch]$SkipCompatibilityMatrix,
     [switch]$SkipPublicReadinessCheck,
     [switch]$SkipGitChecks
 )
@@ -52,6 +54,11 @@ if (-not $SkipVbaImport) {
     & (Join-Path $PSScriptRoot "ImportVbaIntoWorkbook.ps1")
 }
 
+if (-not $SkipAirportDataset) {
+    Write-Host ""
+    & (Join-Path $PSScriptRoot "Update-AirportDataset.ps1")
+}
+
 if (-not $SkipPdf) {
     Write-Host ""
     & (Join-Path $repoRoot "GenerateReadmePDF.ps1") -RepoPath $repoRoot
@@ -80,6 +87,11 @@ if (-not $SkipVbaCompile) {
 if (-not $SkipPublicReadinessCheck) {
     Write-Host ""
     & (Join-Path $PSScriptRoot "Test-WorkbookPublicReadiness.ps1") -RepoRoot $repoRoot
+}
+
+if (-not $SkipCompatibilityMatrix) {
+    Write-Host ""
+    & (Join-Path $repoRoot "updater\Test-CompatibilityMatrix.ps1") -RepoRoot $repoRoot
 }
 
 Write-Host ""

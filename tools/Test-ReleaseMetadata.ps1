@@ -19,9 +19,12 @@ $requiredTooling = @(
     "PrepareForTesting.ps1",
     "tools\ReleaseChecklist.ps1",
     "tools\Test-VbaSourceQuality.ps1",
+    "tools\Test-VbaWorkbookPairing.ps1",
     "tools\Test-VbaCompileDisposable.ps1",
     "tools\Test-WorkbookPublicReadiness.ps1",
-    "tools\Test-WorkbookVbaParity.ps1"
+    "tools\Test-WorkbookVbaParity.ps1",
+    "updater\compatibility-policy.json",
+    "updater\Test-CompatibilityMatrix.ps1"
 )
 
 if (-not (Test-Path $readmePath)) {
@@ -69,6 +72,8 @@ foreach ($entry in $moduleExpectations.GetEnumerator()) {
     }
 }
 
+& (Join-Path $repoRoot "tools\Test-VbaWorkbookPairing.ps1") -RepoRoot $repoRoot
+
 $modLogbook = Get-Content (Join-Path $repoRoot "modLogbook.bas") -Raw -Encoding UTF8
 if ($modLogbook -notmatch "Public Sub ReportBug\(\)") {
     throw "modLogbook.bas does not contain ReportBug."
@@ -78,13 +83,6 @@ if ($modLogbook -notmatch "https://docs\.google\.com/forms/") {
 }
 if ($modLogbook -match "https://docs\.google\.com/forms/d/e/REPLACE_WITH_FORM_ID/viewform") {
     throw "ReportBug Google Forms responder URL has not been configured."
-}
-
-$userFormFiles = @("frmVerifyCurrency.frm", "frmVerifyCurrency.frx")
-foreach ($formFile in $userFormFiles) {
-    if (-not (Test-Path (Join-Path $repoRoot $formFile))) {
-        throw "$formFile not found."
-    }
 }
 
 $thisWorkbookPath = Join-Path $repoRoot "ThisWorkbook.cls"
