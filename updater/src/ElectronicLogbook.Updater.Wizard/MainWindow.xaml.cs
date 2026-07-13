@@ -568,9 +568,9 @@ public partial class MainWindow : Window
             ? BuildStagedOutputPath(source)
             : _context.OutputPath;
 
+        string? resolvedMaster = null;
         try
         {
-            string resolvedMaster;
             ReleaseManifest? manifest = null;
 
             if (_context.UsesProvidedMaster)
@@ -666,6 +666,35 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            if (DetailedLoggingCheckBox.IsChecked == true)
+            {
+                try
+                {
+                    _lastReportPath = BuildDiagnosticReportPath(source, stagedOutput);
+                    var diagnostic = new
+                    {
+                        status = "failed",
+                        occurredAtUtc = DateTimeOffset.UtcNow,
+                        sourcePath = source,
+                        stagedOutputPath = stagedOutput,
+                        masterPath = resolvedMaster,
+                        phase = progressSink.Latest?.PhaseId,
+                        phaseMessage = progressSink.Latest?.Message,
+                        exceptionType = ex.GetType().FullName,
+                        exceptionMessage = ex.Message,
+                        exceptionStackTrace = ex.ToString()
+                    };
+                    await File.WriteAllTextAsync(
+                        _lastReportPath,
+                        JsonSerializer.Serialize(diagnostic, JsonDefaults.Indented),
+                        CancellationToken.None);
+                    AppendLog($"Detailed failure diagnostic report: {_lastReportPath}");
+                }
+                catch (Exception diagnosticException)
+                {
+                    AppendLog($"Could not write failure diagnostic report: {diagnosticException.Message}");
+                }
+            }
             CompleteTitleText.Text = "Update Failed";
             CompleteSummaryText.Text = ex.Message;
             CompleteOutputPathText.Text = "Updated workbook: not available";
@@ -685,6 +714,13 @@ public partial class MainWindow : Window
             UpdateProgressBar.IsIndeterminate = false;
             UpdateWizardView();
         }
+    }
+
+    private string BuildDiagnosticReportPath(string source, string stagedOutput)
+    {
+        return _context.UseInPlaceSwap
+            ? Path.ChangeExtension(source, ".update-report.json")
+            : Path.ChangeExtension(stagedOutput, ".update-report.json");
     }
 
     private void CleanupDownloadDirectory()
@@ -1017,8 +1053,11 @@ public partial class MainWindow : Window
 
     private sealed class WizardProgressSink(Action<UpdaterProgressEvent> onEvent) : IUpdaterProgressSink
     {
+        public UpdaterProgressEvent? Latest { get; private set; }
+
         public void Report(UpdaterProgressEvent progressEvent)
         {
+            Latest = progressEvent;
             onEvent(progressEvent);
         }
     }

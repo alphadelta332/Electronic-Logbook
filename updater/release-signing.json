@@ -1,0 +1,6 @@
+{
+  "subject": "CN=Electronic Logbook Release Signing",
+  "sha1Thumbprint": "D1C34BACCECE7A31E0ACBF88C570F8A952349B23",
+  "certificateFile": "release-signing.cer",
+  "privateKey": "Retained outside the repository in the release maintainer's certificate store and backup."
+}

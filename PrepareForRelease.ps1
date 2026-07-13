@@ -29,13 +29,13 @@ Write-Host "Version source: version.txt = $version"
 Write-Host ""
 
 Set-LogbookWorkbookState -WorkbookPath $WorkbookPath -Branch "main" -Version $version
-Invoke-WorkbookMacro -WorkbookPath $WorkbookPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
+Invoke-WorkbookMacro -WorkbookPath $WorkbookPath -MacroName "EnableProtectionForReleaseAutomation" -IgnoreMissing
 Set-WorkbookOpenView -WorkbookPath $WorkbookPath
 
 if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPath)) {
     Write-Host ""
     Set-LogbookWorkbookState -WorkbookPath $WorkingCopyPath -Branch "main"
-    Invoke-WorkbookMacro -WorkbookPath $WorkingCopyPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
+    Invoke-WorkbookMacro -WorkbookPath $WorkingCopyPath -MacroName "EnableProtectionForReleaseAutomation" -IgnoreMissing
     Set-WorkbookOpenView -WorkbookPath $WorkingCopyPath
 } elseif (-not $SkipWorkingCopy) {
     Write-Host ""

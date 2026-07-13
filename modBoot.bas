@@ -26,6 +26,8 @@ Option Explicit
 Private Const GITHUB_USER  As String = "alphadelta332"
 Private Const GITHUB_REPO  As String = "Electronic-Logbook"
 Private Const MODULE_FILE  As String = "modUpdate.bas"
+Private Const MODULE_MANIFEST_FILE As String = "modUpdate-manifest.json"
+Private Const RELEASE_SIGNER_THUMBPRINT As String = "D1C34BACCECE7A31E0ACBF88C570F8A952349B23"
 Private Const TRUST_WARNING_NAME As String = "UpdateTrustAccessWarningShown"
 
 Public Sub CheckForUpdate()
@@ -63,6 +65,9 @@ End Sub
 
 Private Sub RefreshModUpdate()
     Dim tempFile As String
+    Dim manifestFile As String
+    Dim signatureFile As String
+    Dim gitRef As String
     Dim vbp      As Object
     Dim oldComp  As Object
 
@@ -78,7 +83,21 @@ Private Sub RefreshModUpdate()
 
     ' Download latest modUpdate.bas to a temp file
     tempFile = Environ("TEMP") & "\modUpdate_Latest.bas"
-    If Not DownloadFile(ModuleURL(), tempFile) Then Exit Sub
+    gitRef = ResolveGitHubRef()
+    If Not DownloadFile(RawURL(MODULE_FILE, gitRef), tempFile) Then Exit Sub
+    If LCase$(GetGitHubBranch()) = "main" Then
+        manifestFile = Environ("TEMP") & "\modUpdate-manifest.json"
+        signatureFile = manifestFile & ".p7s"
+        If Not DownloadFile(ReleaseAssetURL(MODULE_MANIFEST_FILE), manifestFile) Or _
+           Not DownloadFile(ReleaseAssetURL(MODULE_MANIFEST_FILE & ".p7s"), signatureFile) Or _
+           Not VerifySignedModuleManifest(tempFile, manifestFile, signatureFile, gitRef) Then
+            On Error Resume Next
+            Kill tempFile
+            On Error GoTo 0
+            WarnUpdateCheckUnavailable False
+            Exit Sub
+        End If
+    End If
 
     ' Remove existing modUpdate and import the fresh one
     On Error Resume Next
@@ -148,13 +167,15 @@ Private Sub MarkTrustWarningShown()
     On Error GoTo 0
 End Sub
 
-Private Function ModuleURL() As String
-    Dim gitRef As String
-
-    gitRef = ResolveGitHubRef()
-    ModuleURL = "https://raw.githubusercontent.com/" & GITHUB_USER & "/" & _
-                GITHUB_REPO & "/" & gitRef & "/" & MODULE_FILE & _
+Private Function RawURL(ByVal filename As String, ByVal gitRef As String) As String
+    RawURL = "https://raw.githubusercontent.com/" & GITHUB_USER & "/" & _
+                GITHUB_REPO & "/" & gitRef & "/" & filename & _
                 "?_=" & Format(Now, "yyyymmddhhmmss")
+End Function
+
+Private Function ReleaseAssetURL(ByVal filename As String) As String
+    ReleaseAssetURL = "https://github.com/" & GITHUB_USER & "/" & GITHUB_REPO & _
+                      "/releases/latest/download/" & filename
 End Function
 
 Private Function GetGitHubBranch() As String
@@ -188,7 +209,6 @@ Private Function GetBranchCommitSha(branchName As String) As String
     Dim http     As Object
     Dim apiUrl   As String
     Dim body     As String
-    Dim token    As String
 
     On Error GoTo Fail
 
@@ -196,28 +216,8 @@ Private Function GetBranchCommitSha(branchName As String) As String
              GITHUB_REPO & "/commits/" & branchName & _
              "?_=" & Format(Now, "yyyymmddhhmmss")
 
-    Set http = CreateObject("MSXML2.XMLHTTP")
-    http.Open "GET", apiUrl, False
-    http.setRequestHeader "Accept", "application/vnd.github+json"
-    http.setRequestHeader "Cache-Control", "no-cache"
-    http.setRequestHeader "Pragma", "no-cache"
-    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
-    http.send
-    If http.Status <> 200 And token <> "" Then
-        ' Existing workbooks may contain a stale private-repo PAT.
-        ' Public repo reads should still work after retrying unauthenticated.
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", apiUrl, False
-        http.setRequestHeader "Accept", "application/vnd.github+json"
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
+    Set http = CreateHttpGetRequest(apiUrl, True)
+    If http Is Nothing Then GoTo Fail
     If http.Status <> 200 Then GoTo Fail
 
     body = http.responseText
@@ -246,40 +246,13 @@ Fail:
     ExtractFirstSha = ""
 End Function
 
-Private Function GetGitHubToken() As String
-    ' Reads the GitHub PAT from a named range in the workbook.
-    ' The token never appears in any file pushed to GitHub.
-    On Error Resume Next
-    GetGitHubToken = Trim(CStr(ThisWorkbook.Names("GitHubToken").RefersToRange.Value))
-    On Error GoTo 0
-End Function
-
 Private Function DownloadFile(url As String, destPath As String) As Boolean
     Dim http   As Object
     Dim stream As Object
 
     On Error GoTo Fail
-    Set http = CreateObject("MSXML2.XMLHTTP")
-    http.Open "GET", url, False
-    http.setRequestHeader "Cache-Control", "no-cache"
-    http.setRequestHeader "Pragma", "no-cache"
-    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    Dim token As String
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
-    http.send
-    If http.Status <> 200 And token <> "" Then
-        ' Retry without auth so a revoked PAT in GitHubToken does not block
-        ' public update downloads.
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", url, False
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
+    Set http = CreateHttpGetRequest(url, False)
+    If http Is Nothing Then GoTo Fail
     If http.Status <> 200 Then GoTo Fail
 
     Set stream = CreateObject("ADODB.Stream")
@@ -293,4 +266,57 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     Exit Function
 Fail:
     DownloadFile = False
+End Function
+
+' All synchronous update requests use ServerXMLHTTP with finite timeouts so a
+' DNS, proxy, or network failure cannot leave Excel blocked indefinitely.
+Private Function CreateHttpGetRequest(ByVal url As String, ByVal acceptGitHubJson As Boolean) As Object
+    Dim http As Object
+
+    On Error GoTo Fail
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    http.setTimeouts 5000, 5000, 15000, 30000
+    http.Open "GET", url, False
+    If acceptGitHubJson Then http.setRequestHeader "Accept", "application/vnd.github+json"
+    http.setRequestHeader "Cache-Control", "no-cache"
+    http.setRequestHeader "Pragma", "no-cache"
+    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
+    http.send
+    Set CreateHttpGetRequest = http
+    Exit Function
+Fail:
+    Set CreateHttpGetRequest = Nothing
+End Function
+
+' Stable releases fail closed: the signed manifest must be cryptographically
+' valid, pin the release certificate, bind to the resolved commit, and contain
+' the exact SHA-256 of the downloaded VBA module. Development branches remain
+' deliberately unsigned for local iteration only.
+Private Function VerifySignedModuleManifest(ByVal modulePath As String, _
+                                            ByVal manifestPath As String, _
+                                            ByVal signaturePath As String, _
+                                            ByVal expectedRef As String) As Boolean
+    Dim shellObj As Object
+    Dim command As String
+
+    On Error GoTo Fail
+    command = "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command """ & _
+              "$ErrorActionPreference='Stop';Add-Type -AssemblyName System.Security;" & _
+              "$m=[IO.File]::ReadAllBytes('" & EscapePowerShellLiteral(manifestPath) & "');" & _
+              "$ci=[System.Security.Cryptography.Pkcs.ContentInfo]::new($m);$c=[System.Security.Cryptography.Pkcs.SignedCms]::new($ci,$true);" & _
+              "$c.Decode([IO.File]::ReadAllBytes('" & EscapePowerShellLiteral(signaturePath) & "'));$c.CheckSignature($true);" & _
+              "if($c.SignerInfos.Count -ne 1 -or $c.SignerInfos[0].Certificate.Thumbprint -ne '" & RELEASE_SIGNER_THUMBPRINT & "'){exit 1};" & _
+              "$j=Get-Content -Raw -LiteralPath '" & EscapePowerShellLiteral(manifestPath) & "'|ConvertFrom-Json;" & _
+              "$a=@($j.assets|Where-Object {$_.name -eq '" & MODULE_FILE & "'})[0];" & _
+              "if($null -eq $a -or $j.ref -ne '" & EscapePowerShellLiteral(expectedRef) & "' -or " & _
+              "(Get-FileHash -LiteralPath '" & EscapePowerShellLiteral(modulePath) & "' -Algorithm SHA256).Hash.ToLower() -ne $a.sha256.ToLower()){exit 1}"""
+    Set shellObj = CreateObject("WScript.Shell")
+    VerifySignedModuleManifest = (shellObj.Run(command, 0, True) = 0)
+    Exit Function
+Fail:
+    VerifySignedModuleManifest = False
+End Function
+
+Private Function EscapePowerShellLiteral(ByVal value As String) As String
+    EscapePowerShellLiteral = Replace(value, "'", "''")
 End Function

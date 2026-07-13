@@ -161,6 +161,11 @@ function Set-LogbookWorkbookState {
         # Keep public/user-started workbooks usable. Release safety is enforced by
         # explicit readiness checks, not Excel's modal Document Inspector save flag.
         $Workbook.RemovePersonalInformation = $false
+        try {
+            $Workbook.Names.Item("GitHubToken").Delete()
+        } catch {
+            # Expected for workbooks already stripped of obsolete token support.
+        }
         Set-WorkbookNameValue -Workbook $Workbook -Name "GitHubBranch" -Value $Branch
         if (-not [string]::IsNullOrWhiteSpace($Version)) {
             Set-WorkbookNameValue -Workbook $Workbook -Name "LogbookVersion" -Value $Version
@@ -168,6 +173,7 @@ function Set-LogbookWorkbookState {
     }
 
     Write-Host "  RemovePersonalInformation = False" -ForegroundColor Green
+    Write-Host "  GitHubToken = removed" -ForegroundColor Green
     Write-Host "  GitHubBranch = $Branch" -ForegroundColor Green
     if (-not [string]::IsNullOrWhiteSpace($Version)) {
         Write-Host "  LogbookVersion = $Version" -ForegroundColor Green

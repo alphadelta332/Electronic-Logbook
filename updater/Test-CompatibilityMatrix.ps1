@@ -24,7 +24,6 @@ $updaterDllPath = Join-Path $projectPath "bin\Release\net8.0-windows\ElectronicL
 $testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) (
     "ElectronicLogbookCompatibility-{0}" -f [guid]::NewGuid().ToString("N")
 )
-$maxAttempts = 3
 
 Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
@@ -316,39 +315,24 @@ try {
         }
 
         $sourceHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
-        $updaterSucceeded = $false
-        for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-            Write-Step "Migrating $tag (attempt $attempt of $maxAttempts)"
-            Remove-Item -LiteralPath $outputPath, $reportPath -Force -ErrorAction SilentlyContinue
-
-            $updaterLines = @()
-            & dotnet $updaterDllPath `
-                --source $sourcePath `
-                --master $MasterPath `
-                --output $outputPath `
-                --report $reportPath 2>&1 | Tee-Object -Variable updaterLines
-            $exitCode = $LASTEXITCODE
-            $updaterOutput = ($updaterLines | Out-String)
-
-            if ($exitCode -eq 0) {
-                $updaterSucceeded = $true
-                break
-            }
-
-            $looksTransientComFailure = $updaterOutput -match "0x800706BE|0x800706BA|remote procedure call|RPC server is unavailable"
-            if ($looksTransientComFailure -and $attempt -lt $maxAttempts) {
-                Write-Host "Transient Excel COM failure detected. Retrying..." -ForegroundColor Yellow
-                continue
-            }
-
-            throw "Updater failed for $tag with exit code $exitCode.`n$updaterOutput"
-        }
-
-        Assert-Condition -Condition $updaterSucceeded -Message "Updater failed for $tag."
+        Write-Step "Migrating $tag once"
+        Remove-Item -LiteralPath $outputPath, $reportPath -Force -ErrorAction SilentlyContinue
+        & dotnet $updaterDllPath `
+            --source $sourcePath `
+            --master $MasterPath `
+            --output $outputPath `
+            --report $reportPath
+        Assert-Condition -Condition ($LASTEXITCODE -eq 0) -Message "Updater failed for $tag with exit code $LASTEXITCODE."
 
         $afterHash = (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash
         Assert-Condition -Condition ($sourceHash -eq $afterHash) -Message "Source workbook changed during migration for $tag."
         Assert-Condition -Condition (Test-Path -LiteralPath $outputPath) -Message "Output workbook missing for $tag."
+        try {
+            $exclusiveOutput = [System.IO.File]::Open($outputPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+            $exclusiveOutput.Dispose()
+        } catch {
+            throw "Updated workbook for $tag is still locked after migration: $($_.Exception.Message)"
+        }
 
         Invoke-WorkbookEdit -WorkbookPath $outputPath -ReadOnly -Operation {
             param($Workbook)

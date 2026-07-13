@@ -48,6 +48,7 @@ if (-not $SkipGitChecks) {
 
 & (Join-Path $PSScriptRoot "Test-ReleaseMetadata.ps1") -RepoRoot $repoRoot
 & (Join-Path $PSScriptRoot "Test-VbaSourceQuality.ps1") -RepoRoot $repoRoot
+& (Join-Path $PSScriptRoot "Test-ReliabilityQuality.ps1") -RepoRoot $repoRoot
 
 if (-not $SkipVbaImport) {
     Write-Host ""

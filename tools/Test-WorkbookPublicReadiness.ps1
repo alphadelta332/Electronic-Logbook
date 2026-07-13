@@ -40,9 +40,11 @@ function Get-WorkbookNameText {
 Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
     param($Workbook)
 
-    $token = (Get-WorkbookNameText -Workbook $Workbook -Name "GitHubToken").Trim()
-    if ($token -ne "") {
-        $issues.Add("GitHubToken is not empty in $($Workbook.Name). Remove it before publishing.")
+    try {
+        $null = $Workbook.Names.Item("GitHubToken")
+        $issues.Add("GitHubToken is present in $($Workbook.Name). Remove the obsolete named range before publishing.")
+    } catch {
+        # Expected: public workbooks must not carry token support.
     }
 
     $branch = (Get-WorkbookNameText -Workbook $Workbook -Name "GitHubBranch").Trim()

@@ -4,7 +4,6 @@ param(
     [string]$Repository = "alphadelta332/Electronic-Logbook",
     [string]$AssetDirectory,
     [switch]$SkipBuild,
-    [switch]$Sign,
     [string]$CertificateThumbprint,
     [string]$TimestampServer = "http://timestamp.digicert.com",
     [switch]$Clobber,
@@ -32,15 +31,10 @@ $publishArgs = @(
 if ($SkipBuild) {
     $publishArgs += "-SkipBuild"
 }
-if ($Sign) {
-    $publishArgs += @(
-        "-Sign"
-        "-CertificateThumbprint"
-        $CertificateThumbprint
-        "-TimestampServer"
-        $TimestampServer
-    )
+if (-not [string]::IsNullOrWhiteSpace($CertificateThumbprint)) {
+    $publishArgs += @("-CertificateThumbprint", $CertificateThumbprint)
 }
+$publishArgs += @("-TimestampServer", $TimestampServer)
 
 Write-Host "Preparing wizard assets for $Tag..."
 & powershell -NoProfile @publishArgs
@@ -48,6 +42,35 @@ Write-Host "Preparing wizard assets for $Tag..."
 $assets = @(
     (Join-Path $AssetDirectory "ElectronicLogbook.Updater.Wizard.exe")
     (Join-Path $AssetDirectory "ElectronicLogbook.Updater.Wizard.win-x64.zip")
+)
+
+$masterWorkbook = Join-Path $repoRoot "Electronic_Logbook_Master.xlsm"
+if (-not (Test-Path $masterWorkbook)) {
+    throw "Master workbook not found for release manifest: $masterWorkbook"
+}
+$version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
+$manifestAssets = @($masterWorkbook) + $assets
+$manifestCertificateThumbprint = $CertificateThumbprint
+if ([string]::IsNullOrWhiteSpace($manifestCertificateThumbprint)) {
+    $manifestCertificateThumbprint = (Get-Content (Join-Path $PSScriptRoot "release-signing.json") -Raw | ConvertFrom-Json).sha1Thumbprint
+}
+& (Join-Path $PSScriptRoot "New-ReleaseManifest.ps1") `
+    -Version $version `
+    -Tag $Tag `
+    -AssetPath $manifestAssets `
+    -OutputDirectory $AssetDirectory `
+    -CertificateThumbprint $manifestCertificateThumbprint
+$tagCommit = (git -C $repoRoot rev-parse "$Tag^{commit}").Trim()
+& (Join-Path $PSScriptRoot "New-ModUpdateManifest.ps1") `
+    -ModulePath (Join-Path $repoRoot "modUpdate.bas") `
+    -OutputDirectory $AssetDirectory `
+    -Ref $tagCommit `
+    -CertificateThumbprint $manifestCertificateThumbprint
+$assets += @(
+    (Join-Path $AssetDirectory "release-manifest.json"),
+    (Join-Path $AssetDirectory "release-manifest.json.p7s"),
+    (Join-Path $AssetDirectory "modUpdate-manifest.json"),
+    (Join-Path $AssetDirectory "modUpdate-manifest.json.p7s")
 )
 
 foreach ($asset in $assets) {

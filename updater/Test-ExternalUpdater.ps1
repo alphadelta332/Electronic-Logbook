@@ -16,7 +16,6 @@ $testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) (
 $sourcePath = Join-Path $testDirectory "Source.xlsm"
 $masterPath = Join-Path $testDirectory "Master.xlsm"
 $outputPath = Join-Path $testDirectory "Updated.xlsm"
-$maxAttempts = 3
 $updaterDllPath = Join-Path $projectPath "bin\Release\net8.0-windows\ElectronicLogbook.Updater.dll"
 
 Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
@@ -36,8 +35,11 @@ try {
     Invoke-WorkbookEdit -WorkbookPath $sourcePath -Operation {
         param($Workbook)
 
+        $Workbook.Unprotect("")
+        foreach ($worksheet in $Workbook.Worksheets) {
+            $worksheet.Unprotect("")
+        }
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
-        $logbook.TableStyle = $Workbook.TableStyles.Item("TableStyleLight16")
         $customColumnIndex = $logbook.ListColumns("OPC").Index + 1
         $logbook.ListColumns.Item($customColumnIndex).Name = "Updater Test"
         $logbook.ListColumns("Reg").DataBodyRange.Cells(1, 1).Value2 = "TESTREG"
@@ -70,6 +72,10 @@ try {
     Invoke-WorkbookEdit -WorkbookPath $masterPath -Operation {
         param($Workbook)
 
+        $Workbook.Unprotect("")
+        foreach ($worksheet in $Workbook.Worksheets) {
+            $worksheet.Unprotect("")
+        }
         $Workbook.Names.Item("RoutesDirty").RefersToRange.Value2 = $true
     }
 
@@ -83,51 +89,26 @@ try {
     }
 
     $sourceHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
-    $updaterSucceeded = $false
-    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        Write-Step "Running updater attempt $attempt of $maxAttempts"
-        if (Test-Path $outputPath) {
-            Remove-Item -LiteralPath $outputPath -Force
-        }
-
-        $updaterLines = @()
-        $previousErrorActionPreference = $ErrorActionPreference
-        try {
-            # Native stderr is updater output, not a PowerShell failure. Capture it
-            # so the retry policy below can classify transient Excel COM errors.
-            $ErrorActionPreference = "Continue"
-            & dotnet $updaterDllPath `
-                --source $sourcePath `
-                --master $masterPath `
-                --output $outputPath 2>&1 | Tee-Object -Variable updaterLines
-            $exitCode = $LASTEXITCODE
-        } finally {
-            $ErrorActionPreference = $previousErrorActionPreference
-        }
-        $updaterOutput = ($updaterLines | Out-String)
-
-        if ($exitCode -eq 0) {
-            Write-Step "Updater completed successfully"
-            $updaterSucceeded = $true
-            break
-        }
-
-        $looksTransientComFailure = $updaterOutput -match "0x800706BE|0x800706BA|remote procedure call|RPC server is unavailable"
-        if ($looksTransientComFailure -and $attempt -lt $maxAttempts) {
-            Write-Host "Transient Excel COM failure detected. Retrying..." -ForegroundColor Yellow
-            continue
-        }
-
-        throw "External updater returned exit code $exitCode on attempt $attempt."
+    Write-Step "Running updater once"
+    & dotnet $updaterDllPath `
+        --source $sourcePath `
+        --master $masterPath `
+        --output $outputPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "External updater returned exit code $LASTEXITCODE."
     }
-
-    if (-not $updaterSucceeded) {
-        throw "External updater failed after $maxAttempts attempts."
-    }
+    Write-Step "Updater completed successfully"
 
     $afterHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
     if ($sourceHash -ne $afterHash) {
         throw "Source workbook changed during the external update."
+    }
+
+    try {
+        $exclusiveOutput = [System.IO.File]::Open($outputPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+        $exclusiveOutput.Dispose()
+    } catch {
+        throw "Updated workbook is still locked after migration: $($_.Exception.Message)"
     }
 
     Write-Step "Validating updated workbook content"
@@ -205,17 +186,6 @@ try {
 } finally {
     Write-Step "Cleaning up temporary files"
     if (Test-Path $testDirectory) {
-        for ($attempt = 1; $attempt -le 3; $attempt++) {
-            try {
-                Remove-Item -LiteralPath $testDirectory -Recurse -Force -ErrorAction Stop
-                break
-            } catch {
-                if ($attempt -eq 3) {
-                    Write-Warning "Could not remove temporary test directory: $testDirectory"
-                } else {
-                    Start-Sleep -Seconds 2
-                }
-            }
-        }
+        Remove-Item -LiteralPath $testDirectory -Recurse -Force -ErrorAction Stop
     }
 }

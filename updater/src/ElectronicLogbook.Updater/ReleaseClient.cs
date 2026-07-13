@@ -7,6 +7,7 @@ public sealed class ReleaseClient
 {
     private const string MasterFile = "Electronic_Logbook_Master.xlsm";
     private const string ManifestFile = "release-manifest.json";
+    private const string ManifestSignatureFile = ManifestFile + ".p7s";
     private readonly HttpClient _httpClient;
 
     public ReleaseClient(HttpClient? httpClient = null)
@@ -48,6 +49,12 @@ public sealed class ReleaseClient
                 $"Latest release {tag} does not contain {ManifestFile}. " +
                 "Use --master for local prototype testing.");
         }
+        if (!assets.TryGetValue(ManifestSignatureFile, out var manifestSignatureUrl))
+        {
+            throw new InvalidDataException(
+                $"Latest release {tag} does not contain {ManifestSignatureFile}. " +
+                "Release-channel updates require authenticated metadata.");
+        }
         if (!assets.TryGetValue(MasterFile, out var masterUrl))
         {
             throw new InvalidDataException($"Latest release {tag} does not contain {MasterFile}.");
@@ -55,6 +62,11 @@ public sealed class ReleaseClient
 
         var manifestBytes = await _httpClient.GetByteArrayAsync(manifestUrl.Url, cancellationToken);
         VerifyGitHubAsset(manifestBytes, ManifestFile, manifestUrl);
+        var manifestSignatureBytes = await _httpClient.GetByteArrayAsync(
+            manifestSignatureUrl.Url,
+            cancellationToken);
+        VerifyGitHubAsset(manifestSignatureBytes, ManifestSignatureFile, manifestSignatureUrl);
+        ReleaseManifestSignatureVerifier.VerifyPinned(manifestBytes, manifestSignatureBytes);
         var manifest = JsonSerializer.Deserialize<ReleaseManifest>(manifestBytes, JsonDefaults.Web) ??
             throw new InvalidDataException("Release manifest could not be parsed.");
         ValidateManifest(manifest, tag);

@@ -10,6 +10,11 @@
 
   <ItemGroup>
     <EmbeddedResource Include="..\..\compatibility-policy.json" Link="compatibility-policy.json" />
+    <EmbeddedResource Include="..\..\release-signing.cer" Link="release-signing.cer" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.0" />
   </ItemGroup>
 
 </Project>

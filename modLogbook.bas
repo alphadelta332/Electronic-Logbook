@@ -6506,33 +6506,23 @@ End Sub
 
 Public Sub OpenHelp()
     Dim http      As Object
-    Dim token     As String
     Dim url       As String
     Dim markdown  As String
     Dim html      As String
     Dim tempFile  As String
     Dim fileNum   As Integer
 
-    ' Fetch README.md from GitHub
-    token = Trim(CStr(ThisWorkbook.Names("GitHubToken").RefersToRange.Value))
+    ' Fetch the public README without legacy token support.
     url = "https://raw.githubusercontent.com/alphadelta332/Electronic-Logbook/main/README.md"
 
     On Error GoTo Fail
-    Set http = CreateObject("MSXML2.XMLHTTP")
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    http.setTimeouts 5000, 5000, 15000, 30000
     http.Open "GET", url, False
     http.setRequestHeader "Cache-Control", "no-cache"
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
+    http.setRequestHeader "Pragma", "no-cache"
+    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
     http.send
-    If http.Status <> 200 And token <> "" Then
-        ' The public README should still load if an old workbook contains
-        ' a stale private-repo PAT.
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", url, False
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.send
-    End If
 
     If http.Status <> 200 Then GoTo Fail
     markdown = http.responseText
@@ -8215,6 +8205,14 @@ Public Sub EnableProtectionForRelease()
     SetWorkbookNameValue ThisWorkbook, "GitHubBranch", "main"
     mProtectionDisabledForSession = False
     ApplyWorkbookProtection True
+End Sub
+
+' Release tooling must be able to prepare a workbook without creating a modal
+' dialog. Keep the interactive macro above for users invoking it from Excel.
+Public Sub EnableProtectionForReleaseAutomation()
+    SetWorkbookNameValue ThisWorkbook, "GitHubBranch", "main"
+    mProtectionDisabledForSession = False
+    ApplyWorkbookProtection False
 End Sub
 
 Public Sub DisableProtectionForDevelopment()

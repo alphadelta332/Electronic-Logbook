@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Diagnostics;
 using Microsoft.CSharp.RuntimeBinder;
 using System.Runtime.InteropServices;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -21,6 +22,8 @@ public sealed class ExcelWorkbookMigrator
     private const int MsoGroup = 6;
     private const int XlUp = -4162;
     private const int BaseAirportsTopCount = 10;
+    private const int GracefulExcelShutdownTimeoutMilliseconds = 30000;
+    private const int ForcedExcelShutdownTimeoutMilliseconds = 5000;
 
     private static readonly string[] PreservedNames =
     [
@@ -38,6 +41,46 @@ public sealed class ExcelWorkbookMigrator
     }
 
     public MigrationReport Migrate(MigrationRequest request, CancellationToken cancellationToken = default)
+    {
+        MigrationReport? report = null;
+        Exception? failure = null;
+        using var completed = new ManualResetEventSlim();
+
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                report = MigrateOnDedicatedStaThread(request, cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+            finally
+            {
+                completed.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "Electronic Logbook Excel migration"
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        completed.Wait();
+
+        if (failure is not null)
+        {
+            ExceptionDispatchInfo.Capture(failure).Throw();
+        }
+
+        return report ?? throw new InvalidOperationException(
+            "Excel migration completed without producing a report.");
+    }
+
+    private MigrationReport MigrateOnDedicatedStaThread(
+        MigrationRequest request,
+        CancellationToken cancellationToken)
     {
         string phaseId = UpdaterPhaseIds.StartExcel;
 
@@ -131,15 +174,34 @@ public sealed class ExcelWorkbookMigrator
 
             step = SetStep(UpdaterPhaseIds.CalculateOutputWorkbook, "calculating output workbook");
             excel.Calculation = XlCalculationAutomatic;
-            foreach (dynamic worksheet in outputWorkbook.Worksheets)
+            var worksheetCount = (int)outputWorkbook.Worksheets.Count;
+            for (var worksheetIndex = 1; worksheetIndex <= worksheetCount; worksheetIndex++)
             {
-                worksheet.Calculate();
+                dynamic? worksheet = null;
+                try
+                {
+                    worksheet = outputWorkbook.Worksheets.Item(worksheetIndex);
+                    worksheet.Calculate();
+                }
+                finally
+                {
+                    ReleaseComObject(worksheet);
+                }
             }
             step = SetStep(UpdaterPhaseIds.RefreshPivotTables, "refreshing pivot tables");
             RefreshWorkbookPivotSummaries((object)outputWorkbook);
             step = SetStep(UpdaterPhaseIds.UpdateHoursOverTimeChart, "updating Hours Over Time chart");
             UpdateHoursOverTimeChart((object)outputWorkbook);
-            RepairLogbookActionButtons(GetTable((object)outputWorkbook, "Logbook"));
+            dynamic? actionLogbook = null;
+            try
+            {
+                actionLogbook = GetTable((object)outputWorkbook, "Logbook");
+                RepairLogbookActionButtons(actionLogbook);
+            }
+            finally
+            {
+                ReleaseComObject(actionLogbook);
+            }
 
             step = SetStep(UpdaterPhaseIds.ValidatePreservedData, "validating preserved data");
             IReadOnlyDictionary<string, string> outputFingerprints =
@@ -177,8 +239,10 @@ public sealed class ExcelWorkbookMigrator
                 Percent: 100,
                 DateTimeOffset.UtcNow));
 
-            dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
+            dynamic? outputLogbook = GetTable((object)outputWorkbook, "Logbook");
             var logbookRows = (int)outputLogbook.ListRows.Count;
+            ReleaseComObject(outputLogbook);
+            outputLogbook = null;
             migrationSucceeded = true;
             return new MigrationReport(
                 request.SourcePath,
@@ -241,10 +305,37 @@ public sealed class ExcelWorkbookMigrator
             GC.WaitForPendingFinalizers();
             GC.Collect();
             GC.WaitForPendingFinalizers();
-            EnsureProcessExited(excelProcessId);
-            if (!migrationSucceeded)
+            Exception? shutdownFailure = null;
+            try
             {
-                TryDelete(request.OutputPath);
+                var forcedExcelTermination = EnsureProcessExited(excelProcessId);
+                if (migrationSucceeded)
+                {
+                    EnsureOutputIsExclusivelyAccessible(request.OutputPath);
+                    if (forcedExcelTermination)
+                    {
+                        _progressSink?.Report(new UpdaterProgressEvent(
+                            UpdaterProgressEventTypes.PhaseStarted,
+                            UpdaterPhaseIds.Completed,
+                            "Excel required forced shutdown after the validated workbook was saved",
+                            Percent: null,
+                            DateTimeOffset.UtcNow));
+                    }
+                }
+            }
+            catch (Exception exception)
+            {
+                shutdownFailure = exception;
+            }
+
+            if (!migrationSucceeded || shutdownFailure is not null)
+            {
+                DeleteIncompleteOutput(request.OutputPath);
+            }
+
+            if (shutdownFailure is not null)
+            {
+                ExceptionDispatchInfo.Capture(shutdownFailure).Throw();
             }
         }
     }
@@ -1495,7 +1586,7 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static void RestoreLogbookPresentation(
+    private void RestoreLogbookPresentation(
         object sourceWorkbookObject,
         object outputWorkbookObject)
     {
@@ -1504,6 +1595,8 @@ public sealed class ExcelWorkbookMigrator
         dynamic source = GetTable(sourceWorkbookObject, "Logbook");
         dynamic destination = GetTable(outputWorkbookObject, "Logbook");
         dynamic worksheet = destination.Parent;
+
+        ReportPresentationStep("reading Logbook presentation");
 
         var masterHeaderFont = (string)destination.HeaderRowRange.Cells.Item(1, 1).Font.Name;
         var masterDataFont = (string)destination.DataBodyRange.Cells.Item(1, 1).Font.Name;
@@ -1515,22 +1608,11 @@ public sealed class ExcelWorkbookMigrator
         destination.ShowTableStyleFirstColumn = source.ShowTableStyleFirstColumn;
         destination.ShowTableStyleLastColumn = source.ShowTableStyleLastColumn;
 
-        var lastUserFormatColumn = GetColumnIndex(destination, "CumAzi");
-        for (var destinationIndex = 1; destinationIndex <= lastUserFormatColumn; destinationIndex++)
-        {
-            var name = (string)destination.ListColumns.Item(destinationIndex).Name;
-            var sourceFormatName = LogbookSourceFormatColumnName(source, name);
-            if (string.IsNullOrEmpty(sourceFormatName))
-            {
-                continue;
-            }
+        // The master owns schema and calculated-column formatting. Table style,
+        // header palette and totals are restored below without clipboard/column
+        // automation, which can deadlock headless Excel on large Logbook tables.
 
-            var sourceIndex = GetColumnIndex(source, sourceFormatName);
-            source.Range.Columns.Item(sourceIndex).Copy();
-            destination.Range.Columns.Item(destinationIndex).PasteSpecial(XlPasteFormats);
-        }
-        outputWorkbook.Application.CutCopyMode = false;
-
+        ReportPresentationStep("restoring Logbook totals and palette");
         destination.HeaderRowRange.Font.Name = masterHeaderFont;
         destination.DataBodyRange.Font.Name = masterDataFont;
         destination.TotalsRowRange.Font.Name = masterTotalsFont;
@@ -1550,15 +1632,60 @@ public sealed class ExcelWorkbookMigrator
         ApplyHiddenHourHeaderFormatting(destination);
         ApplyNativeCheckboxesIfAvailable(destination, "FR", "IPC", "OPC");
 
+        ReportPresentationStep("restoring Logbook visible rows and actions");
         var lastDataRow =
             (int)destination.DataBodyRange.Row + (int)destination.DataBodyRange.Rows.Count - 1;
-        worksheet.Rows.Hidden = false;
-        if (lastDataRow + 7 <= (int)worksheet.Rows.Count)
-        {
-            worksheet.Rows[$"{lastDataRow + 7}:{worksheet.Rows.Count}"].Hidden = true;
-        }
+        // Do not toggle every worksheet row: Excel has more than one million of
+        // them and that automation call can leave a headless migration hung.
+        // Only the live Logbook area and its action-button rows need to be shown.
+        worksheet.Rows[$"{(int)destination.Range.Row}:{lastDataRow + 6}"].Hidden = false;
 
         RepairLogbookActionButtons(destination);
+    }
+
+    private void ReportPresentationStep(string message)
+    {
+        _progressSink?.Report(new UpdaterProgressEvent(
+            UpdaterProgressEventTypes.PhaseStarted,
+            UpdaterPhaseIds.RestoreLogbookPresentation,
+            message,
+            Percent: null,
+            DateTimeOffset.UtcNow));
+    }
+
+    private static void CopyLogbookColumnPresentation(
+        dynamic sourceTable,
+        int sourceColumnIndex,
+        dynamic destinationTable,
+        int destinationColumnIndex)
+    {
+        object? sourceColumn = null;
+        object? destinationColumn = null;
+        try
+        {
+            sourceColumn = sourceTable.Range.Columns.Item(sourceColumnIndex);
+            destinationColumn = destinationTable.Range.Columns.Item(destinationColumnIndex);
+            // Clipboard-based Range.Copy/PasteSpecial is prone to blocking in
+            // headless Excel. Transfer the presentation properties directly.
+            // Table styles, header palette, and totals formatting are restored
+            // separately by the caller.
+            dynamic sourceRange = sourceColumn;
+            dynamic destinationRange = destinationColumn;
+            destinationRange.ColumnWidth = sourceRange.ColumnWidth;
+            destinationRange.Hidden = sourceRange.Hidden;
+            destinationRange.NumberFormat = sourceRange.NumberFormat;
+            destinationRange.Font.Name = sourceRange.Font.Name;
+            destinationRange.Font.Size = sourceRange.Font.Size;
+            destinationRange.Font.Bold = sourceRange.Font.Bold;
+            destinationRange.Font.Italic = sourceRange.Font.Italic;
+            destinationRange.Font.Color = sourceRange.Font.Color;
+            destinationRange.Interior.Color = sourceRange.Interior.Color;
+        }
+        finally
+        {
+            ReleaseComObject(destinationColumn);
+            ReleaseComObject(sourceColumn);
+        }
     }
 
     private static void RepairLogbookActionButtons(dynamic destination)
@@ -2998,40 +3125,63 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static void TryDelete(string path)
+    private static void DeleteIncompleteOutput(string path)
     {
-        try
+        if (File.Exists(path))
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch
-        {
-            // Preserve the original exception; the incomplete output is never trusted.
+            File.Delete(path);
         }
     }
 
-    private static void EnsureProcessExited(int processId)
+    private static void EnsureOutputIsExclusivelyAccessible(string outputPath)
+    {
+        using var stream = new FileStream(
+            outputPath,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+    }
+
+    private static bool EnsureProcessExited(int processId)
     {
         if (processId <= 0)
         {
-            return;
+            return false;
         }
 
         try
         {
             using var process = Process.GetProcessById(processId);
-            if (!process.WaitForExit(3000))
+            // Excel can take noticeably longer than a few seconds to finish
+            // background calculation and release OneDrive-backed workbooks after
+            // Quit. Allow that normal shutdown before treating it as a hang.
+            if (process.WaitForExit(GracefulExcelShutdownTimeoutMilliseconds))
+            {
+                return false;
+            }
+
+            try
             {
                 process.Kill(entireProcessTree: true);
-                process.WaitForExit(3000);
             }
+            catch (InvalidOperationException)
+            {
+                // Excel exited between the timeout and the diagnostic cleanup.
+                return false;
+            }
+
+            if (!process.WaitForExit(ForcedExcelShutdownTimeoutMilliseconds))
+            {
+                throw new InvalidOperationException(
+                    "Excel could not be terminated after a failed migration.");
+            }
+
+            return true;
         }
         catch (ArgumentException)
         {
             // The Excel process already exited normally.
+            return false;
         }
     }
 

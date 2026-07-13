@@ -19,12 +19,17 @@ $requiredTooling = @(
     "PrepareForTesting.ps1",
     "tools\ReleaseChecklist.ps1",
     "tools\Test-VbaSourceQuality.ps1",
+    "tools\Test-ReliabilityQuality.ps1",
     "tools\Test-VbaWorkbookPairing.ps1",
     "tools\Test-VbaCompileDisposable.ps1",
     "tools\Test-WorkbookPublicReadiness.ps1",
     "tools\Test-WorkbookVbaParity.ps1",
     "updater\compatibility-policy.json",
-    "updater\Test-CompatibilityMatrix.ps1"
+    "updater\Test-CompatibilityMatrix.ps1",
+    "updater\New-ReleaseManifest.ps1",
+    "updater\New-ModUpdateManifest.ps1",
+    "updater\release-signing.cer",
+    "updater\release-signing.json"
 )
 
 if (-not (Test-Path $readmePath)) {
