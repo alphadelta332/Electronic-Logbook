@@ -293,14 +293,7 @@ public partial class MainWindow : Window
                 : $"No changelog entries found between {installedVersion ?? "current"} and {targetVersion}.";
         }
 
-        var merged = string.Join("\n\n", included);
-        const int maxChars = 1200;
-        if (merged.Length > maxChars)
-        {
-            merged = merged[..maxChars] + "...";
-        }
-
-        return merged;
+        return string.Join("\n\n", included);
     }
 
     private static (int Major, int Minor, int Patch)? TryParseSemVer(string? value)
@@ -365,11 +358,6 @@ public partial class MainWindow : Window
         var summary = root.TryGetProperty("body", out var body)
             ? (body.GetString() ?? string.Empty)
             : string.Empty;
-
-        if (summary.Length > 300)
-        {
-            summary = summary[..300] + "...";
-        }
 
         return (tag, summary);
     }
