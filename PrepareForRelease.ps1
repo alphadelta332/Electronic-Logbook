@@ -31,6 +31,10 @@ Write-Host ""
 Set-LogbookWorkbookState -WorkbookPath $WorkbookPath -Branch "main" -Version $version
 Invoke-WorkbookMacro -WorkbookPath $WorkbookPath -MacroName "EnableProtectionForRelease" -IgnoreMissing
 Set-WorkbookOpenView -WorkbookPath $WorkbookPath
+# The macro and open-view steps save through Excel, which can add the local Office
+# identity back into core properties. This must be the final write to the public
+# workbook package.
+Set-WorkbookCustomPropertyFileValue -WorkbookPath $WorkbookPath -Name "ElectronicLogbookVersion" -Value $version
 
 if (-not $SkipWorkingCopy -and -not [string]::IsNullOrWhiteSpace($WorkingCopyPath)) {
     Write-Host ""

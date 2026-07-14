@@ -44,7 +44,14 @@
                 <TextBlock Text="Update Available" FontSize="20" FontWeight="SemiBold" />
                 <TextBlock Margin="0,8,0,0" x:Name="AvailableVersionText" Text="A newer version is available." />
                 <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" Text="The updater will create a separate updated workbook and keep your original workbook unchanged." />
-                <TextBlock Margin="0,12,0,0" x:Name="ReleaseSummaryText" TextWrapping="Wrap" Text="Release notes preview unavailable." />
+                <ScrollViewer Margin="0,12,0,0"
+                              MaxHeight="250"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <TextBlock x:Name="ReleaseSummaryText"
+                               TextWrapping="Wrap"
+                               Text="Release notes unavailable." />
+                </ScrollViewer>
             </StackPanel>
 
             <StackPanel Grid.Row="0" x:Name="PreflightPanel" Visibility="Collapsed">

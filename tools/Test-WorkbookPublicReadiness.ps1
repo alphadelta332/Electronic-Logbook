@@ -37,6 +37,27 @@ function Get-WorkbookNameText {
     }
 }
 
+function Get-WorkbookPackageEntryText {
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorkbookPath,
+        [Parameter(Mandatory)]
+        [string]$EntryName
+    )
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($WorkbookPath)
+    try {
+        $entry = $archive.GetEntry($EntryName)
+        if ($null -eq $entry) { throw "Package entry '$EntryName' is missing." }
+        $reader = [System.IO.StreamReader]::new($entry.Open())
+        try { return $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally {
+        $archive.Dispose()
+    }
+}
+
 Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
     param($Workbook)
 
@@ -87,6 +108,24 @@ Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
             Write-Host "Hidden sheet present: $($worksheet.Name)" -ForegroundColor Yellow
         }
     }
+}
+
+try {
+    $core = [System.Xml.XmlDocument]::new()
+    $core.LoadXml((Get-WorkbookPackageEntryText -WorkbookPath $workbookPath -EntryName "docProps/core.xml"))
+    $coreNs = [System.Xml.XmlNamespaceManager]::new($core.NameTable)
+    $coreNs.AddNamespace("cp", "http://schemas.openxmlformats.org/package/2006/metadata/core-properties")
+    $coreNs.AddNamespace("dc", "http://purl.org/dc/elements/1.1/")
+    $creator = $core.SelectSingleNode("/cp:coreProperties/dc:creator", $coreNs)
+    $lastModifiedBy = $core.SelectSingleNode("/cp:coreProperties/cp:lastModifiedBy", $coreNs)
+    if ($null -eq $creator -or -not [string]::IsNullOrWhiteSpace($creator.InnerText)) {
+        $issues.Add("Raw docProps/core.xml Creator must be blank before publishing.")
+    }
+    if ($null -eq $lastModifiedBy -or -not [string]::IsNullOrWhiteSpace($lastModifiedBy.InnerText)) {
+        $issues.Add("Raw docProps/core.xml Last saved by must be blank before publishing.")
+    }
+} catch {
+    $issues.Add("Could not inspect raw docProps/core.xml: $($_.Exception.Message)")
 }
 
 if ($issues.Count -gt 0) {

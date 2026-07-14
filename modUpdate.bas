@@ -241,6 +241,19 @@ Private Sub RunUpdate(newVersion As String)
         wizardReason = "Release wizard assets for version " & newVersion & " are not published yet."
     End If
 
+    ' Save before starting the external process. Non-AutoSave workbooks can surface
+    ' Excel's normal save prompt while closing; launching the wizard first let it
+    ' try to read LogbookVersion during that hand-off.
+    If wizardReason = "" Then
+        On Error Resume Next
+        ThisWorkbook.Save
+        If Err.Number <> 0 Then
+            wizardReason = "The source workbook could not be saved before the update: " & Err.Description
+        End If
+        Err.Clear
+        On Error GoTo 0
+    End If
+
     If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
         WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
         WriteUpdateDiagnostic diagnosticsPath, "Launcher diagnostics stop here because Excel handed off to the external wizard."
@@ -249,17 +262,12 @@ Private Sub RunUpdate(newVersion As String)
 
         Dim closeErr As Long
         Dim closeMsg As String
-        Dim shouldQuitExcel As Boolean
-
-        shouldQuitExcel = (Application.Workbooks.Count <= 1)
         On Error Resume Next
         Application.DisplayAlerts = False
-        ThisWorkbook.Save
-        If shouldQuitExcel Then
-            Application.Quit
-        Else
-            ThisWorkbook.Close SaveChanges:=False
-        End If
+        ' Close only this workbook. Application.Quit can invoke Excel's normal
+        ' save prompt for non-AutoSave workbooks, leaving the wizard to inspect
+        ' a source file that is still open behind that prompt.
+        ThisWorkbook.Close SaveChanges:=False
         closeErr = Err.Number
         closeMsg = Err.Description
         Application.DisplayAlerts = True
@@ -1804,7 +1812,12 @@ Private Function LogbookSourceFormatColumnName(ByVal srcLo As ListObject, _
                 LogbookSourceFormatColumnName = columnName
             End If
         Case "fr", "ipc", "opc"
-            If ListColumnExists(srcLo, "Custom 1") Then
+            ' 2.0.0 contains FR/IPC/OPC as well as the legacy Custom 1 column.
+            ' Prefer the checkbox field's own formatting so it is not replaced
+            ' with Custom 1's numeric-cell presentation during migration.
+            If ListColumnExists(srcLo, columnName) Then
+                LogbookSourceFormatColumnName = columnName
+            ElseIf ListColumnExists(srcLo, "Custom 1") Then
                 LogbookSourceFormatColumnName = "Custom 1"
             Else
                 LogbookSourceFormatColumnName = "Details"
