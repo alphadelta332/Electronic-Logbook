@@ -2269,9 +2269,8 @@ Private Function HighSpeedNewEntryRouteFieldNames(ByRef warningMessage As String
     warningMessage = "Warning: The route from " & fromIcao & AirportNameSuffix(fromName) & _
                      " to " & toIcao & AirportNameSuffix(toName) & " is about " & _
                      Format$(routeDistanceNm, "#,##0") & " NM. With " & _
-                     Format$(totalFlightHours, "0.00") & " flight hours recorded, the implied " & _
+                     Format$(totalFlightHours, "0.0#") & " flight hours recorded, the implied " & _
                      "average speed is " & Format$(impliedSpeedKt, "#,##0") & _
-                     " knots, which exceeds " & Format$(HIGH_SPEED_ROUTE_WARNING_THRESHOLD_KT, "#,##0") & _
                      " knots. Continue?"
     HighSpeedNewEntryRouteFieldNames = CombineNewEntryFieldNames( _
         Array("neFrom", "neTo"), NewEntryFlightTimeFieldNames())

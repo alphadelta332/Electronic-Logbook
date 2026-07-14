@@ -281,6 +281,17 @@ try {
                 $customColumn.Name = "Compat Header"
             }
 
+            # When a source already has the native checkbox columns (2.0.0+),
+            # their format must be retained rather than borrowed from legacy
+            # Custom 1. Capture the source alignment for a migration assertion.
+            $checkboxVerticalAlignment = @{}
+            foreach ($checkboxName in @("FR", "IPC", "OPC")) {
+                $checkboxColumn = Get-ListColumnOrNull -Table $logbook -Names @($checkboxName)
+                if ($null -ne $checkboxColumn) {
+                    $checkboxVerticalAlignment[$checkboxName] = [int]$checkboxColumn.DataBodyRange.Cells(1, 1).VerticalAlignment
+                }
+            }
+
             $keywords = Get-ListObject -Workbook $Workbook -Name "Keywords"
             $hasKeywords = $false
             if ($null -ne $keywords) {
@@ -312,6 +323,7 @@ try {
                 RouteRows = $routeRows
                 HasKeywords = $hasKeywords
                 Marker = $marker
+                CheckboxVerticalAlignment = $checkboxVerticalAlignment
             }
         }
 
@@ -365,6 +377,14 @@ try {
             Assert-Condition -Condition ([string]$idColumn.DataBodyRange.Cells(1, 1).Value2 -eq [string]$sourceFacts.Marker) -Message "Logbook marker was not preserved for $tag."
 
             Assert-Condition -Condition (Test-ListColumnExists -Table $logbook -Name "Compat Header") -Message "Custom Logbook heading was not preserved for $tag."
+
+            foreach ($checkboxName in $sourceFacts.CheckboxVerticalAlignment.Keys) {
+                $checkboxColumn = Get-ListColumnOrNull -Table $logbook -Names @($checkboxName)
+                Assert-Condition -Condition ($null -ne $checkboxColumn) -Message "$checkboxName column missing after migration for $tag."
+                $actualAlignment = [int]$checkboxColumn.DataBodyRange.Cells(1, 1).VerticalAlignment
+                $expectedAlignment = [int]$sourceFacts.CheckboxVerticalAlignment[$checkboxName]
+                Assert-Condition -Condition ($actualAlignment -eq $expectedAlignment) -Message "$checkboxName format was not preserved for $tag."
+            }
 
             if ([bool]$sourceFacts.HasKeywords) {
                 $keywords = Get-ListObject -Workbook $Workbook -Name "Keywords"

@@ -1812,7 +1812,12 @@ Private Function LogbookSourceFormatColumnName(ByVal srcLo As ListObject, _
                 LogbookSourceFormatColumnName = columnName
             End If
         Case "fr", "ipc", "opc"
-            If ListColumnExists(srcLo, "Custom 1") Then
+            ' 2.0.0 contains FR/IPC/OPC as well as the legacy Custom 1 column.
+            ' Prefer the checkbox field's own formatting so it is not replaced
+            ' with Custom 1's numeric-cell presentation during migration.
+            If ListColumnExists(srcLo, columnName) Then
+                LogbookSourceFormatColumnName = columnName
+            ElseIf ListColumnExists(srcLo, "Custom 1") Then
                 LogbookSourceFormatColumnName = "Custom 1"
             Else
                 LogbookSourceFormatColumnName = "Details"

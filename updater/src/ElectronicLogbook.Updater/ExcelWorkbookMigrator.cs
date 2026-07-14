@@ -1713,6 +1713,14 @@ public sealed class ExcelWorkbookMigrator
             string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase))
         {
+            // Version 2.0.0 already has these checkbox fields as well as the
+            // legacy Custom 1 column. Prefer their own format so that a
+            // 2.0.0-to-newer migration does not apply Custom 1's numeric-cell
+            // presentation to the checkbox controls.
+            if (HasColumn((object)source, name))
+            {
+                return name;
+            }
             if (HasColumn((object)source, "Custom 1"))
             {
                 return "Custom 1";
