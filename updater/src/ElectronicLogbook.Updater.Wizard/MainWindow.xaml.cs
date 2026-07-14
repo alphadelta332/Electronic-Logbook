@@ -1,11 +1,13 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Xml.Linq;
 using ElectronicLogbook.Updater;
 
 namespace ElectronicLogbook.Updater.Wizard;
@@ -66,6 +68,10 @@ public partial class MainWindow : Window
         _lastOutputPath = _context.OutputPath;
 
         UpdateWizardView();
+    }
+
+    public void BeginAvailabilityCheck()
+    {
         _ = InitialiseAvailabilityAsync();
     }
 
@@ -82,7 +88,9 @@ public partial class MainWindow : Window
 
         BackButton.IsEnabled = _stepIndex > 0 && !_isUpdating && _stepIndex < 5;
         NextButton.IsEnabled = !_isUpdating && CanAdvanceFromCurrentStep();
-        NextButton.Content = _stepIndex == 3 ? "Start" : (_stepIndex == 5 ? "Finish" : "Next");
+        NextButton.Content = _stepIndex == 0 && !_availabilityReady
+            ? "Retry"
+            : (_stepIndex == 3 ? "Start" : (_stepIndex == 5 ? "Finish" : "Next"));
 
         CancelButton.Content = _isUpdating ? "Cancel Update" : "Cancel";
     }
@@ -91,7 +99,7 @@ public partial class MainWindow : Window
     {
         return _stepIndex switch
         {
-            0 => _availabilityReady && !_isCheckingAvailability,
+            0 => !_isCheckingAvailability,
             1 => _availabilityReady && !_isCheckingAvailability,
             2 => _preflightPassed,
             3 => true,
@@ -112,19 +120,19 @@ public partial class MainWindow : Window
         // Do not race that hand-off by trying to automate the workbook immediately:
         // an AutoSave/OneDrive workbook can still be locked or mid-save, which made
         // the version look missing even though the workbook was valid.
-        FooterStatusText.Text = "Waiting for source workbook to close...";
+        FooterStatusText.Text = "Reading logbook details...";
         UpdateWizardView();
-        var sourceCheck = await WaitForSourceWorkbookAsync(_context.SourcePath);
-        var installedVersion = sourceCheck.IsOk
-            ? await TryReadWorkbookVersionWithRetryAsync(_context.SourcePath)
-            : null;
+        // Read the defined name directly from the XLSM package. Opening the
+        // workbook in another Excel instance can trigger a hidden "file in
+        // use" prompt, which is precisely what the wizard must avoid here.
+        var installedVersion = await TryReadWorkbookVersionFromPackageWithRetryAsync(_context.SourcePath);
         InstalledVersionText.Text = string.IsNullOrWhiteSpace(installedVersion)
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
         var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
-        string? availabilityFailureReason = sourceCheck.IsOk ? null : sourceCheck.Message;
+        string? availabilityFailureReason = null;
         if (identifiedInstalledVersion)
         {
             try
@@ -181,12 +189,27 @@ public partial class MainWindow : Window
             identifiedUpdateChannel = await CheckForReleaseAvailabilityAsync();
         }
 
-        _availabilityReady = identifiedInstalledVersion && identifiedUpdateChannel;
+        PreflightCheckResult? sourceCheck = null;
+        if (identifiedInstalledVersion && identifiedUpdateChannel)
+        {
+            FooterStatusText.Text = "Saving and closing your logbook...";
+            UpdateWizardView();
+            sourceCheck = await WaitForSourceWorkbookAsync(_context.SourcePath);
+            if (!sourceCheck.IsOk)
+            {
+                availabilityFailureReason =
+                    "Logbook identified, but it is still open or syncing. Save and close it, then try again.";
+            }
+        }
+
+        _availabilityReady = identifiedInstalledVersion && identifiedUpdateChannel && sourceCheck?.IsOk == true;
         _isCheckingAvailability = false;
         FooterStatusText.Text = _availabilityReady
             ? "Ready"
             : availabilityFailureReason ?? "Could not identify installed version or update channel.";
         UpdateWizardView();
+        Show();
+        Activate();
     }
 
     private async Task<bool> CheckForReleaseAvailabilityAsync()
@@ -503,6 +526,12 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_stepIndex == 0 && !_availabilityReady)
+        {
+            _ = InitialiseAvailabilityAsync();
+            return;
+        }
+
         if (_stepIndex == 3)
         {
             _stepIndex = 4;
@@ -804,14 +833,14 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task<string?> TryReadWorkbookVersionWithRetryAsync(string workbookPath)
+    private static async Task<string?> TryReadWorkbookVersionFromPackageWithRetryAsync(string workbookPath)
     {
-        // The lock can be released before Excel or the OneDrive sync client has
-        // finished replacing the saved file. Retry the read-only COM open instead
-        // of treating that short settling window as an unknown workbook version.
+        // OneDrive can briefly replace the package while it synchronises. Retrying
+        // the package read is safe: unlike Excel automation, it cannot display a
+        // hidden file-in-use prompt while the user's workbook remains open.
         for (var attempt = 0; attempt < 10; attempt++)
         {
-            var version = await Task.Run(() => TryReadWorkbookVersion(workbookPath));
+            var version = await Task.Run(() => TryReadWorkbookVersionFromPackage(workbookPath));
             if (!string.IsNullOrWhiteSpace(version))
             {
                 return version;
@@ -824,6 +853,166 @@ public partial class MainWindow : Window
         }
 
         return null;
+    }
+
+    private static string? TryReadWorkbookVersionFromPackage(string workbookPath)
+    {
+        if (!File.Exists(workbookPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var stream = new FileStream(
+                workbookPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+
+            var spreadsheet = (XNamespace)"http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+            var documentRelationships =
+                (XNamespace)"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+            var packageRelationships =
+                (XNamespace)"http://schemas.openxmlformats.org/package/2006/relationships";
+            var workbook = ReadXmlEntry(archive, "xl/workbook.xml");
+            var workbookRelationships = ReadXmlEntry(archive, "xl/_rels/workbook.xml.rels");
+            if (workbook is null || workbookRelationships is null)
+            {
+                return null;
+            }
+
+            var definedName = workbook
+                .Descendants(spreadsheet + "definedName")
+                .FirstOrDefault(name => string.Equals(
+                    (string?)name.Attribute("name"),
+                    "LogbookVersion",
+                    StringComparison.OrdinalIgnoreCase));
+            if (definedName is null ||
+                !TryParseSingleCellReference(definedName.Value, out var sheetName, out var cellReference))
+            {
+                return null;
+            }
+
+            var sheet = workbook
+                .Descendants(spreadsheet + "sheet")
+                .FirstOrDefault(candidate => string.Equals(
+                    (string?)candidate.Attribute("name"),
+                    sheetName,
+                    StringComparison.OrdinalIgnoreCase));
+            var relationshipId = (string?)sheet?.Attribute(documentRelationships + "id");
+            if (string.IsNullOrWhiteSpace(relationshipId))
+            {
+                return null;
+            }
+
+            var relationship = workbookRelationships
+                .Descendants(packageRelationships + "Relationship")
+                .FirstOrDefault(candidate => string.Equals(
+                    (string?)candidate.Attribute("Id"),
+                    relationshipId,
+                    StringComparison.Ordinal));
+            var target = (string?)relationship?.Attribute("Target");
+            if (string.IsNullOrWhiteSpace(target))
+            {
+                return null;
+            }
+
+            var worksheet = ReadXmlEntry(archive, ResolveWorkbookRelationshipTarget(target));
+            var cell = worksheet?
+                .Descendants(spreadsheet + "c")
+                .FirstOrDefault(candidate => string.Equals(
+                    (string?)candidate.Attribute("r"),
+                    cellReference,
+                    StringComparison.OrdinalIgnoreCase));
+            if (cell is null)
+            {
+                return null;
+            }
+
+            var cellType = (string?)cell.Attribute("t");
+            if (string.Equals(cellType, "s", StringComparison.Ordinal))
+            {
+                var sharedStringIndex = (int?)cell.Element(spreadsheet + "v");
+                var sharedStrings = ReadXmlEntry(archive, "xl/sharedStrings.xml");
+                return sharedStringIndex.HasValue
+                    ? sharedStrings?
+                        .Descendants(spreadsheet + "si")
+                        .ElementAtOrDefault(sharedStringIndex.Value)?
+                        .Descendants(spreadsheet + "t")
+                        .Select(text => text.Value)
+                        .Aggregate(string.Empty, static (value, text) => value + text)
+                    : null;
+            }
+
+            if (string.Equals(cellType, "inlineStr", StringComparison.Ordinal))
+            {
+                return string.Concat(cell.Descendants(spreadsheet + "t").Select(text => text.Value));
+            }
+
+            return (string?)cell.Element(spreadsheet + "v");
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
+    }
+
+    private static XDocument? ReadXmlEntry(ZipArchive archive, string entryName)
+    {
+        var entry = archive.GetEntry(entryName);
+        if (entry is null)
+        {
+            return null;
+        }
+
+        using var entryStream = entry.Open();
+        return XDocument.Load(entryStream);
+    }
+
+    private static bool TryParseSingleCellReference(
+        string formula,
+        out string sheetName,
+        out string cellReference)
+    {
+        sheetName = string.Empty;
+        cellReference = string.Empty;
+
+        var separator = formula.LastIndexOf('!');
+        if (separator <= 0 || separator == formula.Length - 1)
+        {
+            return false;
+        }
+
+        sheetName = formula[..separator].Trim().TrimStart('=');
+        if (sheetName.Length >= 2 && sheetName[0] == '\'' && sheetName[^1] == '\'')
+        {
+            sheetName = sheetName[1..^1].Replace("''", "'", StringComparison.Ordinal);
+        }
+
+        cellReference = formula[(separator + 1)..].Trim().Replace("$", string.Empty, StringComparison.Ordinal);
+        return !string.IsNullOrWhiteSpace(sheetName) &&
+            System.Text.RegularExpressions.Regex.IsMatch(cellReference, "^[A-Za-z]+[0-9]+$");
+    }
+
+    private static string ResolveWorkbookRelationshipTarget(string target)
+    {
+        return target.StartsWith("/", StringComparison.Ordinal)
+            ? target[1..]
+            : $"xl/{target}";
     }
 
     private static RunContext ResolveRunContext()
@@ -964,7 +1153,7 @@ public partial class MainWindow : Window
             return new(false, $"Source workbook must be an .xlsm file: {source}");
         }
 
-        for (var attempt = 0; attempt < 30; attempt++)
+        for (var attempt = 0; attempt < 60; attempt++)
         {
             if (!IsWorkbookLocked(source))
             {
