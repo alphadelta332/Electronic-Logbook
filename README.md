@@ -10,7 +10,8 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ### [2.0.1] - 2026-07-14
 #### General
-- 
+- Added a warning when a route's recorded time implies an unusually high average speed.
+- Improved the master workbook used to start a new logbook.
 
 #### Updater
 - Fixed bug preventing users from being able to update workbooks when not connected to File Sharing service.
