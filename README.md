@@ -8,6 +8,13 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 ## Changelog
 
+### [2.0.1] - 2026-07-14
+#### General
+- 
+
+#### Updater
+- Fixed bug preventing users from being able to update workbooks when not connected to File Sharing service.
+
 ### [2.0.0] - 2026-07-13
 #### General
 - Improved workbook opening feedback so Excel shows what the logbook is working on during startup.

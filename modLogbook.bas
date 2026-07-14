@@ -14,6 +14,7 @@ Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
 Private Const AIRPORT_ICAO_VALIDATION_NAME As String = "AirportIcaoValidationList"
 Private Const REMOTE_AIRPORT_WARNING_THRESHOLD_NM As Double = 3000
+Private Const HIGH_SPEED_ROUTE_WARNING_THRESHOLD_KT As Double = 700
 Private Const ADD_LOGBOOK_LAYOUT_DIAG_SHEET As String = "_AddToLogbookLayoutDiagnostics"
 Private Const ADD_LOGBOOK_LAYOUT_DIAG_FLAG As String = "AddToLogbookLayoutDiagnostics"
 Private Const LOGBOOK_ACTION_BUTTON_WIDTH As Double = 121.2
@@ -287,6 +288,23 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                                   "Distant Airport")
                 If response = vbCancel Then
                     MarkNewEntryProblemFields distantAirportFields
+                    GoTo Cleanup
+                End If
+            End If
+        End If
+
+    '--- 4c-3. Implied Route Speed
+        If Not suppressWarnings Then
+            Dim highSpeedRouteFields As Variant
+            Dim highSpeedRouteMessage As String
+
+            highSpeedRouteFields = HighSpeedNewEntryRouteFieldNames(highSpeedRouteMessage)
+            If VariantArrayHasItems(highSpeedRouteFields) Then
+                response = MsgBox(highSpeedRouteMessage, _
+                                  vbOKCancel + vbExclamation, _
+                                  "High Route Speed")
+                If response = vbCancel Then
+                    MarkNewEntryProblemFields highSpeedRouteFields
                     GoTo Cleanup
                 End If
             End If
@@ -2196,6 +2214,68 @@ Private Sub AddDistantNewEntryRouteLegWarning(ByVal problemFields As Collection,
                      " to " & toIcao & AirportNameSuffix(toName) & _
                      " is about " & Format$(routeDistanceNm, "#,##0") & " NM."
 End Sub
+
+Private Function HighSpeedNewEntryRouteFieldNames(ByRef warningMessage As String) As Variant
+    Dim fromText As String
+    Dim toText As String
+    Dim fromIcao As String
+    Dim toIcao As String
+    Dim fromName As String
+    Dim toName As String
+    Dim fromLat As Double
+    Dim fromLon As Double
+    Dim toLat As Double
+    Dim toLon As Double
+    Dim routeDistanceNm As Double
+    Dim totalFlightHours As Double
+    Dim impliedSpeedKt As Double
+
+    totalFlightHours = SumNewEntryFields(NewEntryFlightTimeFieldNames())
+    If totalFlightHours <= 0 Then
+        HighSpeedNewEntryRouteFieldNames = Array()
+        Exit Function
+    End If
+
+    fromText = Trim$(CStr(NewEntryValue("neFrom")))
+    toText = Trim$(CStr(NewEntryValue("neTo")))
+    If fromText = "" Or toText = "" Then
+        HighSpeedNewEntryRouteFieldNames = Array()
+        Exit Function
+    End If
+
+    fromIcao = NewEntryAirportIcao(fromText)
+    toIcao = NewEntryAirportIcao(toText)
+    If fromIcao = "" Or toIcao = "" Or fromIcao = toIcao Then
+        HighSpeedNewEntryRouteFieldNames = Array()
+        Exit Function
+    End If
+
+    If Not AirportLocationByIcao(fromIcao, fromName, fromLat, fromLon) Then
+        HighSpeedNewEntryRouteFieldNames = Array()
+        Exit Function
+    End If
+    If Not AirportLocationByIcao(toIcao, toName, toLat, toLon) Then
+        HighSpeedNewEntryRouteFieldNames = Array()
+        Exit Function
+    End If
+
+    routeDistanceNm = GreatCircleDistanceNm(fromLat, fromLon, toLat, toLon)
+    impliedSpeedKt = routeDistanceNm / totalFlightHours
+    If impliedSpeedKt <= HIGH_SPEED_ROUTE_WARNING_THRESHOLD_KT Then
+        HighSpeedNewEntryRouteFieldNames = Array()
+        Exit Function
+    End If
+
+    warningMessage = "Warning: The route from " & fromIcao & AirportNameSuffix(fromName) & _
+                     " to " & toIcao & AirportNameSuffix(toName) & " is about " & _
+                     Format$(routeDistanceNm, "#,##0") & " NM. With " & _
+                     Format$(totalFlightHours, "0.00") & " flight hours recorded, the implied " & _
+                     "average speed is " & Format$(impliedSpeedKt, "#,##0") & _
+                     " knots, which exceeds " & Format$(HIGH_SPEED_ROUTE_WARNING_THRESHOLD_KT, "#,##0") & _
+                     " knots. Continue?"
+    HighSpeedNewEntryRouteFieldNames = CombineNewEntryFieldNames( _
+        Array("neFrom", "neTo"), NewEntryFlightTimeFieldNames())
+End Function
 
 Private Function NearestVisitedAirportDistanceNm(ByVal airportIcao As String, _
                                                  ByRef airportName As String, _
