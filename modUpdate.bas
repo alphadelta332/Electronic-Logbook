@@ -121,11 +121,17 @@ Private Function FetchRemoteVersion() As String
         http.send
     End If
     If http.Status = 200 Then
-        FetchRemoteVersion = Trim(http.responseText)
+        FetchRemoteVersion = NormalizeVersionText(http.responseText)
     End If
     Exit Function
 Fail:
     FetchRemoteVersion = ""
+End Function
+
+Private Function NormalizeVersionText(ByVal value As String) As String
+    value = Replace(value, vbCr, "")
+    value = Replace(value, vbLf, "")
+    NormalizeVersionText = Trim$(value)
 End Function
 
 Private Function IsNewerVersion(remoteVer As String, localVer As String) As Boolean
@@ -199,6 +205,8 @@ Private Sub RunUpdate(newVersion As String)
     Dim wizardMasterPath As String
     Dim releaseChannel As Boolean
 
+    newVersion = NormalizeVersionText(newVersion)
+
     ' Unique per-run filenames prevent stale leftovers from a prior failed update
     ' from being silently used as the staging input.
     sessionId = Format(Now, "yyyymmdd_hhmmss")
@@ -237,8 +245,6 @@ Private Sub RunUpdate(newVersion As String)
             wizardReason = "Could not prepare the development master workbook for the updater wizard."
             wizardMasterPath = ""
         End If
-    ElseIf Not LatestReleaseMatchesVersion(GITHUB_USER & "/" & GITHUB_REPO, newVersion) Then
-        wizardReason = "Release wizard assets for version " & newVersion & " are not published yet."
     End If
 
     ' Save before starting the external process. Non-AutoSave workbooks can surface
@@ -254,33 +260,35 @@ Private Sub RunUpdate(newVersion As String)
         On Error GoTo 0
     End If
 
-    If wizardReason = "" And TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
-        WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
-        WriteUpdateDiagnostic diagnosticsPath, "Launcher diagnostics stop here because Excel handed off to the external wizard."
-        WriteUpdateDiagnostic diagnosticsPath, "Wizard diagnostic report path if enabled: " & wizardReportPath
-        UpdateStatus ""
+    If wizardReason = "" Then
+        If TryLaunchExternalUpdaterWizard(sourceWorkbookPath, GITHUB_USER & "/" & GITHUB_REPO, wizardReason, wizardMasterPath, newVersion) Then
+            WriteUpdateDiagnostic diagnosticsPath, "External updater wizard launched."
+            WriteUpdateDiagnostic diagnosticsPath, "Launcher diagnostics stop here because Excel handed off to the external wizard."
+            WriteUpdateDiagnostic diagnosticsPath, "Wizard diagnostic report path if enabled: " & wizardReportPath
+            UpdateStatus ""
 
-        Dim closeErr As Long
-        Dim closeMsg As String
-        On Error Resume Next
-        Application.DisplayAlerts = False
-        ' Close only this workbook. Application.Quit can invoke Excel's normal
-        ' save prompt for non-AutoSave workbooks, leaving the wizard to inspect
-        ' a source file that is still open behind that prompt.
-        ThisWorkbook.Close SaveChanges:=False
-        closeErr = Err.Number
-        closeMsg = Err.Description
-        Application.DisplayAlerts = True
-        On Error GoTo 0
+            Dim closeErr As Long
+            Dim closeMsg As String
+            On Error Resume Next
+            Application.DisplayAlerts = False
+            ' Close only this workbook. Application.Quit can invoke Excel's normal
+            ' save prompt for non-AutoSave workbooks, leaving the wizard to inspect
+            ' a source file that is still open behind that prompt.
+            ThisWorkbook.Close SaveChanges:=False
+            closeErr = Err.Number
+            closeMsg = Err.Description
+            Application.DisplayAlerts = True
+            On Error GoTo 0
 
-        If closeErr <> 0 Then
-            MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
-                "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
-                "Close error: " & closeMsg, _
-                vbExclamation, "Manual Close Required"
+            If closeErr <> 0 Then
+                MsgBox "The updater wizard is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
+                    "Please close this workbook now so the wizard can continue." & vbCrLf & vbCrLf & _
+                    "Close error: " & closeMsg, _
+                    vbExclamation, "Manual Close Required"
+            End If
+
+            Exit Sub
         End If
-
-        Exit Sub
     End If
 
     If wizardReason <> "" And releaseChannel Then
@@ -2428,6 +2436,8 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     Dim candidate As String
     Dim tempFolder As String
 
+    targetVersion = NormalizeVersionText(targetVersion)
+
     On Error Resume Next
     namedPath = Trim(CStr(ThisWorkbook.Names("UpdaterWizardPath").RefersToRange.Value))
     On Error GoTo 0
@@ -2480,7 +2490,16 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
 
     candidate = tempFolder & "\" & WIZARD_EXE_NAME
     If Dir$(candidate) = "" Then
-        If Not DownloadLatestWizardPackage(repository, candidate, tempFolder) Then
+        ' Do not preflight /releases/latest separately. GitHub can briefly return
+        ' stale release metadata immediately after a release is published, which
+        ' falsely blocked a valid update before the wizard could start. Download
+        ' the asset for the requested version directly instead.
+        If targetVersion <> "" Then
+            If Not DownloadReleaseWizardPackage(repository, targetVersion, candidate, tempFolder) Then
+                ResolveWizardExecutablePath = ""
+                Exit Function
+            End If
+        ElseIf Not DownloadLatestWizardPackage(repository, candidate, tempFolder) Then
             ResolveWizardExecutablePath = ""
             Exit Function
         End If
@@ -2559,8 +2578,8 @@ Fail:
 End Function
 
 Private Function DownloadLatestWizardPackage(ByVal repository As String, _
-                                             ByVal destinationExePath As String, _
-                                             ByVal tempFolder As String) As Boolean
+                                              ByVal destinationExePath As String, _
+                                              ByVal tempFolder As String) As Boolean
     Dim downloadUrl As String
 
     downloadUrl = FetchLatestWizardDownloadUrl(repository)
@@ -2579,6 +2598,25 @@ Private Function DownloadLatestWizardPackage(ByVal repository As String, _
 
     downloadUrl = "https://github.com/" & repository & "/releases/latest/download/" & WIZARD_ZIP_NAME
     DownloadLatestWizardPackage = TryDownloadWizardFromUrl(downloadUrl, destinationExePath, tempFolder)
+End Function
+
+Private Function DownloadReleaseWizardPackage(ByVal repository As String, _
+                                              ByVal version As String, _
+                                              ByVal destinationExePath As String, _
+                                              ByVal tempFolder As String) As Boolean
+    Dim releaseBaseUrl As String
+
+    version = NormalizeVersionText(version)
+    If version = "" Then Exit Function
+
+    releaseBaseUrl = "https://github.com/" & repository & "/releases/download/v" & version & "/"
+
+    If TryDownloadWizardFromUrl(releaseBaseUrl & WIZARD_EXE_NAME, destinationExePath, tempFolder) Then
+        DownloadReleaseWizardPackage = True
+        Exit Function
+    End If
+
+    DownloadReleaseWizardPackage = TryDownloadWizardFromUrl(releaseBaseUrl & WIZARD_ZIP_NAME, destinationExePath, tempFolder)
 End Function
 
 Private Function TryDownloadWizardFromUrl(ByVal downloadUrl As String, _
@@ -2666,57 +2704,6 @@ Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As Str
     Exit Function
 Fail:
     FetchLatestWizardDownloadUrl = ""
-End Function
-
-Private Function LatestReleaseMatchesVersion(ByVal repository As String, ByVal version As String) As Boolean
-    Dim tag As String
-
-    tag = FetchLatestReleaseTag(repository)
-    If tag = "" Then
-        LatestReleaseMatchesVersion = False
-    Else
-        LatestReleaseMatchesVersion = (LCase$(tag) = LCase$("v" & version))
-    End If
-End Function
-
-Private Function FetchLatestReleaseTag(ByVal repository As String) As String
-    Dim http As Object
-    Dim token As String
-    Dim body As String
-    Dim apiUrl As String
-
-    On Error GoTo Fail
-    apiUrl = "https://api.github.com/repos/" & repository & "/releases/latest"
-
-    Set http = CreateObject("MSXML2.XMLHTTP")
-    http.Open "GET", apiUrl, False
-    http.setRequestHeader "Accept", "application/vnd.github+json"
-    http.setRequestHeader "Cache-Control", "no-cache"
-    http.setRequestHeader "Pragma", "no-cache"
-    http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
-    http.send
-
-    If http.Status <> 200 And token <> "" Then
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", apiUrl, False
-        http.setRequestHeader "Accept", "application/vnd.github+json"
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
-
-    If http.Status <> 200 Then GoTo Fail
-
-    body = http.responseText
-    FetchLatestReleaseTag = ExtractJsonStringValue(body, "tag_name")
-    Exit Function
-Fail:
-    FetchLatestReleaseTag = ""
 End Function
 
 Private Function ExtractWizardDownloadUrl(ByVal jsonText As String) As String
