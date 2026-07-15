@@ -133,7 +133,7 @@ function Get-LogbookCustomColumn {
         return $null
     }
 
-    foreach ($anchorName in @("OPC", "Details", "Remarks")) {
+    foreach ($anchorName in @("OPC")) {
         $anchor = Get-ListColumnOrNull -Table $Table -Names @($anchorName)
         if ($null -ne $anchor -and $anchor.Index + 1 -lt $hoursColumn.Index) {
             return $Table.ListColumns.Item($anchor.Index + 1)
@@ -265,16 +265,63 @@ try {
             try { $logbook.Parent.Unprotect() } catch {}
             Ensure-DataRow -Table $logbook
 
-            $idColumn = Get-ListColumnOrNull -Table $logbook -Names @("Reg", "Flight ID")
-            if ($null -eq $idColumn) {
-                throw "No Reg or Flight ID column found in $tag."
-            }
-            $idColumn.DataBodyRange.Cells(1, 1).Value2 = $marker
-
             $yearColumn = Get-ListColumnOrNull -Table $logbook -Names @("Year")
             if ($null -ne $yearColumn) {
                 $yearColumn.DataBodyRange.Cells(1, 1).Value2 = 2026
             }
+
+            $baseAirports = Get-ListObject -Workbook $Workbook -Name "BaseAirportsTop10"
+            $baseAirportIcao = ""
+            $airports = Get-ListObject -Workbook $Workbook -Name "Airports"
+            if ($null -ne $airports) {
+                $airportIcaoColumn = Get-ListColumnOrNull -Table $airports -Names @("ICAO")
+                if ($null -ne $airportIcaoColumn) {
+                    for ($airportRow = 1; $airportRow -le (Get-DataBodyRowCount -Table $airports); $airportRow++) {
+                        $candidateIcao = [string]$airportIcaoColumn.DataBodyRange.Cells($airportRow, 1).Value2
+                        if (-not [string]::IsNullOrWhiteSpace($candidateIcao)) {
+                            $baseAirportIcao = $candidateIcao
+                            break
+                        }
+                    }
+                }
+            }
+            if ($null -ne $baseAirports) {
+                try { $baseAirports.Parent.Unprotect() } catch {}
+                Ensure-DataRow -Table $baseAirports
+                $baseColumn = Get-ListColumnOrNull -Table $baseAirports -Names @("Base")
+                $icaoColumn = Get-ListColumnOrNull -Table $baseAirports -Names @("ICAO")
+                if ($null -ne $baseColumn -and $null -ne $icaoColumn) {
+                    if ([string]::IsNullOrWhiteSpace($baseAirportIcao)) {
+                        $baseAirportIcao = [string]$icaoColumn.DataBodyRange.Cells(1, 1).Value2
+                    } else {
+                        $icaoColumn.DataBodyRange.Cells(1, 1).Value2 = $baseAirportIcao
+                    }
+                    $baseColumn.DataBodyRange.Cells(1, 1).Value2 = "TRUE"
+                }
+            }
+
+            $fromAirport = if ([string]::IsNullOrWhiteSpace($baseAirportIcao)) { "YCOM" } else { $baseAirportIcao }
+            $nativeLogbookValues = @{}
+            foreach ($entry in @(
+                @{ Name = "Reg"; Value = "REG-$safeTag" },
+                @{ Name = "Flight ID"; Value = "FID-$safeTag" },
+                @{ Name = "From"; Value = $fromAirport },
+                @{ Name = "Via"; Value = "YVIA" },
+                @{ Name = "To"; Value = "YTAG" },
+                @{ Name = "Remarks"; Value = "COMPAT REMARKS $safeTag" },
+                @{ Name = "FR"; Value = "TRUE" },
+                @{ Name = "IPC"; Value = "FALSE" },
+                @{ Name = "OPC"; Value = "TRUE" },
+                @{ Name = "RNP"; Value = "1.23" }
+            )) {
+                $column = Get-ListColumnOrNull -Table $logbook -Names @([string]$entry["Name"])
+                if ($null -ne $column) {
+                    $column.DataBodyRange.Cells(1, 1).Value2 = $entry["Value"]
+                    $nativeLogbookValues[[string]$entry["Name"]] = $entry["Value"]
+                }
+            }
+
+            Assert-Condition -Condition ($nativeLogbookValues.ContainsKey("Reg") -or $nativeLogbookValues.ContainsKey("Flight ID")) -Message "No Reg or Flight ID column found in $tag."
 
             $customColumn = Get-LogbookCustomColumn -Table $logbook
             if ($null -ne $customColumn) {
@@ -323,7 +370,9 @@ try {
                 RouteRows = $routeRows
                 HasKeywords = $hasKeywords
                 Marker = $marker
+                NativeLogbookValues = $nativeLogbookValues
                 CheckboxVerticalAlignment = $checkboxVerticalAlignment
+                BaseAirportIcao = $baseAirportIcao
             }
         }
 
@@ -372,9 +421,19 @@ try {
             Assert-Condition -Condition ($null -ne $logbook) -Message "Output Logbook table missing for $tag."
             Assert-Condition -Condition ((Get-DataBodyRowCount -Table $logbook) -eq [int]$sourceFacts.LogbookRows) -Message "Logbook row count was not preserved for $tag."
 
-            $idColumn = Get-ListColumnOrNull -Table $logbook -Names @("Reg", "Flight ID")
-            Assert-Condition -Condition ($null -ne $idColumn) -Message "Output has no Reg or Flight ID column for $tag."
-            Assert-Condition -Condition ([string]$idColumn.DataBodyRange.Cells(1, 1).Value2 -eq [string]$sourceFacts.Marker) -Message "Logbook marker was not preserved for $tag."
+            foreach ($nativeName in $sourceFacts.NativeLogbookValues.Keys) {
+                $nativeColumn = Get-ListColumnOrNull -Table $logbook -Names @([string]$nativeName)
+                Assert-Condition -Condition ($null -ne $nativeColumn) -Message "$nativeName column missing after migration for $tag."
+                $actualNativeValue = $nativeColumn.DataBodyRange.Cells(1, 1).Value2
+                $expectedNativeValue = $sourceFacts.NativeLogbookValues[$nativeName]
+                if ($expectedNativeValue -is [bool]) {
+                    Assert-Condition -Condition ([bool]$actualNativeValue -eq [bool]$expectedNativeValue) -Message "$nativeName value was not preserved for $tag."
+                } elseif ($expectedNativeValue -is [double] -or $expectedNativeValue -is [decimal] -or $expectedNativeValue -is [int]) {
+                    Assert-Condition -Condition ([math]::Abs([double]$actualNativeValue - [double]$expectedNativeValue) -lt 0.000001) -Message "$nativeName value was not preserved for $tag."
+                } else {
+                    Assert-Condition -Condition ([string]$actualNativeValue -eq [string]$expectedNativeValue) -Message "$nativeName value was not preserved for $tag."
+                }
+            }
 
             Assert-Condition -Condition (Test-ListColumnExists -Table $logbook -Name "Compat Header") -Message "Custom Logbook heading was not preserved for $tag."
 
@@ -400,6 +459,22 @@ try {
                 Assert-Condition -Condition ((Get-DataBodyRowCount -Table $routes) -eq [int]$sourceFacts.RouteRows) -Message "Routes row count was not preserved for $tag."
             }
 
+            if (-not [string]::IsNullOrWhiteSpace([string]$sourceFacts.BaseAirportIcao)) {
+                $baseAirports = Get-ListObject -Workbook $Workbook -Name "BaseAirportsTop10"
+                Assert-Condition -Condition ($null -ne $baseAirports) -Message "BaseAirportsTop10 table missing after migration for $tag."
+                $baseColumn = Get-ListColumnOrNull -Table $baseAirports -Names @("Base")
+                $icaoColumn = Get-ListColumnOrNull -Table $baseAirports -Names @("ICAO")
+                Assert-Condition -Condition ($null -ne $baseColumn -and $null -ne $icaoColumn) -Message "BaseAirportsTop10 schema incomplete after migration for $tag."
+                $foundBaseAirport = $false
+                for ($baseRow = 1; $baseRow -le (Get-DataBodyRowCount -Table $baseAirports); $baseRow++) {
+                    if ([string]$icaoColumn.DataBodyRange.Cells($baseRow, 1).Value2 -eq [string]$sourceFacts.BaseAirportIcao) {
+                        $foundBaseAirport = [bool]$baseColumn.DataBodyRange.Cells($baseRow, 1).Value2
+                        break
+                    }
+                }
+                Assert-Condition -Condition $foundBaseAirport -Message "Base airport selection was not preserved for $tag."
+            }
+
             try {
                 Assert-Condition -Condition ([int]$Workbook.Names.Item("DateAfterExport").RefersToRange.Value2 -eq 3) -Message "DateAfterExport was not preserved for $tag."
             } catch {
@@ -411,6 +486,38 @@ try {
         }
 
         Write-Step "$tag migrated successfully"
+    }
+
+    if ($tags -contains "v1.4.2") {
+        Write-Step "Verifying unsupported below-floor tag v1.4.2 is rejected"
+        $unsupportedDirectory = Join-Path $testDirectory "unsupported-v1.4.2"
+        New-Item -ItemType Directory -Path $unsupportedDirectory | Out-Null
+        $unsupportedSourcePath = Join-Path $unsupportedDirectory "Source-v1.4.2.xlsm"
+        $unsupportedOutputPath = Join-Path $unsupportedDirectory "Updated-v1.4.2.xlsm"
+        $unsupportedReportPath = Join-Path $unsupportedDirectory "Updated-v1.4.2.update-report.json"
+        Export-GitFile -Tag "v1.4.2" -PathInRepo "Electronic_Logbook_Master.xlsm" -DestinationPath $unsupportedSourcePath
+        $unsupportedSourceHash = (Get-FileHash -LiteralPath $unsupportedSourcePath -Algorithm SHA256).Hash
+
+        $unsupportedLines = @()
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & dotnet $updaterDllPath `
+                --source $unsupportedSourcePath `
+                --master $MasterPath `
+                --output $unsupportedOutputPath `
+                --report $unsupportedReportPath 2>&1 | Tee-Object -Variable unsupportedLines
+            $unsupportedExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
+        $unsupportedOutput = ($unsupportedLines | Out-String)
+
+        Assert-Condition -Condition ($unsupportedExitCode -ne 0) -Message "Updater unexpectedly accepted unsupported v1.4.2 source."
+        Assert-Condition -Condition ($unsupportedOutput -match "2\.0\.0") -Message "Unsupported-version error did not describe the v2.0.0 floor."
+        Assert-Condition -Condition (-not (Test-Path -LiteralPath $unsupportedOutputPath)) -Message "Unsupported migration left an output workbook."
+        $unsupportedAfterHash = (Get-FileHash -LiteralPath $unsupportedSourcePath -Algorithm SHA256).Hash
+        Assert-Condition -Condition ($unsupportedSourceHash -eq $unsupportedAfterHash) -Message "Unsupported source workbook changed during rejection."
     }
 
     Write-Host "Compatibility matrix passed for $($supportedTags.Count) supported tag(s)." -ForegroundColor Green

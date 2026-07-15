@@ -2,7 +2,7 @@ namespace ElectronicLogbook.Updater.Tests;
 
 public sealed class CompatibilityPolicyTests
 {
-    private const string CompatibilityFloor = "1.4.1";
+    private const string CompatibilityFloor = "2.0.0";
     private const string CompatibilityFloorTag = "v" + CompatibilityFloor;
 
     [Fact]
@@ -11,10 +11,10 @@ public sealed class CompatibilityPolicyTests
         var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
 
         var tags = policy.SupportedTags(
-            ["v1.3.1", "v1.4.0", CompatibilityFloorTag, "v1.4.2", "v1.5.0", "v2.0.0"],
-            "2.0.0");
+            ["v1.4.2", "v1.9.9", CompatibilityFloorTag, "v2.0.1", "v2.0.2", "v2.0.3"],
+            "2.0.3");
 
-        Assert.Equal([CompatibilityFloorTag, "v1.4.2", "v1.5.0"], tags);
+        Assert.Equal([CompatibilityFloorTag, "v2.0.1", "v2.0.2"], tags);
     }
 
     [Fact]
@@ -23,10 +23,10 @@ public sealed class CompatibilityPolicyTests
         var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
 
         var tags = policy.SupportedTags(
-            ["v1.10.0", "v1.4.2", CompatibilityFloorTag, "v1.9.0"],
-            "2.0.0");
+            ["v2.0.10", "v2.0.2", CompatibilityFloorTag, "v2.0.9"],
+            "2.1.0");
 
-        Assert.Equal([CompatibilityFloorTag, "v1.4.2", "v1.9.0", "v1.10.0"], tags);
+        Assert.Equal([CompatibilityFloorTag, "v2.0.2", "v2.0.9", "v2.0.10"], tags);
     }
 
     [Fact]
@@ -50,10 +50,11 @@ public sealed class CompatibilityPolicyTests
     }
 
     [Theory]
-    [InlineData("1.4.0", false)]
-    [InlineData("1.4.1", true)]
-    [InlineData("v1.4.1", true)]
-    [InlineData("1.5.0", true)]
+    [InlineData("1.4.2", false)]
+    [InlineData("1.9.9", false)]
+    [InlineData("2.0.0", true)]
+    [InlineData("v2.0.0", true)]
+    [InlineData("2.0.1", true)]
     public void IsVersionSupportedAppliesFloor(string version, bool expected)
     {
         var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
@@ -67,9 +68,9 @@ public sealed class CompatibilityPolicyTests
         var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
 
         var exception = Assert.Throws<InvalidDataException>(() =>
-            policy.ThrowIfUnsupported("1.4.0"));
+            policy.ThrowIfUnsupported("1.4.2"));
 
-        Assert.Contains("1.4.0", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("1.4.2", exception.Message, StringComparison.Ordinal);
         Assert.Contains(CompatibilityFloor, exception.Message, StringComparison.Ordinal);
     }
 

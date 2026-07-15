@@ -170,8 +170,7 @@ End Function
 '
 ' Data preserved from user:
 '   Logbook[Year] through Logbook[Circling]  (raw flight entries)
-'   Legacy Logbook[Details] split into From, To, Via, and Remarks
-'   Legacy currency detection helper columns converted to FR, IPC, and OPC
+'   Native Logbook route and currency columns
 '   BaseAirportsTop10                         (matched by ICAO)
 '   Keywords table                            (user detection terms)
 '   Routes table and route cache state
@@ -940,7 +939,6 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     Dim userRows     As Long
     Dim masterRows   As Long
     Dim hasTotals    As Boolean
-    Dim airportLookup As Object
 
     Set loSrc = ThisWorkbook.Sheets("Logbook").ListObjects("Logbook")
     Set loDst = masterWb.Sheets("Logbook").ListObjects("Logbook")
@@ -953,8 +951,6 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     userRows     = loSrc.DataBodyRange.Rows.Count
     masterRows   = loDst.DataBodyRange.Rows.Count
     hasTotals    = loDst.ShowTotals
-    Set airportLookup = BuildAirportAliasLookup(masterWb)
-
     If userRows > masterRows Then
         loDst.ShowTotals = False
         loDst.Resize loDst.Range.Resize(userRows + 1, loDst.ListColumns.Count)
@@ -998,10 +994,9 @@ Private Sub InjectLogbookData(masterWb As Workbook)
     Dim dstColName As String
     Dim dstColIdx As Long
     For Each srcCol In loSrc.ListColumns
-        If (srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd) Or _
-           srcCol.Name = "CurrencyExclusions" Then
-            dstColName = DestinationLogbookColumnName(loDst, srcCol.Name)
-            If Len(dstColName) = 0 Then GoTo NextSourceColumn
+        If srcCol.Index >= dataColStart And srcCol.Index <= dataColEnd Then
+            dstColName = srcCol.Name
+            If Not ListColumnExists(loDst, dstColName) Then GoTo NextSourceColumn
 
             On Error Resume Next
             dstColIdx = loDst.ListColumns(dstColName).Index
@@ -1015,241 +1010,11 @@ Private Sub InjectLogbookData(masterWb As Workbook)
 NextSourceColumn:
     Next srcCol
 
-    SplitLegacyDetailsIntoNewEntryColumns loSrc, loDst, airportLookup, userRows
-    ConvertLegacyCurrencyColumns loSrc, loDst, userRows
-
     ' Clear explicit cell fills and bold accumulated from prior AddToLogbook
     ' PasteSpecial calls. Lets the table's built-in stripe style show cleanly.
     loDst.DataBodyRange.Interior.Pattern = xlNone
     loDst.DataBodyRange.Font.Bold = False
 End Sub
-
-Private Function DestinationLogbookColumnName(ByVal loDst As ListObject, ByVal sourceName As String) As String
-    If ListColumnExists(loDst, sourceName) Then
-        DestinationLogbookColumnName = sourceName
-    ElseIf LCase$(sourceName) = "rnav" And ListColumnExists(loDst, "RNP") Then
-        DestinationLogbookColumnName = "RNP"
-    ElseIf LCase$(sourceName) = "cumrnav" And ListColumnExists(loDst, "CumRNP") Then
-        DestinationLogbookColumnName = "CumRNP"
-    End If
-End Function
-
-Private Sub SplitLegacyDetailsIntoNewEntryColumns(ByVal loSrc As ListObject, _
-                                                  ByVal loDst As ListObject, _
-                                                  ByVal airportLookup As Object, _
-                                                  ByVal rowCount As Long)
-    Dim sourceDetailsColumn As String
-    Dim rowIndex As Long
-    Dim splitValues As Variant
-
-    If rowCount <= 0 Then Exit Sub
-    If Not ListColumnExists(loDst, "From") Then Exit Sub
-    If Not ListColumnExists(loDst, "To") Then Exit Sub
-    If Not ListColumnExists(loDst, "Via") Then Exit Sub
-    If Not ListColumnExists(loDst, "Remarks") Then Exit Sub
-
-    If ListColumnExists(loSrc, "Remarks") Then
-        CopyColumnIfPresent loSrc, loDst, "From", rowCount
-        CopyColumnIfPresent loSrc, loDst, "To", rowCount
-        CopyColumnIfPresent loSrc, loDst, "Via", rowCount
-        CopyColumnIfPresent loSrc, loDst, "Remarks", rowCount
-        Exit Sub
-    End If
-
-    If Not ListColumnExists(loSrc, "Details") Then Exit Sub
-    sourceDetailsColumn = "Details"
-
-    For rowIndex = 1 To rowCount
-        splitValues = SplitLegacyDetailsText( _
-            CStr(loSrc.ListColumns(sourceDetailsColumn).DataBodyRange.Cells(rowIndex, 1).Value), _
-            airportLookup)
-
-        loDst.ListColumns("From").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(0)
-        loDst.ListColumns("To").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(1)
-        loDst.ListColumns("Via").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(2)
-        loDst.ListColumns("Remarks").DataBodyRange.Cells(rowIndex, 1).Value = splitValues(3)
-    Next rowIndex
-End Sub
-
-Private Sub ConvertLegacyCurrencyColumns(ByVal loSrc As ListObject, _
-                                         ByVal loDst As ListObject, _
-                                         ByVal rowCount As Long)
-    Dim rowIndex As Long
-    Dim excluded As Boolean
-
-    If rowCount <= 0 Then Exit Sub
-    If Not ListColumnExists(loDst, "FR") Then Exit Sub
-    If Not ListColumnExists(loDst, "IPC") Then Exit Sub
-    If Not ListColumnExists(loDst, "OPC") Then Exit Sub
-
-    For rowIndex = 1 To rowCount
-        excluded = False
-        If ListColumnExists(loSrc, "CurrencyExclusions") Then
-            excluded = LogbookBooleanValue(loSrc, "CurrencyExclusions", rowIndex)
-        End If
-
-        If excluded Then
-            loDst.ListColumns("FR").DataBodyRange.Cells(rowIndex, 1).Value = False
-            loDst.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value = False
-            loDst.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value = False
-        Else
-            loDst.ListColumns("FR").DataBodyRange.Cells(rowIndex, 1).Value = _
-                LogbookCurrencyCheckValue(loSrc, "FR", rowIndex) Or _
-                LogbookCurrencyCheckValue(loSrc, "FlightReview", rowIndex) Or _
-                LogbookCurrencyCheckValue(loSrc, "IPC", rowIndex)
-            loDst.ListColumns("IPC").DataBodyRange.Cells(rowIndex, 1).Value = _
-                LogbookCurrencyCheckValue(loSrc, "IPC", rowIndex)
-            loDst.ListColumns("OPC").DataBodyRange.Cells(rowIndex, 1).Value = _
-                LogbookCurrencyCheckValue(loSrc, "OPC", rowIndex)
-        End If
-    Next rowIndex
-End Sub
-
-Private Function LogbookCurrencyCheckValue(ByVal lo As ListObject, _
-                                           ByVal columnName As String, _
-                                           ByVal rowIndex As Long) As Boolean
-    Dim value As Variant
-    Dim textValue As String
-
-    If Not ListColumnExists(lo, columnName) Then Exit Function
-    value = lo.ListColumns(columnName).DataBodyRange.Cells(rowIndex, 1).Value
-    If IsError(value) Then Exit Function
-
-    If VarType(value) = vbBoolean Then
-        LogbookCurrencyCheckValue = CBool(value)
-    ElseIf IsDate(value) Then
-        LogbookCurrencyCheckValue = True
-    Else
-        textValue = LCase$(Trim$(CStr(value)))
-        Select Case textValue
-            Case "true", "yes", "y", "1", "x"
-                LogbookCurrencyCheckValue = True
-        End Select
-    End If
-End Function
-
-Private Function LogbookBooleanValue(ByVal lo As ListObject, _
-                                     ByVal columnName As String, _
-                                     ByVal rowIndex As Long) As Boolean
-    Dim value As Variant
-
-    If Not ListColumnExists(lo, columnName) Then Exit Function
-    value = lo.ListColumns(columnName).DataBodyRange.Cells(rowIndex, 1).Value
-    If VarType(value) = vbBoolean Then
-        LogbookBooleanValue = CBool(value)
-    ElseIf IsNumeric(value) Then
-        LogbookBooleanValue = (CDbl(value) <> 0)
-    Else
-        Select Case LCase$(Trim$(CStr(value)))
-            Case "true", "yes", "y", "1", "x"
-                LogbookBooleanValue = True
-        End Select
-    End If
-End Function
-
-Private Sub CopyColumnIfPresent(ByVal loSrc As ListObject, _
-                                ByVal loDst As ListObject, _
-                                ByVal columnName As String, _
-                                ByVal rowCount As Long)
-    If Not ListColumnExists(loSrc, columnName) Then Exit Sub
-    If Not ListColumnExists(loDst, columnName) Then Exit Sub
-
-    loDst.ListColumns(columnName).DataBodyRange.Resize(rowCount, 1).Value = _
-        loSrc.ListColumns(columnName).DataBodyRange.Resize(rowCount, 1).Value
-End Sub
-
-Private Function BuildAirportAliasLookup(ByVal wb As Workbook) As Object
-    Dim lookup As Object
-    Dim loAirports As ListObject
-    Dim rowIndex As Long
-    Dim icao As String
-
-    Set lookup = CreateObject("Scripting.Dictionary")
-    lookup.CompareMode = 1
-
-    On Error Resume Next
-    Set loAirports = wb.Sheets("Airports").ListObjects("Airports")
-    On Error GoTo 0
-    If loAirports Is Nothing Then
-        Set BuildAirportAliasLookup = lookup
-        Exit Function
-    End If
-    If loAirports.DataBodyRange Is Nothing Then
-        Set BuildAirportAliasLookup = lookup
-        Exit Function
-    End If
-
-    For rowIndex = 1 To loAirports.DataBodyRange.Rows.Count
-        icao = UCase$(Trim$(CStr(loAirports.ListColumns("ICAO").DataBodyRange.Cells(rowIndex, 1).Value)))
-        If Len(icao) > 0 Then
-            AddAirportAlias lookup, icao, icao
-            AddAirportAlias lookup, CStr(loAirports.ListColumns("Two").DataBodyRange.Cells(rowIndex, 1).Value), icao
-            AddAirportAlias lookup, CStr(loAirports.ListColumns("Three").DataBodyRange.Cells(rowIndex, 1).Value), icao
-        End If
-    Next rowIndex
-
-    Set BuildAirportAliasLookup = lookup
-End Function
-
-Private Sub AddAirportAlias(ByVal lookup As Object, ByVal aliasText As String, ByVal icao As String)
-    aliasText = UCase$(Trim$(aliasText))
-    If Len(aliasText) = 0 Then Exit Sub
-    If Not lookup.Exists(aliasText) Then lookup.Add aliasText, icao
-End Sub
-
-Private Function SplitLegacyDetailsText(ByVal detailsText As String, ByVal airportLookup As Object) As Variant
-    Dim normalised As String
-    Dim delimiters As Variant
-    Dim delimiter As Variant
-    Dim tokens As Variant
-    Dim token As Variant
-    Dim tokenText As String
-    Dim matchedIcaos As Collection
-    Dim remarkTokens As Collection
-    Dim result(0 To 3) As String
-    Dim i As Long
-    Dim routeText As String
-    Dim remarksText As String
-
-    Set matchedIcaos = New Collection
-    Set remarkTokens = New Collection
-
-    normalised = Replace(detailsText, "|", "")
-    delimiters = Array("-", " ", ",", "(", ")")
-    For Each delimiter In delimiters
-        normalised = Replace(normalised, CStr(delimiter), "|")
-    Next delimiter
-
-    tokens = Split(normalised, "|")
-    For Each token In tokens
-        tokenText = Trim$(CStr(token))
-        If Len(tokenText) > 0 Then
-            If airportLookup.Exists(UCase$(tokenText)) Then
-                matchedIcaos.Add CStr(airportLookup(UCase$(tokenText)))
-            Else
-                remarkTokens.Add tokenText
-            End If
-        End If
-    Next token
-
-    If matchedIcaos.Count >= 1 Then result(0) = CStr(matchedIcaos(1))
-    If matchedIcaos.Count >= 2 Then result(1) = CStr(matchedIcaos(matchedIcaos.Count))
-    If matchedIcaos.Count > 2 Then
-        For i = 2 To matchedIcaos.Count - 1
-            If Len(routeText) > 0 Then routeText = routeText & "-"
-            routeText = routeText & CStr(matchedIcaos(i))
-        Next i
-        result(2) = routeText
-    End If
-
-    For i = 1 To remarkTokens.Count
-        If Len(remarksText) > 0 Then remarksText = remarksText & " "
-        remarksText = remarksText & CStr(remarkTokens(i))
-    Next i
-    result(3) = remarksText
-
-    SplitLegacyDetailsText = result
-End Function
 
 Private Sub FillLogbookFormulas(lo As ListObject, fromRow As Long, toRow As Long)
     ' Fills formula columns from fromRow+1 down to toRow.
@@ -1356,10 +1121,6 @@ Private Function LogbookCustomStartColumn(ByVal tbl As ListObject) As Long
     firstHoursColumn = tbl.ListColumns("SeIcusDay").Index
     If ListColumnExists(tbl, "OPC") And tbl.ListColumns("OPC").Index < firstHoursColumn Then
         LogbookCustomStartColumn = tbl.ListColumns("OPC").Index + 1
-    ElseIf ListColumnExists(tbl, "Details") Then
-        LogbookCustomStartColumn = tbl.ListColumns("Details").Index + 1
-    ElseIf ListColumnExists(tbl, "Remarks") Then
-        LogbookCustomStartColumn = tbl.ListColumns("Remarks").Index + 1
     End If
 End Function
 
@@ -1757,8 +1518,7 @@ Private Sub CopyTableFormatting(masterWb As Workbook)
     dstLo.ShowTableStyleLastColumn = srcLo.ShowTableStyleLastColumn
     On Error GoTo Fail
 
-    ' Copy full table formats by destination column name, using source-template
-    ' columns for 2.0.0 columns that did not exist in older workbooks.
+    ' Copy full table formats by destination column name.
     For Each dstCol In dstLo.ListColumns
         If dstCol.Index > dstLo.ListColumns("CumAzi").Index Then Exit For
         sourceFormatName = LogbookSourceFormatColumnName(srcLo, dstCol.Name)
@@ -1804,49 +1564,9 @@ End Sub
 
 Private Function LogbookSourceFormatColumnName(ByVal srcLo As ListObject, _
                                                ByVal columnName As String) As String
-    Select Case LCase$(columnName)
-        Case "details", "flightreview", "currencyexclusions", "rnav", "cumrnav"
-            LogbookSourceFormatColumnName = ""
-        Case "flight id"
-            If ListColumnExists(srcLo, "Flight ID") Then
-                LogbookSourceFormatColumnName = "Flight ID"
-            Else
-                LogbookSourceFormatColumnName = "Reg"
-            End If
-        Case "from", "to", "via", "remarks"
-            If ListColumnExists(srcLo, "Details") Then
-                LogbookSourceFormatColumnName = "Details"
-            Else
-                LogbookSourceFormatColumnName = columnName
-            End If
-        Case "fr", "ipc", "opc"
-            ' 2.0.0 contains FR/IPC/OPC as well as the legacy Custom 1 column.
-            ' Prefer the checkbox field's own formatting so it is not replaced
-            ' with Custom 1's numeric-cell presentation during migration.
-            If ListColumnExists(srcLo, columnName) Then
-                LogbookSourceFormatColumnName = columnName
-            ElseIf ListColumnExists(srcLo, "Custom 1") Then
-                LogbookSourceFormatColumnName = "Custom 1"
-            Else
-                LogbookSourceFormatColumnName = "Details"
-            End If
-        Case "rnp"
-            If ListColumnExists(srcLo, "RNP") Then
-                LogbookSourceFormatColumnName = "RNP"
-            ElseIf ListColumnExists(srcLo, "RNAV") Then
-                LogbookSourceFormatColumnName = "RNAV"
-            End If
-        Case "cumrnp"
-            If ListColumnExists(srcLo, "CumRNP") Then
-                LogbookSourceFormatColumnName = "CumRNP"
-            ElseIf ListColumnExists(srcLo, "CumRNAV") Then
-                LogbookSourceFormatColumnName = "CumRNAV"
-            End If
-        Case Else
-            If ListColumnExists(srcLo, columnName) Then
-                LogbookSourceFormatColumnName = columnName
-            End If
-    End Select
+    If ListColumnExists(srcLo, columnName) Then
+        LogbookSourceFormatColumnName = columnName
+    End If
 End Function
 
 Private Sub ApplyHiddenHourHeaderFormatting(masterWb As Workbook)

@@ -9,10 +9,9 @@ finalise an in-place handoff that keeps the original filename and writes a times
 ## Preserved Data
 
 - Logbook raw entry columns from `Year` through `Circling`
-- `CurrencyExclusions`
 - Custom Logbook column headings
 - Currency detection `Keywords`
-- Airport `Base` flags matched by ICAO
+- Base airport selections from `BaseAirportsTop10`
 - Routes table and route-cache state
 - Date reset and warning-suppression preferences
 - Logbook table style, custom column formatting, totals-area formatting, and palette

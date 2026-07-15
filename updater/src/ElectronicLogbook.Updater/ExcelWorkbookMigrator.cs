@@ -337,8 +337,6 @@ public sealed class ExcelWorkbookMigrator
         var sourceDataEnd = GetColumnIndex(source, "Circling");
         var destinationDataStart = GetColumnIndex(destination, "Year");
         var destinationDataEnd = GetColumnIndex(destination, "Circling");
-        var airportLookup = BuildAirportAliasLookup(outputWorkbookObject);
-
         var sourceCustomStart = GetLogbookCustomStartColumn(source);
         var destinationCustomStart = GetLogbookCustomStartColumn(destination);
         var sourceCustomCount = GetColumnIndex(source, "SeIcusDay") - sourceCustomStart;
@@ -362,15 +360,11 @@ public sealed class ExcelWorkbookMigrator
         for (var sourceIndex = sourceDataStart; sourceIndex <= sourceDataEnd; sourceIndex++)
         {
             var name = (string)source.ListColumns.Item(sourceIndex).Name;
-            var destinationName = DestinationLogbookColumnName((object)destination, name);
-            if (destinationName is not null)
+            if (HasColumn((object)destination, name))
             {
-                CopyColumn(source, destination, name, destinationName, sourceRows);
+                CopyColumn(source, destination, name, sourceRows);
             }
         }
-
-        SplitLegacyDetailsIntoNewEntryColumns(source, destination, sourceRows, airportLookup);
-        ConvertLegacyCurrencyColumns(source, destination, sourceRows);
     }
 
     private static void CopyTableByMatchingColumns(
@@ -410,202 +404,8 @@ public sealed class ExcelWorkbookMigrator
         {
             return GetColumnIndex(table, "OPC") + 1;
         }
-        if (HasColumn((object)table, "Details"))
-        {
-            return GetColumnIndex(table, "Details") + 1;
-        }
-        if (HasColumn((object)table, "Remarks"))
-        {
-            return GetColumnIndex(table, "Remarks") + 1;
-        }
         throw new InvalidDataException($"Table {table.Name} has no recognised custom-column anchor.");
     }
-
-    private static void SplitLegacyDetailsIntoNewEntryColumns(
-        dynamic source,
-        dynamic destination,
-        int rows,
-        IReadOnlyDictionary<string, string> airportLookup)
-    {
-        if (rows <= 0 ||
-            !HasColumn((object)destination, "From") ||
-            !HasColumn((object)destination, "To") ||
-            !HasColumn((object)destination, "Via") ||
-            !HasColumn((object)destination, "Remarks"))
-        {
-            return;
-        }
-
-        if (HasColumn((object)source, "Remarks"))
-        {
-            CopyColumnIfPresent(source, destination, "From", rows);
-            CopyColumnIfPresent(source, destination, "To", rows);
-            CopyColumnIfPresent(source, destination, "Via", rows);
-            CopyColumnIfPresent(source, destination, "Remarks", rows);
-            return;
-        }
-
-        if (!HasColumn((object)source, "Details"))
-        {
-            return;
-        }
-
-        var details = ReadColumnValues(source, "Details", rows);
-        var fromValues = NewColumnArray(rows);
-        var toValues = NewColumnArray(rows);
-        var routeValues = NewColumnArray(rows);
-        var remarksValues = NewColumnArray(rows);
-        for (var row = 0; row < rows; row++)
-        {
-            var split = SplitLegacyDetailsText(StableValue(details[row]), airportLookup);
-            fromValues[row, 0] = split.From;
-            toValues[row, 0] = split.To;
-            routeValues[row, 0] = split.Route;
-            remarksValues[row, 0] = split.Remarks;
-        }
-
-        SetColumnValues(destination, "From", fromValues, rows);
-        SetColumnValues(destination, "To", toValues, rows);
-        SetColumnValues(destination, "Via", routeValues, rows);
-        SetColumnValues(destination, "Remarks", remarksValues, rows);
-    }
-
-    private static void ConvertLegacyCurrencyColumns(dynamic source, dynamic destination, int rows)
-    {
-        if (rows <= 0 ||
-            !HasColumn((object)destination, "FR") ||
-            !HasColumn((object)destination, "IPC") ||
-            !HasColumn((object)destination, "OPC"))
-        {
-            return;
-        }
-
-        var frValues = NewColumnArray(rows);
-        var ipcValues = NewColumnArray(rows);
-        var opcValues = NewColumnArray(rows);
-        var exclusionSource = ReadColumnValuesIfPresent(source, "CurrencyExclusions", rows);
-        var frSource = ReadColumnValuesIfPresent(source, "FR", rows);
-        var flightReviewSource = ReadColumnValuesIfPresent(source, "FlightReview", rows);
-        var ipcSource = ReadColumnValuesIfPresent(source, "IPC", rows);
-        var opcSource = ReadColumnValuesIfPresent(source, "OPC", rows);
-
-        for (var row = 0; row < rows; row++)
-        {
-            var excluded = ToBoolean(ReadOptionalColumnValue(exclusionSource, row));
-            if (!excluded)
-            {
-                var ipcChecked = ToCurrencyCheckValue(ReadOptionalColumnValue(ipcSource, row));
-                frValues[row, 0] =
-                    ToCurrencyCheckValue(ReadOptionalColumnValue(frSource, row)) ||
-                    ToCurrencyCheckValue(ReadOptionalColumnValue(flightReviewSource, row)) ||
-                    ipcChecked;
-                ipcValues[row, 0] = ipcChecked;
-                opcValues[row, 0] = ToCurrencyCheckValue(ReadOptionalColumnValue(opcSource, row));
-            }
-        }
-
-        SetColumnValues(destination, "FR", frValues, rows);
-        SetColumnValues(destination, "IPC", ipcValues, rows);
-        SetColumnValues(destination, "OPC", opcValues, rows);
-    }
-
-    private static void CopyColumnIfPresent(dynamic source, dynamic destination, string name, int rows)
-    {
-        if (HasColumn((object)source, name) && HasColumn((object)destination, name))
-        {
-            CopyColumn(source, destination, name, rows);
-        }
-    }
-
-    private static object?[]? ReadColumnValuesIfPresent(dynamic table, string name, int rows)
-    {
-        if (!HasColumn((object)table, name) || rows <= 0)
-        {
-            return null;
-        }
-
-        return ReadColumnValues(table, name, rows);
-    }
-
-    private static object? ReadOptionalColumnValue(object?[]? values, int zeroBasedRow)
-    {
-        if (values is null || zeroBasedRow < 0 || zeroBasedRow >= values.Length)
-        {
-            return null;
-        }
-
-        return values[zeroBasedRow];
-    }
-
-    private static Dictionary<string, string> BuildAirportAliasLookup(object workbookObject)
-    {
-        dynamic airports = GetTable(workbookObject, "Airports");
-        var rows = (int)airports.ListRows.Count;
-        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (rows <= 0)
-        {
-            return lookup;
-        }
-
-        var airportIcao = ReadColumnValues(airports, "ICAO", rows);
-        var airportTwo = ReadColumnValues(airports, "Two", rows);
-        var airportThree = ReadColumnValues(airports, "Three", rows);
-        for (var row = 0; row < rows; row++)
-        {
-            var icao = StableValue(airportIcao[row]).Trim().ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(icao))
-            {
-                continue;
-            }
-
-            lookup.TryAdd(icao, icao);
-            AddAirportAlias(lookup, StableValue(airportTwo[row]), icao);
-            AddAirportAlias(lookup, StableValue(airportThree[row]), icao);
-        }
-
-        return lookup;
-    }
-
-    private static void AddAirportAlias(
-        IDictionary<string, string> lookup,
-        string alias,
-        string icao)
-    {
-        alias = alias.Trim().ToUpperInvariant();
-        if (!string.IsNullOrWhiteSpace(alias))
-        {
-            lookup.TryAdd(alias, icao);
-        }
-    }
-
-    private static LegacyDetailsSplit SplitLegacyDetailsText(
-        string details,
-        IReadOnlyDictionary<string, string> airportLookup)
-    {
-        var matchedIcaos = new List<string>();
-        var remarkTokens = new List<string>();
-        foreach (var rawToken in TokeniseAirportDetails(details))
-        {
-            if (airportLookup.TryGetValue(rawToken.ToUpperInvariant(), out var icao))
-            {
-                matchedIcaos.Add(icao);
-            }
-            else
-            {
-                remarkTokens.Add(rawToken);
-            }
-        }
-
-        var from = matchedIcaos.Count >= 1 ? matchedIcaos[0] : "";
-        var to = matchedIcaos.Count >= 2 ? matchedIcaos[^1] : "";
-        var route = matchedIcaos.Count > 2
-            ? string.Join("-", matchedIcaos.Skip(1).Take(matchedIcaos.Count - 2))
-            : "";
-        var remarks = string.Join(" ", remarkTokens);
-        return new LegacyDetailsSplit(from, to, route, remarks);
-    }
-
-    private sealed record LegacyDetailsSplit(string From, string To, string Route, string Remarks);
 
     private static void ApplyBaseAirportSelections(object sourceWorkbook, object outputWorkbook)
     {
@@ -659,11 +459,6 @@ public sealed class ExcelWorkbookMigrator
                     selections[icao] = ToBoolean(bases[row]);
                 }
             }
-        }
-
-        foreach (var legacySelection in ReadLegacyAirportBaseSelections(workbookObject))
-        {
-            selections.TryAdd(legacySelection.Key, true);
         }
 
         return selections;
@@ -987,11 +782,6 @@ public sealed class ExcelWorkbookMigrator
             }
         }
 
-        foreach (var legacySelection in ReadLegacyAirportBaseSelections(workbookObject))
-        {
-            selections.TryAdd(legacySelection.Key, true);
-        }
-
         return selections;
     }
 
@@ -1055,40 +845,6 @@ public sealed class ExcelWorkbookMigrator
         {
             matchedIcaos.Add(icao);
         }
-    }
-
-    private static Dictionary<string, string> ReadLegacyAirportBaseSelections(object workbookObject)
-    {
-        dynamic? airports = GetTableOrNull(workbookObject, "Airports");
-        var selections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (airports is null ||
-            !HasColumn((object)airports, "Base") ||
-            !HasColumn((object)airports, "ICAO"))
-        {
-            return selections;
-        }
-
-        var rows = (int)airports.ListRows.Count;
-        var icaos = ReadColumnValues(airports, "ICAO", rows);
-        object?[] names = HasColumn((object)airports, "Airport")
-            ? ReadColumnValues(airports, "Airport", rows)
-            : Array.Empty<object?>();
-        var bases = ReadColumnValues(airports, "Base", rows);
-        for (var row = 0; row < rows; row++)
-        {
-            if (!ToBoolean(bases[row]))
-            {
-                continue;
-            }
-
-            var icao = StableValue(icaos[row]).Trim().ToUpperInvariant();
-            if (!string.IsNullOrWhiteSpace(icao))
-            {
-                selections[icao] = row < names.Length ? StableValue(names[row]) : "";
-            }
-        }
-
-        return selections;
     }
 
     private static string AirportIcaoForName(dynamic airports, string airportName)
@@ -1255,15 +1011,9 @@ public sealed class ExcelWorkbookMigrator
         object?[]? toValues = HasColumn((object)logbook, "To")
             ? ReadColumnValues(logbook, "To", rows)
             : null;
-        object?[]? remarksValues = null;
-        if (HasColumn((object)logbook, "Remarks"))
-        {
-            remarksValues = ReadColumnValues(logbook, "Remarks", rows);
-        }
-        else if (HasColumn((object)logbook, "Details"))
-        {
-            remarksValues = ReadColumnValues(logbook, "Details", rows);
-        }
+        object?[]? remarksValues = HasColumn((object)logbook, "Remarks")
+            ? ReadColumnValues(logbook, "Remarks", rows)
+            : null;
 
         for (var row = 0; row < rows; row++)
         {
@@ -1315,35 +1065,6 @@ public sealed class ExcelWorkbookMigrator
             decimal number => number != 0,
             string text when bool.TryParse(text.Trim(), out var flag) => flag,
             string text when double.TryParse(text.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => Math.Abs(number) > double.Epsilon,
-            string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
-            _ => false
-        };
-    }
-
-    private static bool ToCurrencyCheckValue(object? value)
-    {
-        return value switch
-        {
-            null => false,
-            bool flag => flag,
-            DateTime => true,
-            double number => number > 0,
-            float number => number > 0,
-            int number => number > 0,
-            decimal number => number > 0,
-            string text when bool.TryParse(text.Trim(), out var flag) => flag,
-            string text when DateTime.TryParse(
-                text.Trim(),
-                CultureInfo.CurrentCulture,
-                DateTimeStyles.None,
-                out _) => true,
-            string text when double.TryParse(
-                text.Trim(),
-                NumberStyles.Any,
-                CultureInfo.InvariantCulture,
-                out var number) => number > 0,
             string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
             string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
             string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
@@ -1689,61 +1410,6 @@ public sealed class ExcelWorkbookMigrator
 
     private static string? LogbookSourceFormatColumnName(dynamic source, string name)
     {
-        if (string.Equals(name, "Details", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "FlightReview", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        if (string.Equals(name, "Flight ID", StringComparison.OrdinalIgnoreCase))
-        {
-            return HasColumn((object)source, "Flight ID") ? "Flight ID" : "Reg";
-        }
-        if (string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "Via", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase))
-        {
-            return HasColumn((object)source, "Details") ? "Details" : name;
-        }
-        if (string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase))
-        {
-            // Version 2.0.0 already has these checkbox fields as well as the
-            // legacy Custom 1 column. Prefer their own format so that a
-            // 2.0.0-to-newer migration does not apply Custom 1's numeric-cell
-            // presentation to the checkbox controls.
-            if (HasColumn((object)source, name))
-            {
-                return name;
-            }
-            if (HasColumn((object)source, "Custom 1"))
-            {
-                return "Custom 1";
-            }
-            return HasColumn((object)source, "Details") ? "Details" : null;
-        }
-        if (string.Equals(name, "RNP", StringComparison.OrdinalIgnoreCase))
-        {
-            if (HasColumn((object)source, "RNP"))
-            {
-                return "RNP";
-            }
-            return HasColumn((object)source, "RNAV") ? "RNAV" : null;
-        }
-        if (string.Equals(name, "CumRNP", StringComparison.OrdinalIgnoreCase))
-        {
-            if (HasColumn((object)source, "CumRNP"))
-            {
-                return "CumRNP";
-            }
-            return HasColumn((object)source, "CumRNAV") ? "CumRNAV" : null;
-        }
-
         return HasColumn((object)source, name) ? name : null;
     }
 
@@ -2515,7 +2181,7 @@ public sealed class ExcelWorkbookMigrator
             var name = (string)table.ListColumns.Item(index).Name;
             if (LogbookFingerprintColumnIsPreserved(name))
             {
-                columns.TryAdd(CanonicalLogbookFingerprintColumnName(name), name);
+                columns.TryAdd(name, name);
             }
         }
 
@@ -2532,31 +2198,10 @@ public sealed class ExcelWorkbookMigrator
     private static bool LogbookFingerprintColumnIsPreserved(string name)
     {
         return !string.Equals(name, "Details", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Flight ID", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "FlightReview", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Via", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string CanonicalLogbookFingerprintColumnName(string name)
-    {
-        if (string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase))
-        {
-            return "RNP";
-        }
-
-        if (string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase))
-        {
-            return "CumRNP";
-        }
-
-        return name;
+            !string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FingerprintTable(dynamic workbook, string tableName)
@@ -2604,13 +2249,6 @@ public sealed class ExcelWorkbookMigrator
                 {
                     selections[icao] = "TRUE";
                 }
-            }
-        }
-        else
-        {
-            foreach (var selection in ReadLegacyAirportBaseSelections((object)workbook))
-            {
-                selections[selection.Key] = "TRUE";
             }
         }
 
@@ -2668,28 +2306,6 @@ public sealed class ExcelWorkbookMigrator
         var destinationIndex = GetColumnIndex(destination, destinationName);
         destination.DataBodyRange.Columns.Item(destinationIndex).Resize[rows, 1].Value2 =
             source.DataBodyRange.Columns.Item(sourceIndex).Resize[rows, 1].Value2;
-    }
-
-    private static string? DestinationLogbookColumnName(object destinationTable, string sourceName)
-    {
-        if (HasColumn(destinationTable, sourceName))
-        {
-            return sourceName;
-        }
-
-        if (string.Equals(sourceName, "RNAV", StringComparison.OrdinalIgnoreCase) &&
-            HasColumn(destinationTable, "RNP"))
-        {
-            return "RNP";
-        }
-
-        if (string.Equals(sourceName, "CumRNAV", StringComparison.OrdinalIgnoreCase) &&
-            HasColumn(destinationTable, "CumRNP"))
-        {
-            return "CumRNP";
-        }
-
-        return null;
     }
 
     private static void CopyColumnPreservingFormula(
