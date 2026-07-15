@@ -7,7 +7,7 @@ Contributions are welcome, but this project has a cautious release process becau
 - Open an issue first for large changes or changes to the workbook update process.
 - Keep every master-workbook VBA source change paired with the corresponding `Electronic_Logbook_Master.xlsm` change. After editing tracked VBA source, run `.\tools\ImportVbaIntoWorkbook.ps1 -WorkbookPath .\Electronic_Logbook_Master.xlsm`; string-only and other small VBA edits still require import. `tools\Test-VbaWorkbookPairing.ps1` enforces this before VBA source-quality and release metadata checks pass.
 - Do not include personal logbook data, private tokens, or machine-specific paths.
-- Run `tools/Test-ReleaseMetadata.ps1` and `tools/Test-VbaSourceQuality.ps1` before submitting.
+- Run `tools/Invoke-Validation.ps1 -Tier Fast` before submitting.
 - If you changed workbook content, export the VBA source after testing so the text files match the workbook.
 
 ## Release Changes
@@ -17,10 +17,7 @@ Release PRs should use the pull request checklist. The master workbook must be c
 At minimum, run:
 
 ```powershell
-.\tools\Test-ReleaseMetadata.ps1
-.\tools\Test-VbaSourceQuality.ps1
-.\tools\Test-WorkbookPublicReadiness.ps1
-.\tools\Test-WorkbookVbaParity.ps1
+.\tools\Invoke-Validation.ps1 -Tier Excel
 ```
 
 Then smoke test the prepared workbook manually in Excel.
