@@ -59,6 +59,51 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedValidatesFinalAndBackupVersions()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook.xlsm");
+        var staged = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook_updated.xlsm");
+
+        var result = WorkbookHandoff.ReplaceSourceWithUpdated(
+            source,
+            staged,
+            TestRepo.Version,
+            "2.0.0");
+
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.Equal("2.0.0", WorkbookPackageValidator.ValidateWorkbookPackage(result.BackupWorkbookPath));
+    }
+
+    [Fact]
+    public void ReplaceSourceWithUpdatedRejectsUnexpectedSourceVersionBeforeHandoff()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var staged = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook_updated.xlsm");
+
+        Assert.Throws<InvalidDataException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(
+                source,
+                staged,
+                TestRepo.Version,
+                "2.0.0"));
+
+        Assert.True(File.Exists(staged));
+        Assert.False(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm").Any());
+    }
+
+    [Fact]
     public void RecoverIfNeededRestoresBackupWhenSourceIsMissing()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -120,7 +165,7 @@ public sealed class WorkbookHandoffTests : IDisposable
             "2.0.0",
             "other_Old_20260715-120000.xlsm");
 
-        WorkbookHandoff.CompletePostHandoffValidation(source, retainedBackup, TestRepo.Version);
+        WorkbookHandoff.CompletePostHandoffValidation(source, retainedBackup, TestRepo.Version, "2.0.0");
 
         Assert.True(File.Exists(retainedBackup));
         Assert.False(File.Exists(olderBackup));
@@ -142,7 +187,30 @@ public sealed class WorkbookHandoffTests : IDisposable
             "logbook_Old_20260715-120000.xlsm");
 
         Assert.Throws<InvalidDataException>(() =>
-            WorkbookHandoff.CompletePostHandoffValidation(source, retainedBackup, TestRepo.Version));
+            WorkbookHandoff.CompletePostHandoffValidation(source, retainedBackup, TestRepo.Version, "2.0.0"));
+
+        Assert.True(File.Exists(retainedBackup));
+        Assert.True(File.Exists(olderBackup));
+    }
+
+    [Fact]
+    public void CompletePostHandoffValidationDoesNotDeleteOlderBackupsWhenRetainedBackupHasUpdatedVersion()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var retainedBackup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook_Old_20260716-120000.xlsm");
+        var olderBackup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260715-120000.xlsm");
+
+        Assert.Throws<InvalidDataException>(() =>
+            WorkbookHandoff.CompletePostHandoffValidation(source, retainedBackup, TestRepo.Version, "2.0.0"));
 
         Assert.True(File.Exists(retainedBackup));
         Assert.True(File.Exists(olderBackup));

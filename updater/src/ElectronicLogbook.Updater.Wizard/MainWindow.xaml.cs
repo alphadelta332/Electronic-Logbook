@@ -57,6 +57,7 @@ public partial class MainWindow : Window
     private string? _lastOutputPath;
     private string? _lastBackupPath;
     private string? _lastReportPath;
+    private string? _lastOutputExpectedVersion;
     private string? _downloadDirectoryToCleanup;
     private CancellationTokenSource? _updateCts;
 
@@ -519,7 +520,7 @@ public partial class MainWindow : Window
         {
             if (OpenUpdatedCheckBox.IsEnabled && OpenUpdatedCheckBox.IsChecked == true)
             {
-                OpenLastOutputWorkbook();
+                await OpenLastOutputWorkbookAsync();
             }
 
             Close();
@@ -652,11 +653,16 @@ public partial class MainWindow : Window
             {
                 AppendLog("finalising workbook handoff...");
                 var handoff = await Task.Run(
-                    () => WorkbookHandoff.ReplaceSourceWithUpdated(source, stagedOutput),
+                    () => WorkbookHandoff.ReplaceSourceWithUpdated(
+                        source,
+                        stagedOutput,
+                        report.OutputVersion,
+                        report.SourceVersion),
                     _updateCts.Token);
                 _lastOutputPath = handoff.FinalWorkbookPath;
                 _lastBackupPath = handoff.BackupWorkbookPath;
             }
+            _lastOutputExpectedVersion = report.OutputVersion;
 
             AppendLog("Waiting for workbook file to settle...");
             var finalWorkbookReady = await WaitForFileToSettleAsync(_lastOutputPath, _updateCts.Token);
@@ -667,7 +673,8 @@ public partial class MainWindow : Window
                 WorkbookHandoff.CompletePostHandoffValidation(
                     _lastOutputPath,
                     _lastBackupPath,
-                    report.OutputVersion);
+                    report.OutputVersion,
+                    report.SourceVersion);
                 AppendLog("Post-handoff validation complete; older update backups pruned.");
             }
 
@@ -771,11 +778,25 @@ public partial class MainWindow : Window
         UpdateLogTextBox.ScrollToEnd();
     }
 
-    private void OpenLastOutputWorkbook()
+    private async Task OpenLastOutputWorkbookAsync()
     {
         if (string.IsNullOrWhiteSpace(_lastOutputPath) || !File.Exists(_lastOutputPath))
         {
             return;
+        }
+        if (!string.IsNullOrWhiteSpace(_lastOutputExpectedVersion))
+        {
+            var version = await TryReadWorkbookVersionFromPackageWithRetryAsync(_lastOutputPath);
+            if (!string.Equals(version, _lastOutputExpectedVersion, StringComparison.Ordinal))
+            {
+                MessageBox.Show(
+                    this,
+                    "The updated workbook is not ready to open yet. Wait for OneDrive to finish syncing, then open the updated workbook from the path shown on this screen.",
+                    "Workbook still syncing",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
         }
 
         Process.Start(new ProcessStartInfo

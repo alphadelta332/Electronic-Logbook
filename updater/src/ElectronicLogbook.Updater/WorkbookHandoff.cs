@@ -10,7 +10,9 @@ public static class WorkbookHandoff
 {
     public static HandoffResult ReplaceSourceWithUpdated(
         string sourceWorkbookPath,
-        string stagedUpdatedWorkbookPath)
+        string stagedUpdatedWorkbookPath,
+        string? expectedFinalVersion = null,
+        string? expectedBackupVersion = null)
     {
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         stagedUpdatedWorkbookPath = Path.GetFullPath(stagedUpdatedWorkbookPath);
@@ -28,6 +30,14 @@ public static class WorkbookHandoff
         if (string.Equals(sourceWorkbookPath, stagedUpdatedWorkbookPath, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("Staged update path must differ from source workbook path.");
+        }
+        if (!string.IsNullOrWhiteSpace(expectedBackupVersion))
+        {
+            WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedBackupVersion);
+        }
+        if (!string.IsNullOrWhiteSpace(expectedFinalVersion))
+        {
+            WorkbookPackageValidator.ValidateWorkbookPackage(stagedUpdatedWorkbookPath, expectedFinalVersion);
         }
 
         var backupPath = BuildBackupPath(sourceWorkbookPath);
@@ -56,6 +66,14 @@ public static class WorkbookHandoff
             if (localStageCreated)
             {
                 File.Delete(stagedUpdatedWorkbookPath);
+            }
+            if (!string.IsNullOrWhiteSpace(expectedFinalVersion))
+            {
+                WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedFinalVersion);
+            }
+            if (!string.IsNullOrWhiteSpace(expectedBackupVersion))
+            {
+                WorkbookPackageValidator.ValidateWorkbookPackage(backupPath, expectedBackupVersion);
             }
             File.Delete(journalPath);
 
@@ -126,13 +144,14 @@ public static class WorkbookHandoff
     public static void CompletePostHandoffValidation(
         string sourceWorkbookPath,
         string retainedBackupWorkbookPath,
-        string expectedSourceVersion)
+        string expectedSourceVersion,
+        string? expectedBackupVersion = null)
     {
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         retainedBackupWorkbookPath = Path.GetFullPath(retainedBackupWorkbookPath);
 
         WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedSourceVersion);
-        WorkbookPackageValidator.ValidateWorkbookPackage(retainedBackupWorkbookPath);
+        WorkbookPackageValidator.ValidateWorkbookPackage(retainedBackupWorkbookPath, expectedBackupVersion);
         PruneOlderBackups(sourceWorkbookPath, retainedBackupWorkbookPath);
     }
 
