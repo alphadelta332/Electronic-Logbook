@@ -45,9 +45,16 @@ public static class UpdaterProgram
             string? backupWorkbookPath = null;
             if (options.InPlaceSwap)
             {
+                WorkbookPackageValidator.ValidateStagedWorkbook(
+                    options.OutputPath!,
+                    report.OutputVersion);
                 var handoff = WorkbookHandoff.ReplaceSourceWithUpdated(options.SourcePath!, options.OutputPath!);
                 finalWorkbookPath = handoff.FinalWorkbookPath;
                 backupWorkbookPath = handoff.BackupWorkbookPath;
+                WorkbookHandoff.CompletePostHandoffValidation(
+                    finalWorkbookPath,
+                    backupWorkbookPath,
+                    report.OutputVersion);
             }
 
             var reportPath = options.ReportPath ??

@@ -660,6 +660,16 @@ public partial class MainWindow : Window
 
             AppendLog("Waiting for workbook file to settle...");
             var finalWorkbookReady = await WaitForFileToSettleAsync(_lastOutputPath, _updateCts.Token);
+            if (finalWorkbookReady &&
+                _context.UseInPlaceSwap &&
+                !string.IsNullOrWhiteSpace(_lastBackupPath))
+            {
+                WorkbookHandoff.CompletePostHandoffValidation(
+                    _lastOutputPath,
+                    _lastBackupPath,
+                    report.OutputVersion);
+                AppendLog("Post-handoff validation complete; older update backups pruned.");
+            }
 
             CompleteTitleText.Text = "Update Complete";
             CompleteSummaryText.Text = finalWorkbookReady
