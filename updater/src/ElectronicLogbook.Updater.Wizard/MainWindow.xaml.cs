@@ -1103,7 +1103,7 @@ public partial class MainWindow : Window
 
         source ??= GetDefaultSourcePath();
         source = Path.GetFullPath(source);
-        output ??= BuildDefaultOutputPath(source);
+        output ??= WorkbookOutputNamer.BuildDefaultOutputPath(source);
         output = Path.GetFullPath(output);
         master = string.IsNullOrWhiteSpace(master) ? null : Path.GetFullPath(master);
         channel ??= string.IsNullOrWhiteSpace(master)
@@ -1160,18 +1160,6 @@ public partial class MainWindow : Window
         }
 
         return preferred;
-    }
-
-    private static string BuildDefaultOutputPath(string sourcePath)
-    {
-        var directory = Path.GetDirectoryName(sourcePath);
-        var name = Path.GetFileNameWithoutExtension(sourcePath);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            directory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        }
-
-        return Path.Combine(directory, $"{name}_Updated_{DateTime.Now:yyyyMMdd-HHmmss}.xlsm");
     }
 
     private static string BuildStagedOutputPath(string sourcePath)
