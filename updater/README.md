@@ -84,11 +84,13 @@ manual `Compatibility matrix` workflow on a self-hosted Windows runner labelled
 - Requires Microsoft Excel for Windows.
 - Uses Excel COM automation and must run while the source workbook is closed.
 - Does not yet provide a full visual-diff test or Normalise every possible user-customized format.
-- The executable is not currently code-signed or distributed as a release asset.
+- The wizard executable is packaged as a GitHub release asset but is not currently code-signed.
 
 ## Release Asset Packaging
 
-Build release-ready wizard assets with:
+The protected `Promote release` workflow builds, validates, and publishes the wizard assets
+as part of the GitHub release. For local packaging checks, build release-ready wizard assets
+with:
 
 ```powershell
 .\updater\Publish-WizardAsset.ps1
@@ -108,16 +110,9 @@ This script outputs:
 - `updater/dist/ElectronicLogbook.Updater.Wizard.exe`
 - `updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip`
 
-Upload at least one of these assets to the GitHub release. The in-workbook launcher will use the `.exe` directly and can fall back to the `.zip` asset.
-
-After the release tag exists, upload the wizard assets with:
-
-```powershell
-.\updater\Upload-WizardAsset.ps1 -Tag vX.Y.Z
-```
-
-Add `-Clobber` if replacing an existing draft-release asset.
-Add `-Sign -CertificateThumbprint "THUMBPRINT"` to sign during the publish step before upload.
+The in-workbook launcher uses the `.exe` asset directly and can fall back to the `.zip`
+asset. Do not manually upload wizard assets for normal releases; rerun the protected
+promotion workflow for the exact release commit instead.
 
 ## Product Direction (Implemented)
 

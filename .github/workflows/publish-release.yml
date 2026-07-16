@@ -211,6 +211,8 @@ jobs:
 
       - name: Create release app token
         id: release-app-token
+        # Treat this token as opaque. GitHub App installation tokens may be
+        # longer stateless ghs_ JWT-format values during GitHub's rollout.
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}

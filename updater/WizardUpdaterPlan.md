@@ -1,6 +1,6 @@
 # Wizard Updater Plan
 
-Status: approved direction, implementation-ready
+Status: MVP implemented; retained as design and follow-up reference
 Date: 2026-06-20
 
 ## Product Decisions
@@ -141,9 +141,9 @@ Stable phase IDs (`UpdaterPhaseIds`):
 
 ## Milestone 4: Packaging
 
-- Publish self-contained x64 build
+- Publish self-contained x64 build (implemented through release asset packaging)
 - Add code-signing pipeline
-- Add installer/bundle packaging and release assets
+- Add installer/bundle packaging polish
 
 ## Notes on Rollback
 
