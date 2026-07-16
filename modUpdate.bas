@@ -104,22 +104,7 @@ Private Function FetchRemoteVersion() As String
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
     http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    Dim token As String
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
     http.send
-    If http.Status <> 200 And token <> "" Then
-        ' Existing workbooks may contain a stale private-repo PAT.
-        ' Public repo reads should still work after retrying unauthenticated.
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", url, False
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
     If http.Status = 200 Then
         FetchRemoteVersion = NormalizeVersionText(http.responseText)
     End If
@@ -1995,21 +1980,6 @@ Private Function PivotFieldExists(ByVal pt As PivotTable, ByVal fieldName As Str
 End Function
 
 ' ==============================================================
-' GITHUB TOKEN
-' ==============================================================
-' The token is stored in a named range in the workbook so it
-' never appears in any file that is pushed to GitHub.
-' The named range 'GitHubToken' should contain the PAT value.
-' If the named range is missing or empty, requests are made
-' without authentication (works for public repos only).
-
-Private Function GetGitHubToken() As String
-    On Error Resume Next
-    GetGitHubToken = Trim(CStr(ThisWorkbook.Names("GitHubToken").RefersToRange.Value))
-    On Error GoTo 0
-End Function
-
-' ==============================================================
 ' UTILITIES
 ' ==============================================================
 
@@ -2061,23 +2031,7 @@ Private Function DownloadFile(url As String, destPath As String) As Boolean
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
     http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    Dim token As String
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
     http.send
-    If http.Status <> 200 And token <> "" Then
-        ' Retry without auth so a revoked PAT in GitHubToken does not block
-        ' public update downloads.
-        Set http = CreateDownloadHttpRequest()
-        If http Is Nothing Then GoTo Fail
-        http.Open "GET", url, False
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
     If http.Status <> 200 Then GoTo Fail
 
     Set stream = CreateObject("ADODB.Stream")
@@ -2386,7 +2340,6 @@ End Function
 
 Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As String
     Dim http As Object
-    Dim token As String
     Dim body As String
     Dim apiUrl As String
 
@@ -2399,23 +2352,7 @@ Private Function FetchLatestWizardDownloadUrl(ByVal repository As String) As Str
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
     http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
     http.send
-
-    If http.Status <> 200 And token <> "" Then
-        ' Retry without auth so a revoked PAT in GitHubToken does not block
-        ' public release asset discovery.
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", apiUrl, False
-        http.setRequestHeader "Accept", "application/vnd.github+json"
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
 
     If http.Status <> 200 Then GoTo Fail
 
@@ -2605,7 +2542,6 @@ Private Function GetBranchCommitSha(branchName As String) As String
     Dim http     As Object
     Dim apiUrl   As String
     Dim body     As String
-    Dim token    As String
 
     On Error GoTo Fail
 
@@ -2619,22 +2555,7 @@ Private Function GetBranchCommitSha(branchName As String) As String
     http.setRequestHeader "Cache-Control", "no-cache"
     http.setRequestHeader "Pragma", "no-cache"
     http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-    token = GetGitHubToken()
-    If token <> "" Then
-        http.setRequestHeader "Authorization", "token " & token
-    End If
     http.send
-    If http.Status <> 200 And token <> "" Then
-        ' Retry without auth so a revoked PAT in GitHubToken does not block
-        ' public branch resolution.
-        Set http = CreateObject("MSXML2.XMLHTTP")
-        http.Open "GET", apiUrl, False
-        http.setRequestHeader "Accept", "application/vnd.github+json"
-        http.setRequestHeader "Cache-Control", "no-cache"
-        http.setRequestHeader "Pragma", "no-cache"
-        http.setRequestHeader "User-Agent", "Electronic-Logbook-Updater"
-        http.send
-    End If
     If http.Status <> 200 Then GoTo Fail
 
     body = http.responseText
