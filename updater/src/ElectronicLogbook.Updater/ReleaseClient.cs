@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace ElectronicLogbook.Updater;
@@ -7,6 +8,9 @@ public sealed class ReleaseClient
 {
     private const string MasterFile = "Electronic_Logbook_Master.xlsm";
     private const string ManifestFile = "release-manifest.json";
+    private const long MaxManifestBytes = 1024 * 1024;
+    private const long MaxWorkbookBytes = 100L * 1024 * 1024;
+    private static readonly TimeSpan DefaultDownloadTimeout = TimeSpan.FromMinutes(5);
     private readonly HttpClient _httpClient;
 
     public ReleaseClient(HttpClient? httpClient = null)
@@ -22,10 +26,25 @@ public sealed class ReleaseClient
         string repository,
         CancellationToken cancellationToken)
     {
-        var releaseJson = await _httpClient.GetStringAsync(
-            $"https://api.github.com/repos/{repository}/releases/latest",
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(DefaultDownloadTimeout);
+        cancellationToken = timeout.Token;
+
+        var releaseUri = new Uri($"https://api.github.com/repos/{repository}/releases/latest");
+        ValidateHttpsAllowedHost(releaseUri, "latest release metadata");
+        using var releaseResponse = await _httpClient.GetAsync(
+            releaseUri,
+            HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
-        using var releaseDocument = JsonDocument.Parse(releaseJson);
+        releaseResponse.EnsureSuccessStatusCode();
+        ValidateHttpsAllowedHost(
+            releaseResponse.RequestMessage?.RequestUri ?? releaseUri,
+            "latest release metadata");
+
+        await using var releaseStream = await releaseResponse.Content.ReadAsStreamAsync(cancellationToken);
+        using var releaseDocument = await JsonDocument.ParseAsync(
+            releaseStream,
+            cancellationToken: cancellationToken);
         var root = releaseDocument.RootElement;
         var tag = root.GetProperty("tag_name").GetString() ??
             throw new InvalidDataException("Latest release is missing tag_name.");
@@ -53,27 +72,38 @@ public sealed class ReleaseClient
             throw new InvalidDataException($"Latest release {tag} does not contain {MasterFile}.");
         }
 
-        var manifestBytes = await _httpClient.GetByteArrayAsync(manifestUrl.Url, cancellationToken);
-        VerifyGitHubAsset(manifestBytes, ManifestFile, manifestUrl);
-        var manifest = JsonSerializer.Deserialize<ReleaseManifest>(manifestBytes, JsonDefaults.Web) ??
-            throw new InvalidDataException("Release manifest could not be parsed.");
-        ValidateManifest(manifest, tag);
-
-        var masterAsset = manifest.Assets.SingleOrDefault(
-            asset => string.Equals(asset.Name, MasterFile, StringComparison.OrdinalIgnoreCase)) ??
-            throw new InvalidDataException($"Release manifest does not describe {MasterFile}.");
-
         var downloadDirectory = Path.Combine(
             Path.GetTempPath(),
             $"ElectronicLogbookUpdater-{Guid.NewGuid():N}");
         Directory.CreateDirectory(downloadDirectory);
+        var manifestPath = Path.Combine(downloadDirectory, ManifestFile);
         var masterPath = Path.Combine(downloadDirectory, MasterFile);
 
         try
         {
-            var masterBytes = await _httpClient.GetByteArrayAsync(masterUrl.Url, cancellationToken);
-            VerifyGitHubAsset(masterBytes, MasterFile, masterUrl);
-            await File.WriteAllBytesAsync(masterPath, masterBytes, cancellationToken);
+            await StreamGitHubAssetToFileAsync(
+                manifestUrl,
+                ManifestFile,
+                manifestPath,
+                MaxManifestBytes,
+                cancellationToken);
+            await using var manifestStream = File.OpenRead(manifestPath);
+            var manifest = await JsonSerializer.DeserializeAsync<ReleaseManifest>(
+                manifestStream,
+                JsonDefaults.Web,
+                cancellationToken) ?? throw new InvalidDataException("Release manifest could not be parsed.");
+            ValidateManifest(manifest, tag);
+
+            var masterAsset = manifest.Assets.SingleOrDefault(
+                asset => string.Equals(asset.Name, MasterFile, StringComparison.OrdinalIgnoreCase)) ??
+                throw new InvalidDataException($"Release manifest does not describe {MasterFile}.");
+
+            await StreamGitHubAssetToFileAsync(
+                masterUrl,
+                MasterFile,
+                masterPath,
+                MaxWorkbookBytes,
+                cancellationToken);
             await Integrity.VerifyFileAsync(masterPath, masterAsset, cancellationToken);
 
             return new(manifest, masterPath, downloadDirectory);
@@ -124,15 +154,89 @@ public sealed class ReleaseClient
         }
     }
 
-    private static void VerifyGitHubAsset(
-        byte[] content,
+    private async Task StreamGitHubAssetToFileAsync(
+        GitHubReleaseAsset asset,
         string assetName,
-        GitHubReleaseAsset asset)
+        string destinationPath,
+        long maxBytes,
+        CancellationToken cancellationToken)
     {
-        if (content.LongLength != asset.Size)
+        ValidateGitHubAssetMetadata(asset, assetName, maxBytes);
+        var requestUri = new Uri(asset.Url);
+        ValidateHttpsAllowedHost(requestUri, assetName);
+
+        var partialPath = $"{destinationPath}.partial";
+        File.Delete(partialPath);
+        File.Delete(destinationPath);
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(
+                requestUri,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            response.EnsureSuccessStatusCode();
+            ValidateHttpsAllowedHost(response.RequestMessage?.RequestUri ?? requestUri, assetName);
+
+            if (response.Content.Headers.ContentLength is { } contentLength &&
+                contentLength != asset.Size)
+            {
+                throw new InvalidDataException(
+                    $"{assetName} does not match GitHub's release asset size.");
+            }
+
+            long totalBytes = 0;
+            await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
+            await using (var output = new FileStream(
+                partialPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 81920,
+                useAsync: true))
+            {
+                var buffer = new byte[81920];
+                int bytesRead;
+                while ((bytesRead = await input.ReadAsync(buffer, cancellationToken)) > 0)
+                {
+                    totalBytes += bytesRead;
+                    if (totalBytes > asset.Size || totalBytes > maxBytes)
+                    {
+                        throw new InvalidDataException($"{assetName} exceeds the expected download size.");
+                    }
+
+                    await output.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                }
+
+                if (totalBytes != asset.Size)
+                {
+                    throw new InvalidDataException(
+                        $"{assetName} does not match GitHub's release asset size.");
+                }
+
+                await output.FlushAsync(cancellationToken);
+            }
+
+            File.Move(partialPath, destinationPath);
+            await VerifyGitHubAssetFileAsync(destinationPath, assetName, asset, cancellationToken);
+        }
+        catch
+        {
+            try { File.Delete(partialPath); } catch { }
+            try { File.Delete(destinationPath); } catch { }
+            throw;
+        }
+    }
+
+    private static void ValidateGitHubAssetMetadata(
+        GitHubReleaseAsset asset,
+        string assetName,
+        long maxBytes)
+    {
+        if (asset.Size <= 0 || asset.Size > maxBytes)
         {
             throw new InvalidDataException(
-                $"{assetName} does not match GitHub's release asset size.");
+                $"{assetName} has an unsupported release asset size.");
         }
 
         if (string.IsNullOrWhiteSpace(asset.Digest))
@@ -147,14 +251,52 @@ public sealed class ReleaseClient
             throw new InvalidDataException(
                 $"{assetName} uses an unsupported GitHub release asset digest.");
         }
+    }
 
+    private static async Task VerifyGitHubAssetFileAsync(
+        string path,
+        string assetName,
+        GitHubReleaseAsset asset,
+        CancellationToken cancellationToken)
+    {
+        var info = new FileInfo(path);
+        if (info.Length != asset.Size)
+        {
+            throw new InvalidDataException(
+                $"{assetName} does not match GitHub's release asset size.");
+        }
+
+        await using var stream = File.OpenRead(path);
         var actual = Convert.ToHexString(
-            System.Security.Cryptography.SHA256.HashData(content)).ToLowerInvariant();
-        if (!string.Equals(asset.Digest[prefix.Length..], actual, StringComparison.OrdinalIgnoreCase))
+            await SHA256.HashDataAsync(stream, cancellationToken)).ToLowerInvariant();
+        const string prefix = "sha256:";
+        var digest = asset.Digest ?? throw new InvalidDataException(
+            $"{assetName} does not have a GitHub release asset digest.");
+        if (!string.Equals(digest[prefix.Length..], actual, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
                 $"{assetName} does not match GitHub's release asset digest.");
         }
+    }
+
+    private static void ValidateHttpsAllowedHost(Uri uri, string assetName)
+    {
+        if (!string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException($"{assetName} must be downloaded over HTTPS.");
+        }
+
+        if (!IsAllowedGitHubHost(uri.Host))
+        {
+            throw new InvalidDataException($"{assetName} uses an unsupported download host.");
+        }
+    }
+
+    private static bool IsAllowedGitHubHost(string host)
+    {
+        return string.Equals(host, "api.github.com", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(host, "github.com", StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith(".githubusercontent.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed record GitHubReleaseAsset(string Url, long Size, string? Digest);

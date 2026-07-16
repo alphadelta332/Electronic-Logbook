@@ -9,12 +9,14 @@ public sealed class CompatibilityPolicyTests
     public void SupportedTagsIncludesFloorAndExcludesOlderTags()
     {
         var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");
+        var currentVersion = TestRepo.Version;
+        var currentTag = "v" + currentVersion;
 
         var tags = policy.SupportedTags(
-            ["v1.4.2", "v1.9.9", CompatibilityFloorTag, "v2.0.1", "v2.0.2", "v2.0.3"],
-            "2.0.3");
+            ["v1.4.2", "v1.9.9", CompatibilityFloorTag, currentTag],
+            currentVersion);
 
-        Assert.Equal([CompatibilityFloorTag, "v2.0.1", "v2.0.2"], tags);
+        Assert.Equal([CompatibilityFloorTag], tags);
     }
 
     [Fact]
@@ -32,7 +34,7 @@ public sealed class CompatibilityPolicyTests
     [Fact]
     public void LoadAcceptsTrackedPolicy()
     {
-        var policyPath = FindRepoFile("updater", "compatibility-policy.json");
+        var policyPath = TestRepo.FindFile("updater", "compatibility-policy.json");
 
         var policy = CompatibilityPolicy.Load(policyPath);
 
@@ -97,22 +99,4 @@ public sealed class CompatibilityPolicyTests
         }
     }
 
-    private static string FindRepoFile(params string[] relativeParts)
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            var candidate = Path.Combine(
-                new[] { directory.FullName }.Concat(relativeParts).ToArray());
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new FileNotFoundException(
-            $"Could not locate repo file: {Path.Combine(relativeParts)}");
-    }
 }
