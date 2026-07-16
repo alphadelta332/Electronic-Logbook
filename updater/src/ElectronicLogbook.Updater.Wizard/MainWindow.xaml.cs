@@ -405,9 +405,9 @@ public partial class MainWindow : Window
         _preflightPassed = false;
 
         var source = _context.SourcePath;
-        var stagedOutput = _context.UseInPlaceSwap
+        var stagedOutput = _context.MigrationOutputPath ?? (_context.UseInPlaceSwap
             ? BuildStagedOutputPath(source)
-            : _context.OutputPath;
+            : _context.OutputPath);
 
         CheckSourcePathText.Text = "[ ] Waiting for source workbook to close...";
         FooterStatusText.Text = "Waiting for source workbook to close...";
@@ -417,29 +417,30 @@ public partial class MainWindow : Window
             ? "[OK] Source workbook exists, is .xlsm, and is closed"
             : $"[FAIL] {sourceCheck.Message}";
 
+        var finalOutput = !string.IsNullOrWhiteSpace(_context.MigrationOutputPath)
+            ? _context.OutputPath
+            : stagedOutput;
         var outputDir = string.IsNullOrWhiteSpace(stagedOutput)
             ? string.Empty
             : (Path.GetDirectoryName(stagedOutput) ?? string.Empty);
+        var finalOutputDir = string.IsNullOrWhiteSpace(finalOutput)
+            ? string.Empty
+            : (Path.GetDirectoryName(finalOutput) ?? string.Empty);
         var outputDirExists = !string.IsNullOrWhiteSpace(outputDir) && Directory.Exists(outputDir);
-        var outputMissing = !File.Exists(stagedOutput);
-        var outputExtOk = string.Equals(Path.GetExtension(stagedOutput), ".xlsm", StringComparison.OrdinalIgnoreCase);
-        var writeAccess = false;
-        if (outputDirExists)
-        {
-            try
-            {
-                var probe = Path.Combine(outputDir, $".write-test-{Guid.NewGuid():N}.tmp");
-                await File.WriteAllTextAsync(probe, "probe");
-                File.Delete(probe);
-                writeAccess = true;
-            }
-            catch
-            {
-                writeAccess = false;
-            }
-        }
+        var finalOutputDirExists = !string.IsNullOrWhiteSpace(finalOutputDir) && Directory.Exists(finalOutputDir);
+        var outputMissing = !File.Exists(stagedOutput) && !File.Exists(finalOutput);
+        var outputExtOk =
+            string.Equals(Path.GetExtension(stagedOutput), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Path.GetExtension(finalOutput), ".xlsm", StringComparison.OrdinalIgnoreCase);
+        var writeAccess = outputDirExists && await CanWriteToDirectoryAsync(outputDir);
+        var finalWriteAccess = finalOutputDirExists && await CanWriteToDirectoryAsync(finalOutputDir);
 
-        var outputOk = outputDirExists && outputMissing && outputExtOk && writeAccess;
+        var outputOk = outputDirExists &&
+            finalOutputDirExists &&
+            outputMissing &&
+            outputExtOk &&
+            writeAccess &&
+            finalWriteAccess;
         CheckOutputPathText.Text = outputOk
             ? "[OK] Output path is writable and output file does not exist"
             : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists";
@@ -591,9 +592,9 @@ public partial class MainWindow : Window
         var progressSink = new WizardProgressSink(AppendProgressEvent);
 
         var source = _context.SourcePath;
-        var stagedOutput = _context.UseInPlaceSwap
+        var stagedOutput = _context.MigrationOutputPath ?? (_context.UseInPlaceSwap
             ? BuildStagedOutputPath(source)
-            : _context.OutputPath;
+            : _context.OutputPath);
 
         try
         {
@@ -636,7 +637,7 @@ public partial class MainWindow : Window
             {
                 _lastReportPath = _context.UseInPlaceSwap
                     ? Path.ChangeExtension(source, ".update-report.json")
-                    : Path.ChangeExtension(stagedOutput, ".update-report.json");
+                    : Path.ChangeExtension(_context.OutputPath, ".update-report.json");
                 await File.WriteAllTextAsync(
                     _lastReportPath,
                     JsonSerializer.Serialize(report, JsonDefaults.Indented),
@@ -648,6 +649,11 @@ public partial class MainWindow : Window
                 $"{report.AirportVisitStats.WrittenVisitedAirportRows} written, " +
                 $"{report.AirportVisitStats.SavedNonBlankVisitRows} saved, " +
                 $"{report.AirportVisitStats.LogbookRowsWithRecognisedAirports} recognised logbook rows");
+
+            if (!string.IsNullOrWhiteSpace(_context.HandoffNote))
+            {
+                AppendLog(_context.HandoffNote);
+            }
 
             if (_context.UseInPlaceSwap)
             {
@@ -661,6 +667,15 @@ public partial class MainWindow : Window
                     _updateCts.Token);
                 _lastOutputPath = handoff.FinalWorkbookPath;
                 _lastBackupPath = handoff.BackupWorkbookPath;
+            }
+            else if (!string.IsNullOrWhiteSpace(_context.MigrationOutputPath))
+            {
+                AppendLog("copying validated workbook into OneDrive folder...");
+                WorkbookPackageValidator.ValidateStagedWorkbook(stagedOutput, report.OutputVersion);
+                File.Copy(stagedOutput, _context.OutputPath, overwrite: false);
+                WorkbookPackageValidator.ValidateWorkbookPackage(_context.OutputPath, report.OutputVersion);
+                TryDelete(stagedOutput);
+                _lastOutputPath = _context.OutputPath;
             }
             _lastOutputExpectedVersion = report.OutputVersion;
 
@@ -682,7 +697,7 @@ public partial class MainWindow : Window
             CompleteSummaryText.Text = finalWorkbookReady
                 ? (_context.UseInPlaceSwap
                     ? "Update complete. The original filename now points to the updated workbook."
-                    : "The updated workbook was created and validated.")
+                    : "The updated workbook was created as a separate file and validated.")
                 : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.";
             CompleteOutputPathText.Text = $"Updated workbook: {_lastOutputPath}";
             CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
@@ -1087,19 +1102,32 @@ public partial class MainWindow : Window
         }
 
         source ??= GetDefaultSourcePath();
+        source = Path.GetFullPath(source);
         output ??= BuildDefaultOutputPath(source);
+        output = Path.GetFullPath(output);
         master = string.IsNullOrWhiteSpace(master) ? null : Path.GetFullPath(master);
         channel ??= string.IsNullOrWhiteSpace(master)
             ? UpdateChannel.Stable
             : UpdateChannel.LocalMaster;
+        var handoffNote = string.Empty;
+        string? migrationOutputPath = null;
+        if (useInPlaceSwap && CloudStoragePath.IsLikelyCloudSynced(source))
+        {
+            useInPlaceSwap = false;
+            migrationOutputPath = BuildLocalMigrationOutputPath(source);
+            handoffNote =
+                "OneDrive/cloud storage detected; migrating locally and creating a separate updated workbook to avoid merge conflicts.";
+        }
 
         return new RunContext(
-            SourcePath: Path.GetFullPath(source),
-            OutputPath: Path.GetFullPath(output),
+            SourcePath: source,
+            OutputPath: output,
+            MigrationOutputPath: migrationOutputPath,
             MasterPath: master,
             Repository: repository,
             Channel: channel.Value,
-            UseInPlaceSwap: useInPlaceSwap);
+            UseInPlaceSwap: useInPlaceSwap,
+            HandoffNote: handoffNote);
     }
 
     private static UpdateChannel ParseUpdateChannel(string value)
@@ -1157,6 +1185,49 @@ public partial class MainWindow : Window
         }
 
         return Path.Combine(directory, $"{name}_Updated_Staged_{DateTime.Now:yyyyMMdd-HHmmss}{extension}");
+    }
+
+    private static string BuildLocalMigrationOutputPath(string sourcePath)
+    {
+        var name = Path.GetFileNameWithoutExtension(sourcePath);
+        var extension = Path.GetExtension(sourcePath);
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "ElectronicLogbookUpdater",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+
+        return Path.Combine(directory, $"{name}_Updated_Working{extension}");
+    }
+
+    private static async Task<bool> CanWriteToDirectoryAsync(string directory)
+    {
+        try
+        {
+            var probe = Path.Combine(directory, $".write-test-{Guid.NewGuid():N}.tmp");
+            await File.WriteAllTextAsync(probe, "probe");
+            File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // A temp cleanup failure must not hide a validated update.
+        }
     }
 
     private static bool IsWorkbookLocked(string workbookPath)
@@ -1274,10 +1345,12 @@ public partial class MainWindow : Window
     private sealed record RunContext(
         string SourcePath,
         string OutputPath,
+        string? MigrationOutputPath,
         string? MasterPath,
         string Repository,
         UpdateChannel Channel,
-        bool UseInPlaceSwap)
+        bool UseInPlaceSwap,
+        string HandoffNote)
     {
         public bool UsesProvidedMaster => !string.IsNullOrWhiteSpace(MasterPath);
 
