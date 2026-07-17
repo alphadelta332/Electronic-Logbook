@@ -128,6 +128,32 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedKeepsRecoverableStateWhenSourceIsLocked()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+
+        using var sourceLock = new FileStream(
+            source,
+            FileMode.Open,
+            FileAccess.ReadWrite,
+            FileShare.None);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(source, staged));
+
+        Assert.Contains("Failed to finalise workbook handoff", exception.Message, StringComparison.Ordinal);
+        sourceLock.Position = 0;
+        using var reader = new StreamReader(sourceLock, leaveOpen: true);
+        Assert.Equal("old workbook", reader.ReadToEnd());
+        Assert.True(File.Exists(staged));
+        Assert.False(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm").Any());
+        Assert.True(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void RecoverIfNeededRestoresBackupWhenSourceIsMissing()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
