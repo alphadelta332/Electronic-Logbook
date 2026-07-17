@@ -80,10 +80,12 @@ jobs:
 
       - name: Build release artifacts
         shell: pwsh
+        env:
+          RELEASE_MANIFEST_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_MANIFEST_SIGNING_PRIVATE_KEY }}
         run: |
           ./updater/Publish-WizardAsset.ps1
 
-          Remove-Item SHA256SUMS.txt, release-manifest.json, release-notes.md -Force -ErrorAction SilentlyContinue
+          Remove-Item SHA256SUMS.txt, release-manifest.json, release-manifest.json.sig, release-notes.md -Force -ErrorAction SilentlyContinue
 
           $readme = Get-Content README.md -Raw
           $releaseNotesPattern = "(?ms)^### \[$([regex]::Escape($env:RELEASE_VERSION))\].*?(?=^### \[|\z)"
@@ -121,6 +123,15 @@ jobs:
             assets = @($manifestAssets)
           } | ConvertTo-Json -Depth 4 | Set-Content release-manifest.json -Encoding utf8
 
+          ./tools/Sign-ReleaseManifest.ps1 -ManifestPath release-manifest.json
+          foreach ($asset in @(
+            Get-Item release-manifest.json
+            Get-Item release-manifest.json.sig
+          )) {
+            $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($asset.Name)" | Add-Content SHA256SUMS.txt -Encoding ascii
+          }
+
       - name: Run release validation
         shell: pwsh
         run: ./tools/Invoke-Validation.ps1 -Tier Release -ArtifactsPath .
@@ -145,6 +156,7 @@ jobs:
             "updater/dist/wizard-signature-report.json"
             "SHA256SUMS.txt"
             "release-manifest.json"
+            "release-manifest.json.sig"
           )
 
           $artifactHashes = foreach ($path in $artifactPaths) {
@@ -195,6 +207,7 @@ jobs:
             updater/dist/wizard-signature-report.json
             SHA256SUMS.txt
             release-manifest.json
+            release-manifest.json.sig
             release-validation.json
             release-notes.md
 
@@ -263,6 +276,7 @@ jobs:
             "wizard-signature-report.json"
             "SHA256SUMS.txt"
             "release-manifest.json"
+            "release-manifest.json.sig"
             "release-validation.json"
             "--target"
             $env:RELEASE_COMMIT

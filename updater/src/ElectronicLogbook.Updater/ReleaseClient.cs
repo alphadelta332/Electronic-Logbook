@@ -8,14 +8,26 @@ public sealed class ReleaseClient
 {
     private const string MasterFile = "Electronic_Logbook_Master.xlsm";
     private const string ManifestFile = "release-manifest.json";
+    private const string ManifestSignatureFile = "release-manifest.json.sig";
     private const long MaxManifestBytes = 1024 * 1024;
+    private const long MaxManifestSignatureBytes = 16 * 1024;
     private const long MaxWorkbookBytes = 100L * 1024 * 1024;
     private static readonly TimeSpan DefaultDownloadTimeout = TimeSpan.FromMinutes(5);
     private readonly HttpClient _httpClient;
+    private readonly string _downloadRoot;
+    private readonly TimeSpan _downloadTimeout;
+    private readonly string _manifestSignaturePublicKeyPem;
 
-    public ReleaseClient(HttpClient? httpClient = null)
+    public ReleaseClient(
+        HttpClient? httpClient = null,
+        string? downloadRoot = null,
+        TimeSpan? downloadTimeout = null,
+        string? manifestSignaturePublicKeyPem = null)
     {
         _httpClient = httpClient ?? new HttpClient();
+        _downloadRoot = downloadRoot ?? Path.GetTempPath();
+        _downloadTimeout = downloadTimeout ?? DefaultDownloadTimeout;
+        _manifestSignaturePublicKeyPem = manifestSignaturePublicKeyPem ?? LoadManifestSignaturePublicKeyPem();
         _httpClient.DefaultRequestHeaders.UserAgent.Add(
             new ProductInfoHeaderValue("ElectronicLogbook-ExternalUpdater", "0.1"));
         _httpClient.DefaultRequestHeaders.Accept.Add(
@@ -27,7 +39,7 @@ public sealed class ReleaseClient
         CancellationToken cancellationToken)
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(DefaultDownloadTimeout);
+        timeout.CancelAfter(_downloadTimeout);
         cancellationToken = timeout.Token;
 
         var releaseUri = new Uri($"https://api.github.com/repos/{repository}/releases/latest");
@@ -49,17 +61,7 @@ public sealed class ReleaseClient
         var tag = root.GetProperty("tag_name").GetString() ??
             throw new InvalidDataException("Latest release is missing tag_name.");
 
-        var assets = root.GetProperty("assets")
-            .EnumerateArray()
-            .ToDictionary(
-                asset => asset.GetProperty("name").GetString()!,
-                asset => new GitHubReleaseAsset(
-                    asset.GetProperty("browser_download_url").GetString()!,
-                    asset.GetProperty("size").GetInt64(),
-                    asset.TryGetProperty("digest", out var digest)
-                        ? digest.GetString()
-                        : null),
-                StringComparer.OrdinalIgnoreCase);
+        var assets = ParseReleaseAssets(root, tag);
 
         if (!assets.TryGetValue(ManifestFile, out var manifestUrl))
         {
@@ -67,16 +69,22 @@ public sealed class ReleaseClient
                 $"Latest release {tag} does not contain {ManifestFile}. " +
                 "Use --master for local prototype testing.");
         }
+        if (!assets.TryGetValue(ManifestSignatureFile, out var manifestSignatureUrl))
+        {
+            throw new InvalidDataException(
+                $"Latest release {tag} does not contain {ManifestSignatureFile}.");
+        }
         if (!assets.TryGetValue(MasterFile, out var masterUrl))
         {
             throw new InvalidDataException($"Latest release {tag} does not contain {MasterFile}.");
         }
 
         var downloadDirectory = Path.Combine(
-            Path.GetTempPath(),
+            _downloadRoot,
             $"ElectronicLogbookUpdater-{Guid.NewGuid():N}");
         Directory.CreateDirectory(downloadDirectory);
         var manifestPath = Path.Combine(downloadDirectory, ManifestFile);
+        var manifestSignaturePath = Path.Combine(downloadDirectory, ManifestSignatureFile);
         var masterPath = Path.Combine(downloadDirectory, MasterFile);
 
         try
@@ -86,6 +94,16 @@ public sealed class ReleaseClient
                 ManifestFile,
                 manifestPath,
                 MaxManifestBytes,
+                cancellationToken);
+            await StreamGitHubAssetToFileAsync(
+                manifestSignatureUrl,
+                ManifestSignatureFile,
+                manifestSignaturePath,
+                MaxManifestSignatureBytes,
+                cancellationToken);
+            await VerifyManifestSignatureAsync(
+                manifestPath,
+                manifestSignaturePath,
                 cancellationToken);
             await using var manifestStream = File.OpenRead(manifestPath);
             var manifest = await JsonSerializer.DeserializeAsync<ReleaseManifest>(
@@ -151,6 +169,121 @@ public sealed class ReleaseClient
             {
                 throw new InvalidDataException($"Release manifest asset is invalid: {asset.Name}");
             }
+        }
+
+        var duplicateAsset = manifest.Assets
+            .GroupBy(asset => asset.Name, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+        if (duplicateAsset is not null)
+        {
+            throw new InvalidDataException(
+                $"Release manifest contains duplicate asset: {duplicateAsset.Key}");
+        }
+    }
+
+    private static IReadOnlyDictionary<string, GitHubReleaseAsset> ParseReleaseAssets(
+        JsonElement root,
+        string tag)
+    {
+        if (!root.TryGetProperty("assets", out var assetsElement) ||
+            assetsElement.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidDataException($"Latest release {tag} is missing its assets list.");
+        }
+
+        var assets = new Dictionary<string, GitHubReleaseAsset>(StringComparer.OrdinalIgnoreCase);
+        foreach (var assetElement in assetsElement.EnumerateArray())
+        {
+            var name = GetRequiredString(assetElement, "name", "release asset");
+            if (assets.ContainsKey(name))
+            {
+                throw new InvalidDataException($"Latest release {tag} contains duplicate asset: {name}");
+            }
+
+            assets.Add(
+                name,
+                new GitHubReleaseAsset(
+                    GetRequiredString(assetElement, "browser_download_url", name),
+                    GetRequiredInt64(assetElement, "size", name),
+                    assetElement.TryGetProperty("digest", out var digest) &&
+                        digest.ValueKind == JsonValueKind.String
+                        ? digest.GetString()
+                        : null));
+        }
+
+        return assets;
+    }
+
+    private static string GetRequiredString(JsonElement element, string propertyName, string context)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            value.ValueKind != JsonValueKind.String ||
+            string.IsNullOrWhiteSpace(value.GetString()))
+        {
+            throw new InvalidDataException($"{context} is missing {propertyName}.");
+        }
+
+        return value.GetString()!;
+    }
+
+    private static long GetRequiredInt64(JsonElement element, string propertyName, string context)
+    {
+        if (!element.TryGetProperty(propertyName, out var value) ||
+            !value.TryGetInt64(out var result))
+        {
+            throw new InvalidDataException($"{context} is missing {propertyName}.");
+        }
+
+        return result;
+    }
+
+    private static string LoadManifestSignaturePublicKeyPem()
+    {
+        var assembly = typeof(ReleaseClient).Assembly;
+        const string resourceName =
+            "ElectronicLogbook.Updater.release-manifest-signing-public-key.pem";
+        using var stream = assembly.GetManifestResourceStream(resourceName) ??
+            throw new InvalidOperationException(
+                "The release manifest signing public key is not embedded.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    private async Task VerifyManifestSignatureAsync(
+        string manifestPath,
+        string signaturePath,
+        CancellationToken cancellationToken)
+    {
+        if (!_manifestSignaturePublicKeyPem.Contains(
+            "BEGIN PUBLIC KEY",
+            StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "Release manifest signing public key has not been configured.");
+        }
+
+        var manifestBytes = await File.ReadAllBytesAsync(manifestPath, cancellationToken);
+        var signatureBytes = await File.ReadAllBytesAsync(signaturePath, cancellationToken);
+        using var ecdsa = ECDsa.Create();
+        try
+        {
+            ecdsa.ImportFromPem(_manifestSignaturePublicKeyPem);
+        }
+        catch (Exception ex) when (ex is ArgumentException or CryptographicException)
+        {
+            throw new InvalidDataException(
+                "Release manifest signing public key could not be imported.",
+                ex);
+        }
+
+        if (!ecdsa.VerifyData(
+            manifestBytes,
+            signatureBytes,
+            HashAlgorithmName.SHA256,
+            DSASignatureFormat.IeeeP1363FixedFieldConcatenation))
+        {
+            throw new InvalidDataException(
+                "Release manifest signature verification failed.");
         }
     }
 

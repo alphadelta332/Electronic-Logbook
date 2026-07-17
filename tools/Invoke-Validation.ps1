@@ -45,11 +45,13 @@ function Test-ReleaseArtifacts {
 
     $resolvedPath = (Resolve-Path $Path).Path
     $manifestPath = Join-Path $resolvedPath "release-manifest.json"
+    $manifestSignaturePath = Join-Path $resolvedPath "release-manifest.json.sig"
     $sumsPath = Join-Path $resolvedPath "SHA256SUMS.txt"
     $requiredAssets = @(
         "Electronic_Logbook_Master.xlsm",
         "README.pdf",
         "release-manifest.json",
+        "release-manifest.json.sig",
         "SHA256SUMS.txt",
         "wizard-signature-report.json"
     )
@@ -61,6 +63,10 @@ function Test-ReleaseArtifacts {
     }
 
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    & (Join-Path $repoRoot "tools\Test-ReleaseManifestSignature.ps1") `
+        -ManifestPath $manifestPath `
+        -SignaturePath $manifestSignaturePath `
+        -PublicKeyPemPath (Join-Path $repoRoot "updater\release-manifest-signing-public-key.pem")
     $version = (Get-Content -LiteralPath (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
     $head = (git -C $repoRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) {
@@ -107,6 +113,17 @@ function Test-ReleaseArtifacts {
     foreach ($asset in @("Electronic_Logbook_Master.xlsm", "README.pdf")) {
         if (-not ($manifest.assets | Where-Object { $_.name -eq $asset })) {
             throw "release-manifest.json does not describe required asset: $asset"
+        }
+    }
+
+    foreach ($asset in @("release-manifest.json", "release-manifest.json.sig")) {
+        $assetPath = Join-Path $resolvedPath $asset
+        $actualHash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash.ToUpperInvariant()
+        if (-not $sumByName.ContainsKey($asset)) {
+            throw "SHA256SUMS.txt does not include $asset."
+        }
+        if ($sumByName[$asset] -ne $actualHash) {
+            throw "SHA256SUMS.txt hash mismatch for $asset."
         }
     }
 

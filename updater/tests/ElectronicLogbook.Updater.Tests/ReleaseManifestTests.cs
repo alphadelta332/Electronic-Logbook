@@ -42,4 +42,19 @@ public sealed class ReleaseManifestTests
         Assert.Throws<InvalidDataException>(() =>
             ReleaseClient.ValidateManifest(manifest, "v1.4.0"));
     }
+
+    [Fact]
+    public void ValidateManifestRejectsDuplicateAssets()
+    {
+        var manifest = new ReleaseManifest(
+            "1.4.0",
+            "v1.4.0",
+            new string('b', 40),
+            [ValidAsset, ValidAsset]);
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            ReleaseClient.ValidateManifest(manifest, "v1.4.0"));
+
+        Assert.Contains("duplicate", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
 }
