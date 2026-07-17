@@ -400,8 +400,8 @@ Check that the **Currency + Recency** sheet is not using an overridden date. The
 | File | Purpose |
 |---|---|
 | `Electronic_Logbook_Master.xlsm` | Master template -- distributed to users and used as the update source |
-| `modBoot.bas` | Bootstrap module that refreshes the updater code |
-| `modUpdate.bas` | VBA module for the auto-update system |
+| `modBoot.bas` | Embedded launcher that checks for updates and starts the external updater wizard |
+| `modUpdate.bas` | Legacy VBA updater retained for older supported workbooks; not embedded in release workbooks by default |
 | `version.txt` | Current version number -- checked on workbook open |
 | `README.md` | This file |
 

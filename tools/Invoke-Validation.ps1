@@ -216,6 +216,10 @@ if ($Tier -in @("Excel", "Release")) {
     & (Join-Path $repoRoot "updater\Test-ExternalUpdater.ps1") `
         -RepoRoot $repoRoot `
         -ReportPath (Join-Path $repoRoot "updater\TestResults\com-migration-report.json")
+    & (Join-Path $repoRoot "updater\Test-ExternalUpdater.ps1") `
+        -RepoRoot $repoRoot `
+        -ReportPath (Join-Path $repoRoot "updater\TestResults\com-inplace-migration-report.json") `
+        -InPlace
 }
 
 if ($Tier -eq "Release") {

@@ -91,6 +91,14 @@ Private Sub RunWizardUpdate(ByVal newVersion As String)
     End If
 
     If wizardReason = "" Then
+        If Not releaseChannel Then
+            If Not ConfirmDevelopmentWizardLaunch(newVersion) Then
+                MsgBox "Update cancelled. Your workbook has not been changed.", _
+                       vbInformation, "Update Cancelled"
+                Exit Sub
+            End If
+        End If
+
         On Error Resume Next
         ThisWorkbook.Save
         If Err.Number <> 0 Then
@@ -126,6 +134,19 @@ Private Sub RunWizardUpdate(ByVal newVersion As String)
            "Reason: " & wizardReason & vbCrLf & vbCrLf & _
            "Your workbook has not been changed.", vbCritical, "Update Failed"
 End Sub
+
+Private Function ConfirmDevelopmentWizardLaunch(ByVal targetVersion As String) As Boolean
+    Dim message As String
+
+    message = "This workbook is configured for the development update channel." & vbCrLf & vbCrLf & _
+              "Development updater wizard builds may be unsigned and are intended only for testing. " & _
+              "Continue only if you trust this workbook and repository checkout." & vbCrLf & vbCrLf & _
+              "Target version: " & targetVersion & vbCrLf & vbCrLf & _
+              "Continue with the development updater wizard?"
+
+    ConfirmDevelopmentWizardLaunch = (MsgBox(message, vbYesNo + vbExclamation, _
+                                             "Development Updater Warning") = vbYes)
+End Function
 
 Private Function GetLocalVersion() As String
     GetLocalVersion = Trim$(ReadWorkbookNameValue(ThisWorkbook, "LogbookVersion"))

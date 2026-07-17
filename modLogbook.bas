@@ -12,6 +12,7 @@ Private Const NEW_ENTRY_LAYOUT_GROUPED As String = "Grouped"
 Private Const AIRCRAFT_TYPES_SHEET As String = "AircraftTypes"
 Private Const AIRCRAFT_TYPES_TABLE As String = "AircraftTypes"
 Private Const LOGTEN_REPORT_SHEET As String = "LogTen Import Report"
+Private Const LOGTEN_BACKUP_AUTOMATION_SECURITY_FORCE_DISABLE As Long = 3
 Private Const AIRPORT_ICAO_VALIDATION_NAME As String = "AirportIcaoValidationList"
 Private Const REMOTE_AIRPORT_WARNING_THRESHOLD_NM As Double = 3000
 Private Const HIGH_SPEED_ROUTE_WARNING_THRESHOLD_KT As Double = 700
@@ -1730,22 +1731,39 @@ End Sub
 Private Sub DisableWorkbookPivotRefreshOnOpen(ByVal wb As Workbook)
     Dim ws As Worksheet
     Dim pt As PivotTable
-    Dim cacheKey As String
     Dim updatedCaches As Object
 
     Set updatedCaches = CreateObject("Scripting.Dictionary")
 
-    On Error Resume Next
     For Each ws In wb.Worksheets
         For Each pt In ws.PivotTables
-            cacheKey = CStr(pt.PivotCache.Index)
-            If Not updatedCaches.Exists(cacheKey) Then
-                pt.PivotCache.RefreshOnFileOpen = False
-                updatedCaches.Add cacheKey, True
-            End If
+            DisablePivotRefreshOnOpenForTable pt, updatedCaches
         Next pt
     Next ws
+End Sub
+
+Private Sub DisablePivotRefreshOnOpenForTable(ByVal pt As PivotTable, ByVal updatedCaches As Object)
+    Dim cacheKey As String
+    Dim errNum As Long
+    Dim errDesc As String
+    Dim pivotName As String
+
+    On Error GoTo Fail
+
+    cacheKey = CStr(pt.PivotCache.Index)
+    If updatedCaches.Exists(cacheKey) Then Exit Sub
+
+    pt.PivotCache.RefreshOnFileOpen = False
+    updatedCaches.Add cacheKey, True
+    Exit Sub
+
+Fail:
+    errNum = Err.Number
+    errDesc = Err.Description
+    On Error Resume Next
+    pivotName = pt.Name
     On Error GoTo 0
+    WriteDebugLog "DisablePivotRefreshOnOpenForTable", errNum, errDesc, pivotName
 End Sub
 
 Private Sub RefreshWorkbookPivotSummariesWithWorkbookProtection(ByVal wb As Workbook)
@@ -2752,27 +2770,138 @@ End Function
 
 Public Sub ImportFromLogTen()
     Dim filePath As Variant
+    Dim previewResult As Object
     Dim importResult As Object
+    Dim backupPath As String
+    Dim prompt As String
 
     filePath = Application.GetOpenFilename( _
         "LogTen exports (*.txt;*.tsv;*.csv),*.txt;*.tsv;*.csv,All files (*.*),*.*", _
         , "Select LogTen Export")
     If VarType(filePath) = vbBoolean Then Exit Sub
 
-    Set importResult = ImportFromLogTenFile(CStr(filePath))
+    Set previewResult = ImportFromLogTenFile(CStr(filePath), True)
+    If Not CBool(previewResult("Completed")) Then
+        MsgBox CStr(previewResult("Message")), vbExclamation, "LogTen Import Stopped"
+        Exit Sub
+    End If
+
+    prompt = CStr(previewResult("Message")) & vbCrLf & vbCrLf & _
+             "The logbook will create a backup before importing. Import these rows now?"
+    If MsgBox(prompt, vbYesNo + vbQuestion, "Confirm LogTen Import") <> vbYes Then Exit Sub
+
+    backupPath = CreateLogTenImportBackup()
+    If backupPath = "" Then
+        MsgBox "The import was not started because a backup could not be created and validated.", _
+               vbExclamation, "LogTen Import Stopped"
+        Exit Sub
+    End If
+
+    Set importResult = ImportFromLogTenFile(CStr(filePath), False)
+    importResult("BackupPath") = backupPath
     If CBool(importResult("Completed")) Then
-        MsgBox CStr(importResult("Message")), vbInformation, "LogTen Import Complete"
+        MsgBox CStr(importResult("Message")) & vbCrLf & _
+               "Backup created: " & backupPath, vbInformation, "LogTen Import Complete"
     Else
-        MsgBox CStr(importResult("Message")), vbExclamation, "LogTen Import Stopped"
+        MsgBox CStr(importResult("Message")) & vbCrLf & vbCrLf & _
+               "Backup created before import attempt: " & backupPath, vbExclamation, "LogTen Import Stopped"
     End If
 End Sub
 
-Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
+Private Function CreateLogTenImportBackup() As String
+    Dim backupDirectory As String
+    Dim baseName As String
+    Dim extension As String
+    Dim dotPosition As Long
+    Dim candidate As String
+    Dim counter As Long
+
+    On Error GoTo Fail
+
+    backupDirectory = ResolveLocalPath(ThisWorkbook)
+    If backupDirectory = "" Or LCase$(Left$(backupDirectory, 4)) = "http" Then
+        backupDirectory = Environ("USERPROFILE") & "\Documents\Electronic Logbook"
+    End If
+    If Not TryEnsureFolderExists(backupDirectory) Then Exit Function
+
+    baseName = ThisWorkbook.Name
+    dotPosition = InStrRev(baseName, ".")
+    If dotPosition > 1 Then
+        extension = Mid$(baseName, dotPosition)
+        baseName = Left$(baseName, dotPosition - 1)
+    Else
+        extension = ".xlsm"
+    End If
+
+    candidate = backupDirectory & "\" & baseName & "_LogTenBackup_" & Format$(Now, "yyyymmdd-hhnnss") & extension
+    counter = 1
+    Do While Dir$(candidate) <> ""
+        candidate = backupDirectory & "\" & baseName & "_LogTenBackup_" & _
+                    Format$(Now, "yyyymmdd-hhnnss") & "_" & CStr(counter) & extension
+        counter = counter + 1
+    Loop
+
+    ThisWorkbook.SaveCopyAs candidate
+    If ValidateLogTenImportBackup(candidate) Then CreateLogTenImportBackup = candidate
+    Exit Function
+
+Fail:
+    CreateLogTenImportBackup = ""
+End Function
+
+Private Function ValidateLogTenImportBackup(ByVal backupPath As String) As Boolean
+    Dim backupWorkbook As Workbook
+    Dim backupSheet As Worksheet
+    Dim backupTable As ListObject
+    Dim previousEnableEvents As Boolean
+    Dim previousAutomationSecurity As Long
+    Dim stateCaptured As Boolean
+
+    On Error GoTo Fail
+
+    If Dir$(backupPath) = "" Then Exit Function
+    If FileLen(backupPath) = 0 Then Exit Function
+
+    previousEnableEvents = Application.EnableEvents
+    previousAutomationSecurity = Application.AutomationSecurity
+    stateCaptured = True
+    Application.EnableEvents = False
+    Application.AutomationSecurity = LOGTEN_BACKUP_AUTOMATION_SECURITY_FORCE_DISABLE
+
+    Set backupWorkbook = Application.Workbooks.Open( _
+        Filename:=backupPath, _
+        UpdateLinks:=0, _
+        ReadOnly:=True, _
+        AddToMru:=False, _
+        IgnoreReadOnlyRecommended:=True, _
+        Notify:=False)
+
+    Set backupSheet = backupWorkbook.Worksheets("Logbook")
+    Set backupTable = backupSheet.ListObjects("Logbook")
+    ValidateLogTenImportBackup = Not backupTable Is Nothing
+
+CleanUp:
+    On Error Resume Next
+    If Not backupWorkbook Is Nothing Then backupWorkbook.Close SaveChanges:=False
+    If stateCaptured Then
+        Application.AutomationSecurity = previousAutomationSecurity
+        Application.EnableEvents = previousEnableEvents
+    End If
+    On Error GoTo 0
+    Exit Function
+
+Fail:
+    ValidateLogTenImportBackup = False
+    Resume CleanUp
+End Function
+
+Public Function ImportFromLogTenFile(ByVal filePath As String, Optional ByVal previewOnly As Boolean = False) As Object
     Dim previousScreenUpdating As Boolean
     Dim previousEnableEvents As Boolean
     Dim previousCalculation As XlCalculation
     Dim previousDisplayStatusBar As Boolean
     Dim previousStatusBar As Variant
+    Dim applicationStateCaptured As Boolean
     Dim result As Object
     Dim records As Collection
     Dim headers As Object
@@ -2797,10 +2926,21 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
     Dim diagStep As String
     Dim existingKeys As Object
     Dim rowsToImport As Collection
+    Dim importRowsWritten As Boolean
 
     Set result = CreateObject("Scripting.Dictionary")
     result.Add "Completed", False
     result.Add "Message", ""
+    result.Add "PreviewOnly", previewOnly
+    result.Add "ImportableRows", 0
+    result.Add "DuplicateRows", 0
+    result.Add "BlankRows", 0
+    result.Add "SimulatorRows", 0
+    result.Add "MappedRows", 0
+    result.Add "RejectedRows", 0
+    result.Add "UnknownAircraftTypes", 0
+    result.Add "IgnoredApproachLabels", 0
+    result.Add "ValidationErrors", 0
 
     On Error GoTo Fail
 
@@ -2819,7 +2959,7 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
     End If
 
     diagStep = "loading aircraft type table"
-    Set aircraftTypes = LoadAircraftTypeClasses()
+    Set aircraftTypes = LoadAircraftTypeClasses(Not previewOnly)
     Set unknownTypes = CreateObject("Scripting.Dictionary")
     Set ignoredApproaches = CreateObject("Scripting.Dictionary")
     Set errors = New Collection
@@ -2831,37 +2971,29 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
         If Not rowItem Is Nothing Then mappedRows.Add rowItem
     Next rowIndex
 
+    result("MappedRows") = mappedRows.Count
+    result("RejectedRows") = records.Count - mappedRows.Count
+    result("UnknownAircraftTypes") = unknownTypes.Count
+    result("IgnoredApproachLabels") = ignoredApproaches.Count
+    result("ValidationErrors") = errors.Count
+
     If unknownTypes.Count > 0 Or errors.Count > 0 Then
         WriteLogTenImportReport mappedRows, errors, unknownTypes, ignoredApproaches, 0, 0, blanks, True
-        result("Message") = "The import was not written because validation found issues." & vbCrLf & vbCrLf & _
-                            "Unknown aircraft types: " & JoinDictionaryKeys(unknownTypes, ", ") & vbCrLf & _
+        result("Message") = "LogTen import preview found blocking issues:" & vbCrLf & _
+                            "Mapped rows: " & mappedRows.Count & vbCrLf & _
+                            "Rejected rows: " & result("RejectedRows") & vbCrLf & _
+                            "Validation errors: " & errors.Count & vbCrLf & _
+                            "Unknown aircraft types: " & unknownTypes.Count & " (" & JoinDictionaryKeys(unknownTypes, ", ") & ")" & vbCrLf & _
+                            "Blank rows ignored: " & blanks & vbCrLf & _
+                            "Ignored approach labels: " & ignoredApproaches.Count & " (" & JoinDictionaryKeys(ignoredApproaches, ", ") & ")" & vbCrLf & _
                             "Review the '" & LOGTEN_REPORT_SHEET & "' sheet for details."
         Set ImportFromLogTenFile = result
         Exit Function
     End If
 
-    previousScreenUpdating = Application.ScreenUpdating
-    previousEnableEvents = Application.EnableEvents
-    previousCalculation = Application.Calculation
-    previousDisplayStatusBar = Application.DisplayStatusBar
-    previousStatusBar = Application.StatusBar
-
-    Application.ScreenUpdating = False
-    Application.EnableEvents = False
-    Application.Calculation = xlCalculationManual
-    Application.DisplayStatusBar = True
-    Application.StatusBar = "Electronic Logbook: importing LogTen export"
-
     diagStep = "opening Logbook table"
     Set wsLog = ThisWorkbook.Sheets("Logbook")
     Set tbl = wsLog.ListObjects("Logbook")
-    logbookWasProtected = wsLog.ProtectContents
-    If logbookWasProtected Then wsLog.Unprotect Password:=ProtectionPassword()
-
-    tableStyleName = tbl.TableStyle.Name
-    totalsWereOn = tbl.ShowTotals
-    totalsStateCaptured = True
-    If totalsWereOn Then tbl.ShowTotals = False
 
     diagStep = "checking duplicates"
     Set existingKeys = BuildExistingLogTenDuplicateKeys(tbl)
@@ -2878,9 +3010,58 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
         End If
     Next rowItem
 
+    result("ImportableRows") = rowsToImport.Count
+    result("DuplicateRows") = duplicates
+    result("BlankRows") = blanks
+    result("SimulatorRows") = simRows
+    result("MappedRows") = mappedRows.Count
+    result("RejectedRows") = records.Count - mappedRows.Count
+    result("UnknownAircraftTypes") = unknownTypes.Count
+    result("IgnoredApproachLabels") = ignoredApproaches.Count
+    result("ValidationErrors") = errors.Count
+
+    If previewOnly Then
+        result("Completed") = True
+        result("Message") = "LogTen import preview:" & vbCrLf & _
+                            "Mapped rows: " & mappedRows.Count & vbCrLf & _
+                            "Rows ready to import: " & rowsToImport.Count & vbCrLf & _
+                            "Rejected rows: " & result("RejectedRows") & vbCrLf & _
+                            "Potential duplicates to skip: " & duplicates & vbCrLf & _
+                            "Unknown aircraft types: " & unknownTypes.Count & vbCrLf & _
+                            "Blank rows ignored: " & blanks & vbCrLf & _
+                            "Simulator rows recognised: " & simRows & vbCrLf & _
+                            "Ignored approach labels: " & ignoredApproaches.Count & " (" & JoinDictionaryKeys(ignoredApproaches, ", ") & ")"
+        Set ImportFromLogTenFile = result
+        Exit Function
+    End If
+
+    previousScreenUpdating = Application.ScreenUpdating
+    previousEnableEvents = Application.EnableEvents
+    previousCalculation = Application.Calculation
+    previousDisplayStatusBar = Application.DisplayStatusBar
+    previousStatusBar = Application.StatusBar
+    applicationStateCaptured = True
+
+    Application.ScreenUpdating = False
+    Application.EnableEvents = False
+    Application.Calculation = xlCalculationManual
+    Application.DisplayStatusBar = True
+    Application.StatusBar = "Electronic Logbook: importing LogTen export"
+
+    logbookWasProtected = wsLog.ProtectContents
+    If logbookWasProtected Then wsLog.Unprotect Password:=ProtectionPassword()
+
+    tableStyleName = tbl.TableStyle.Name
+    totalsWereOn = tbl.ShowTotals
+    totalsStateCaptured = True
+    If totalsWereOn Then tbl.ShowTotals = False
+
     diagStep = "writing imported rows"
     imported = rowsToImport.Count
-    If imported > 0 Then AppendMappedLogTenRows tbl, rowsToImport
+    If imported > 0 Then
+        importRowsWritten = True
+        AppendMappedLogTenRows tbl, rowsToImport
+    End If
 
     tbl.TableStyle = tableStyleName
     tbl.ShowTableStyleRowStripes = True
@@ -2904,15 +3085,29 @@ Public Function ImportFromLogTenFile(ByVal filePath As String) As Object
     WriteLogTenImportReport mappedRows, errors, unknownTypes, ignoredApproaches, imported, duplicates, blanks, False
 
     If logbookWasProtected Then ProtectLogbookSheetForRuntime wsLog
-    RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
-                                  previousDisplayStatusBar, previousStatusBar
+    If applicationStateCaptured Then
+        RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
+                                      previousDisplayStatusBar, previousStatusBar
+    End If
 
     result("Completed") = True
+    result("ImportableRows") = imported
+    result("DuplicateRows") = duplicates
+    result("BlankRows") = blanks
+    result("SimulatorRows") = simRows
+    result("MappedRows") = mappedRows.Count
+    result("RejectedRows") = records.Count - mappedRows.Count
+    result("UnknownAircraftTypes") = unknownTypes.Count
+    result("IgnoredApproachLabels") = ignoredApproaches.Count
+    result("ValidationErrors") = errors.Count
     result("Message") = "Imported " & imported & " row(s)." & vbCrLf & _
+                        "Mapped rows: " & mappedRows.Count & vbCrLf & _
+                        "Rejected rows: " & result("RejectedRows") & vbCrLf & _
                         "Skipped duplicates: " & duplicates & vbCrLf & _
+                        "Unknown aircraft types: " & unknownTypes.Count & vbCrLf & _
                         "Blank rows ignored: " & blanks & vbCrLf & _
                         "Simulator rows imported: " & simRows & vbCrLf & _
-                        "Ignored approach labels: " & JoinDictionaryKeys(ignoredApproaches, ", ")
+                        "Ignored approach labels: " & ignoredApproaches.Count & " (" & JoinDictionaryKeys(ignoredApproaches, ", ") & ")"
     Set ImportFromLogTenFile = result
     Exit Function
 
@@ -2922,16 +3117,41 @@ Fail:
     errNum = Err.Number
     errDesc = Err.Description
     On Error Resume Next
+    If importRowsWritten Then DeleteMappedLogTenRows tbl, rowsToImport
     If totalsStateCaptured Then tbl.ShowTotals = totalsWereOn
     If logbookWasProtected Then ProtectLogbookSheetForRuntime wsLog
-    RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
-                                  previousDisplayStatusBar, previousStatusBar
+    If applicationStateCaptured Then
+        RestoreImportApplicationState previousScreenUpdating, previousEnableEvents, previousCalculation, _
+                                      previousDisplayStatusBar, previousStatusBar
+    End If
     result("Message") = BuildUserFacingErrorMessage( _
                         "The LogTen import could not be completed.", _
                         "No completed import was applied. Check the selected export file and try again. If this keeps happening, use the Report a Bug button and include the debug log.", _
                         errNum, "ImportFromLogTenFile", errDesc, diagStep)
     Set ImportFromLogTenFile = result
 End Function
+
+Private Sub DeleteMappedLogTenRows(ByVal tbl As ListObject, ByVal rowsToImport As Collection)
+    Dim importedKeys As Object
+    Dim mapped As Object
+    Dim rowIndex As Long
+    Dim key As String
+
+    If tbl Is Nothing Then Exit Sub
+    If rowsToImport Is Nothing Then Exit Sub
+    If tbl.DataBodyRange Is Nothing Then Exit Sub
+
+    Set importedKeys = CreateObject("Scripting.Dictionary")
+    importedKeys.CompareMode = vbTextCompare
+    For Each mapped In rowsToImport
+        importedKeys(CStr(mapped("DuplicateKey"))) = True
+    Next mapped
+
+    For rowIndex = tbl.ListRows.Count To 1 Step -1
+        key = BuildExistingLogTenDuplicateKey(tbl, rowIndex)
+        If importedKeys.Exists(key) Then tbl.ListRows(rowIndex).Delete
+    Next rowIndex
+End Sub
 
 Public Sub ImportAircraftTypesFromCsv()
     Dim filePath As Variant
@@ -3758,7 +3978,7 @@ Private Function JoinDictionaryKeys(ByVal dict As Object, ByVal delimiter As Str
     If JoinDictionaryKeys = "" Then JoinDictionaryKeys = "none"
 End Function
 
-Private Function LoadAircraftTypeClasses() As Object
+Private Function LoadAircraftTypeClasses(Optional ByVal createMissingTable As Boolean = True) As Object
     Dim tbl As ListObject
     Dim result As Object
     Dim rowIndex As Long
@@ -3767,7 +3987,17 @@ Private Function LoadAircraftTypeClasses() As Object
 
     Set result = CreateObject("Scripting.Dictionary")
     result.CompareMode = vbTextCompare
-    Set tbl = EnsureAircraftTypesTable()
+    If createMissingTable Then
+        Set tbl = EnsureAircraftTypesTable()
+    Else
+        Set tbl = TryGetAircraftTypesTable()
+    End If
+
+    If tbl Is Nothing Then
+        AddSeedAircraftTypeClasses result
+        Set LoadAircraftTypeClasses = result
+        Exit Function
+    End If
 
     If Not tbl.DataBodyRange Is Nothing Then
         For rowIndex = 1 To tbl.DataBodyRange.Rows.Count
@@ -3779,6 +4009,22 @@ Private Function LoadAircraftTypeClasses() As Object
 
     Set LoadAircraftTypeClasses = result
 End Function
+
+Private Function TryGetAircraftTypesTable() As ListObject
+    Dim ws As Worksheet
+
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets(AIRCRAFT_TYPES_SHEET)
+    If Not ws Is Nothing Then Set TryGetAircraftTypesTable = ws.ListObjects(AIRCRAFT_TYPES_TABLE)
+    On Error GoTo 0
+End Function
+
+Private Sub AddSeedAircraftTypeClasses(ByVal result As Object)
+    result("A320") = "ME"
+    result("A321") = "ME"
+    result("C172") = "SE"
+    result("PA44") = "ME"
+End Sub
 
 Private Function EnsureAircraftTypesTable() As ListObject
     Dim ws As Worksheet

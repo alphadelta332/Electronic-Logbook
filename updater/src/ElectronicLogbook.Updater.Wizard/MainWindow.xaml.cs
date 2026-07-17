@@ -758,8 +758,16 @@ public partial class MainWindow : Window
                     ? "Update complete. The original filename now points to the updated workbook."
                     : "The updated workbook was created as a separate file and validated.")
                 : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.";
-            CompleteOutputPathText.Text = $"Updated workbook: {_lastOutputPath}";
-            CompleteBackupPathText.Text = await BuildBackupDisplayTextAsync(_lastBackupPath);
+            CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Current workbook",
+                _lastOutputPath,
+                _lastOutputExpectedVersion,
+                "Current workbook: not available");
+            CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Retained backup",
+                _lastBackupPath,
+                _lastBackupExpectedVersion,
+                "Retained backup: not available");
             RestoreBackupButton.IsEnabled = finalWorkbookReady &&
                 _context.UseInPlaceSwap &&
                 !string.IsNullOrWhiteSpace(_lastBackupPath);
@@ -791,7 +799,7 @@ public partial class MainWindow : Window
 
             CompleteTitleText.Text = "Update Cancelled";
             CompleteSummaryText.Text = "Update was cancelled before completion.";
-            CompleteOutputPathText.Text = "Updated workbook: not created";
+            CompleteOutputPathText.Text = "Current workbook: not created";
             CompleteBackupPathText.Text = string.Empty;
             RestoreBackupButton.IsEnabled = false;
             OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
@@ -821,8 +829,12 @@ public partial class MainWindow : Window
                 ? "Update Failed"
                 : "Update Failed - Backup Available";
             CompleteSummaryText.Text = ex.Message;
-            CompleteOutputPathText.Text = "Updated workbook: not available";
-            CompleteBackupPathText.Text = await BuildBackupDisplayTextAsync(_lastBackupPath);
+            CompleteOutputPathText.Text = "Current workbook: not available";
+            CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Retained backup",
+                _lastBackupPath,
+                _lastBackupExpectedVersion,
+                "Retained backup: not available");
             RestoreBackupButton.IsEnabled = _context.UseInPlaceSwap &&
                 !string.IsNullOrWhiteSpace(_lastBackupPath);
             OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
@@ -967,28 +979,44 @@ public partial class MainWindow : Window
         });
     }
 
-    private static async Task<string> BuildBackupDisplayTextAsync(string? backupPath)
+    private static async Task<string> BuildWorkbookDisplayTextAsync(
+        string label,
+        string? workbookPath,
+        string? expectedVersion,
+        string missingText)
     {
-        if (string.IsNullOrWhiteSpace(backupPath))
+        if (string.IsNullOrWhiteSpace(workbookPath) || !File.Exists(workbookPath))
         {
-            return string.Empty;
+            return missingText;
         }
 
         var details = new List<string>();
-        var version = await TryReadWorkbookVersionFromPackageWithRetryAsync(backupPath);
+        var version = await TryReadWorkbookVersionFromPackageWithRetryAsync(workbookPath);
         if (!string.IsNullOrWhiteSpace(version))
         {
-            details.Add($"version {version}");
+            if (string.IsNullOrWhiteSpace(expectedVersion))
+            {
+                details.Add($"version {version}");
+            }
+            else if (string.Equals(version, expectedVersion, StringComparison.Ordinal))
+            {
+                details.Add($"validated version {version}");
+            }
+            else
+            {
+                details.Add($"version {version}; expected {expectedVersion}");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(expectedVersion))
+        {
+            details.Add($"version unreadable; expected {expectedVersion}");
         }
 
-        if (File.Exists(backupPath))
-        {
-            details.Add($"saved {File.GetLastWriteTime(backupPath):G}");
-        }
+        details.Add($"saved {File.GetLastWriteTime(workbookPath):G}");
 
         return details.Count == 0
-            ? $"Backup workbook: {backupPath}"
-            : $"Backup workbook: {backupPath} ({string.Join(", ", details)})";
+            ? $"{label}: {workbookPath}"
+            : $"{label}: {workbookPath} ({string.Join(", ", details)})";
     }
 
     private void RestoreBackupButton_OnClick(object sender, RoutedEventArgs e)
@@ -1018,9 +1046,9 @@ public partial class MainWindow : Window
                 _lastBackupExpectedVersion);
             CompleteTitleText.Text = "Backup Restored";
             CompleteSummaryText.Text = "The retained backup has been restored to the original workbook filename.";
-            CompleteOutputPathText.Text = $"Restored workbook: {result.RestoredWorkbookPath}";
+            CompleteOutputPathText.Text = BuildRestoredWorkbookDisplayText(result.RestoredWorkbookPath);
             CompleteBackupPathText.Text = result.FailedWorkbookPath is null
-                ? $"Backup workbook: {_lastBackupPath}"
+                ? $"Retained backup: {_lastBackupPath}"
                 : $"Previous failed workbook kept: {result.FailedWorkbookPath}";
             RestoreBackupButton.IsEnabled = false;
             OpenUpdatedCheckBox.IsEnabled = true;
@@ -1038,6 +1066,14 @@ public partial class MainWindow : Window
                 MessageBoxImage.Error);
             FooterStatusText.Text = "Restore failed.";
         }
+    }
+
+    private static string BuildRestoredWorkbookDisplayText(string restoredWorkbookPath)
+    {
+        var details = File.Exists(restoredWorkbookPath)
+            ? $" (saved {File.GetLastWriteTime(restoredWorkbookPath):G})"
+            : string.Empty;
+        return $"Restored workbook: {restoredWorkbookPath}{details}";
     }
 
     private void OpenDiagnosticReportButton_OnClick(object sender, RoutedEventArgs e)
