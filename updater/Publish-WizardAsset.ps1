@@ -4,6 +4,7 @@ param(
     [switch]$SkipBuild,
     [switch]$Sign,
     [string]$CertificateThumbprint,
+    [string]$ExpectedPublisher,
     [string]$TimestampServer = "http://timestamp.digicert.com"
 )
 
@@ -23,6 +24,7 @@ if (-not (Test-Path $OutputDirectory)) {
 $publishDir = Join-Path $repoRoot "updater\src\ElectronicLogbook.Updater.Wizard\bin\Release\net8.0-windows\win-x64\publish-single-file"
 $assetExe = Join-Path $OutputDirectory "ElectronicLogbook.Updater.Wizard.exe"
 $assetZip = Join-Path $OutputDirectory "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+$signatureReportPath = Join-Path $OutputDirectory "wizard-signature-report.json"
 
 if (-not $SkipBuild) {
     dotnet publish $projectPath -c Release -r win-x64 --self-contained true `
@@ -60,6 +62,19 @@ if ($Sign) {
     }
 }
 
+$signatureArgs = @{
+    Path = $publishedExe
+    ReportPath = $signatureReportPath
+}
+if (-not [string]::IsNullOrWhiteSpace($ExpectedPublisher)) {
+    $signatureArgs.ExpectedPublisher = $ExpectedPublisher
+}
+if ($Sign) {
+    $signatureArgs.RequireValidSignature = $true
+    $signatureArgs.RequireTimestamp = $true
+}
+& (Join-Path $PSScriptRoot "Test-WizardSignature.ps1") @signatureArgs | Out-Null
+
 Copy-Item $publishedExe $assetExe -Force
 if (Test-Path $assetZip) {
     Remove-Item $assetZip -Force
@@ -70,6 +85,7 @@ Compress-Archive -Path $publishedExe -DestinationPath $assetZip -Force
 Write-Host "Wizard assets ready:" -ForegroundColor Green
 Write-Host "  EXE: $assetExe"
 Write-Host "  ZIP: $assetZip"
+Write-Host "  Signature report: $signatureReportPath"
 if ($Sign) {
     Write-Host "  Signature: Authenticode signed with $CertificateThumbprint"
 }

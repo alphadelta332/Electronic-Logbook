@@ -52,6 +52,7 @@ jobs:
             gh release create $tag `
               updater/dist/ElectronicLogbook.Updater.Wizard.exe `
               updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
+              updater/dist/wizard-signature-report.json `
               dev-wizard-commit.txt `
               --repo $env:GITHUB_REPOSITORY `
               --title $title `

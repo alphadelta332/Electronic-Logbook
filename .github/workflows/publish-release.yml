@@ -101,6 +101,7 @@ jobs:
             Get-Item README.pdf
             Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.exe
             Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
+            Get-Item updater/dist/wizard-signature-report.json
           )
 
           $manifestAssets = foreach ($asset in $assets) {
@@ -141,6 +142,7 @@ jobs:
             "README.pdf"
             "updater/dist/ElectronicLogbook.Updater.Wizard.exe"
             "updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip"
+            "updater/dist/wizard-signature-report.json"
             "SHA256SUMS.txt"
             "release-manifest.json"
           )
@@ -190,6 +192,7 @@ jobs:
             README.pdf
             updater/dist/ElectronicLogbook.Updater.Wizard.exe
             updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
+            updater/dist/wizard-signature-report.json
             SHA256SUMS.txt
             release-manifest.json
             release-validation.json
@@ -257,6 +260,7 @@ jobs:
             "README.pdf"
             "ElectronicLogbook.Updater.Wizard.exe"
             "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+            "wizard-signature-report.json"
             "SHA256SUMS.txt"
             "release-manifest.json"
             "release-validation.json"

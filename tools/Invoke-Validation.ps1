@@ -50,7 +50,8 @@ function Test-ReleaseArtifacts {
         "Electronic_Logbook_Master.xlsm",
         "README.pdf",
         "release-manifest.json",
-        "SHA256SUMS.txt"
+        "SHA256SUMS.txt",
+        "wizard-signature-report.json"
     )
 
     foreach ($asset in $requiredAssets) {
@@ -107,6 +108,19 @@ function Test-ReleaseArtifacts {
         if (-not ($manifest.assets | Where-Object { $_.name -eq $asset })) {
             throw "release-manifest.json does not describe required asset: $asset"
         }
+    }
+
+    $signatureReportPath = Join-Path $resolvedPath "wizard-signature-report.json"
+    $signatureReport = Get-Content -LiteralPath $signatureReportPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $wizardAsset = $manifest.assets | Where-Object { $_.name -eq "ElectronicLogbook.Updater.Wizard.exe" } | Select-Object -First 1
+    if ($null -eq $wizardAsset) {
+        throw "release-manifest.json does not describe required asset: ElectronicLogbook.Updater.Wizard.exe"
+    }
+    if (([string]$signatureReport.fileName) -ne "ElectronicLogbook.Updater.Wizard.exe") {
+        throw "wizard-signature-report.json does not describe the wizard executable."
+    }
+    if (([string]$signatureReport.sha256).ToUpperInvariant() -ne ([string]$wizardAsset.sha256).ToUpperInvariant()) {
+        throw "wizard-signature-report.json SHA-256 does not match release-manifest.json."
     }
 
     Write-Host "Release artifacts verified in $resolvedPath." -ForegroundColor Green

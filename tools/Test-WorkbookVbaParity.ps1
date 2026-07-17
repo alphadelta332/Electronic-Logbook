@@ -42,7 +42,7 @@ function Get-WorkbookVbaSnapshot {
         if ($CheckForEmbeddedUpdater) {
             try {
                 $null = $vbaComponents.Item("modUpdate")
-                $issues.Add("modUpdate is embedded in $($Workbook.Name); release workbooks must download it at runtime.")
+                $issues.Add("modUpdate is embedded in $($Workbook.Name); release workbooks should use the embedded wizard launcher only.")
             } catch {}
         }
 

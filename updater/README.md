@@ -84,7 +84,7 @@ manual `Compatibility matrix` workflow on a self-hosted Windows runner labelled
 - Requires Microsoft Excel for Windows.
 - Uses Excel COM automation and must run while the source workbook is closed.
 - Does not yet provide a full visual-diff test or Normalise every possible user-customized format.
-- The wizard executable is packaged as a GitHub release asset but is not currently code-signed.
+- The wizard executable can be Authenticode-signed during packaging, but release signing is currently reported rather than release-blocking until a production code-signing identity is configured.
 
 ## Release Asset Packaging
 
@@ -109,6 +109,12 @@ This script outputs:
 
 - `updater/dist/ElectronicLogbook.Updater.Wizard.exe`
 - `updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip`
+- `updater/dist/wizard-signature-report.json`
+
+The signature report records the executable SHA-256, Authenticode status, signer
+certificate details when present, and timestamp certificate details when present. Unsigned
+local builds are allowed, but the protected release workflow publishes this report as a
+release artifact so signing can be audited before it becomes release-blocking.
 
 The in-workbook launcher uses the `.exe` asset directly and can fall back to the `.zip`
 asset. Do not manually upload wizard assets for normal releases; rerun the protected
