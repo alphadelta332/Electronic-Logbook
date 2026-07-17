@@ -67,6 +67,45 @@ public sealed class UpdaterOptionsTests : IDisposable
     {
         Assert.Contains("separate file (the default)", UpdaterOptions.HelpText);
         Assert.Contains("source workbook is left unchanged", UpdaterOptions.HelpText);
+        Assert.Contains("redacted diagnostic report", UpdaterOptions.HelpText);
+    }
+
+    [Fact]
+    public async Task RunAsyncReturnsSuccessForHelp()
+    {
+        using var output = new StringWriter();
+        var originalOutput = Console.Out;
+        Console.SetOut(output);
+        try
+        {
+            var exitCode = await UpdaterProgram.RunAsync(["--help"]);
+
+            Assert.Equal(0, exitCode);
+            Assert.Contains("Usage:", output.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetOut(originalOutput);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsyncReturnsUsageCodeForInvalidArguments()
+    {
+        using var error = new StringWriter();
+        var originalError = Console.Error;
+        Console.SetError(error);
+        try
+        {
+            var exitCode = await UpdaterProgram.RunAsync(["--unknown"]);
+
+            Assert.Equal(2, exitCode);
+            Assert.Contains("Unknown argument", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
     }
 
     public void Dispose()

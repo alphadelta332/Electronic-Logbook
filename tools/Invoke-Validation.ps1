@@ -7,6 +7,7 @@ param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$ArtifactsPath,
     [switch]$SkipDependencyAudit,
+    [switch]$SkipPublicReadinessCheck,
     [switch]$SkipReleaseArtifactVerification
 )
 
@@ -15,6 +16,10 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path $RepoRoot).Path
 if ([string]::IsNullOrWhiteSpace($ArtifactsPath)) {
     $ArtifactsPath = $repoRoot
+}
+
+if ($Tier -eq "Release" -and $SkipPublicReadinessCheck) {
+    throw "Release validation must not skip public-readiness checks."
 }
 
 function Write-Step {
@@ -203,7 +208,11 @@ if ($Tier -in @("Excel", "Release")) {
     Write-Step "Excel validation"
     & (Join-Path $repoRoot "tools\Test-WorkbookVbaParity.ps1") -RepoRoot $repoRoot
     & (Join-Path $repoRoot "tools\Test-VbaCompileDisposable.ps1")
-    & (Join-Path $repoRoot "tools\Test-WorkbookPublicReadiness.ps1") -RepoRoot $repoRoot
+    if (-not $SkipPublicReadinessCheck) {
+        & (Join-Path $repoRoot "tools\Test-WorkbookPublicReadiness.ps1") -RepoRoot $repoRoot
+    } else {
+        Write-Host "Skipping release-only public-readiness checks." -ForegroundColor Yellow
+    }
     & (Join-Path $repoRoot "updater\Test-ExternalUpdater.ps1") -RepoRoot $repoRoot
 }
 

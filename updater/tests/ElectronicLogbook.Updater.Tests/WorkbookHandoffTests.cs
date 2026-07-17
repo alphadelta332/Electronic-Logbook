@@ -49,6 +49,34 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedReplacesFromSourceDirectoryWhenOutputIsExternal()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var externalDirectory = Path.Combine(_directory, "external");
+        Directory.CreateDirectory(externalDirectory);
+        var staged = Path.Combine(externalDirectory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+        var fileSystem = new RecordingFileSystem();
+
+        WorkbookHandoff.ReplaceSourceWithUpdated(
+            source,
+            staged,
+            expectedFinalVersion: null,
+            expectedBackupVersion: null,
+            fileSystem);
+
+        var copiedPath = Assert.Single(fileSystem.CopiedDestinations);
+        Assert.Equal(_directory, Path.GetDirectoryName(copiedPath));
+        Assert.StartsWith(".logbook_Staged_", Path.GetFileName(copiedPath), StringComparison.Ordinal);
+        Assert.Equal(Path.GetFullPath(copiedPath), fileSystem.ReplaceSourcePath);
+        Assert.Equal(Path.GetFullPath(source), fileSystem.ReplaceDestinationPath);
+        Assert.Equal(_directory, Path.GetDirectoryName(fileSystem.ReplaceBackupPath));
+        Assert.False(File.Exists(staged));
+        Assert.Empty(Directory.EnumerateFiles(_directory, ".*_Staged_*.xlsm"));
+    }
+
+    [Fact]
     public void ReplaceSourceWithUpdatedRejectsSourceAsStagedPath()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -128,6 +156,52 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedLeavesSourceUntouchedWhenExternalStageCopyFails()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var externalDirectory = Path.Combine(_directory, "external");
+        Directory.CreateDirectory(externalDirectory);
+        var staged = Path.Combine(externalDirectory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+
+        Assert.Throws<IOException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(
+                source,
+                staged,
+                expectedFinalVersion: null,
+                expectedBackupVersion: null,
+                new ThrowingCopyFileSystem()));
+
+        Assert.Equal("old workbook", File.ReadAllText(source));
+        Assert.Equal("new workbook", File.ReadAllText(staged));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm"));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void ReplaceSourceWithUpdatedLeavesSourceUntouchedWhenJournalWriteFails()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+
+        Assert.Throws<IOException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(
+                source,
+                staged,
+                expectedFinalVersion: null,
+                expectedBackupVersion: null,
+                new ThrowingJournalMoveFileSystem(source)));
+
+        Assert.Equal("old workbook", File.ReadAllText(source));
+        Assert.Equal("new workbook", File.ReadAllText(staged));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm"));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void ReplaceSourceWithUpdatedKeepsRecoverableStateWhenSourceIsLocked()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -182,6 +256,30 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedDoesNotRollbackWhenExternalStagedCleanupFails()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var externalDirectory = Path.Combine(_directory, "external");
+        Directory.CreateDirectory(externalDirectory);
+        var staged = Path.Combine(externalDirectory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+        var fileSystem = new ThrowingDeleteFileSystem(staged);
+
+        var result = WorkbookHandoff.ReplaceSourceWithUpdated(
+            source,
+            staged,
+            expectedFinalVersion: null,
+            expectedBackupVersion: null,
+            fileSystem);
+
+        Assert.Equal("new workbook", File.ReadAllText(source));
+        Assert.Equal("old workbook", File.ReadAllText(result.BackupWorkbookPath));
+        Assert.True(File.Exists(staged));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void RecoverIfNeededRestoresBackupWhenSourceIsMissing()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -194,8 +292,9 @@ public sealed class WorkbookHandoffTests : IDisposable
         File.WriteAllText(backup, "old workbook");
         WriteJournal(source, staged, replacement, backup, localStageCreated: true);
 
-        WorkbookHandoff.RecoverIfNeeded(source);
+        var result = WorkbookHandoff.RecoverIfNeeded(source);
 
+        Assert.Equal(HandoffRecoveryAction.BackupRestored, result.Action);
         Assert.Equal("old workbook", File.ReadAllText(source));
         Assert.False(File.Exists(backup));
         Assert.False(File.Exists(replacement));
@@ -215,12 +314,24 @@ public sealed class WorkbookHandoffTests : IDisposable
         File.WriteAllText(backup, "old workbook");
         WriteJournal(source, staged, replacement, backup, localStageCreated: true);
 
-        WorkbookHandoff.RecoverIfNeeded(source);
+        var result = WorkbookHandoff.RecoverIfNeeded(source);
 
+        Assert.Equal(HandoffRecoveryAction.CompletedJournalCleaned, result.Action);
         Assert.Equal("new workbook", File.ReadAllText(source));
         Assert.Equal("old workbook", File.ReadAllText(backup));
         Assert.False(File.Exists(staged));
         Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void RecoverIfNeededReturnsNoneWhenNoJournalExists()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        File.WriteAllText(source, "workbook");
+
+        var result = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.None, result.Action);
     }
 
     [Fact]
@@ -347,6 +458,71 @@ public sealed class WorkbookHandoffTests : IDisposable
         Assert.True(File.Exists(olderBackup));
     }
 
+    [Fact]
+    public void RestoreBackupValidatesBackupAndKeepsFailedWorkbookForInvestigation()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var backup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260717-120000.xlsm");
+
+        var result = WorkbookHandoff.RestoreBackup(source, backup, "2.0.0");
+
+        Assert.Equal("2.0.0", WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.Equal(Path.GetFullPath(source), result.RestoredWorkbookPath);
+        Assert.NotNull(result.FailedWorkbookPath);
+        Assert.True(File.Exists(result.FailedWorkbookPath));
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(result.FailedWorkbookPath));
+        Assert.True(File.Exists(backup));
+    }
+
+    [Fact]
+    public void RestoreBackupRejectsInvalidBackupWithoutMovingSource()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var backup = Path.Combine(_directory, "logbook_Old_20260717-120000.xlsm");
+        File.WriteAllText(backup, "not a workbook package");
+
+        Assert.Throws<InvalidDataException>(() =>
+            WorkbookHandoff.RestoreBackup(source, backup, "2.0.0"));
+
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.False(Directory.EnumerateFiles(_directory, "logbook_FailedRestore_*.xlsm").Any());
+        Assert.True(File.Exists(backup));
+    }
+
+    [Fact]
+    public void RestoreBackupRollsBackFailedRestoreValidation()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var backup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260717-120000.xlsm");
+        var validation = new SecondSourceValidationFailingValidation(source);
+
+        Assert.Throws<InvalidDataException>(() =>
+            WorkbookHandoff.RestoreBackup(
+                source,
+                backup,
+                "2.0.0",
+                PhysicalWorkbookFileSystem.Instance,
+                validation));
+
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.True(File.Exists(backup));
+    }
+
     public void Dispose()
     {
         Directory.Delete(_directory, recursive: true);
@@ -378,16 +554,16 @@ public sealed class WorkbookHandoffTests : IDisposable
         File.WriteAllText(BuildJournalPath(source), System.Text.Json.JsonSerializer.Serialize(journal));
     }
 
-    private sealed class ThrowingReplaceFileSystem : IWorkbookFileSystem
+    private class LocalFileSystem : IWorkbookFileSystem
     {
         public bool FileExists(string path) => File.Exists(path);
 
-        public void CopyFile(string sourcePath, string destinationPath, bool overwrite)
+        public virtual void CopyFile(string sourcePath, string destinationPath, bool overwrite)
         {
             File.Copy(sourcePath, destinationPath, overwrite);
         }
 
-        public void DeleteFile(string path)
+        public virtual void DeleteFile(string path)
         {
             File.Delete(path);
         }
@@ -397,14 +573,35 @@ public sealed class WorkbookHandoffTests : IDisposable
             return Directory.EnumerateFiles(path, searchPattern);
         }
 
-        public void MoveFile(string sourcePath, string destinationPath, bool overwrite = false)
+        public virtual void MoveFile(string sourcePath, string destinationPath, bool overwrite = false)
         {
             File.Move(sourcePath, destinationPath, overwrite);
         }
 
         public string ReadAllText(string path) => File.ReadAllText(path);
 
-        public void ReplaceFile(
+        public virtual void ReplaceFile(
+            string sourceFileName,
+            string destinationFileName,
+            string destinationBackupFileName,
+            bool ignoreMetadataErrors)
+        {
+            File.Replace(
+                sourceFileName,
+                destinationFileName,
+                destinationBackupFileName,
+                ignoreMetadataErrors);
+        }
+
+        public void WriteAllText(string path, string contents)
+        {
+            File.WriteAllText(path, contents);
+        }
+    }
+
+    private sealed class ThrowingReplaceFileSystem : LocalFileSystem
+    {
+        public override void ReplaceFile(
             string sourceFileName,
             string destinationFileName,
             string destinationBackupFileName,
@@ -412,10 +609,73 @@ public sealed class WorkbookHandoffTests : IDisposable
         {
             throw new IOException("Simulated replace failure.");
         }
+    }
 
-        public void WriteAllText(string path, string contents)
+    private sealed class ThrowingCopyFileSystem : LocalFileSystem
+    {
+        public override void CopyFile(string sourcePath, string destinationPath, bool overwrite)
         {
-            File.WriteAllText(path, contents);
+            throw new IOException("Simulated stage copy failure.");
+        }
+    }
+
+    private sealed class ThrowingJournalMoveFileSystem(string sourcePath) : LocalFileSystem
+    {
+        private readonly string _journalPath = BuildJournalPath(sourcePath);
+
+        public override void MoveFile(string sourcePath, string destinationPath, bool overwrite = false)
+        {
+            if (string.Equals(Path.GetFullPath(destinationPath), Path.GetFullPath(_journalPath), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Simulated journal write failure.");
+            }
+
+            File.Move(sourcePath, destinationPath, overwrite);
+        }
+    }
+
+    private sealed class RecordingFileSystem : LocalFileSystem
+    {
+        public List<string> CopiedDestinations { get; } = [];
+        public string? ReplaceSourcePath { get; private set; }
+        public string? ReplaceDestinationPath { get; private set; }
+        public string? ReplaceBackupPath { get; private set; }
+
+        public override void CopyFile(string sourcePath, string destinationPath, bool overwrite)
+        {
+            CopiedDestinations.Add(Path.GetFullPath(destinationPath));
+            File.Copy(sourcePath, destinationPath, overwrite);
+        }
+
+        public override void ReplaceFile(
+            string sourceFileName,
+            string destinationFileName,
+            string destinationBackupFileName,
+            bool ignoreMetadataErrors)
+        {
+            ReplaceSourcePath = Path.GetFullPath(sourceFileName);
+            ReplaceDestinationPath = Path.GetFullPath(destinationFileName);
+            ReplaceBackupPath = Path.GetFullPath(destinationBackupFileName);
+            File.Replace(
+                sourceFileName,
+                destinationFileName,
+                destinationBackupFileName,
+                ignoreMetadataErrors);
+        }
+    }
+
+    private sealed class ThrowingDeleteFileSystem(string pathToFail) : LocalFileSystem
+    {
+        private readonly string _pathToFail = Path.GetFullPath(pathToFail);
+
+        public override void DeleteFile(string path)
+        {
+            if (string.Equals(Path.GetFullPath(path), _pathToFail, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Simulated cleanup failure.");
+            }
+
+            File.Delete(path);
         }
     }
 
@@ -430,6 +690,27 @@ public sealed class WorkbookHandoffTests : IDisposable
                 string.Equals(expectedVersion, TestRepo.Version, StringComparison.Ordinal))
             {
                 throw new InvalidDataException("Simulated post-replace validation failure.");
+            }
+
+            return WorkbookPackageValidator.ValidateWorkbookPackage(workbookPath, expectedVersion);
+        }
+    }
+
+    private sealed class SecondSourceValidationFailingValidation(string sourcePath) : IWorkbookPackageValidation
+    {
+        private readonly string _sourcePath = Path.GetFullPath(sourcePath);
+        private int _sourceValidationCount;
+
+        public string ValidateWorkbookPackage(string workbookPath, string? expectedVersion = null)
+        {
+            workbookPath = Path.GetFullPath(workbookPath);
+            if (string.Equals(workbookPath, _sourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                _sourceValidationCount++;
+                if (_sourceValidationCount == 1)
+                {
+                    throw new InvalidDataException("Simulated restored workbook validation failure.");
+                }
             }
 
             return WorkbookPackageValidator.ValidateWorkbookPackage(workbookPath, expectedVersion);

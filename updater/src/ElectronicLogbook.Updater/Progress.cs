@@ -30,16 +30,81 @@ public static class UpdaterProgressEventTypes
     public const string UpdateCompleted = "update-completed";
 }
 
+public static class UpdaterPhasePolicies
+{
+    private static readonly IReadOnlyDictionary<string, int> TimeoutSecondsByPhase =
+        new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            [UpdaterPhaseIds.StartExcel] = 60,
+            [UpdaterPhaseIds.OpenSourceWorkbook] = 120,
+            [UpdaterPhaseIds.OpenMasterCopy] = 120,
+            [UpdaterPhaseIds.PrepareMasterCopy] = 60,
+            [UpdaterPhaseIds.ReadSourceValidationData] = 60,
+            [UpdaterPhaseIds.CopyLogbookData] = 300,
+            [UpdaterPhaseIds.CopyKeywordsData] = 60,
+            [UpdaterPhaseIds.CopyRoutesData] = 60,
+            [UpdaterPhaseIds.CopyBaseAirportSelections] = 60,
+            [UpdaterPhaseIds.CopyNamedPreferences] = 60,
+            [UpdaterPhaseIds.RestoreLogbookPresentation] = 180,
+            [UpdaterPhaseIds.RefreshAirportVisitStats] = 180,
+            [UpdaterPhaseIds.CalculateOutputWorkbook] = 300,
+            [UpdaterPhaseIds.RefreshPivotTables] = 180,
+            [UpdaterPhaseIds.UpdateHoursOverTimeChart] = 120,
+            [UpdaterPhaseIds.ValidatePreservedData] = 120,
+            [UpdaterPhaseIds.SaveOutputWorkbook] = 180,
+            [UpdaterPhaseIds.Completed] = 0,
+            [UpdaterPhaseIds.Failed] = 0
+        };
+
+    public static IReadOnlyCollection<string> PhaseIds => TimeoutSecondsByPhase.Keys.ToArray();
+
+    public static int? GetTimeoutSeconds(string phaseId)
+    {
+        return TimeoutSecondsByPhase.TryGetValue(phaseId, out var timeoutSeconds)
+            ? timeoutSeconds
+            : null;
+    }
+}
+
 public sealed record UpdaterProgressEvent(
     string EventType,
     string PhaseId,
     string Message,
     int? Percent,
-    DateTimeOffset TimestampUtc);
+    DateTimeOffset TimestampUtc,
+    string? RecoveryHint = null,
+    int? TimeoutSeconds = null);
 
 public interface IUpdaterProgressSink
 {
     void Report(UpdaterProgressEvent progressEvent);
+}
+
+public sealed class RecordingUpdaterProgressSink(IUpdaterProgressSink? inner = null) : IUpdaterProgressSink
+{
+    private readonly List<UpdaterProgressEvent> _events = [];
+    private readonly object _syncRoot = new();
+
+    public IReadOnlyList<UpdaterProgressEvent> Events
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                return _events.ToArray();
+            }
+        }
+    }
+
+    public void Report(UpdaterProgressEvent progressEvent)
+    {
+        lock (_syncRoot)
+        {
+            _events.Add(progressEvent);
+        }
+
+        inner?.Report(progressEvent);
+    }
 }
 
 public sealed class ConsoleUpdaterProgressSink : IUpdaterProgressSink
@@ -53,6 +118,10 @@ public sealed class ConsoleUpdaterProgressSink : IUpdaterProgressSink
                 break;
             case UpdaterProgressEventTypes.PhaseFailed:
                 Console.Error.WriteLine($"[updater] Failed at {progressEvent.PhaseId}: {progressEvent.Message}");
+                if (!string.IsNullOrWhiteSpace(progressEvent.RecoveryHint))
+                {
+                    Console.Error.WriteLine($"[updater] Recovery: {progressEvent.RecoveryHint}");
+                }
                 break;
             case UpdaterProgressEventTypes.UpdateCompleted:
                 Console.WriteLine($"[updater] {progressEvent.Message}");

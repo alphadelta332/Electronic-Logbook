@@ -24,7 +24,8 @@ public sealed class DiagnosticBundleFactoryTests : IDisposable
                 UpdaterPhaseIds.CopyLogbookData,
                 "copying Logbook data",
                 40,
-                DateTimeOffset.Parse("2026-07-17T00:00:00Z"))
+                DateTimeOffset.Parse("2026-07-17T00:00:00Z"),
+                TimeoutSeconds: 300)
         };
         var exception = new IOException(
             $"Could not replace {sourcePath} with token ghp_abcdefghijklmnopqrstuvwxyz.");
@@ -46,9 +47,43 @@ public sealed class DiagnosticBundleFactoryTests : IDisposable
         Assert.DoesNotContain("Updated Private Logbook.xlsm", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ghp_abcdefghijklmnopqrstuvwxyz", json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("UPDATER-FILE-IO", json, StringComparison.Ordinal);
-        Assert.Equal(1, bundle.SchemaVersion);
+        Assert.Equal(3, bundle.SchemaVersion);
         Assert.Equal(12, bundle.WorkbookStructure.LogbookRows);
         Assert.Single(bundle.Phases);
+        Assert.Null(bundle.Phases[0].RecoveryHint);
+        Assert.Equal(300, bundle.Phases[0].TimeoutSeconds);
+        Assert.NotNull(bundle.Error?.RecoveryHint);
+        Assert.Contains("Close Excel", bundle.Error.RecoveryHint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateIncludesRedactedPhaseRecoveryHints()
+    {
+        var sourcePath = Path.Combine("C:\\Users\\Pilot\\OneDrive\\Logbooks", "My Private Logbook.xlsm");
+        var progressEvents = new[]
+        {
+            new UpdaterProgressEvent(
+                UpdaterProgressEventTypes.PhaseFailed,
+                UpdaterPhaseIds.OpenSourceWorkbook,
+                "source locked",
+                null,
+                DateTimeOffset.Parse("2026-07-17T00:00:00Z"),
+                $"Close {sourcePath} and retry.")
+        };
+
+        var bundle = DiagnosticBundleFactory.Create(
+            TestRepo.Version,
+            report: null,
+            progressEvents,
+            new InvalidOperationException($"Could not open {sourcePath}."),
+            sourcePath,
+            masterWorkbookPath: null,
+            outputWorkbookPath: null);
+
+        Assert.Single(bundle.Phases);
+        Assert.Contains("[redacted-path]", bundle.Phases[0].RecoveryHint, StringComparison.Ordinal);
+        Assert.DoesNotContain(sourcePath, bundle.Phases[0].RecoveryHint, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Save and close", bundle.Error?.RecoveryHint, StringComparison.Ordinal);
     }
 
     [Fact]

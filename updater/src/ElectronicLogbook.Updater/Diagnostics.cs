@@ -24,13 +24,16 @@ public sealed record DiagnosticPhaseEvent(
     string PhaseId,
     string Message,
     int? Percent,
-    DateTimeOffset TimestampUtc);
+    DateTimeOffset TimestampUtc,
+    string? RecoveryHint,
+    int? TimeoutSeconds);
 
 public sealed record DiagnosticError(
     string Code,
     string PhaseId,
     string ExceptionType,
-    string Message);
+    string Message,
+    string? RecoveryHint);
 
 public sealed record DiagnosticWorkbookStructure(
     int LogbookRows,
@@ -41,7 +44,7 @@ public sealed record DiagnosticWorkbookStructure(
 
 public static partial class DiagnosticBundleFactory
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 3;
 
     public static DiagnosticBundle Create(
         string applicationVersion,
@@ -78,7 +81,9 @@ public static partial class DiagnosticBundleFactory
                     progressEvent.PhaseId,
                     progressEvent.Message,
                     progressEvent.Percent,
-                    progressEvent.TimestampUtc))
+                    progressEvent.TimestampUtc,
+                    RedactOptionalSensitiveText(progressEvent.RecoveryHint, sensitivePaths),
+                    progressEvent.TimeoutSeconds))
                 .ToArray(),
             error is null
                 ? null
@@ -86,7 +91,8 @@ public static partial class DiagnosticBundleFactory
                     ClassifyError(error),
                     lastPhase,
                     error.GetType().Name,
-                    RedactSensitiveText(error.Message, sensitivePaths)),
+                    RedactSensitiveText(error.Message, sensitivePaths),
+                    RedactSensitiveText(GetRecoveryHint(lastPhase, error), sensitivePaths)),
             new DiagnosticWorkbookStructure(
                 report?.LogbookRows ?? 0,
                 report?.AirportVisitStats.AirportRows ?? 0,
@@ -137,6 +143,41 @@ public static partial class DiagnosticBundleFactory
         };
     }
 
+    public static string GetRecoveryHint(string phaseId, Exception error)
+    {
+        if (error is OperationCanceledException)
+        {
+            return "No recovery action is required. Re-run the updater when ready.";
+        }
+
+        if (error is IOException or UnauthorizedAccessException)
+        {
+            return "Close Excel, wait for any cloud sync to finish, confirm the workbook is writable, then re-run the updater.";
+        }
+
+        return phaseId switch
+        {
+            UpdaterPhaseIds.OpenSourceWorkbook =>
+                "Save and close the source workbook, wait for cloud sync to finish, then re-run the updater.",
+            UpdaterPhaseIds.OpenMasterCopy =>
+                "Retry after the updater can access the downloaded or selected master workbook.",
+            UpdaterPhaseIds.ReadSourceValidationData =>
+                "Keep the original workbook unchanged and contact support with the diagnostic bundle.",
+            UpdaterPhaseIds.CopyLogbookData or
+            UpdaterPhaseIds.CopyKeywordsData or
+            UpdaterPhaseIds.CopyRoutesData or
+            UpdaterPhaseIds.CopyBaseAirportSelections or
+            UpdaterPhaseIds.CopyNamedPreferences =>
+                "Keep the original workbook unchanged and contact support with the diagnostic bundle before retrying.",
+            UpdaterPhaseIds.ValidatePreservedData =>
+                "Do not use the updated workbook. Keep the original workbook and contact support with the diagnostic bundle.",
+            UpdaterPhaseIds.SaveOutputWorkbook =>
+                "Close Excel, check write access and available disk space, then re-run the updater.",
+            _ =>
+                "Keep the original workbook and any updater backup, then re-run the updater or contact support with the diagnostic bundle."
+        };
+    }
+
     private static string RedactSensitiveText(
         string message,
         IEnumerable<string?> sensitivePaths)
@@ -153,6 +194,15 @@ public static partial class DiagnosticBundleFactory
         }
 
         return SensitiveTokenRegex().Replace(redacted, "[redacted-token]");
+    }
+
+    private static string? RedactOptionalSensitiveText(
+        string? message,
+        IEnumerable<string?> sensitivePaths)
+    {
+        return string.IsNullOrWhiteSpace(message)
+            ? null
+            : RedactSensitiveText(message, sensitivePaths);
     }
 
     [GeneratedRegex(@"(?i)\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b")]

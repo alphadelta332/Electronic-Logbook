@@ -6,6 +6,26 @@ public sealed record HandoffResult(
     string FinalWorkbookPath,
     string BackupWorkbookPath);
 
+public enum HandoffRecoveryAction
+{
+    None,
+    CompletedJournalCleaned,
+    BackupRestored
+}
+
+public sealed record HandoffRecoveryResult(
+    HandoffRecoveryAction Action,
+    string Message)
+{
+    public static HandoffRecoveryResult None { get; } = new(
+        HandoffRecoveryAction.None,
+        "No interrupted workbook handoff was found.");
+}
+
+public sealed record BackupRestoreResult(
+    string RestoredWorkbookPath,
+    string? FailedWorkbookPath);
+
 public static class WorkbookHandoff
 {
     public static HandoffResult ReplaceSourceWithUpdated(
@@ -85,7 +105,7 @@ public static class WorkbookHandoff
             replacementCompleted = true;
             if (localStageCreated)
             {
-                fileSystem.DeleteFile(stagedUpdatedWorkbookPath);
+                TryDelete(stagedUpdatedWorkbookPath, fileSystem);
             }
             if (!string.IsNullOrWhiteSpace(expectedFinalVersion))
             {
@@ -122,12 +142,12 @@ public static class WorkbookHandoff
         }
     }
 
-    public static void RecoverIfNeeded(string sourceWorkbookPath)
+    public static HandoffRecoveryResult RecoverIfNeeded(string sourceWorkbookPath)
     {
-        RecoverIfNeeded(sourceWorkbookPath, PhysicalWorkbookFileSystem.Instance);
+        return RecoverIfNeeded(sourceWorkbookPath, PhysicalWorkbookFileSystem.Instance);
     }
 
-    internal static void RecoverIfNeeded(
+    internal static HandoffRecoveryResult RecoverIfNeeded(
         string sourceWorkbookPath,
         IWorkbookFileSystem fileSystem)
     {
@@ -135,7 +155,7 @@ public static class WorkbookHandoff
         var journalPath = BuildJournalPath(sourceWorkbookPath);
         if (!fileSystem.FileExists(journalPath))
         {
-            return;
+            return HandoffRecoveryResult.None;
         }
 
         var journal = ReadJournal(journalPath, fileSystem);
@@ -160,7 +180,9 @@ public static class WorkbookHandoff
                 TryDelete(journal.StagedUpdatedWorkbookPath, fileSystem);
             }
             fileSystem.DeleteFile(journalPath);
-            return;
+            return new HandoffRecoveryResult(
+                HandoffRecoveryAction.CompletedJournalCleaned,
+                "A completed workbook handoff journal was cleaned up.");
         }
 
         if (backupExists)
@@ -171,7 +193,9 @@ public static class WorkbookHandoff
                 TryDelete(journal.ReplacementWorkbookPath, fileSystem);
             }
             fileSystem.DeleteFile(journalPath);
-            return;
+            return new HandoffRecoveryResult(
+                HandoffRecoveryAction.BackupRestored,
+                "The previous workbook backup was restored after an interrupted handoff.");
         }
 
         throw new InvalidOperationException(
@@ -208,6 +232,70 @@ public static class WorkbookHandoff
         packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedSourceVersion);
         packageValidation.ValidateWorkbookPackage(retainedBackupWorkbookPath, expectedBackupVersion);
         PruneOlderBackups(sourceWorkbookPath, retainedBackupWorkbookPath, fileSystem);
+    }
+
+    public static BackupRestoreResult RestoreBackup(
+        string sourceWorkbookPath,
+        string backupWorkbookPath,
+        string? expectedBackupVersion = null)
+    {
+        return RestoreBackup(
+            sourceWorkbookPath,
+            backupWorkbookPath,
+            expectedBackupVersion,
+            PhysicalWorkbookFileSystem.Instance,
+            WorkbookPackageValidation.Instance);
+    }
+
+    internal static BackupRestoreResult RestoreBackup(
+        string sourceWorkbookPath,
+        string backupWorkbookPath,
+        string? expectedBackupVersion,
+        IWorkbookFileSystem fileSystem,
+        IWorkbookPackageValidation? packageValidation = null)
+    {
+        packageValidation ??= WorkbookPackageValidation.Instance;
+        sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
+        backupWorkbookPath = Path.GetFullPath(backupWorkbookPath);
+
+        if (!fileSystem.FileExists(backupWorkbookPath))
+        {
+            throw new FileNotFoundException("Backup workbook not found.", backupWorkbookPath);
+        }
+
+        packageValidation.ValidateWorkbookPackage(backupWorkbookPath, expectedBackupVersion);
+        var failedWorkbookPath = fileSystem.FileExists(sourceWorkbookPath)
+            ? BuildFailedRestorePath(sourceWorkbookPath, fileSystem)
+            : null;
+
+        if (failedWorkbookPath is not null)
+        {
+            fileSystem.MoveFile(sourceWorkbookPath, failedWorkbookPath);
+        }
+
+        try
+        {
+            fileSystem.CopyFile(backupWorkbookPath, sourceWorkbookPath, overwrite: false);
+            packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedBackupVersion);
+            return new BackupRestoreResult(sourceWorkbookPath, failedWorkbookPath);
+        }
+        catch
+        {
+            TryDelete(sourceWorkbookPath, fileSystem);
+            if (failedWorkbookPath is not null && fileSystem.FileExists(failedWorkbookPath))
+            {
+                try
+                {
+                    fileSystem.MoveFile(failedWorkbookPath, sourceWorkbookPath);
+                }
+                catch
+                {
+                    // Preserve the restore failure; the failed workbook remains for investigation.
+                }
+            }
+
+            throw;
+        }
     }
 
     private static string BuildBackupPath(
@@ -252,6 +340,27 @@ public static class WorkbookHandoff
 
             fileSystem.DeleteFile(backupFullPath);
         }
+    }
+
+    private static string BuildFailedRestorePath(
+        string sourceWorkbookPath,
+        IWorkbookFileSystem fileSystem)
+    {
+        var directory = Path.GetDirectoryName(sourceWorkbookPath) ??
+            throw new InvalidOperationException("Source workbook directory is unavailable.");
+        var baseName = Path.GetFileNameWithoutExtension(sourceWorkbookPath);
+        var extension = Path.GetExtension(sourceWorkbookPath);
+        var timestamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+
+        var candidate = Path.Combine(directory, $"{baseName}_FailedRestore_{timestamp}{extension}");
+        var counter = 1;
+        while (fileSystem.FileExists(candidate))
+        {
+            candidate = Path.Combine(directory, $"{baseName}_FailedRestore_{timestamp}_{counter}{extension}");
+            counter++;
+        }
+
+        return candidate;
     }
 
     private static string StageReplacementBesideSource(

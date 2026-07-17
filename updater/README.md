@@ -47,12 +47,19 @@ dotnet run --project updater/src/ElectronicLogbook.Updater -- `
   --inplace
 ```
 
-The updater writes a JSON validation report beside the final updated workbook.
+The updater writes a redacted JSON diagnostic report beside the final updated workbook.
 
 Run the disposable Excel migration test locally with:
 
 ```powershell
 .\updater\Test-ExternalUpdater.ps1
+```
+
+For a dev workbook on the `dev` update channel, run the Excel tier without the
+release-only public-readiness gate:
+
+```powershell
+.\tools\Invoke-Validation.ps1 -Tier Excel -SkipPublicReadinessCheck
 ```
 
 ## Backward Compatibility Policy
@@ -149,7 +156,9 @@ The migration engine now supports a progress sink via `IUpdaterProgressSink` and
 
 Stable phase IDs for UI mapping are defined in `UpdaterPhaseIds`.
 
-Current CLI wiring uses `ConsoleUpdaterProgressSink`; the wizard subscribes to the same progress events for determinate update progress.
+Current CLI wiring records progress events and forwards them to `ConsoleUpdaterProgressSink`;
+the wizard records the same events for determinate update progress and optional redacted
+diagnostic reports.
 
 ## Wizard MVP (Now Available)
 

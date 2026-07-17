@@ -7,9 +7,14 @@ public static class UpdaterProgram
     public static async Task<int> RunAsync(string[] args)
     {
         string? downloadDirectory = null;
+        UpdaterOptions? options = null;
+        string? masterPath = null;
+        string? finalWorkbookPath = null;
+        MigrationReport? report = null;
+        RecordingUpdaterProgressSink? progressSink = null;
         try
         {
-            var options = UpdaterOptions.Parse(args);
+            options = UpdaterOptions.Parse(args);
             if (options.ShowHelp)
             {
                 Console.WriteLine(UpdaterOptions.HelpText);
@@ -21,7 +26,13 @@ public static class UpdaterProgram
                 ? "In-place mode enabled: source filename will be replaced after validation."
                 : "The source workbook will not be modified.");
 
-            var masterPath = options.MasterPath;
+            var recovery = WorkbookHandoff.RecoverIfNeeded(options.SourcePath!);
+            if (recovery.Action != HandoffRecoveryAction.None)
+            {
+                Console.WriteLine($"[updater] {recovery.Message}");
+            }
+
+            masterPath = options.MasterPath;
             ReleaseManifest? manifest = null;
             if (masterPath is null)
             {
@@ -33,15 +44,15 @@ public static class UpdaterProgram
                 Console.WriteLine($"Verified release {manifest.Version} ({manifest.Tag}).");
             }
 
-            var progressSink = new ConsoleUpdaterProgressSink();
+            progressSink = new RecordingUpdaterProgressSink(new ConsoleUpdaterProgressSink());
             var migrator = new ExcelWorkbookMigrator(progressSink);
-            var report = migrator.Migrate(new MigrationRequest(
+            report = migrator.Migrate(new MigrationRequest(
                 options.SourcePath!,
                 masterPath,
                 options.OutputPath!,
                 manifest));
 
-            var finalWorkbookPath = options.OutputPath!;
+            finalWorkbookPath = options.OutputPath!;
             string? backupWorkbookPath = null;
             if (options.InPlaceSwap)
             {
@@ -64,9 +75,14 @@ public static class UpdaterProgram
 
             var reportPath = options.ReportPath ??
                 Path.ChangeExtension(finalWorkbookPath, ".update-report.json");
-            await File.WriteAllTextAsync(
+            await WriteDiagnosticBundleAsync(
                 reportPath,
-                JsonSerializer.Serialize(report, JsonDefaults.Indented));
+                report,
+                progressSink.Events,
+                error: null,
+                options.SourcePath,
+                masterPath,
+                finalWorkbookPath);
 
             Console.WriteLine($"Updated workbook: {finalWorkbookPath}");
             if (!string.IsNullOrWhiteSpace(backupWorkbookPath))
@@ -85,6 +101,20 @@ public static class UpdaterProgram
         }
         catch (Exception ex)
         {
+            if (options is not null)
+            {
+                var reportPath = options.ReportPath ??
+                    Path.ChangeExtension(finalWorkbookPath ?? options.OutputPath!, ".update-report.json");
+                await TryWriteDiagnosticBundleAsync(
+                    reportPath,
+                    report,
+                    progressSink?.Events ?? [],
+                    ex,
+                    options.SourcePath,
+                    masterPath,
+                    finalWorkbookPath ?? options.OutputPath);
+            }
+
             Console.Error.WriteLine($"Update failed: {ex.Message}");
             return 1;
         }
@@ -94,6 +124,56 @@ public static class UpdaterProgram
             {
                 try { Directory.Delete(downloadDirectory, recursive: true); } catch { }
             }
+        }
+    }
+
+    private static async Task WriteDiagnosticBundleAsync(
+        string path,
+        MigrationReport? report,
+        IReadOnlyList<UpdaterProgressEvent> progressEvents,
+        Exception? error,
+        string? sourceWorkbookPath,
+        string? masterWorkbookPath,
+        string? outputWorkbookPath)
+    {
+        var applicationVersion = report?.OutputVersion ?? "unknown";
+        var diagnosticBundle = DiagnosticBundleFactory.Create(
+            applicationVersion,
+            report,
+            progressEvents,
+            error,
+            sourceWorkbookPath,
+            masterWorkbookPath,
+            outputWorkbookPath);
+        await File.WriteAllTextAsync(
+            path,
+            JsonSerializer.Serialize(diagnosticBundle, JsonDefaults.Indented));
+    }
+
+    private static async Task TryWriteDiagnosticBundleAsync(
+        string path,
+        MigrationReport? report,
+        IReadOnlyList<UpdaterProgressEvent> progressEvents,
+        Exception error,
+        string? sourceWorkbookPath,
+        string? masterWorkbookPath,
+        string? outputWorkbookPath)
+    {
+        try
+        {
+            await WriteDiagnosticBundleAsync(
+                path,
+                report,
+                progressEvents,
+                error,
+                sourceWorkbookPath,
+                masterWorkbookPath,
+                outputWorkbookPath);
+            Console.Error.WriteLine($"Diagnostic report: {path}");
+        }
+        catch (Exception reportError)
+        {
+            Console.Error.WriteLine($"Could not write diagnostic report: {reportError.Message}");
         }
     }
 }

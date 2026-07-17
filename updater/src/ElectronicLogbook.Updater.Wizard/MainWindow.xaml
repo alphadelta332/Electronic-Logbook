@@ -69,7 +69,7 @@
             <StackPanel Grid.Row="0" x:Name="ReadyPanel" Visibility="Collapsed">
                 <TextBlock Text="Ready to Update" FontSize="20" FontWeight="SemiBold" />
                 <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="Click Start to begin the update." />
-                <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write detailed diagnostic report beside output workbook" IsChecked="False" />
+                <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write redacted diagnostic report beside output workbook" IsChecked="False" />
             </StackPanel>
 
             <StackPanel Grid.Row="0" x:Name="UpdatingPanel" Visibility="Collapsed">
@@ -88,6 +88,19 @@
                 <TextBlock Margin="0,8,0,0" x:Name="CompleteSummaryText" TextWrapping="Wrap" />
                 <TextBlock Margin="0,12,0,0" x:Name="CompleteOutputPathText" TextWrapping="Wrap" />
                 <TextBlock Margin="0,6,0,0" x:Name="CompleteBackupPathText" TextWrapping="Wrap" />
+                <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                    <Button Width="140"
+                            x:Name="RestoreBackupButton"
+                            Content="Restore Backup"
+                            IsEnabled="False"
+                            Click="RestoreBackupButton_OnClick" />
+                    <Button Width="160"
+                            Margin="10,0,0,0"
+                            x:Name="OpenDiagnosticReportButton"
+                            Content="Open Diagnostic"
+                            IsEnabled="False"
+                            Click="OpenDiagnosticReportButton_OnClick" />
+                </StackPanel>
                 <CheckBox Margin="0,14,0,0" x:Name="OpenUpdatedCheckBox" Content="Open updated workbook when I click Finish" IsChecked="True" />
             </StackPanel>
 

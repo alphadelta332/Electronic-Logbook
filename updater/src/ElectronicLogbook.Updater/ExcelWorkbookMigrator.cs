@@ -50,7 +50,8 @@ public sealed class ExcelWorkbookMigrator
                 phaseId,
                 message,
                 Percent: null,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                TimeoutSeconds: UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
             return message;
         }
 
@@ -175,7 +176,8 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterPhaseIds.Completed,
                 "migration completed",
                 Percent: 100,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                TimeoutSeconds: UpdaterPhasePolicies.GetTimeoutSeconds(UpdaterPhaseIds.Completed)));
 
             dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
             var logbookRows = (int)outputLogbook.ListRows.Count;
@@ -199,7 +201,9 @@ public sealed class ExcelWorkbookMigrator
                 phaseId,
                 "migration cancelled",
                 Percent: null,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                DiagnosticBundleFactory.GetRecoveryHint(phaseId, new OperationCanceledException()),
+                UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
 
             CloseWorkbook(outputWorkbook);
             outputWorkbook = null;
@@ -214,7 +218,9 @@ public sealed class ExcelWorkbookMigrator
                 phaseId,
                 ex.Message,
                 Percent: null,
-                DateTimeOffset.UtcNow));
+                DateTimeOffset.UtcNow,
+                DiagnosticBundleFactory.GetRecoveryHint(phaseId, ex),
+                UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
 
             CloseWorkbook(outputWorkbook);
             outputWorkbook = null;
@@ -231,6 +237,7 @@ public sealed class ExcelWorkbookMigrator
             if (excel is not null)
             {
                 try { excel.Calculation = XlCalculationAutomatic; } catch { }
+                try { excel.DisplayAlerts = true; } catch { }
                 try { excel.EnableEvents = true; } catch { }
                 try { excel.ScreenUpdating = true; } catch { }
                 try { excel.Quit(); } catch { }
