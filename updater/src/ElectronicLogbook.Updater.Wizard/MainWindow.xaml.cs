@@ -448,9 +448,9 @@ public partial class MainWindow : Window
             ? "[OK] Source workbook exists, is .xlsm, and is closed"
             : $"[FAIL] {sourceCheck.Message}";
 
-        var finalOutput = !string.IsNullOrWhiteSpace(_context.MigrationOutputPath)
-            ? _context.OutputPath
-            : stagedOutput;
+        var finalOutput = _context.UseInPlaceSwap
+            ? source
+            : _context.OutputPath;
         var outputDir = string.IsNullOrWhiteSpace(stagedOutput)
             ? string.Empty
             : (Path.GetDirectoryName(stagedOutput) ?? string.Empty);
@@ -459,7 +459,9 @@ public partial class MainWindow : Window
             : (Path.GetDirectoryName(finalOutput) ?? string.Empty);
         var outputDirExists = !string.IsNullOrWhiteSpace(outputDir) && Directory.Exists(outputDir);
         var finalOutputDirExists = !string.IsNullOrWhiteSpace(finalOutputDir) && Directory.Exists(finalOutputDir);
-        var outputMissing = !File.Exists(stagedOutput) && !File.Exists(finalOutput);
+        var outputMissing = _context.UseInPlaceSwap
+            ? !File.Exists(stagedOutput)
+            : !File.Exists(stagedOutput) && !File.Exists(finalOutput);
         var outputExtOk =
             string.Equals(Path.GetExtension(stagedOutput), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(Path.GetExtension(finalOutput), ".xlsm", StringComparison.OrdinalIgnoreCase);
@@ -473,8 +475,12 @@ public partial class MainWindow : Window
             writeAccess &&
             finalWriteAccess;
         CheckOutputPathText.Text = outputOk
-            ? "[OK] Output path is writable and output file does not exist"
-            : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists";
+            ? (_context.UseInPlaceSwap
+                ? "[OK] Temporary output is writable and original workbook can be replaced"
+                : "[OK] Output path is writable and output file does not exist")
+            : (_context.UseInPlaceSwap
+                ? "[FAIL] Temporary output invalid, unwritable, wrong extension, or already exists"
+                : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists");
 
         var channelOk = _context.UsesProvidedMaster
             ? File.Exists(_context.MasterPath!)
@@ -1336,25 +1342,22 @@ public partial class MainWindow : Window
         channel ??= string.IsNullOrWhiteSpace(master)
             ? UpdateChannel.Stable
             : UpdateChannel.LocalMaster;
-        var handoffNote = string.Empty;
-        string? migrationOutputPath = null;
-        if (useInPlaceSwap && CloudStoragePath.IsLikelyCloudSynced(source))
-        {
-            useInPlaceSwap = false;
-            migrationOutputPath = BuildLocalMigrationOutputPath(source);
-            handoffNote =
-                "OneDrive/cloud storage detected; migrating locally and creating a separate updated workbook to avoid merge conflicts.";
-        }
+        var updatePathPlan = WorkbookUpdatePathPlanner.Resolve(
+            source,
+            output,
+            useInPlaceSwap,
+            CloudStoragePath.IsLikelyCloudSynced,
+            BuildLocalMigrationOutputPath);
 
         return new RunContext(
             SourcePath: source,
-            OutputPath: output,
-            MigrationOutputPath: migrationOutputPath,
+            OutputPath: updatePathPlan.OutputPath,
+            MigrationOutputPath: updatePathPlan.MigrationOutputPath,
             MasterPath: master,
             Repository: repository,
             Channel: channel.Value,
-            UseInPlaceSwap: useInPlaceSwap,
-            HandoffNote: handoffNote);
+            UseInPlaceSwap: updatePathPlan.UseInPlaceSwap,
+            HandoffNote: updatePathPlan.HandoffNote);
     }
 
     private static UpdateChannel ParseUpdateChannel(string value)
