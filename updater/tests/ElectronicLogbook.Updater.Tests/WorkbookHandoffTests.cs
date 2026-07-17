@@ -104,6 +104,30 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedKeepsRecoverableStateWhenFinalReplaceFails()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+        var fileSystem = new ThrowingReplaceFileSystem();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(
+                source,
+                staged,
+                expectedFinalVersion: null,
+                expectedBackupVersion: null,
+                fileSystem));
+
+        Assert.Contains("Failed to finalise workbook handoff", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("old workbook", File.ReadAllText(source));
+        Assert.Equal("new workbook", File.ReadAllText(staged));
+        Assert.False(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm").Any());
+        Assert.True(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void RecoverIfNeededRestoresBackupWhenSourceIsMissing()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -245,5 +269,46 @@ public sealed class WorkbookHandoffTests : IDisposable
             createdAtUtc = DateTimeOffset.UtcNow
         };
         File.WriteAllText(BuildJournalPath(source), System.Text.Json.JsonSerializer.Serialize(journal));
+    }
+
+    private sealed class ThrowingReplaceFileSystem : IWorkbookFileSystem
+    {
+        public bool FileExists(string path) => File.Exists(path);
+
+        public void CopyFile(string sourcePath, string destinationPath, bool overwrite)
+        {
+            File.Copy(sourcePath, destinationPath, overwrite);
+        }
+
+        public void DeleteFile(string path)
+        {
+            File.Delete(path);
+        }
+
+        public IEnumerable<string> EnumerateFiles(string path, string searchPattern)
+        {
+            return Directory.EnumerateFiles(path, searchPattern);
+        }
+
+        public void MoveFile(string sourcePath, string destinationPath, bool overwrite = false)
+        {
+            File.Move(sourcePath, destinationPath, overwrite);
+        }
+
+        public string ReadAllText(string path) => File.ReadAllText(path);
+
+        public void ReplaceFile(
+            string sourceFileName,
+            string destinationFileName,
+            string destinationBackupFileName,
+            bool ignoreMetadataErrors)
+        {
+            throw new IOException("Simulated replace failure.");
+        }
+
+        public void WriteAllText(string path, string contents)
+        {
+            File.WriteAllText(path, contents);
+        }
     }
 }

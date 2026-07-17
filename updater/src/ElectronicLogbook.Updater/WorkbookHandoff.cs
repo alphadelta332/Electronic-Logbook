@@ -14,16 +14,31 @@ public static class WorkbookHandoff
         string? expectedFinalVersion = null,
         string? expectedBackupVersion = null)
     {
+        return ReplaceSourceWithUpdated(
+            sourceWorkbookPath,
+            stagedUpdatedWorkbookPath,
+            expectedFinalVersion,
+            expectedBackupVersion,
+            PhysicalWorkbookFileSystem.Instance);
+    }
+
+    internal static HandoffResult ReplaceSourceWithUpdated(
+        string sourceWorkbookPath,
+        string stagedUpdatedWorkbookPath,
+        string? expectedFinalVersion,
+        string? expectedBackupVersion,
+        IWorkbookFileSystem fileSystem)
+    {
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         stagedUpdatedWorkbookPath = Path.GetFullPath(stagedUpdatedWorkbookPath);
 
-        RecoverIfNeeded(sourceWorkbookPath);
+        RecoverIfNeeded(sourceWorkbookPath, fileSystem);
 
-        if (!File.Exists(sourceWorkbookPath))
+        if (!fileSystem.FileExists(sourceWorkbookPath))
         {
             throw new FileNotFoundException("Source workbook not found.", sourceWorkbookPath);
         }
-        if (!File.Exists(stagedUpdatedWorkbookPath))
+        if (!fileSystem.FileExists(stagedUpdatedWorkbookPath))
         {
             throw new FileNotFoundException("Staged updated workbook not found.", stagedUpdatedWorkbookPath);
         }
@@ -40,8 +55,8 @@ public static class WorkbookHandoff
             WorkbookPackageValidator.ValidateWorkbookPackage(stagedUpdatedWorkbookPath, expectedFinalVersion);
         }
 
-        var backupPath = BuildBackupPath(sourceWorkbookPath);
-        var replacementPath = StageReplacementBesideSource(sourceWorkbookPath, stagedUpdatedWorkbookPath);
+        var backupPath = BuildBackupPath(sourceWorkbookPath, fileSystem);
+        var replacementPath = StageReplacementBesideSource(sourceWorkbookPath, stagedUpdatedWorkbookPath, fileSystem);
         var localStageCreated = !string.Equals(
             replacementPath,
             stagedUpdatedWorkbookPath,
@@ -54,18 +69,18 @@ public static class WorkbookHandoff
             backupPath,
             localStageCreated,
             DateTimeOffset.UtcNow);
-        WriteJournal(journalPath, journal);
+        WriteJournal(journalPath, journal, fileSystem);
 
         try
         {
-            File.Replace(
+            fileSystem.ReplaceFile(
                 replacementPath,
                 sourceWorkbookPath,
                 backupPath,
                 ignoreMetadataErrors: true);
             if (localStageCreated)
             {
-                File.Delete(stagedUpdatedWorkbookPath);
+                fileSystem.DeleteFile(stagedUpdatedWorkbookPath);
             }
             if (!string.IsNullOrWhiteSpace(expectedFinalVersion))
             {
@@ -75,15 +90,15 @@ public static class WorkbookHandoff
             {
                 WorkbookPackageValidator.ValidateWorkbookPackage(backupPath, expectedBackupVersion);
             }
-            File.Delete(journalPath);
+            fileSystem.DeleteFile(journalPath);
 
             return new HandoffResult(sourceWorkbookPath, backupPath);
         }
         catch (Exception ex)
         {
-            if (localStageCreated && File.Exists(replacementPath))
+            if (localStageCreated && fileSystem.FileExists(replacementPath))
             {
-                TryDelete(replacementPath);
+                TryDelete(replacementPath, fileSystem);
             }
 
             throw new InvalidOperationException(
@@ -94,46 +109,53 @@ public static class WorkbookHandoff
 
     public static void RecoverIfNeeded(string sourceWorkbookPath)
     {
+        RecoverIfNeeded(sourceWorkbookPath, PhysicalWorkbookFileSystem.Instance);
+    }
+
+    internal static void RecoverIfNeeded(
+        string sourceWorkbookPath,
+        IWorkbookFileSystem fileSystem)
+    {
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         var journalPath = BuildJournalPath(sourceWorkbookPath);
-        if (!File.Exists(journalPath))
+        if (!fileSystem.FileExists(journalPath))
         {
             return;
         }
 
-        var journal = ReadJournal(journalPath);
+        var journal = ReadJournal(journalPath, fileSystem);
         if (!string.Equals(journal.SourceWorkbookPath, sourceWorkbookPath, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 $"Handoff journal {journalPath} does not match source workbook {sourceWorkbookPath}.");
         }
 
-        var sourceExists = File.Exists(journal.SourceWorkbookPath);
-        var backupExists = File.Exists(journal.BackupWorkbookPath);
-        var replacementExists = File.Exists(journal.ReplacementWorkbookPath);
+        var sourceExists = fileSystem.FileExists(journal.SourceWorkbookPath);
+        var backupExists = fileSystem.FileExists(journal.BackupWorkbookPath);
+        var replacementExists = fileSystem.FileExists(journal.ReplacementWorkbookPath);
 
         if (sourceExists)
         {
             if (journal.LocalStageCreated && replacementExists)
             {
-                TryDelete(journal.ReplacementWorkbookPath);
+                TryDelete(journal.ReplacementWorkbookPath, fileSystem);
             }
             if (backupExists && journal.LocalStageCreated)
             {
-                TryDelete(journal.StagedUpdatedWorkbookPath);
+                TryDelete(journal.StagedUpdatedWorkbookPath, fileSystem);
             }
-            File.Delete(journalPath);
+            fileSystem.DeleteFile(journalPath);
             return;
         }
 
         if (backupExists)
         {
-            File.Move(journal.BackupWorkbookPath, journal.SourceWorkbookPath);
+            fileSystem.MoveFile(journal.BackupWorkbookPath, journal.SourceWorkbookPath);
             if (journal.LocalStageCreated && replacementExists)
             {
-                TryDelete(journal.ReplacementWorkbookPath);
+                TryDelete(journal.ReplacementWorkbookPath, fileSystem);
             }
-            File.Delete(journalPath);
+            fileSystem.DeleteFile(journalPath);
             return;
         }
 
@@ -147,15 +169,32 @@ public static class WorkbookHandoff
         string expectedSourceVersion,
         string? expectedBackupVersion = null)
     {
+        CompletePostHandoffValidation(
+            sourceWorkbookPath,
+            retainedBackupWorkbookPath,
+            expectedSourceVersion,
+            expectedBackupVersion,
+            PhysicalWorkbookFileSystem.Instance);
+    }
+
+    internal static void CompletePostHandoffValidation(
+        string sourceWorkbookPath,
+        string retainedBackupWorkbookPath,
+        string expectedSourceVersion,
+        string? expectedBackupVersion,
+        IWorkbookFileSystem fileSystem)
+    {
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         retainedBackupWorkbookPath = Path.GetFullPath(retainedBackupWorkbookPath);
 
         WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedSourceVersion);
         WorkbookPackageValidator.ValidateWorkbookPackage(retainedBackupWorkbookPath, expectedBackupVersion);
-        PruneOlderBackups(sourceWorkbookPath, retainedBackupWorkbookPath);
+        PruneOlderBackups(sourceWorkbookPath, retainedBackupWorkbookPath, fileSystem);
     }
 
-    private static string BuildBackupPath(string sourceWorkbookPath)
+    private static string BuildBackupPath(
+        string sourceWorkbookPath,
+        IWorkbookFileSystem fileSystem)
     {
         var directory = Path.GetDirectoryName(sourceWorkbookPath) ??
             throw new InvalidOperationException("Source workbook directory is unavailable.");
@@ -165,7 +204,7 @@ public static class WorkbookHandoff
 
         var candidate = Path.Combine(directory, $"{baseName}_Old_{timestamp}{extension}");
         var counter = 1;
-        while (File.Exists(candidate))
+        while (fileSystem.FileExists(candidate))
         {
             candidate = Path.Combine(directory, $"{baseName}_Old_{timestamp}_{counter}{extension}");
             counter++;
@@ -176,7 +215,8 @@ public static class WorkbookHandoff
 
     private static void PruneOlderBackups(
         string sourceWorkbookPath,
-        string retainedBackupWorkbookPath)
+        string retainedBackupWorkbookPath,
+        IWorkbookFileSystem fileSystem)
     {
         var directory = Path.GetDirectoryName(sourceWorkbookPath) ??
             throw new InvalidOperationException("Source workbook directory is unavailable.");
@@ -184,7 +224,7 @@ public static class WorkbookHandoff
         var extension = Path.GetExtension(sourceWorkbookPath);
         var retainedFullPath = Path.GetFullPath(retainedBackupWorkbookPath);
 
-        foreach (var backup in Directory.EnumerateFiles(directory, $"{baseName}_Old_*{extension}"))
+        foreach (var backup in fileSystem.EnumerateFiles(directory, $"{baseName}_Old_*{extension}"))
         {
             var backupFullPath = Path.GetFullPath(backup);
             if (string.Equals(backupFullPath, retainedFullPath, StringComparison.OrdinalIgnoreCase))
@@ -192,13 +232,14 @@ public static class WorkbookHandoff
                 continue;
             }
 
-            File.Delete(backupFullPath);
+            fileSystem.DeleteFile(backupFullPath);
         }
     }
 
     private static string StageReplacementBesideSource(
         string sourceWorkbookPath,
-        string stagedUpdatedWorkbookPath)
+        string stagedUpdatedWorkbookPath,
+        IWorkbookFileSystem fileSystem)
     {
         var sourceDirectory = Path.GetDirectoryName(sourceWorkbookPath) ??
             throw new InvalidOperationException("Source workbook directory is unavailable.");
@@ -214,15 +255,15 @@ public static class WorkbookHandoff
         var localStagedPath = Path.Combine(
             sourceDirectory,
             $".{Path.GetFileNameWithoutExtension(sourceWorkbookPath)}_Staged_{Guid.NewGuid():N}{extension}");
-        File.Copy(stagedUpdatedWorkbookPath, localStagedPath, overwrite: false);
+        fileSystem.CopyFile(stagedUpdatedWorkbookPath, localStagedPath, overwrite: false);
         return localStagedPath;
     }
 
-    private static void TryDelete(string path)
+    private static void TryDelete(string path, IWorkbookFileSystem fileSystem)
     {
         try
         {
-            File.Delete(path);
+            fileSystem.DeleteFile(path);
         }
         catch
         {
@@ -241,15 +282,25 @@ public static class WorkbookHandoff
 
     private static void WriteJournal(string journalPath, HandoffJournal journal)
     {
-        var tempPath = $"{journalPath}.{Guid.NewGuid():N}.tmp";
-        File.WriteAllText(tempPath, JsonSerializer.Serialize(journal, JsonDefaults.Indented));
-        File.Move(tempPath, journalPath, overwrite: true);
+        WriteJournal(journalPath, journal, PhysicalWorkbookFileSystem.Instance);
     }
 
-    private static HandoffJournal ReadJournal(string journalPath)
+    private static void WriteJournal(
+        string journalPath,
+        HandoffJournal journal,
+        IWorkbookFileSystem fileSystem)
+    {
+        var tempPath = $"{journalPath}.{Guid.NewGuid():N}.tmp";
+        fileSystem.WriteAllText(tempPath, JsonSerializer.Serialize(journal, JsonDefaults.Indented));
+        fileSystem.MoveFile(tempPath, journalPath, overwrite: true);
+    }
+
+    private static HandoffJournal ReadJournal(
+        string journalPath,
+        IWorkbookFileSystem fileSystem)
     {
         return JsonSerializer.Deserialize<HandoffJournal>(
-            File.ReadAllText(journalPath),
+            fileSystem.ReadAllText(journalPath),
             JsonDefaults.Web) ?? throw new InvalidDataException(
                 $"Handoff journal could not be parsed: {journalPath}");
     }
@@ -261,4 +312,71 @@ public static class WorkbookHandoff
         string BackupWorkbookPath,
         bool LocalStageCreated,
         DateTimeOffset CreatedAtUtc);
+}
+
+internal interface IWorkbookFileSystem
+{
+    bool FileExists(string path);
+    void CopyFile(string sourcePath, string destinationPath, bool overwrite);
+    void DeleteFile(string path);
+    IEnumerable<string> EnumerateFiles(string path, string searchPattern);
+    void MoveFile(string sourcePath, string destinationPath, bool overwrite = false);
+    string ReadAllText(string path);
+    void ReplaceFile(
+        string sourceFileName,
+        string destinationFileName,
+        string destinationBackupFileName,
+        bool ignoreMetadataErrors);
+    void WriteAllText(string path, string contents);
+}
+
+internal sealed class PhysicalWorkbookFileSystem : IWorkbookFileSystem
+{
+    public static PhysicalWorkbookFileSystem Instance { get; } = new();
+
+    private PhysicalWorkbookFileSystem()
+    {
+    }
+
+    public bool FileExists(string path) => File.Exists(path);
+
+    public void CopyFile(string sourcePath, string destinationPath, bool overwrite)
+    {
+        File.Copy(sourcePath, destinationPath, overwrite);
+    }
+
+    public void DeleteFile(string path)
+    {
+        File.Delete(path);
+    }
+
+    public IEnumerable<string> EnumerateFiles(string path, string searchPattern)
+    {
+        return Directory.EnumerateFiles(path, searchPattern);
+    }
+
+    public void MoveFile(string sourcePath, string destinationPath, bool overwrite = false)
+    {
+        File.Move(sourcePath, destinationPath, overwrite);
+    }
+
+    public string ReadAllText(string path) => File.ReadAllText(path);
+
+    public void ReplaceFile(
+        string sourceFileName,
+        string destinationFileName,
+        string destinationBackupFileName,
+        bool ignoreMetadataErrors)
+    {
+        File.Replace(
+            sourceFileName,
+            destinationFileName,
+            destinationBackupFileName,
+            ignoreMetadataErrors);
+    }
+
+    public void WriteAllText(string path, string contents)
+    {
+        File.WriteAllText(path, contents);
+    }
 }
