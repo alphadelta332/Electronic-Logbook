@@ -170,6 +170,28 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void RecoverIfNeededThrowsAndKeepsJournalWhenSourceAndBackupAreMissing()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "external", "logbook_updated.xlsm");
+        var replacement = Path.Combine(_directory, ".logbook_Staged_test.xlsm");
+        var backup = Path.Combine(_directory, "logbook_Old_20260716-120000.xlsm");
+        Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+        File.WriteAllText(staged, "new workbook");
+        File.WriteAllText(replacement, "new workbook");
+        WriteJournal(source, staged, replacement, backup, localStageCreated: true);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            WorkbookHandoff.RecoverIfNeeded(source));
+
+        Assert.Contains("Cannot recover interrupted handoff", exception.Message, StringComparison.Ordinal);
+        Assert.False(File.Exists(source));
+        Assert.False(File.Exists(backup));
+        Assert.True(File.Exists(replacement));
+        Assert.True(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void CompletePostHandoffValidationRetainsCurrentBackupAndDeletesOlderUpdaterBackups()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(
