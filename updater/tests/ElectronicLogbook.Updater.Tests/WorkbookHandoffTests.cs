@@ -218,6 +218,37 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void RecoverIfNeededRejectsJournalForDifferentSourceWorkbook()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var otherSource = Path.Combine(_directory, "other-logbook.xlsm");
+        var staged = Path.Combine(_directory, "external", "logbook_updated.xlsm");
+        var replacement = Path.Combine(_directory, ".logbook_Staged_test.xlsm");
+        var backup = Path.Combine(_directory, "logbook_Old_20260716-120000.xlsm");
+        Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+        WriteJournal(otherSource, staged, replacement, backup, localStageCreated: true);
+        File.Move(BuildJournalPath(otherSource), BuildJournalPath(source));
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            WorkbookHandoff.RecoverIfNeeded(source));
+
+        Assert.Contains("does not match source workbook", exception.Message, StringComparison.Ordinal);
+        Assert.True(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void RecoverIfNeededRejectsMalformedJournal()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        File.WriteAllText(BuildJournalPath(source), "not json");
+
+        Assert.Throws<System.Text.Json.JsonException>(() =>
+            WorkbookHandoff.RecoverIfNeeded(source));
+
+        Assert.True(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void CompletePostHandoffValidationRetainsCurrentBackupAndDeletesOlderUpdaterBackups()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(
