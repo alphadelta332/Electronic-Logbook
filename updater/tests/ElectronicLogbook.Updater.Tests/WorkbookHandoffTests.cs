@@ -154,6 +154,34 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedRestoresBackupWhenPostReplaceValidationFails()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook.xlsm");
+        var staged = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook_updated.xlsm");
+        var packageValidation = new PostReplaceFailingValidation(source);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(
+                source,
+                staged,
+                expectedFinalVersion: TestRepo.Version,
+                expectedBackupVersion: "2.0.0",
+                PhysicalWorkbookFileSystem.Instance,
+                packageValidation));
+
+        Assert.Contains("Failed to finalise workbook handoff", exception.Message, StringComparison.Ordinal);
+        Assert.Equal("2.0.0", WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm"));
+    }
+
+    [Fact]
     public void RecoverIfNeededRestoresBackupWhenSourceIsMissing()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -388,6 +416,23 @@ public sealed class WorkbookHandoffTests : IDisposable
         public void WriteAllText(string path, string contents)
         {
             File.WriteAllText(path, contents);
+        }
+    }
+
+    private sealed class PostReplaceFailingValidation(string sourcePath) : IWorkbookPackageValidation
+    {
+        private readonly string _sourcePath = Path.GetFullPath(sourcePath);
+
+        public string ValidateWorkbookPackage(string workbookPath, string? expectedVersion = null)
+        {
+            workbookPath = Path.GetFullPath(workbookPath);
+            if (string.Equals(workbookPath, _sourcePath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(expectedVersion, TestRepo.Version, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("Simulated post-replace validation failure.");
+            }
+
+            return WorkbookPackageValidator.ValidateWorkbookPackage(workbookPath, expectedVersion);
         }
     }
 }

@@ -19,7 +19,8 @@ public static class WorkbookHandoff
             stagedUpdatedWorkbookPath,
             expectedFinalVersion,
             expectedBackupVersion,
-            PhysicalWorkbookFileSystem.Instance);
+            PhysicalWorkbookFileSystem.Instance,
+            WorkbookPackageValidation.Instance);
     }
 
     internal static HandoffResult ReplaceSourceWithUpdated(
@@ -27,8 +28,10 @@ public static class WorkbookHandoff
         string stagedUpdatedWorkbookPath,
         string? expectedFinalVersion,
         string? expectedBackupVersion,
-        IWorkbookFileSystem fileSystem)
+        IWorkbookFileSystem fileSystem,
+        IWorkbookPackageValidation? packageValidation = null)
     {
+        packageValidation ??= WorkbookPackageValidation.Instance;
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         stagedUpdatedWorkbookPath = Path.GetFullPath(stagedUpdatedWorkbookPath);
 
@@ -48,11 +51,11 @@ public static class WorkbookHandoff
         }
         if (!string.IsNullOrWhiteSpace(expectedBackupVersion))
         {
-            WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedBackupVersion);
+            packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedBackupVersion);
         }
         if (!string.IsNullOrWhiteSpace(expectedFinalVersion))
         {
-            WorkbookPackageValidator.ValidateWorkbookPackage(stagedUpdatedWorkbookPath, expectedFinalVersion);
+            packageValidation.ValidateWorkbookPackage(stagedUpdatedWorkbookPath, expectedFinalVersion);
         }
 
         var backupPath = BuildBackupPath(sourceWorkbookPath, fileSystem);
@@ -70,6 +73,7 @@ public static class WorkbookHandoff
             localStageCreated,
             DateTimeOffset.UtcNow);
         WriteJournal(journalPath, journal, fileSystem);
+        var replacementCompleted = false;
 
         try
         {
@@ -78,17 +82,18 @@ public static class WorkbookHandoff
                 sourceWorkbookPath,
                 backupPath,
                 ignoreMetadataErrors: true);
+            replacementCompleted = true;
             if (localStageCreated)
             {
                 fileSystem.DeleteFile(stagedUpdatedWorkbookPath);
             }
             if (!string.IsNullOrWhiteSpace(expectedFinalVersion))
             {
-                WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedFinalVersion);
+                packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedFinalVersion);
             }
             if (!string.IsNullOrWhiteSpace(expectedBackupVersion))
             {
-                WorkbookPackageValidator.ValidateWorkbookPackage(backupPath, expectedBackupVersion);
+                packageValidation.ValidateWorkbookPackage(backupPath, expectedBackupVersion);
             }
             fileSystem.DeleteFile(journalPath);
 
@@ -99,6 +104,16 @@ public static class WorkbookHandoff
             if (localStageCreated && fileSystem.FileExists(replacementPath))
             {
                 TryDelete(replacementPath, fileSystem);
+            }
+
+            if (replacementCompleted &&
+                fileSystem.FileExists(backupPath))
+            {
+                TryRestoreBackupAfterFailedReplacement(
+                    sourceWorkbookPath,
+                    backupPath,
+                    journalPath,
+                    fileSystem);
             }
 
             throw new InvalidOperationException(
@@ -174,7 +189,8 @@ public static class WorkbookHandoff
             retainedBackupWorkbookPath,
             expectedSourceVersion,
             expectedBackupVersion,
-            PhysicalWorkbookFileSystem.Instance);
+            PhysicalWorkbookFileSystem.Instance,
+            WorkbookPackageValidation.Instance);
     }
 
     internal static void CompletePostHandoffValidation(
@@ -182,13 +198,15 @@ public static class WorkbookHandoff
         string retainedBackupWorkbookPath,
         string expectedSourceVersion,
         string? expectedBackupVersion,
-        IWorkbookFileSystem fileSystem)
+        IWorkbookFileSystem fileSystem,
+        IWorkbookPackageValidation? packageValidation = null)
     {
+        packageValidation ??= WorkbookPackageValidation.Instance;
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         retainedBackupWorkbookPath = Path.GetFullPath(retainedBackupWorkbookPath);
 
-        WorkbookPackageValidator.ValidateWorkbookPackage(sourceWorkbookPath, expectedSourceVersion);
-        WorkbookPackageValidator.ValidateWorkbookPackage(retainedBackupWorkbookPath, expectedBackupVersion);
+        packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedSourceVersion);
+        packageValidation.ValidateWorkbookPackage(retainedBackupWorkbookPath, expectedBackupVersion);
         PruneOlderBackups(sourceWorkbookPath, retainedBackupWorkbookPath, fileSystem);
     }
 
@@ -271,6 +289,27 @@ public static class WorkbookHandoff
         }
     }
 
+    private static void TryRestoreBackupAfterFailedReplacement(
+        string sourceWorkbookPath,
+        string backupPath,
+        string journalPath,
+        IWorkbookFileSystem fileSystem)
+    {
+        try
+        {
+            if (fileSystem.FileExists(sourceWorkbookPath))
+            {
+                fileSystem.DeleteFile(sourceWorkbookPath);
+            }
+            fileSystem.MoveFile(backupPath, sourceWorkbookPath);
+            fileSystem.DeleteFile(journalPath);
+        }
+        catch
+        {
+            // Keep the original handoff failure; the journal remains if cleanup failed.
+        }
+    }
+
     private static string BuildJournalPath(string sourceWorkbookPath)
     {
         var directory = Path.GetDirectoryName(sourceWorkbookPath) ??
@@ -328,6 +367,25 @@ internal interface IWorkbookFileSystem
         string destinationBackupFileName,
         bool ignoreMetadataErrors);
     void WriteAllText(string path, string contents);
+}
+
+internal interface IWorkbookPackageValidation
+{
+    string ValidateWorkbookPackage(string workbookPath, string? expectedVersion = null);
+}
+
+internal sealed class WorkbookPackageValidation : IWorkbookPackageValidation
+{
+    public static WorkbookPackageValidation Instance { get; } = new();
+
+    private WorkbookPackageValidation()
+    {
+    }
+
+    public string ValidateWorkbookPackage(string workbookPath, string? expectedVersion = null)
+    {
+        return WorkbookPackageValidator.ValidateWorkbookPackage(workbookPath, expectedVersion);
+    }
 }
 
 internal sealed class PhysicalWorkbookFileSystem : IWorkbookFileSystem
