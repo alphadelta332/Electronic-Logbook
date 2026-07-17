@@ -31,15 +31,17 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
     On Error GoTo Cleanup
 
     ' Ensure unqualified Range() calls resolve against this workbook/session.
-    On Error Resume Next
-    ThisWorkbook.Activate
-    ThisWorkbook.Sheets(NEW_ENTRY_ACTIVE_SHEET).Activate
-    On Error GoTo Cleanup
+    If Not TryActivateNewEntrySheet(ThisWorkbook) Then
+        Err.Raise vbObjectError + 510, "AddToLogbook", _
+                  "Could not activate the New Entry sheet before adding the logbook entry."
+    End If
 
     '--- Save workbook before making any changes (safeguard against mid-run crashes)
-    On Error Resume Next
-    ThisWorkbook.Save
-    On Error GoTo Cleanup
+    If Not TrySaveWorkbookBeforeAdd(ThisWorkbook) Then
+        WriteDebugLog "AddToLogbook", vbObjectError + 511, _
+                      "The workbook could not be saved before adding the logbook entry.", _
+                      "Pre-change workbook save"
+    End If
 
     '===============================
     ' STEP 1: OPTIMISE PERFORMANCE
@@ -83,9 +85,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         logbookWasProtected = wsLog.ProtectContents
         TraceAddToLogbookLayout "Initial table state", tbl
         If logbookWasProtected Then
-            On Error Resume Next
-            wsLog.Unprotect Password:=ProtectionPassword()
-            On Error GoTo Cleanup
+            If Not TryUnprotectWorksheet(wsLog) Then
+                Err.Raise vbObjectError + 512, "AddToLogbook", _
+                          "Could not unprotect the Logbook sheet before adding the entry."
+            End If
             TraceAddToLogbookLayout "After unprotect", tbl
         End If
         If Not ListColumnExists(tbl, "Flight ID") Or _
@@ -751,9 +754,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         diagStep = "Step 8a: Add Routes"
         WriteCrumb diagStep
         SetAddToLogbookStatus "Updating routes"
-        On Error Resume Next
-        Call AddNewRoutes
-        On Error GoTo Cleanup
+        TryAddNewRoutes
 
         diagStep = "Step 8a.1: Refresh Airport Stats"
         WriteCrumb diagStep
@@ -765,9 +766,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         WriteCrumb diagStep
         SetAddToLogbookStatus "Refreshing summaries"
         DoEvents
-        On Error Resume Next
-        RefreshWorkbookPivotSummariesWithWorkbookProtection ThisWorkbook
-        On Error GoTo Cleanup
+        TryRefreshWorkbookPivotSummariesWithWorkbookProtection ThisWorkbook
 
     '===============================
     ' STEP 9: SUCCESS MESSAGE
@@ -775,28 +774,33 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         diagStep = "Step 9a: Finalise Layout"
         WriteCrumb diagStep
         SetAddToLogbookStatus "Finalising layout"
-        On Error Resume Next
         If logbookWasProtected Then
             WriteCrumb "Step 9a.0: Unprotect for final layout"
-            wsLog.Unprotect Password:=ProtectionPassword()
+            If Not TryUnprotectWorksheet(wsLog) Then
+                Err.Raise vbObjectError + 513, "AddToLogbook", _
+                          "Could not unprotect the Logbook sheet while finalising layout."
+            End If
         End If
         WriteCrumb "Step 9a.1: Update hidden rows"
-        UpdateHiddenRows ThisWorkbook
-        RestoreNewEntryView
+        TryUpdateHiddenRows ThisWorkbook
+        TryRestoreNewEntryView
         TraceAddToLogbookLayout "After final UpdateHiddenRows", tbl
         If entryWasWritten Then
             WriteCrumb "Step 9a.2: Save final layout"
-            ThisWorkbook.Save
+            If Not TrySaveWorkbookBeforeAdd(ThisWorkbook) Then
+                WriteDebugLog "AddToLogbook", vbObjectError + 514, _
+                              "The workbook could not be saved after finalising the new entry layout.", _
+                              diagStep
+            End If
             TraceAddToLogbookLayout "After final layout save", tbl
         End If
         If logbookWasProtected Then
             WriteCrumb "Step 9a.3: Re-protect after final layout"
-            ProtectLogbookSheetForRuntime wsLog
+            TryProtectLogbookSheetForRuntime wsLog
             TraceAddToLogbookLayout "After final layout protect", tbl
         End If
         WriteCrumb "Step 9a.4: Restore New Entry view"
-        RestoreNewEntryView
-        On Error GoTo Cleanup
+        TryRestoreNewEntryView
 
         diagStep = "Step 9: Success"
         SetAddToLogbookStatus "Done"
@@ -815,13 +819,11 @@ Cleanup:
         errDesc = Err.Description
 
         If totalsStateCaptured Then
-            On Error Resume Next
-            tbl.ShowTotals = totalsWereOn
-            On Error GoTo 0
+            TryRestoreTableTotals tbl, totalsWereOn
             TraceAddToLogbookLayout "Cleanup restored totals", tbl
         End If
 
-        RestoreNewEntryView
+        TryRestoreNewEntryView
         TraceAddToLogbookLayout "Cleanup before app state restore", tbl
         Application.ScreenUpdating = True
         Application.EnableEvents = True
@@ -840,18 +842,14 @@ Cleanup:
         TraceAddToLogbookLayout "Cleanup after app state restore", tbl
 
         If logbookWasProtected Then
-            On Error Resume Next
             TraceAddToLogbookLayout "Cleanup before protect", tbl
-            ProtectLogbookSheetForRuntime wsLog
-            On Error GoTo 0
+            TryProtectLogbookSheetForRuntime wsLog
             TraceAddToLogbookLayout "Cleanup after protect", tbl
         End If
 
         '--- Report any unexpected error (errNum 0 means clean exit via GoTo Cleanup on cancel)
         If errNum <> 0 Then
-            On Error Resume Next
-            WriteDebugLog "AddToLogbook", errNum, errDesc, diagStep
-            On Error GoTo 0
+            TryWriteDebugLog "AddToLogbook", errNum, errDesc, diagStep
             MsgBox BuildUserFacingErrorMessage( _
                    "The entry could not be added cleanly.", _
                    "Check the Logbook table before adding another entry. If the entry is missing, try adding it again. If this keeps happening, use the Report a Bug button and include the debug log.", _
@@ -862,6 +860,109 @@ Cleanup:
         Exit Sub
 
 End Sub
+
+Private Function TryActivateNewEntrySheet(ByVal wb As Workbook) As Boolean
+    On Error GoTo Fail
+
+    wb.Activate
+    wb.Sheets(NEW_ENTRY_ACTIVE_SHEET).Activate
+    TryActivateNewEntrySheet = True
+    Exit Function
+
+Fail:
+    TryActivateNewEntrySheet = False
+End Function
+
+Private Function TrySaveWorkbookBeforeAdd(ByVal wb As Workbook) As Boolean
+    On Error GoTo Fail
+
+    wb.Save
+    TrySaveWorkbookBeforeAdd = True
+    Exit Function
+
+Fail:
+    TrySaveWorkbookBeforeAdd = False
+End Function
+
+Private Function TryUnprotectWorksheet(ByVal ws As Worksheet) As Boolean
+    On Error GoTo Fail
+
+    ws.Unprotect Password:=ProtectionPassword()
+    TryUnprotectWorksheet = True
+    Exit Function
+
+Fail:
+    TryUnprotectWorksheet = False
+End Function
+
+Private Function TryRestoreTableTotals(ByVal tbl As ListObject, ByVal showTotals As Boolean) As Boolean
+    On Error GoTo Fail
+
+    tbl.ShowTotals = showTotals
+    TryRestoreTableTotals = True
+    Exit Function
+
+Fail:
+    TryRestoreTableTotals = False
+End Function
+
+Private Function TryProtectLogbookSheetForRuntime(ByVal ws As Worksheet) As Boolean
+    On Error GoTo Fail
+
+    ProtectLogbookSheetForRuntime ws
+    TryProtectLogbookSheetForRuntime = True
+    Exit Function
+
+Fail:
+    TryProtectLogbookSheetForRuntime = False
+End Function
+
+Private Function TryWriteDebugLog(ByVal source As String, _
+                                  ByVal errNum As Long, _
+                                  ByVal errDesc As String, _
+                                  ByVal diagStep As String) As Boolean
+    On Error GoTo Fail
+
+    WriteDebugLog source, errNum, errDesc, diagStep
+    TryWriteDebugLog = True
+    Exit Function
+
+Fail:
+    TryWriteDebugLog = False
+End Function
+
+Private Function TryAddNewRoutes() As Boolean
+    On Error GoTo Fail
+
+    AddNewRoutes
+    TryAddNewRoutes = True
+    Exit Function
+
+Fail:
+    TryAddNewRoutes = False
+End Function
+
+Private Function TryRefreshWorkbookPivotSummariesWithWorkbookProtection(ByVal wb As Workbook) As Boolean
+    On Error GoTo Fail
+
+    RefreshWorkbookPivotSummariesWithWorkbookProtection wb
+    TryRefreshWorkbookPivotSummariesWithWorkbookProtection = True
+    Exit Function
+
+Fail:
+    TryRefreshWorkbookPivotSummariesWithWorkbookProtection = False
+End Function
+
+Private Function TryUpdateHiddenRows(ByVal wb As Workbook) As Boolean
+    On Error GoTo Fail
+
+    UpdateHiddenRows wb
+    TryUpdateHiddenRows = True
+    Exit Function
+
+Fail:
+    TryUpdateHiddenRows = False
+End Function
 
 Private Sub SetAddToLogbookStatus(ByVal stepText As String)
     Application.DisplayStatusBar = True
@@ -3924,13 +4025,18 @@ Public Sub UpdateHiddenRows(wb As Workbook)
     RepairLogbookActionButtons tbl
 End Sub
 
-Private Sub RestoreNewEntryView()
-    On Error Resume Next
+Private Function TryRestoreNewEntryView() As Boolean
+    On Error GoTo Fail
+
     ThisWorkbook.Worksheets(NEW_ENTRY_ACTIVE_SHEET).Activate
     ActiveWindow.ScrollRow = 1
     ActiveWindow.ScrollColumn = 1
-    On Error GoTo 0
-End Sub
+    TryRestoreNewEntryView = True
+    Exit Function
+
+Fail:
+    TryRestoreNewEntryView = False
+End Function
 
 Public Sub HideRowsBelowLogbookData(ByVal tbl As ListObject, Optional ByVal bufferRows As Long = 7)
     Dim ws As Worksheet
@@ -3986,9 +4092,7 @@ Private Sub RepairLogbookActionButton(ByVal tbl As ListObject, _
     targetLeft = ws.Cells(topRow, leftCol).Left
     targetTop = ws.Cells(topRow, leftCol).Top
 
-    On Error Resume Next
-    Set btn = ws.Shapes(buttonName)
-    On Error GoTo CleanFail
+    Set btn = FindWorksheetShape(ws, buttonName)
 
     If btn Is Nothing Then
         If createMissing Then
@@ -3997,15 +4101,13 @@ Private Sub RepairLogbookActionButton(ByVal tbl As ListObject, _
         Exit Sub
     End If
 
-    ConfigureShapeAction btn, actionName
+    TryConfigureShapeAction btn, actionName
 
-    On Error Resume Next
-    MoveLogbookActionButton btn, targetLeft, targetTop
-    On Error GoTo CleanFail
+    TryMoveLogbookActionButton btn, targetLeft, targetTop
 
     If LogbookActionButtonIsAwayFromTarget(btn, targetLeft, targetTop) Then
-        BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
-        MoveLogbookActionButton btn, targetLeft, targetTop
+        TryBringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+        TryMoveLogbookActionButton btn, targetLeft, targetTop
     End If
 
     If rebuildIfStillAway Then
@@ -4016,27 +4118,48 @@ Private Sub RepairLogbookActionButton(ByVal tbl As ListObject, _
 CleanFail:
 End Sub
 
+Private Function FindWorksheetShape(ByVal ws As Worksheet, ByVal shapeName As String) As Shape
+    On Error GoTo NotFound
+
+    Set FindWorksheetShape = ws.Shapes(shapeName)
+    Exit Function
+
+NotFound:
+    Set FindWorksheetShape = Nothing
+End Function
+
 Private Sub ConfigureShapeAction(ByVal shp As Shape, ByVal actionName As String)
     Dim item As Shape
 
-    On Error Resume Next
     shp.OnAction = actionName
     If shp.Type = msoGroup Then
         For Each item In shp.GroupItems
             item.OnAction = actionName
         Next item
     End If
-    On Error GoTo 0
 End Sub
+
+Private Function TryConfigureShapeAction(ByVal shp As Shape, ByVal actionName As String) As Boolean
+    On Error GoTo Fail
+
+    ConfigureShapeAction shp, actionName
+    TryConfigureShapeAction = True
+    Exit Function
+
+Fail:
+    TryConfigureShapeAction = False
+End Function
 
 Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
                                                    ByVal topRow As Long, _
                                                    ByVal leftCol As Long)
     Dim restoreRow As Long
     Dim previousScreenUpdating As Boolean
+    Dim screenUpdatingCaptured As Boolean
 
-    On Error Resume Next
+    On Error GoTo CleanUp
     previousScreenUpdating = Application.ScreenUpdating
+    screenUpdatingCaptured = True
     Application.ScreenUpdating = False
     ws.Parent.Activate
     ws.Activate
@@ -4045,10 +4168,28 @@ Private Sub BringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
     If restoreRow < 1 Then restoreRow = 1
     ActiveWindow.ScrollColumn = 1
     ActiveWindow.ScrollRow = restoreRow
-    Application.ScreenUpdating = previousScreenUpdating
+CleanUp:
+    If screenUpdatingCaptured Then
+        On Error Resume Next
+        Application.ScreenUpdating = previousScreenUpdating
+        On Error GoTo 0
+    End If
     If previousScreenUpdating Then DoEvents
-    On Error GoTo 0
+    If Err.Number <> 0 Then Err.Raise Err.Number, Err.source, Err.Description
 End Sub
+
+Private Function TryBringExportLogbookButtonTargetIntoView(ByVal ws As Worksheet, _
+                                                           ByVal topRow As Long, _
+                                                           ByVal leftCol As Long) As Boolean
+    On Error GoTo Fail
+
+    BringExportLogbookButtonTargetIntoView ws, topRow, leftCol
+    TryBringExportLogbookButtonTargetIntoView = True
+    Exit Function
+
+Fail:
+    TryBringExportLogbookButtonTargetIntoView = False
+End Function
 
 Private Function CreateLogbookActionButtonShape(ByVal ws As Worksheet, _
                                                 ByVal buttonName As String, _
@@ -4080,6 +4221,19 @@ Private Sub MoveLogbookActionButton(ByVal btn As Shape, _
     btn.Height = LOGBOOK_ACTION_BUTTON_HEIGHT
     btn.ZOrder msoBringToFront
 End Sub
+
+Private Function TryMoveLogbookActionButton(ByVal btn As Shape, _
+                                            ByVal targetLeft As Double, _
+                                            ByVal targetTop As Double) As Boolean
+    On Error GoTo Fail
+
+    MoveLogbookActionButton btn, targetLeft, targetTop
+    TryMoveLogbookActionButton = True
+    Exit Function
+
+Fail:
+    TryMoveLogbookActionButton = False
+End Function
 
 Private Function LogbookActionButtonIsAwayFromTarget(ByVal btn As Shape, _
                                                      ByVal targetLeft As Double, _
@@ -6987,13 +7141,21 @@ Public Function BuildUserFacingErrorMessage(ByVal userMessage As String, _
 End Function
 
 Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Optional diagStep As String = "")
-    On Error Resume Next
-
     Dim logDir    As String
     Dim logPath   As String
     Dim version   As String
     Dim fileNum   As Integer
-    Dim crumbPath As String
+    Dim fileOpen  As Boolean
+    Dim fDate     As String
+    Dim fType     As String
+    Dim fIpcSelected As String
+    Dim fOpcSelected As String
+    Dim fFlightReviewSelected As String
+    Dim fRows     As String
+    Dim fCrumb    As String
+    Dim pathType  As String
+
+    On Error GoTo Fail
 
     ' Prefer writing alongside the workbook so users can find the log easily.
     ' Falls back to Documents\Electronic Logbook if path resolution fails.
@@ -7001,39 +7163,24 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
     If logDir = "" Or Left(logDir, 4) = "http" Then
         logDir = Environ("USERPROFILE") & "\Documents\Electronic Logbook"
     End If
-    If Dir(logDir, vbDirectory) = "" Then MkDir logDir
+    If Not TryEnsureFolderExists(logDir) Then Exit Sub
 
-    ' Gather context -- all guarded by the top-level On Error Resume Next
-    version = Trim(CStr(ThisWorkbook.Names("LogbookVersion").RefersToRange.Value))
+    version = Trim$(CStr(GetWorkbookNameValue(ThisWorkbook, "LogbookVersion", "Unknown")))
     If version = "" Then version = "Unknown"
 
-    Dim fDate    As String
-    Dim fType    As String
-    Dim fIpcSelected As String
-    Dim fOpcSelected As String
-    Dim fFlightReviewSelected As String
-    Dim fRows    As String
-    Dim fCrumb   As String
-    fDate    = CStr(Range("neDate").Value)
-    fType    = CStr(Range("neType").Value)
-    fIpcSelected          = IIf(NewEntryBooleanValue("neIPC"), "Yes", "No")
-    fOpcSelected          = IIf(NewEntryBooleanValue("neOPC"), "Yes", "No")
-    fFlightReviewSelected = IIf(NewEntryBooleanValue("neFR"), "Yes", "No")
-    fRows    = CStr(ThisWorkbook.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
-
-    ' Read the last crash breadcrumb if one exists
-    crumbPath = Environ("TEMP") & "\LB_Crumb.txt"
-    If Dir(crumbPath) <> "" Then
-        Dim cf As Integer
-        cf = FreeFile
-        Open crumbPath For Input As #cf
-        Line Input #cf, fCrumb
-        Close #cf
-    End If
+    fDate = ReadWorkbookNameText(ThisWorkbook, "neDate", "Unavailable")
+    fType = ReadWorkbookNameText(ThisWorkbook, "neType", "Unavailable")
+    fIpcSelected = ReadNewEntryBooleanText("neIPC")
+    fOpcSelected = ReadNewEntryBooleanText("neOPC")
+    fFlightReviewSelected = ReadNewEntryBooleanText("neFR")
+    fRows = ReadLogbookRowCountText(ThisWorkbook)
+    fCrumb = ReadLastCrashBreadcrumb()
+    pathType = WorkbookPathType(ThisWorkbook)
 
     logPath = logDir & "\debug_log.txt"
     fileNum = FreeFile
     Open logPath For Append As #fileNum
+    fileOpen = True
         Print #fileNum, String(50, "=")
         Print #fileNum, "Timestamp    : " & Format(Now, "yyyy-mm-dd hh:mm:ss")
         Print #fileNum, ""
@@ -7046,20 +7193,9 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "-- ENVIRONMENT ----------------------------------"
         Print #fileNum, "Excel        : " & Application.Version & " / " & Application.OperatingSystem
         Print #fileNum, "Workbook     : " & ThisWorkbook.Name
-        Dim pathType As String
-        If InStr(1, ThisWorkbook.Path, "OneDrive", vbTextCompare) > 0 Or _
-           InStr(1, ThisWorkbook.Path, "sharepoint", vbTextCompare) > 0 Then
-            pathType = "OneDrive/SharePoint"
-        ElseIf Left(ThisWorkbook.Path, 2) = "\\" Then
-            pathType = "Network"
-        ElseIf Len(ThisWorkbook.Path) > 0 Then
-            pathType = "Local"
-        Else
-            pathType = "Unknown"
-        End If
         Print #fileNum, "WB location  : " & pathType
         Print #fileNum, "Log saved to : " & logPath
-        Print #fileNum, "AutoSave     : " & ThisWorkbook.AutoSaveOn
+        Print #fileNum, "AutoSave     : " & ReadWorkbookAutoSaveText(ThisWorkbook)
         Print #fileNum, "LB Version   : " & version
         Print #fileNum, ""
         Print #fileNum, "-- ENTRY STATE ----------------------------------"
@@ -7071,9 +7207,109 @@ Public Sub WriteDebugLog(source As String, errNum As Long, errDesc As String, Op
         Print #fileNum, "Logbook rows : " & fRows
         Print #fileNum, ""
     Close #fileNum
+    fileOpen = False
+    Exit Sub
 
-    On Error GoTo 0
+Fail:
+    If fileOpen Then
+        On Error Resume Next
+        Close #fileNum
+        On Error GoTo 0
+    End If
 End Sub
+
+Private Function TryEnsureFolderExists(ByVal folderPath As String) As Boolean
+    On Error GoTo Fail
+
+    If Dir(folderPath, vbDirectory) = "" Then MkDir folderPath
+    TryEnsureFolderExists = True
+    Exit Function
+
+Fail:
+    TryEnsureFolderExists = False
+End Function
+
+Private Function ReadWorkbookNameText(ByVal wb As Workbook, _
+                                      ByVal nameText As String, _
+                                      ByVal defaultText As String) As String
+    On Error GoTo Fail
+
+    ReadWorkbookNameText = CStr(wb.Names(nameText).RefersToRange.Value)
+    Exit Function
+
+Fail:
+    ReadWorkbookNameText = defaultText
+End Function
+
+Private Function ReadNewEntryBooleanText(ByVal fieldName As String) As String
+    On Error GoTo Fail
+
+    ReadNewEntryBooleanText = IIf(NewEntryBooleanValue(fieldName), "Yes", "No")
+    Exit Function
+
+Fail:
+    ReadNewEntryBooleanText = "Unavailable"
+End Function
+
+Private Function ReadLogbookRowCountText(ByVal wb As Workbook) As String
+    On Error GoTo Fail
+
+    ReadLogbookRowCountText = CStr(wb.Sheets("Logbook").ListObjects("Logbook").DataBodyRange.Rows.Count)
+    Exit Function
+
+Fail:
+    ReadLogbookRowCountText = "Unavailable"
+End Function
+
+Private Function ReadLastCrashBreadcrumb() As String
+    Dim crumbPath As String
+    Dim fileNum As Integer
+    Dim fileOpen As Boolean
+
+    On Error GoTo Fail
+
+    crumbPath = Environ("TEMP") & "\LB_Crumb.txt"
+    If Dir(crumbPath) = "" Then Exit Function
+
+    fileNum = FreeFile
+    Open crumbPath For Input As #fileNum
+    fileOpen = True
+    Line Input #fileNum, ReadLastCrashBreadcrumb
+    Close #fileNum
+    fileOpen = False
+    Exit Function
+
+Fail:
+    If fileOpen Then
+        On Error Resume Next
+        Close #fileNum
+        On Error GoTo 0
+    End If
+    ReadLastCrashBreadcrumb = ""
+End Function
+
+Private Function ReadWorkbookAutoSaveText(ByVal wb As Workbook) As String
+    On Error GoTo Fail
+
+    ReadWorkbookAutoSaveText = CStr(wb.AutoSaveOn)
+    Exit Function
+
+Fail:
+    ReadWorkbookAutoSaveText = "Unavailable"
+End Function
+
+Private Function WorkbookPathType(ByVal wb As Workbook) As String
+    If InStr(1, wb.Path, "OneDrive", vbTextCompare) > 0 Or _
+       InStr(1, wb.Path, "sharepoint", vbTextCompare) > 0 Then
+        WorkbookPathType = "OneDrive/SharePoint"
+    ElseIf Left(wb.Path, 2) = "\\" Then
+        WorkbookPathType = "Network"
+    ElseIf Len(wb.Path) > 0 Then
+        WorkbookPathType = "Local"
+    Else
+        WorkbookPathType = "Unknown"
+    End If
+End Function
 
 ' ==============================================================
 ' EXPORT DIAGNOSTICS
@@ -7089,13 +7325,27 @@ End Sub
 
 Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean = True, _
                                            Optional ByRef exportedPath As String = "") As Boolean
-    On Error Resume Next
-
     Dim logDir   As String
     Dim outPath  As String
     Dim fileNum  As Integer
     Dim version  As String
     Dim wb       As Workbook
+    Dim pathType As String
+    Dim tbl       As ListObject
+    Dim rowCount  As String
+    Dim colNames  As String
+    Dim c         As ListColumn
+    Dim gitBranch  As String
+    Dim dateReset  As String
+    Dim routesVer  As String
+    Dim routesBlt  As String
+    Dim routesDrty As String
+    Dim kwCount As String
+    Dim kwTbl   As ListObject
+    Dim suppressState As String
+    Dim suppressVal As Variant
+
+    On Error GoTo Fail
     Set wb = ThisWorkbook
 
     ' Write alongside the workbook; fall back to Documents if path unavailable.
@@ -7107,10 +7357,9 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
     outPath = logDir & "\diagnostics_" & Format(Now, "yyyymmdd_hhmmss") & ".txt"
     exportedPath = outPath
 
-    version = Trim(CStr(wb.Names("LogbookVersion").RefersToRange.Value))
+    version = Trim$(CStr(GetWorkbookNameValue(wb, "LogbookVersion", "Unknown")))
     If version = "" Then version = "Unknown"
 
-    Dim pathType As String
     If InStr(1, wb.Path, "OneDrive", vbTextCompare) > 0 Or _
        InStr(1, wb.Path, "sharepoint", vbTextCompare) > 0 Then
         pathType = "OneDrive/SharePoint"
@@ -7122,13 +7371,9 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
         pathType = "Unknown"
     End If
 
-    Dim tbl       As ListObject
-    Dim rowCount  As String
-    Dim colNames  As String
-    Dim c         As ListColumn
-    Set tbl = wb.Sheets("Logbook").ListObjects("Logbook")
+    Set tbl = FindListObject(wb, "Logbook")
     If Not tbl Is Nothing Then
-        rowCount = CStr(tbl.DataBodyRange.Rows.Count)
+        If Not tbl.DataBodyRange Is Nothing Then rowCount = CStr(tbl.DataBodyRange.Rows.Count)
         For Each c In tbl.ListColumns
             colNames = colNames & c.Name & ", "
         Next c
@@ -7136,21 +7381,14 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
     End If
 
     ' Named range inventory (non-sensitive values only).
-    Dim gitBranch  As String
-    Dim dateReset  As String
-    Dim routesVer  As String
-    Dim routesBlt  As String
-    Dim routesDrty As String
-    gitBranch  = Trim(CStr(wb.Names("GitHubBranch").RefersToRange.Value))
-    dateReset  = Trim(CStr(wb.Names("DateAfterExport").RefersToRange.Value))
-    routesVer  = Trim(CStr(wb.Names("RoutesDefinitionVersion").RefersToRange.Value))
-    routesBlt  = Trim(CStr(wb.Names("RoutesBuilt").RefersToRange.Value))
-    routesDrty = Trim(CStr(wb.Names("RoutesDirty").RefersToRange.Value))
+    gitBranch = Trim$(CStr(GetWorkbookNameValue(wb, "GitHubBranch", "")))
+    dateReset = Trim$(CStr(GetWorkbookNameValue(wb, "DateAfterExport", "")))
+    routesVer = Trim$(CStr(GetWorkbookNameValue(wb, "RoutesDefinitionVersion", "")))
+    routesBlt = Trim$(CStr(GetWorkbookNameValue(wb, "RoutesBuilt", "")))
+    routesDrty = Trim$(CStr(GetWorkbookNameValue(wb, "RoutesDirty", "")))
 
     ' Keywords table row count.
-    Dim kwCount As String
-    Dim kwTbl   As ListObject
-    Set kwTbl = wb.Sheets("Settings").ListObjects("Keywords")
+    Set kwTbl = FindListObject(wb, "Keywords")
     If Not kwTbl Is Nothing Then
         If Not kwTbl.DataBodyRange Is Nothing Then
             kwCount = CStr(kwTbl.DataBodyRange.Rows.Count)
@@ -7160,10 +7398,8 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
     End If
 
     ' Warning suppression state (active/inactive, not the timestamp).
-    Dim suppressState As String
     suppressState = "Inactive"
-    Dim suppressVal As Variant
-    suppressVal = wb.Names("suppressWarningsUntil").RefersToRange.Value
+    suppressVal = GetWorkbookNameValue(wb, "suppressWarningsUntil", vbNullString)
     If suppressVal <> "" Then
         If IsDate(suppressVal) Then
             If Now < CDate(suppressVal) Then suppressState = "Active"
@@ -7204,7 +7440,6 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
         Print #fileNum, "This file contains no personal data, flight records,"
         Print #fileNum, "names, registrations, or file paths."
     Close #fileNum
-    On Error GoTo 0
 
     If Dir(outPath) <> "" Then
         If showConfirmation Then
@@ -7220,34 +7455,97 @@ Private Function ExportDiagnosticsInternal(Optional showConfirmation As Boolean 
         End If
         ExportDiagnosticsInternal = False
     End If
+    Exit Function
+
+Fail:
+    If fileNum <> 0 Then
+        On Error Resume Next
+        Close #fileNum
+        On Error GoTo 0
+    End If
+    If showConfirmation Then
+        MsgBox "Could not write the diagnostics file. Check folder permissions.", _
+               vbExclamation, "Export Failed"
+    End If
+    ExportDiagnosticsInternal = False
 End Function
 
 Private Sub PrintPivotProtectionDiagnostics(ByVal fileNum As Integer, ByVal wb As Workbook)
     Dim ws As Worksheet
-    Dim pt As PivotTable
     Dim pivotCount As Long
 
-    On Error Resume Next
     Print #fileNum, "Workbook protected: structure=" & CStr(wb.ProtectStructure) & _
                     ", windows=" & CStr(wb.ProtectWindows)
     For Each ws In wb.Worksheets
-        pivotCount = 0
-        pivotCount = ws.PivotTables.Count
+        If Not TryGetWorksheetPivotCount(ws, pivotCount) Then
+            Print #fileNum, "Sheet: " & ws.Name & _
+                            " | protected=" & CStr(ws.ProtectContents) & _
+                            " | pivots=unavailable"
+            GoTo NextSheet
+        End If
+
         If ws.ProtectContents Or pivotCount > 0 Then
             Print #fileNum, "Sheet: " & ws.Name & _
                             " | protected=" & CStr(ws.ProtectContents) & _
                             " | pivots=" & CStr(pivotCount)
         End If
         If pivotCount > 0 Then
-            For Each pt In ws.PivotTables
-                Print #fileNum, "  Pivot: " & pt.Name & _
-                                " | cache=" & CStr(pt.PivotCache.Index) & _
-                                " | refreshOnOpen=" & CStr(pt.PivotCache.RefreshOnFileOpen)
-            Next pt
+            PrintWorksheetPivotDiagnostics fileNum, ws
         End If
+NextSheet:
     Next ws
-    On Error GoTo 0
 End Sub
+
+Private Function TryGetWorksheetPivotCount(ByVal ws As Worksheet, ByRef pivotCount As Long) As Boolean
+    On Error GoTo Fail
+
+    pivotCount = ws.PivotTables.Count
+    TryGetWorksheetPivotCount = True
+    Exit Function
+
+Fail:
+    pivotCount = 0
+    TryGetWorksheetPivotCount = False
+End Function
+
+Private Sub PrintWorksheetPivotDiagnostics(ByVal fileNum As Integer, ByVal ws As Worksheet)
+    Dim pt As PivotTable
+    Dim cacheIndex As String
+    Dim refreshOnOpen As String
+
+    On Error GoTo Fail
+
+    For Each pt In ws.PivotTables
+        If TryGetPivotCacheDetails(pt, cacheIndex, refreshOnOpen) Then
+            Print #fileNum, "  Pivot: " & pt.Name & _
+                            " | cache=" & cacheIndex & _
+                            " | refreshOnOpen=" & refreshOnOpen
+        Else
+            Print #fileNum, "  Pivot: " & pt.Name & _
+                            " | cache=unavailable | refreshOnOpen=unavailable"
+        End If
+    Next pt
+    Exit Sub
+
+Fail:
+    Print #fileNum, "  Pivot diagnostics unavailable for sheet: " & ws.Name
+End Sub
+
+Private Function TryGetPivotCacheDetails(ByVal pt As PivotTable, _
+                                         ByRef cacheIndex As String, _
+                                         ByRef refreshOnOpen As String) As Boolean
+    On Error GoTo Fail
+
+    cacheIndex = CStr(pt.PivotCache.Index)
+    refreshOnOpen = CStr(pt.PivotCache.RefreshOnFileOpen)
+    TryGetPivotCacheDetails = True
+    Exit Function
+
+Fail:
+    cacheIndex = "unavailable"
+    refreshOnOpen = "unavailable"
+    TryGetPivotCacheDetails = False
+End Function
 
 Public Sub ToggleSuppressWarnings()
     Dim isActive As Boolean

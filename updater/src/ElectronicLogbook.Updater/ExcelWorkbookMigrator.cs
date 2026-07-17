@@ -4,6 +4,8 @@ using Microsoft.CSharp.RuntimeBinder;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using static ElectronicLogbook.Updater.WorkbookColor;
+using static ElectronicLogbook.Updater.WorkbookValue;
 
 namespace ElectronicLogbook.Updater;
 
@@ -55,7 +57,7 @@ public sealed class ExcelWorkbookMigrator
             return message;
         }
 
-        request = ValidateRequest(request);
+        request = MigrationRequestValidator.Validate(request);
         cancellationToken.ThrowIfCancellationRequested();
 
         var outputDirectory = Path.GetDirectoryName(request.OutputPath)!;
@@ -254,36 +256,6 @@ public sealed class ExcelWorkbookMigrator
                 TryDelete(request.OutputPath);
             }
         }
-    }
-
-    private static MigrationRequest ValidateRequest(MigrationRequest request)
-    {
-        request = request with
-        {
-            SourcePath = Path.GetFullPath(request.SourcePath),
-            MasterPath = Path.GetFullPath(request.MasterPath),
-            OutputPath = Path.GetFullPath(request.OutputPath)
-        };
-
-        if (!File.Exists(request.SourcePath))
-        {
-            throw new FileNotFoundException("Source workbook not found.", request.SourcePath);
-        }
-        if (!File.Exists(request.MasterPath))
-        {
-            throw new FileNotFoundException("Master workbook not found.", request.MasterPath);
-        }
-        if (File.Exists(request.OutputPath))
-        {
-            throw new IOException($"Output path already exists: {request.OutputPath}");
-        }
-        if (string.Equals(request.SourcePath, request.OutputPath, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(request.MasterPath, request.OutputPath, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Output path must differ from source and master paths.");
-        }
-
-        return request;
     }
 
     private static void UnprotectWorkbookForMigration(object workbookObject)
@@ -542,7 +514,7 @@ public sealed class ExcelWorkbookMigrator
 
             for (var row = 0; row < logbookRows; row++)
             {
-                if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
+                if (AirportStatsRows.IsSimOnly(row, ifrSim, hourColumns))
                 {
                     simOnlyRowsSkipped++;
                     continue;
@@ -556,10 +528,10 @@ public sealed class ExcelWorkbookMigrator
                 logbookRowsWithDetails++;
 
                 var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (string token in TokeniseAirportDetails(detailsText))
+                foreach (string token in AirportStatsText.TokeniseDetails(detailsText))
                 {
                     tokensScanned++;
-                    if (AirportStatsIgnoreToken(token, keywords))
+                    if (AirportStatsText.ShouldIgnoreToken(token, keywords))
                     {
                         tokensIgnored++;
                         continue;
@@ -820,14 +792,14 @@ public sealed class ExcelWorkbookMigrator
 
         for (var row = 0; row < rows; row++)
         {
-            if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
+            if (AirportStatsRows.IsSimOnly(row, ifrSim, hourColumns))
             {
                 continue;
             }
 
             var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(fromValues[row]));
-            AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(toValues[row]));
+            AirportStatsText.AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(fromValues[row]));
+            AirportStatsText.AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(toValues[row]));
 
             foreach (var icao in matchedIcaos)
             {
@@ -836,22 +808,6 @@ public sealed class ExcelWorkbookMigrator
         }
 
         return counts;
-    }
-
-    private static void AddEndpointAirportMatch(
-        ISet<string> matchedIcaos,
-        IReadOnlyDictionary<string, string> aliasLookup,
-        string rawValue)
-    {
-        var token = rawValue.Trim().ToUpperInvariant();
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            return;
-        }
-        if (aliasLookup.TryGetValue(token, out var icao) && !string.IsNullOrWhiteSpace(icao))
-        {
-            matchedIcaos.Add(icao);
-        }
     }
 
     private static string AirportIcaoForName(dynamic airports, string airportName)
@@ -929,40 +885,6 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static bool AirportStatsLogbookRowIsSimOnly(
-        int row,
-        object?[] ifrSim,
-        IReadOnlyCollection<object?[]> hourColumns)
-    {
-        var simHours = ToDouble(ifrSim[row]);
-        var otherHours = hourColumns.Sum(column => ToDouble(column[row]));
-        return simHours > 0 && otherHours == 0;
-    }
-
-    private static IEnumerable<string> TokeniseAirportDetails(string details)
-    {
-        var normalised = details.Replace("|", "", StringComparison.Ordinal);
-        foreach (var delimiter in new[] { '-', ' ', ',', '(', ')' })
-        {
-            normalised = normalised.Replace(delimiter, '|');
-        }
-        return normalised
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    }
-
-    private static bool AirportStatsIgnoreToken(string token, IReadOnlyCollection<string> keywords)
-    {
-        var ignored = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "IPC", "OPC", "FR", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
-        };
-        if (ignored.Contains(token))
-        {
-            return true;
-        }
-        return keywords.Any(keyword => keyword.Contains(token, StringComparison.OrdinalIgnoreCase));
-    }
-
     private static IReadOnlyCollection<string> ReadAirportStatsKeywords(object workbookObject)
     {
         try
@@ -1024,157 +946,14 @@ public sealed class ExcelWorkbookMigrator
 
         for (var row = 0; row < rows; row++)
         {
-            var routeText = JoinNonBlank(
-                " ",
+            result[row] = LogbookRouteText.BuildAirportStatsSource(
                 fromValues is null ? "" : StableValue(fromValues[row]),
                 routeValues is null ? "" : StableValue(routeValues[row]),
-                toValues is null ? "" : StableValue(toValues[row]));
-            if (string.IsNullOrWhiteSpace(routeText) && remarksValues is not null)
-            {
-                routeText = StableValue(remarksValues[row]);
-            }
-            result[row] = routeText;
+                toValues is null ? "" : StableValue(toValues[row]),
+                remarksValues is null ? "" : StableValue(remarksValues[row]));
         }
 
         return result;
-    }
-
-    private static string JoinNonBlank(string separator, params string[] values)
-    {
-        return string.Join(
-            separator,
-            values.Select(value => value.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)));
-    }
-
-    private static double ToDouble(object? value)
-    {
-        return value switch
-        {
-            null => 0,
-            double number => number,
-            float number => number,
-            int number => number,
-            decimal number => (double)number,
-            string text when double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => number,
-            _ => 0
-        };
-    }
-
-    private static bool ToBoolean(object? value)
-    {
-        return value switch
-        {
-            null => false,
-            bool flag => flag,
-            double number => Math.Abs(number) > double.Epsilon,
-            float number => Math.Abs(number) > float.Epsilon,
-            int number => number != 0,
-            decimal number => number != 0,
-            string text when bool.TryParse(text.Trim(), out var flag) => flag,
-            string text when double.TryParse(text.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => Math.Abs(number) > double.Epsilon,
-            string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
-            _ => false
-        };
-    }
-
-    private static double? ToLogbookDate(object? yearValue, object? monthValue, object? dayValue)
-    {
-        var year = (int)ToDouble(yearValue);
-        var day = ResolveLogbookDay(dayValue);
-        var monthText = StableValue(monthValue).Trim();
-        var month = ResolveLogbookMonth(monthValue, monthText);
-        if (year <= 0 || day <= 0 || string.IsNullOrWhiteSpace(monthText))
-        {
-            return null;
-        }
-
-        if (month <= 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            return new DateTime(year, month, day).ToOADate();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int ResolveLogbookMonth(object? monthValue, string monthText)
-    {
-        var monthNumber = ToDouble(monthValue);
-        if (monthNumber >= 1 && monthNumber <= 12)
-        {
-            return (int)monthNumber;
-        }
-        if (monthNumber > 31)
-        {
-            try
-            {
-                return DateTime.FromOADate(monthNumber).Month;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        if (int.TryParse(monthText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericMonth))
-        {
-            if (numericMonth >= 1 && numericMonth <= 12)
-            {
-                return numericMonth;
-            }
-            if (numericMonth > 31)
-            {
-                try
-                {
-                    return DateTime.FromOADate(numericMonth).Month;
-                }
-                catch
-                {
-                    return 0;
-                }
-            }
-        }
-
-        var format = CultureInfo.InvariantCulture.DateTimeFormat;
-        for (var month = 1; month <= 12; month++)
-        {
-            if (string.Equals(monthText, format.AbbreviatedMonthNames[month - 1], StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(monthText, format.MonthNames[month - 1], StringComparison.OrdinalIgnoreCase))
-            {
-                return month;
-            }
-        }
-
-        return 0;
-    }
-
-    private static int ResolveLogbookDay(object? dayValue)
-    {
-        var dayNumber = ToDouble(dayValue);
-        if (dayNumber >= 1 && dayNumber <= 31)
-        {
-            return (int)dayNumber;
-        }
-        if (dayNumber > 31)
-        {
-            try
-            {
-                return DateTime.FromOADate(dayNumber).Day;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-        return 0;
     }
 
     private static void CopyNamedPreferences(object sourceWorkbookObject, object outputWorkbookObject)
@@ -1531,7 +1310,7 @@ public sealed class ExcelWorkbookMigrator
         var secondaryColor = (int)table.DataBodyRange.Rows.Item(1).Cells.Item(1, 1)
             .DisplayFormat.Interior.Color;
         sumTotalsRange.Interior.Pattern = 1;
-        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, 0.2);
+        sumTotalsRange.Interior.Color = WithLightness(secondaryColor, 0.2);
         sumTotalsRange.Font.Color = 0xFFFFFF;
         dynamic labelCell = sumTotalsRange.Cells.Item(1, 1).Offset[0, -1];
         labelCell.HorizontalAlignment = -4152;
@@ -1665,89 +1444,6 @@ public sealed class ExcelWorkbookMigrator
         {
             cell.Font.Color = cell.DisplayFormat.Interior.Color;
         }
-    }
-
-    private static int ColorWithLightness(int sourceColor, double targetLightness)
-    {
-        var red = (sourceColor & 0xFF) / 255.0;
-        var green = ((sourceColor >> 8) & 0xFF) / 255.0;
-        var blue = ((sourceColor >> 16) & 0xFF) / 255.0;
-        var maximum = Math.Max(red, Math.Max(green, blue));
-        var minimum = Math.Min(red, Math.Min(green, blue));
-
-        if (Math.Abs(maximum - minimum) < double.Epsilon)
-        {
-            var grey = (int)Math.Round(targetLightness * 255);
-            return grey + (grey << 8) + (grey << 16);
-        }
-
-        var lightness = (maximum + minimum) / 2.0;
-        var saturation = lightness > 0.5
-            ? (maximum - minimum) / (2.0 - maximum - minimum)
-            : (maximum - minimum) / (maximum + minimum);
-
-        double hue;
-        if (Math.Abs(maximum - red) < double.Epsilon)
-        {
-            hue = (green - blue) / (maximum - minimum);
-            if (green < blue)
-            {
-                hue += 6.0;
-            }
-        }
-        else if (Math.Abs(maximum - green) < double.Epsilon)
-        {
-            hue = (blue - red) / (maximum - minimum) + 2.0;
-        }
-        else
-        {
-            hue = (red - green) / (maximum - minimum) + 4.0;
-        }
-
-        hue /= 6.0;
-        var second = targetLightness < 0.5
-            ? targetLightness * (1.0 + saturation)
-            : targetLightness + saturation - (targetLightness * saturation);
-        var first = (2.0 * targetLightness) - second;
-        var outRed = (int)Math.Round(255 * HueChannel(first, second, hue + (1.0 / 3.0)));
-        var outGreen = (int)Math.Round(255 * HueChannel(first, second, hue));
-        var outBlue = (int)Math.Round(255 * HueChannel(first, second, hue - (1.0 / 3.0)));
-        return outRed + (outGreen << 8) + (outBlue << 16);
-    }
-
-    private static double HueChannel(double first, double second, double hue)
-    {
-        if (hue < 0)
-        {
-            hue += 1.0;
-        }
-        if (hue > 1)
-        {
-            hue -= 1.0;
-        }
-
-        if (hue < 1.0 / 6.0)
-        {
-            return first + ((second - first) * 6.0 * hue);
-        }
-        if (hue < 1.0 / 2.0)
-        {
-            return second;
-        }
-        if (hue < 2.0 / 3.0)
-        {
-            return first + ((second - first) * ((2.0 / 3.0) - hue) * 6.0);
-        }
-        return first;
-    }
-
-    private static int ContrastingTextColor(int backgroundColor)
-    {
-        var red = backgroundColor & 0xFF;
-        var green = (backgroundColor >> 8) & 0xFF;
-        var blue = (backgroundColor >> 16) & 0xFF;
-        var brightness = ((red * 299) + (green * 587) + (blue * 114)) / 1000.0;
-        return brightness >= 150 ? 0 : 0xFFFFFF;
     }
 
     private static void RefreshWorkbookPivotSummaries(object workbookObject)
@@ -2584,25 +2280,6 @@ public sealed class ExcelWorkbookMigrator
         {
             return "";
         }
-    }
-
-    private static string StableValue(object? value)
-    {
-        return value switch
-        {
-            null => "",
-            double number => number.ToString("R", CultureInfo.InvariantCulture),
-            float number => number.ToString("R", CultureInfo.InvariantCulture),
-            DateTime date => date.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
-            bool flag => flag ? "true" : "false",
-            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
-        };
-    }
-
-    private static bool IsBlankValue(object? value)
-    {
-        return value is null ||
-            (value is string text && string.IsNullOrWhiteSpace(text));
     }
 
     private static string Sha256(string value)

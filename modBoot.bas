@@ -128,9 +128,13 @@ Private Sub RunWizardUpdate(ByVal newVersion As String)
 End Sub
 
 Private Function GetLocalVersion() As String
-    On Error Resume Next
-    GetLocalVersion = Trim(CStr(ThisWorkbook.Names("LogbookVersion").RefersToRange.Value))
+    GetLocalVersion = Trim$(ReadWorkbookNameValue(ThisWorkbook, "LogbookVersion"))
     If GetLocalVersion = "" Or GetLocalVersion = "0" Then GetLocalVersion = "0.0"
+End Function
+
+Private Function ReadWorkbookNameValue(ByVal wb As Workbook, ByVal nameText As String) As String
+    On Error Resume Next
+    ReadWorkbookNameValue = CStr(wb.Names(nameText).RefersToRange.Value)
     On Error GoTo 0
 End Function
 

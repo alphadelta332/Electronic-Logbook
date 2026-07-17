@@ -213,7 +213,9 @@ if ($Tier -in @("Excel", "Release")) {
     } else {
         Write-Host "Skipping release-only public-readiness checks." -ForegroundColor Yellow
     }
-    & (Join-Path $repoRoot "updater\Test-ExternalUpdater.ps1") -RepoRoot $repoRoot
+    & (Join-Path $repoRoot "updater\Test-ExternalUpdater.ps1") `
+        -RepoRoot $repoRoot `
+        -ReportPath (Join-Path $repoRoot "updater\TestResults\com-migration-report.json")
 }
 
 if ($Tier -eq "Release") {

@@ -217,16 +217,20 @@ Public Sub AutoFitStatsSheetColumns()
     Set ws = ThisWorkbook.Worksheets("Stats")
     ws.UsedRange.Columns.AutoFit
 
-    On Error Resume Next
-    Set tblBase = ws.ListObjects("BaseAirportsTop10")
+    Set tblBase = TryGetWorksheetTable(ws, "BaseAirportsTop10")
     If Not tblBase Is Nothing Then
         tblBase.ListColumns("ICAO").Range.EntireColumn.Hidden = True
     End If
-    On Error GoTo CleanExit
 
 CleanExit:
     isRunning = False
 End Sub
+
+Private Function TryGetWorksheetTable(ByVal ws As Worksheet, ByVal tableName As String) As ListObject
+    On Error Resume Next
+    Set TryGetWorksheetTable = ws.ListObjects(tableName)
+    On Error GoTo 0
+End Function
 
 Private Sub SetNewEntryDateToTodayOnOpen()
     On Error GoTo CleanExit

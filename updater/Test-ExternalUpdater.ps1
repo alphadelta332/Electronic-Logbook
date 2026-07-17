@@ -2,7 +2,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent)
+    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
+    [string]$ReportPath
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +19,9 @@ $masterPath = Join-Path $testDirectory "Master.xlsm"
 $outputPath = Join-Path $testDirectory "Updated.xlsm"
 $maxAttempts = 3
 $updaterDllPath = Join-Path $projectPath "bin\Release\net8.0-windows\ElectronicLogbook.Updater.dll"
+if ([string]::IsNullOrWhiteSpace($ReportPath)) {
+    $ReportPath = Join-Path $repoRoot "updater\TestResults\com-migration-report.json"
+}
 
 Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
@@ -26,6 +30,49 @@ function Write-Step {
     Write-Host "[Test-ExternalUpdater] $Message" -ForegroundColor Cyan
 }
 
+function Write-ComMigrationReport {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [Parameter(Mandatory)]
+        [string]$Status,
+        [string]$FailureMessage = "",
+        [string[]]$Checks = @()
+    )
+
+    $directory = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+
+    $report = [ordered]@{
+        schemaVersion = 1
+        testName = "ExternalUpdaterDisposableComMigration"
+        status = $Status
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
+        checks = @($Checks)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($FailureMessage)) {
+        $report.failureMessage = $FailureMessage
+    }
+
+    $report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+$coveredChecks = @(
+    "source workbook hash unchanged",
+    "custom Logbook heading preserved",
+    "Logbook entry values and expanded rows preserved",
+    "Logbook table style preserved",
+    "Logbook totals anchor preserved",
+    "Keywords data preserved",
+    "Routes data preserved",
+    "base-airport selection preserved",
+    "named preference preserved",
+    "route-cache invalidation preserved",
+    "pivot cache refreshed",
+    "HoursByYear date grouping restored"
+)
 try {
     Write-Step "Preparing disposable test workspace"
     New-Item -ItemType Directory -Path $testDirectory | Out-Null
@@ -210,7 +257,17 @@ try {
     }
 
     Write-Step "Validation complete"
+    Write-ComMigrationReport -Path $ReportPath -Status "passed" -Checks $coveredChecks
+    Write-Step "COM migration report written to $ReportPath"
     Write-Host "External updater disposable migration test passed." -ForegroundColor Green
+} catch {
+    $failure = $_
+    try {
+        Write-ComMigrationReport -Path $ReportPath -Status "failed" -FailureMessage $failure.Exception.Message -Checks $coveredChecks
+    } catch {
+        Write-Warning "Could not write COM migration failure report: $($_.Exception.Message)"
+    }
+    $PSCmdlet.ThrowTerminatingError($failure)
 } finally {
     Write-Step "Cleaning up temporary files"
     if (Test-Path $testDirectory) {

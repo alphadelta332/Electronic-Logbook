@@ -63,6 +63,93 @@ public sealed class UpdaterOptionsTests : IDisposable
     }
 
     [Fact]
+    public void ParseAcceptsNoInPlaceAfterInPlaceFlag()
+    {
+        var output = Path.Combine(_directory, "output.xlsm");
+
+        var options = UpdaterOptions.Parse(
+            ["--source", _sourcePath, "--output", output, "--inplace", "--no-inplace"]);
+
+        Assert.False(options.InPlaceSwap);
+    }
+
+    [Fact]
+    public void ParseAcceptsReportPath()
+    {
+        var output = Path.Combine(_directory, "output.xlsm");
+        var report = Path.Combine(_directory, "diagnostics", "report.json");
+
+        var options = UpdaterOptions.Parse(
+            ["--source", _sourcePath, "--output", output, "--report", report]);
+
+        Assert.Equal(Path.GetFullPath(report), options.ReportPath);
+    }
+
+    [Theory]
+    [InlineData("--source")]
+    [InlineData("--output")]
+    [InlineData("--master")]
+    [InlineData("--report")]
+    [InlineData("--repo")]
+    public void ParseRejectsMissingOptionValue(string option)
+    {
+        var exception = Assert.Throws<UpdaterUsageException>(() =>
+            UpdaterOptions.Parse([option]));
+
+        Assert.Contains("requires a value", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ParseRejectsInvalidRepositoryFormat()
+    {
+        var output = Path.Combine(_directory, "output.xlsm");
+
+        var exception = Assert.Throws<UpdaterUsageException>(() =>
+            UpdaterOptions.Parse(["--source", _sourcePath, "--output", output, "--repo", "repo-only"]));
+
+        Assert.Contains("owner/name", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ParseRejectsMissingSourceWorkbook()
+    {
+        var output = Path.Combine(_directory, "output.xlsm");
+        var missingSource = Path.Combine(_directory, "missing.xlsm");
+
+        var exception = Assert.Throws<UpdaterUsageException>(() =>
+            UpdaterOptions.Parse(["--source", missingSource, "--output", output]));
+
+        Assert.Contains("Source workbook not found", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void ParseRejectsMissingMasterWorkbook()
+    {
+        var output = Path.Combine(_directory, "output.xlsm");
+        var missingMaster = Path.Combine(_directory, "missing-master.xlsm");
+
+        var exception = Assert.Throws<UpdaterUsageException>(() =>
+            UpdaterOptions.Parse(["--source", _sourcePath, "--output", output, "--master", missingMaster]));
+
+        Assert.Contains("Master workbook not found", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("source.xlsx", "output.xlsm")]
+    [InlineData("source.xlsm", "output.xlsx")]
+    public void ParseRejectsNonMacroWorkbookExtension(string sourceName, string outputName)
+    {
+        var source = Path.Combine(_directory, sourceName);
+        var output = Path.Combine(_directory, outputName);
+        File.WriteAllText(source, "test");
+
+        var exception = Assert.Throws<UpdaterUsageException>(() =>
+            UpdaterOptions.Parse(["--source", source, "--output", output]));
+
+        Assert.Contains(".xlsm", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void HelpDescribesSeparateOutputAsDefault()
     {
         Assert.Contains("separate file (the default)", UpdaterOptions.HelpText);
