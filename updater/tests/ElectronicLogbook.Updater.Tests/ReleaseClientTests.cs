@@ -242,6 +242,116 @@ public sealed class ReleaseClientTests
     }
 
     [Fact]
+    public async Task GetLatestReleaseAsyncRejectsMissingGitHubAssetDigest()
+    {
+        var releaseVersion = TestRepo.Version;
+        var releaseBaseUrl = BuildReleaseBaseUrl(releaseVersion);
+        var workbookBytes = Encoding.UTF8.GetBytes("verified workbook package");
+        var signedManifest = BuildSignedManifest(workbookBytes, releaseVersion);
+        var releaseBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            tag_name = "v" + releaseVersion,
+            assets = new object[]
+            {
+                new
+                {
+                    name = "release-manifest.json",
+                    browser_download_url = $"{releaseBaseUrl}/release-manifest.json",
+                    size = signedManifest.ManifestBytes.Length,
+                    digest = (string?)null
+                },
+                BuildReleaseAsset("release-manifest.json.sig", $"{releaseBaseUrl}/release-manifest.json.sig", signedManifest.SignatureBytes),
+                BuildReleaseAsset("Electronic_Logbook_Master.xlsm", $"{releaseBaseUrl}/Electronic_Logbook_Master.xlsm", workbookBytes)
+            }
+        });
+        using var client = new HttpClient(new StaticResponseHandler(new Dictionary<string, byte[]>
+        {
+            ["https://api.github.com/repos/owner/repo/releases/latest"] = releaseBytes
+        }));
+        var releaseClient = new ReleaseClient(
+            client,
+            manifestSignaturePublicKeyPem: signedManifest.PublicKeyPem);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            releaseClient.GetLatestReleaseAsync("owner/repo", CancellationToken.None));
+
+        Assert.Contains("digest", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetLatestReleaseAsyncRejectsUnsupportedGitHubAssetDigest()
+    {
+        var releaseVersion = TestRepo.Version;
+        var releaseBaseUrl = BuildReleaseBaseUrl(releaseVersion);
+        var workbookBytes = Encoding.UTF8.GetBytes("verified workbook package");
+        var signedManifest = BuildSignedManifest(workbookBytes, releaseVersion);
+        var releaseBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            tag_name = "v" + releaseVersion,
+            assets = new object[]
+            {
+                BuildReleaseAsset(
+                    "release-manifest.json",
+                    $"{releaseBaseUrl}/release-manifest.json",
+                    signedManifest.ManifestBytes,
+                    digestOverride: "md5:unsupported"),
+                BuildReleaseAsset("release-manifest.json.sig", $"{releaseBaseUrl}/release-manifest.json.sig", signedManifest.SignatureBytes),
+                BuildReleaseAsset("Electronic_Logbook_Master.xlsm", $"{releaseBaseUrl}/Electronic_Logbook_Master.xlsm", workbookBytes)
+            }
+        });
+        using var client = new HttpClient(new StaticResponseHandler(new Dictionary<string, byte[]>
+        {
+            ["https://api.github.com/repos/owner/repo/releases/latest"] = releaseBytes
+        }));
+        var releaseClient = new ReleaseClient(
+            client,
+            manifestSignaturePublicKeyPem: signedManifest.PublicKeyPem);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            releaseClient.GetLatestReleaseAsync("owner/repo", CancellationToken.None));
+
+        Assert.Contains("digest", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetLatestReleaseAsyncRejectsMismatchedGitHubAssetDigest()
+    {
+        var releaseVersion = TestRepo.Version;
+        var releaseBaseUrl = BuildReleaseBaseUrl(releaseVersion);
+        var workbookBytes = Encoding.UTF8.GetBytes("verified workbook package");
+        var signedManifest = BuildSignedManifest(workbookBytes, releaseVersion);
+        var releaseBytes = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            tag_name = "v" + releaseVersion,
+            assets = new object[]
+            {
+                BuildReleaseAsset("release-manifest.json", $"{releaseBaseUrl}/release-manifest.json", signedManifest.ManifestBytes),
+                BuildReleaseAsset("release-manifest.json.sig", $"{releaseBaseUrl}/release-manifest.json.sig", signedManifest.SignatureBytes),
+                BuildReleaseAsset(
+                    "Electronic_Logbook_Master.xlsm",
+                    $"{releaseBaseUrl}/Electronic_Logbook_Master.xlsm",
+                    workbookBytes,
+                    digestOverride: "sha256:" + new string('0', 64))
+            }
+        });
+        using var client = new HttpClient(new StaticResponseHandler(new Dictionary<string, byte[]>
+        {
+            ["https://api.github.com/repos/owner/repo/releases/latest"] = releaseBytes,
+            [$"{releaseBaseUrl}/release-manifest.json"] = signedManifest.ManifestBytes,
+            [$"{releaseBaseUrl}/release-manifest.json.sig"] = signedManifest.SignatureBytes,
+            [$"{releaseBaseUrl}/Electronic_Logbook_Master.xlsm"] = workbookBytes
+        }));
+        var releaseClient = new ReleaseClient(
+            client,
+            manifestSignaturePublicKeyPem: signedManifest.PublicKeyPem);
+
+        var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            releaseClient.GetLatestReleaseAsync("owner/repo", CancellationToken.None));
+
+        Assert.Contains("digest", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task GetLatestReleaseAsyncRemovesDownloadDirectoryAfterPartialDownloadFailure()
     {
         var downloadRoot = Directory.CreateTempSubdirectory("ElectronicLogbookReleaseClientTests-").FullName;
@@ -444,14 +554,15 @@ public sealed class ReleaseClientTests
         string name,
         string url,
         byte[] content,
-        long? size = null)
+        long? size = null,
+        string? digestOverride = null)
     {
         return new
         {
             name,
             browser_download_url = url,
             size = size ?? content.Length,
-            digest = $"sha256:{Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant()}"
+            digest = digestOverride ?? $"sha256:{Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant()}"
         };
     }
 
