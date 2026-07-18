@@ -21,6 +21,13 @@ public static class PortableLogbookValidator
                 "Jurisdiction profile is required."));
         }
 
+        if (document.JurisdictionProfileVersion < 1)
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidJurisdictionProfileVersion,
+                "Jurisdiction profile version must be at least 1."));
+        }
+
         var duplicateCustomFieldIds = document.CustomFieldDefinitions
             .GroupBy(field => field.Id)
             .Where(group => group.Count() > 1)
@@ -54,6 +61,8 @@ public static class PortableLogbookValidator
         {
             ValidateOperation(document, operation, revisionsByEntry, customFieldIds, errors);
         }
+
+        ValidateAcyclicRevisionGraph(document.Operations, errors);
 
         return new PortableLogbookValidationResult(errors.Count == 0, errors);
     }
@@ -144,6 +153,61 @@ public static class PortableLogbookValidator
                 $"Revision '{revisionId}' references undefined custom field '{fieldId}'."));
         }
     }
+
+    private static void ValidateAcyclicRevisionGraph(
+        IReadOnlyList<PortableLogbookOperation> operations,
+        List<PortableLogbookValidationError> errors)
+    {
+        foreach (var entryGroup in operations.GroupBy(operation => operation.EntryId))
+        {
+            if (entryGroup.GroupBy(operation => operation.RevisionId).Any(group => group.Count() > 1))
+            {
+                continue;
+            }
+
+            var byRevision = entryGroup.ToDictionary(operation => operation.RevisionId);
+            var visiting = new HashSet<RevisionId>();
+            var visited = new HashSet<RevisionId>();
+
+            foreach (var operation in entryGroup)
+            {
+                if (HasCycle(operation.RevisionId, byRevision, visiting, visited))
+                {
+                    errors.Add(new PortableLogbookValidationError(
+                        PortableLogbookValidationCode.CyclicRevisionHistory,
+                        $"Entry '{entryGroup.Key}' has cyclic revision history."));
+                    break;
+                }
+            }
+        }
+    }
+
+    private static bool HasCycle(
+        RevisionId revisionId,
+        IReadOnlyDictionary<RevisionId, PortableLogbookOperation> byRevision,
+        HashSet<RevisionId> visiting,
+        HashSet<RevisionId> visited)
+    {
+        if (visited.Contains(revisionId))
+        {
+            return false;
+        }
+
+        if (!visiting.Add(revisionId))
+        {
+            return true;
+        }
+
+        if (byRevision.TryGetValue(revisionId, out var operation) &&
+            operation.ParentRevisionIds.Any(parent => byRevision.ContainsKey(parent) && HasCycle(parent, byRevision, visiting, visited)))
+        {
+            return true;
+        }
+
+        visiting.Remove(revisionId);
+        visited.Add(revisionId);
+        return false;
+    }
 }
 
 public sealed record PortableLogbookValidationResult(
@@ -158,11 +222,13 @@ public enum PortableLogbookValidationCode
 {
     UnsupportedSchemaVersion,
     MissingJurisdictionProfile,
+    InvalidJurisdictionProfileVersion,
     DuplicateCustomFieldId,
     DuplicateRevisionId,
     OperationLogbookMismatch,
     InvalidParentCount,
     MissingParentRevision,
     SelfParentRevision,
-    UnknownCustomFieldId
+    UnknownCustomFieldId,
+    CyclicRevisionHistory
 }

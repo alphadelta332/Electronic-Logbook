@@ -6,11 +6,13 @@ public sealed record PortableLogbookDocument(
     int SchemaVersion,
     LogbookId LogbookId,
     string JurisdictionProfile,
+    int JurisdictionProfileVersion,
     IReadOnlyList<CustomFieldDefinition> CustomFieldDefinitions,
     IReadOnlyList<PortableLogbookOperation> Operations)
 {
     public const int CurrentSchemaVersion = 1;
     public const string AustraliaJurisdictionProfile = "AU";
+    public const int AustraliaJurisdictionProfileVersion = 1;
 
     public static PortableLogbookDocument CreateAustraliaFirst(
         LogbookId logbookId,
@@ -20,6 +22,7 @@ public sealed record PortableLogbookDocument(
             CurrentSchemaVersion,
             logbookId,
             AustraliaJurisdictionProfile,
+            AustraliaJurisdictionProfileVersion,
             customFieldDefinitions.OrderBy(field => field.Order).ToArray(),
             operations.OrderBy(operation => operation.CreatedAt).ThenBy(operation => operation.RevisionId.Value, StringComparer.Ordinal).ToArray());
 }

@@ -1,0 +1,146 @@
+using ElectronicLogbook.Portable;
+
+namespace ElectronicLogbook.Updater.Tests;
+
+public sealed class PortableLogbookWorkbookStorageTests
+{
+    [Fact]
+    public void StorageEnvelopeRoundTripsEncryptedHistoryAndReceipts()
+    {
+        var document = CreateDocument();
+        var key = PortableLogbookKey.Generate();
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        var receipt = PortableLogbookImportLedger.CreateReceipt(
+            packageBytes,
+            PortableLogbookPackage.Read(packageBytes, key, document.LogbookId).Manifest,
+            DateTimeOffset.Parse("2026-07-18T00:01:00Z"));
+
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, packageBytes, [receipt]);
+        var json = PortableLogbookWorkbookStorage.Serialize(envelope);
+        var roundTripped = PortableLogbookWorkbookStorage.Deserialize(json);
+
+        Assert.Equal(document.LogbookId, roundTripped.LogbookId);
+        Assert.Equal(document.SchemaVersion, roundTripped.SchemaVersion);
+        Assert.Equal(packageBytes, PortableLogbookWorkbookStorage.GetEncryptedHistoryPackage(roundTripped));
+        Assert.Equal(receipt.PackageSha256, Assert.Single(roundTripped.ImportReceipts).PackageSha256);
+    }
+
+    [Fact]
+    public void OpenEnvelopeDecryptsHistoryAndPreservesReceipts()
+    {
+        var document = CreateDocument();
+        var key = PortableLogbookKey.Generate();
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        var receipt = PortableLogbookImportLedger.CreateReceipt(
+            packageBytes,
+            PortableLogbookPackage.Read(packageBytes, key, document.LogbookId).Manifest,
+            DateTimeOffset.Parse("2026-07-18T00:01:00Z"));
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, packageBytes, [receipt]);
+
+        var state = PortableLogbookWorkbookStorage.OpenEnvelope(envelope, key);
+
+        Assert.Equal(document.LogbookId, state.Document.LogbookId);
+        Assert.Equal(document.Operations.Select(operation => operation.RevisionId), state.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal(receipt.PackageSha256, Assert.Single(state.ImportReceipts).PackageSha256);
+    }
+
+    [Fact]
+    public void StorageEnvelopeJsonDoesNotExposeRawFlightDetails()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, PortableLogbookKey.Generate());
+
+        var json = PortableLogbookWorkbookStorage.Serialize(
+            PortableLogbookWorkbookStorage.CreateEnvelope(document, packageBytes, []));
+
+        Assert.DoesNotContain("VH-SECRET", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("YSBK", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("Training details", json, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeserializeRejectsUnsupportedStorageVersion()
+    {
+        var document = CreateDocument();
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, [1, 2, 3], []) with
+        {
+            StorageVersion = PortableLogbookWorkbookStorage.CurrentStorageVersion + 1
+        };
+
+        var exception = Assert.Throws<PortableLogbookWorkbookStorageException>(
+            () => PortableLogbookWorkbookStorage.Deserialize(PortableLogbookWorkbookStorage.Serialize(envelope)));
+
+        Assert.Equal(PortableLogbookWorkbookStorageError.UnsupportedStorageVersion, exception.Error);
+    }
+
+    [Fact]
+    public void DeserializeRejectsInvalidEncryptedPackageBase64()
+    {
+        var document = CreateDocument();
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, [1, 2, 3], []) with
+        {
+            EncryptedHistoryPackageBase64 = "not base64"
+        };
+
+        var exception = Assert.Throws<PortableLogbookWorkbookStorageException>(
+            () => PortableLogbookWorkbookStorage.Deserialize(PortableLogbookWorkbookStorage.Serialize(envelope)));
+
+        Assert.Equal(PortableLogbookWorkbookStorageError.InvalidEncryptedHistoryPackage, exception.Error);
+    }
+
+    [Fact]
+    public void OpenEnvelopeRejectsWrongKeyWithoutReturningStoredState()
+    {
+        var document = CreateDocument();
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
+            document,
+            PortableLogbookPackage.Write(document, PortableLogbookKey.Generate()),
+            []);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookWorkbookStorage.OpenEnvelope(envelope, PortableLogbookKey.Generate()));
+
+        Assert.Equal(PortableLogbookPackageError.AuthenticationFailed, exception.Error);
+    }
+
+    [Fact]
+    public void OpenEnvelopeRejectsSummaryMismatch()
+    {
+        var document = CreateDocument();
+        var key = PortableLogbookKey.Generate();
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
+            document,
+            PortableLogbookPackage.Write(document, key),
+            []) with
+        {
+            Summary = PortableLogbookSummary.Create(document) with { OperationCount = 99 }
+        };
+
+        var exception = Assert.Throws<PortableLogbookWorkbookStorageException>(
+            () => PortableLogbookWorkbookStorage.OpenEnvelope(envelope, key));
+
+        Assert.Equal(PortableLogbookWorkbookStorageError.EnvelopeSummaryMismatch, exception.Error);
+    }
+
+    private static PortableLogbookDocument CreateDocument()
+    {
+        var create = new CreateEntryOperation(
+            new LogbookId("log_storage"),
+            new EntryId("ent_1"),
+            new RevisionId("rev_1"),
+            new DeviceId("dev_excel"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            PortableLogbookEntry.Empty with
+            {
+                Date = new DateOnly(2026, 7, 18),
+                AircraftType = "C172",
+                Registration = "VH-SECRET",
+                From = "YSBK",
+                To = "YSCN",
+                Details = "Training details",
+                PilotInCommand = 1.2m
+            });
+
+        return PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+    }
+}

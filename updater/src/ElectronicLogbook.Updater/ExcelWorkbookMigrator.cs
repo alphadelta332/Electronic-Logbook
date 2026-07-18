@@ -4,6 +4,7 @@ using Microsoft.CSharp.RuntimeBinder;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using ElectronicLogbook.Portable;
 using static ElectronicLogbook.Updater.WorkbookColor;
 using static ElectronicLogbook.Updater.WorkbookValue;
 
@@ -29,7 +30,10 @@ public sealed class ExcelWorkbookMigrator
         "RoutesBuilt",
         "RoutesDefinitionVersion",
         "DateAfterExport",
-        "suppressWarningsUntil"
+        "suppressWarningsUntil",
+        PortableLogbookWorkbookMetadata.LogbookIdName,
+        PortableLogbookWorkbookMetadata.DeviceIdName,
+        PortableLogbookWorkbookMetadata.SchemaVersionName
     ];
 
     private readonly IUpdaterProgressSink? _progressSink;

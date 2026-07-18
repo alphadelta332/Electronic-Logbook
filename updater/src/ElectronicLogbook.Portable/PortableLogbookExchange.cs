@@ -16,6 +16,9 @@ public static class PortableLogbookExchange
 
         EnsureValid(localDocument, nameof(localDocument));
         EnsureValid(incomingDocument, nameof(incomingDocument));
+        var customFieldMerge = PortableLogbookCustomFieldDefinitions.Merge(
+            localDocument.CustomFieldDefinitions,
+            incomingDocument.CustomFieldDefinitions);
 
         var localRevisionIds = localDocument.Operations.Select(operation => operation.RevisionId).ToHashSet();
         var newOperations = incomingDocument.Operations
@@ -32,7 +35,8 @@ public static class PortableLogbookExchange
             newOperations.Count(operation => operation.Kind == PortableOperationKind.Create),
             newOperations.Count(operation => operation.Kind == PortableOperationKind.Correction),
             newOperations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
-            merged.Conflicts);
+            merged.Conflicts,
+            customFieldMerge);
     }
 
     public static PortableLogbookDocument ApplyImport(
@@ -40,7 +44,7 @@ public static class PortableLogbookExchange
         PortableLogbookDocument incomingDocument)
     {
         var preview = PreviewImport(localDocument, incomingDocument);
-        if (preview.HasConflicts)
+        if (preview.HasConflicts || preview.CustomFieldDefinitions.HasConflicts)
         {
             throw new PortableLogbookImportException(
                 PortableLogbookImportError.UnresolvedConflicts,
@@ -49,8 +53,23 @@ public static class PortableLogbookExchange
 
         return PortableLogbookDocument.CreateAustraliaFirst(
             localDocument.LogbookId,
-            localDocument.CustomFieldDefinitions,
+            preview.CustomFieldDefinitions.Definitions,
             localDocument.Operations.Concat(preview.NewOperations));
+    }
+
+    public static PortableLogbookImportPlan PlanImport(
+        PortableLogbookDocument localDocument,
+        PortableLogbookDocument incomingDocument)
+    {
+        var preview = PreviewImport(localDocument, incomingDocument);
+        var status = preview.CustomFieldDefinitions.HasConflicts
+            ? PortableLogbookImportPlanStatus.RequiresCustomFieldResolution
+            : preview.HasConflicts
+            ? PortableLogbookImportPlanStatus.RequiresConflictResolution
+            : preview.NewOperations.Count == 0
+                ? PortableLogbookImportPlanStatus.DuplicateOnly
+                : PortableLogbookImportPlanStatus.ReadyToApply;
+        return new PortableLogbookImportPlan(status, preview);
     }
 
     private static void EnsureValid(PortableLogbookDocument document, string parameterName)
@@ -69,9 +88,22 @@ public sealed record PortableLogbookImportPreview(
     int CreateCount,
     int CorrectionCount,
     int DeletionCount,
-    IReadOnlyList<PortableLogbookConflict> Conflicts)
+    IReadOnlyList<PortableLogbookConflict> Conflicts,
+    PortableLogbookCustomFieldDefinitionMergeResult CustomFieldDefinitions)
 {
     public bool HasConflicts => Conflicts.Count > 0;
+}
+
+public sealed record PortableLogbookImportPlan(
+    PortableLogbookImportPlanStatus Status,
+    PortableLogbookImportPreview Preview);
+
+public enum PortableLogbookImportPlanStatus
+{
+    DuplicateOnly,
+    ReadyToApply,
+    RequiresConflictResolution,
+    RequiresCustomFieldResolution
 }
 
 public sealed class PortableLogbookImportException : Exception

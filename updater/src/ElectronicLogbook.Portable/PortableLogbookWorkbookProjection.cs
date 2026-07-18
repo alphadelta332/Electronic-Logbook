@@ -15,10 +15,20 @@ public static class PortableLogbookWorkbookProjection
 
         idFactory ??= PortableLogbookIdFactory.Default;
         var knownByEntryId = knownEntries.ToDictionary(entry => entry.EntryId);
+        var rows = currentRows.ToArray();
+        var rowValidation = PortableLogbookWorkbookRowValidator.Validate(rows, knownByEntryId.Values);
+        if (!rowValidation.IsValid)
+        {
+            throw new PortableLogbookWorkbookProjectionException(
+                PortableLogbookWorkbookProjectionError.InvalidRowMetadata,
+                "Workbook row metadata is invalid.",
+                rowValidation);
+        }
+
         var seenKnownIds = new HashSet<EntryId>();
         var operations = new List<PortableLogbookOperation>();
 
-        foreach (var row in currentRows)
+        foreach (var row in rows)
         {
             if (row.EntryId is null || !knownByEntryId.TryGetValue(row.EntryId.Value, out var known))
             {
@@ -108,4 +118,26 @@ public sealed record PortableLogbookProjectionResult(
     public int CorrectionCount => Operations.Count(operation => operation.Kind == PortableOperationKind.Correction);
 
     public int DeletionCount => Operations.Count(operation => operation.Kind == PortableOperationKind.Deletion);
+}
+
+public sealed class PortableLogbookWorkbookProjectionException : Exception
+{
+    public PortableLogbookWorkbookProjectionException(
+        PortableLogbookWorkbookProjectionError error,
+        string message,
+        PortableLogbookWorkbookRowValidationResult rowValidation)
+        : base(message)
+    {
+        Error = error;
+        RowValidation = rowValidation;
+    }
+
+    public PortableLogbookWorkbookProjectionError Error { get; }
+
+    public PortableLogbookWorkbookRowValidationResult RowValidation { get; }
+}
+
+public enum PortableLogbookWorkbookProjectionError
+{
+    InvalidRowMetadata
 }

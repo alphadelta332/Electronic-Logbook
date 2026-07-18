@@ -89,6 +89,31 @@ public sealed class PortableLogbookPackageTests
     }
 
     [Fact]
+    public void ReadRejectsPackageLargerThanConfiguredLimit()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+        var options = new PortableLogbookPackageReadOptions(packageBytes.Length - 1);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Read(packageBytes, FixedKey(1), document.LogbookId, options));
+
+        Assert.Equal(PortableLogbookPackageError.PackageTooLarge, exception.Error);
+    }
+
+    [Fact]
+    public void ReadRejectsInvalidMagic()
+    {
+        var bytes = new byte[64];
+        Array.Fill<byte>(bytes, 1);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Read(bytes, FixedKey(1)));
+
+        Assert.Equal(PortableLogbookPackageError.InvalidMagic, exception.Error);
+    }
+
+    [Fact]
     public void WriteRejectsInvalidDocument()
     {
         var create = CreateOperation();
@@ -121,6 +146,79 @@ public sealed class PortableLogbookPackageTests
                 ? PortableLogbookPackageError.UnsupportedFormatVersion
                 : PortableLogbookPackageError.UnsupportedSchemaVersion,
             exception.Error);
+    }
+
+    [Theory]
+    [InlineData("compression")]
+    [InlineData("encryption")]
+    public void ReadRejectsUnsupportedManifestAlgorithms(string algorithmKind)
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+        var manifest = ReadManifest(packageBytes);
+        manifest = algorithmKind == "compression"
+            ? manifest with { Compression = "brotli" }
+            : manifest with { Encryption = "AES-128-CBC" };
+        var modified = ReplaceManifestForAuthenticationFailure(packageBytes, manifest);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Read(modified, FixedKey(1), document.LogbookId));
+
+        Assert.Equal(
+            algorithmKind == "compression"
+                ? PortableLogbookPackageError.UnsupportedCompression
+                : PortableLogbookPackageError.UnsupportedEncryption,
+            exception.Error);
+    }
+
+    [Fact]
+    public void ReadRejectsManifestPayloadMismatchAfterAuthenticatedDecrypt()
+    {
+        var document = CreateDocument();
+        var manifest = new PortableLogbookPackageManifest(
+            PortableLogbookPackage.FormatVersion,
+            document.LogbookId,
+            document.SchemaVersion,
+            document.JurisdictionProfile,
+            document.JurisdictionProfileVersion,
+            CustomFieldCount: document.CustomFieldDefinitions.Count,
+            OperationCount: document.Operations.Count + 1,
+            CreatedAt: DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            Compression: "gzip",
+            Encryption: "AES-256-GCM");
+        var packageBytes = WritePackageWithManifest(document, manifest, FixedKey(1));
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Read(packageBytes, FixedKey(1), document.LogbookId));
+
+        Assert.Equal(PortableLogbookPackageError.ManifestPayloadMismatch, exception.Error);
+    }
+
+    [Fact]
+    public void ReadManifestReturnsPublicPackageMetadataWithoutKey()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+
+        var manifest = PortableLogbookPackage.ReadManifest(packageBytes);
+
+        Assert.Equal(document.LogbookId, manifest.LogbookId);
+        Assert.Equal(document.SchemaVersion, manifest.SchemaVersion);
+        Assert.Equal(document.JurisdictionProfile, manifest.JurisdictionProfile);
+        Assert.Equal(document.JurisdictionProfileVersion, manifest.JurisdictionProfileVersion);
+        Assert.Equal(document.Operations.Count, manifest.OperationCount);
+    }
+
+    [Fact]
+    public void ReadManifestRejectsOversizedPackageBeforeParsingManifest()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.ReadManifest(packageBytes, new PortableLogbookPackageReadOptions(packageBytes.Length - 1)));
+
+        Assert.Equal(PortableLogbookPackageError.PackageTooLarge, exception.Error);
     }
 
     [Fact]
@@ -190,6 +288,40 @@ public sealed class PortableLogbookPackageTests
         output.Write(manifestLength);
         output.Write(newManifestBytes);
         output.Write(packageBytes.AsSpan(remainderStart));
+        return output.ToArray();
+    }
+
+    private static byte[] WritePackageWithManifest(
+        PortableLogbookDocument document,
+        PortableLogbookPackageManifest manifest,
+        byte[] key)
+    {
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, PortableLogbookJson.SerializerOptions);
+        var plaintext = System.Text.Encoding.UTF8.GetBytes(PortableLogbookJson.Serialize(document));
+        using var compressedStream = new MemoryStream();
+        using (var gzip = new System.IO.Compression.GZipStream(compressedStream, System.IO.Compression.CompressionLevel.SmallestSize, leaveOpen: true))
+        {
+            gzip.Write(plaintext);
+        }
+
+        var nonce = new byte[12];
+        Array.Fill<byte>(nonce, 9);
+        var tag = new byte[16];
+        var ciphertext = new byte[compressedStream.ToArray().Length];
+        using (var aes = new System.Security.Cryptography.AesGcm(key, tag.Length))
+        {
+            aes.Encrypt(nonce, compressedStream.ToArray(), ciphertext, tag, manifestBytes);
+        }
+
+        using var output = new MemoryStream();
+        output.Write(System.Text.Encoding.ASCII.GetBytes("ELOGPKG1"));
+        Span<byte> manifestLength = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(manifestLength, manifestBytes.Length);
+        output.Write(manifestLength);
+        output.Write(manifestBytes);
+        output.Write(nonce);
+        output.Write(tag);
+        output.Write(ciphertext);
         return output.ToArray();
     }
 

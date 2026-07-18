@@ -2,6 +2,7 @@
   "schemaVersion": 1,
   "logbookId": "log_fixture",
   "jurisdictionProfile": "AU",
+  "jurisdictionProfileVersion": 1,
   "customFieldDefinitions": [
     {
       "id": "cf_training_kind",

@@ -109,6 +109,19 @@ public sealed class PortableLogbookExchangeTests
     }
 
     [Fact]
+    public void ApplyImportAddsIncomingCustomFieldDefinitions()
+    {
+        var create = CreateOperation();
+        var incomingField = new CustomFieldDefinition(new CustomFieldId("cf_incoming"), "Incoming", 1);
+        var local = Document(create.LogbookId, [create]);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [incomingField], [create]);
+
+        var applied = PortableLogbookExchange.ApplyImport(local, incoming);
+
+        Assert.Equal(incomingField, Assert.Single(applied.CustomFieldDefinitions));
+    }
+
+    [Fact]
     public void ApplyImportBlocksUnresolvedConflicts()
     {
         var create = CreateOperation();
@@ -120,6 +133,44 @@ public sealed class PortableLogbookExchangeTests
         var exception = Assert.Throws<PortableLogbookImportException>(() => PortableLogbookExchange.ApplyImport(local, incoming));
 
         Assert.Equal(PortableLogbookImportError.UnresolvedConflicts, exception.Error);
+    }
+
+    [Fact]
+    public void PlanImportClassifiesDuplicateOnlyReadyAndConflictStates()
+    {
+        var create = CreateOperation();
+        var correction = CorrectOperation(create, "VH-XYZ", "rev_correct");
+        var conflictingCorrection = CorrectOperation(create, "VH-CONFLICT", "rev_conflict");
+        var local = Document(create.LogbookId, [create]);
+        var duplicatePlan = PortableLogbookExchange.PlanImport(local, Document(create.LogbookId, [create]));
+        var readyPlan = PortableLogbookExchange.PlanImport(local, Document(create.LogbookId, [create, correction]));
+        var conflictPlan = PortableLogbookExchange.PlanImport(
+            Document(create.LogbookId, [create, correction]),
+            Document(create.LogbookId, [create, conflictingCorrection]));
+
+        Assert.Equal(PortableLogbookImportPlanStatus.DuplicateOnly, duplicatePlan.Status);
+        Assert.Equal(PortableLogbookImportPlanStatus.ReadyToApply, readyPlan.Status);
+        Assert.Equal(PortableLogbookImportPlanStatus.RequiresConflictResolution, conflictPlan.Status);
+    }
+
+    [Fact]
+    public void PlanImportRequiresCustomFieldResolutionForConflictingDefinitions()
+    {
+        var create = CreateOperation();
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var local = PortableLogbookDocument.CreateAustraliaFirst(
+            create.LogbookId,
+            [new CustomFieldDefinition(fieldId, "Training kind", 1)],
+            [create]);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(
+            create.LogbookId,
+            [new CustomFieldDefinition(fieldId, "Training category", 1)],
+            [create]);
+
+        var plan = PortableLogbookExchange.PlanImport(local, incoming);
+
+        Assert.Equal(PortableLogbookImportPlanStatus.RequiresCustomFieldResolution, plan.Status);
+        Assert.True(plan.Preview.CustomFieldDefinitions.HasConflicts);
     }
 
     private static PortableLogbookDocument Document(

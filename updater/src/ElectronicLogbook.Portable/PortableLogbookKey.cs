@@ -37,7 +37,7 @@ public sealed class PortableLogbookKey : IEquatable<PortableLogbookKey>
         {
             return FromBytes(Base64UrlDecode(recoveryCode));
         }
-        catch (FormatException ex)
+        catch (Exception ex) when (ex is FormatException or ArgumentException)
         {
             throw new ArgumentException("Recovery code is not a valid portable logbook key.", nameof(recoveryCode), ex);
         }

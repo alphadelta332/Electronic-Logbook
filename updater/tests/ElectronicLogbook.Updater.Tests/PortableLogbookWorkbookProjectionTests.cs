@@ -74,17 +74,17 @@ public sealed class PortableLogbookWorkbookProjectionTests
     }
 
     [Fact]
-    public void ReconcileTreatsRowsWithUnknownIdsAsCreates()
+    public void ReconcileRejectsRowsWithUnknownIds()
     {
         var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
 
-        var result = Reconcile(
+        var exception = Assert.Throws<PortableLogbookWorkbookProjectionException>(() => Reconcile(
             [known],
             [new PortableLogbookWorkbookRow(new EntryId("ent_unknown"), new RevisionId("rev_unknown"), Entry("VH-NEW"))],
-            new PortableLogbookIdFactory(() => new EntryId("ent_created"), () => new RevisionId("rev_created")));
+            new PortableLogbookIdFactory(() => new EntryId("ent_created"), () => new RevisionId("rev_created"))));
 
-        Assert.Contains(result.Operations, operation => operation is CreateEntryOperation create && create.EntryId == new EntryId("ent_created"));
-        Assert.Contains(result.Operations, operation => operation is DeleteEntryOperation delete && delete.EntryId == known.EntryId);
+        Assert.Equal(PortableLogbookWorkbookProjectionError.InvalidRowMetadata, exception.Error);
+        Assert.Contains(exception.RowValidation.Errors, error => error.Code == PortableLogbookWorkbookRowValidationCode.UnknownEntryId);
     }
 
     private static PortableLogbookProjectionResult Reconcile(

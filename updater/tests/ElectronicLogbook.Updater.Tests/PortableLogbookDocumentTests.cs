@@ -21,6 +21,7 @@ public sealed class PortableLogbookDocumentTests
 
         Assert.Equal(PortableLogbookDocument.CurrentSchemaVersion, document.SchemaVersion);
         Assert.Equal(PortableLogbookDocument.AustraliaJurisdictionProfile, document.JurisdictionProfile);
+        Assert.Equal(PortableLogbookDocument.AustraliaJurisdictionProfileVersion, document.JurisdictionProfileVersion);
         Assert.Equal(["cf_first", "cf_second"], document.CustomFieldDefinitions.Select(field => field.Id.Value));
         Assert.Equal(["rev_1", "rev_2"], document.Operations.Select(operation => operation.RevisionId.Value));
     }

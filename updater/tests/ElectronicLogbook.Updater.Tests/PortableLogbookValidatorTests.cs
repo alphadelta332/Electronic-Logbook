@@ -31,13 +31,15 @@ public sealed class PortableLogbookValidatorTests
     [Theory]
     [InlineData(2, PortableLogbookValidationCode.UnsupportedSchemaVersion)]
     [InlineData(1, PortableLogbookValidationCode.MissingJurisdictionProfile)]
+    [InlineData(0, PortableLogbookValidationCode.InvalidJurisdictionProfileVersion)]
     public void ValidateRejectsInvalidDocumentEnvelope(int schemaVersion, PortableLogbookValidationCode expectedCode)
     {
         var create = CreateOperation();
         var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]) with
         {
             SchemaVersion = schemaVersion,
-            JurisdictionProfile = schemaVersion == 1 ? "" : PortableLogbookDocument.AustraliaJurisdictionProfile
+            JurisdictionProfile = schemaVersion == 1 ? "" : PortableLogbookDocument.AustraliaJurisdictionProfile,
+            JurisdictionProfileVersion = schemaVersion == 0 ? 0 : PortableLogbookDocument.AustraliaJurisdictionProfileVersion
         };
 
         var result = PortableLogbookValidator.Validate(document);
@@ -148,6 +150,34 @@ public sealed class PortableLogbookValidatorTests
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error => error.Code == PortableLogbookValidationCode.UnknownCustomFieldId);
+    }
+
+    [Fact]
+    public void ValidateRejectsCyclicRevisionHistory()
+    {
+        var create = CreateOperation();
+        var revisionA = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_a"),
+            new HashSet<RevisionId> { new("rev_b") },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            create.Entry);
+        var revisionB = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_b"),
+            new HashSet<RevisionId> { revisionA.RevisionId },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(2),
+            create.Entry);
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create, revisionA, revisionB]);
+
+        var result = PortableLogbookValidator.Validate(document);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Code == PortableLogbookValidationCode.CyclicRevisionHistory);
     }
 
     private static CreateEntryOperation CreateOperation(IReadOnlyDictionary<CustomFieldId, string?>? customFields = null) =>
