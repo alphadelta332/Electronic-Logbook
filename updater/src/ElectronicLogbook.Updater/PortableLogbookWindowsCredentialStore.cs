@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater;
