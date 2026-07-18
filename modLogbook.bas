@@ -23,6 +23,7 @@ Private Const LOGBOOK_ACTION_BUTTON_HEIGHT As Double = 45
 Private Const LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE As Double = 1
 Private mApplyingNewEntryLayout As Boolean
 Private mLastLogbookExportError As String
+Private mPendingNewEntryNavigationFields As Variant
 
 Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
@@ -107,6 +108,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         opcSelected = NewEntryBooleanValue("neOPC")
         flightReviewSelected = NewEntryBooleanValue("neFR")
         RefreshDateCalculationFormulas tbl
+        ClearPendingNewEntryValidationNavigation
         ClearNewEntryValidationHighlights
 
     '===============================
@@ -117,22 +119,25 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
     '--- 3a. Date Validity Check
         'Check 1: Ensure the date field doesn't contain a formula error (e.g. invalid month string)
         If IsError(NewEntryValue("neDate")) Then
-            MarkNewEntryProblemFields NewEntryDateInputFieldNames()
-            MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
+            ShowNewEntryValidationError NewEntryDateInputFieldNames(), _
+                                        "NEWENTRY-E001", _
+                                        "The Date field is not valid. Use a valid day, three-letter month, and year, and make sure the date is not in the future."
             GoTo Cleanup
         End If
 
         'Check 2: Ensure the resolved value is actually a recognisable date
         If Not IsDate(NewEntryValue("neDate")) Then
-            MarkNewEntryProblemFields NewEntryDateInputFieldNames()
-            MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
+            ShowNewEntryValidationError NewEntryDateInputFieldNames(), _
+                                        "NEWENTRY-E001", _
+                                        "The Date field is not valid. Use a valid day, three-letter month, and year, and make sure the date is not in the future."
             GoTo Cleanup
         End If
 
         'Check 3: Ensure the date is not in the future
         If CDate(NewEntryValue("neDate")) > todayDate Then
-            MarkNewEntryProblemFields NewEntryDateInputFieldNames()
-            MsgBox "ERROR: Formatting error in the Date field. Ensure the month is entered in the correct 3 letter format, the date is a valid one, and the date is not in the future.", vbCritical
+            ShowNewEntryValidationError NewEntryDateInputFieldNames(), _
+                                        "NEWENTRY-E001", _
+                                        "The Date field is not valid. Use a valid day, three-letter month, and year, and make sure the date is not in the future."
             GoTo Cleanup
         End If
 
@@ -145,8 +150,9 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
             'Check 1: Aircraft registration must not be blank
             If CStr(NewEntryValue("neReg")) = "" Then
-                MarkNewEntryProblemFields Array("neReg")
-                MsgBox "ERROR: Registration cannot be blank.", vbCritical
+                ShowNewEntryValidationError Array("neReg"), _
+                                            "NEWENTRY-E002", _
+                                            "Registration is required for a flight entry. Enter the aircraft registration, or record simulator time instead."
                 GoTo Cleanup
             End If
 
@@ -154,15 +160,17 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
     '--- 3c. Zero Hours Check
         If CountPositiveNewEntryFields(NewEntryFlightHourFieldNames()) = 0 Then
-            MarkNewEntryProblemFields NewEntryFlightHourFieldNames()
-            MsgBox "ERROR: Total hours cannot be zero.", vbCritical
+            ShowNewEntryValidationError NewEntryFlightHourFieldNames(), _
+                                        "NEWENTRY-E003", _
+                                        "Total flight or simulator time cannot be zero. Enter at least one hour value before adding the entry."
             GoTo Cleanup
         End If
 
     '--- 3d. IFR Hours vs Total Hours Check
         If NewEntryNumericValue("neIfrIf") > SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
-            MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neIfrIf"), NewEntryFlightTimeFieldNames())
-            MsgBox "ERROR: In Flight Instrument Hours cannot be greater than Total Hours.", vbCritical
+            ShowNewEntryValidationError CombineNewEntryFieldNames(Array("neIfrIf"), NewEntryFlightTimeFieldNames()), _
+                                        "NEWENTRY-E004", _
+                                        "In-flight instrument time cannot be greater than the total flight time for this entry."
             GoTo Cleanup
         End If
 
@@ -177,22 +185,25 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
         For i = 0 To UBound(requiredFields)
             If NewEntryValue(CStr(requiredFields(i))) = "" Then
-                MarkNewEntryProblemFields Array(CStr(requiredFields(i)))
-                MsgBox "ERROR: " & fieldNames(i) & " cannot be blank.", vbCritical
+                ShowNewEntryValidationError Array(CStr(requiredFields(i))), _
+                                            "NEWENTRY-E005", _
+                                            CStr(fieldNames(i)) & " is required before this entry can be added."
                 GoTo Cleanup
             End If
         Next i
 
         If NewEntryNumericValue("neIfrSim") = 0 Then
             If NewEntryValue("neFrom") = "" Then
-                MarkNewEntryProblemFields Array("neFrom")
-                MsgBox "ERROR: Departure Airport cannot be blank.", vbCritical
+                ShowNewEntryValidationError Array("neFrom"), _
+                                            "NEWENTRY-E006", _
+                                            "Departure airport is required for a flight entry."
                 GoTo Cleanup
             End If
 
             If NewEntryValue("neTo") = "" Then
-                MarkNewEntryProblemFields Array("neTo")
-                MsgBox "ERROR: Destination Airport cannot be blank.", vbCritical
+                ShowNewEntryValidationError Array("neTo"), _
+                                            "NEWENTRY-E007", _
+                                            "Destination airport is required for a flight entry."
                 GoTo Cleanup
             End If
         End If
@@ -203,8 +214,9 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         For Each checkField In NewEntryNumericFieldNames()
             If NewEntryValue(CStr(checkField)) <> "" Then
                 If Not IsNumeric(NewEntryValue(CStr(checkField))) Then
-                    MarkNewEntryProblemFields Array(CStr(checkField))
-                    MsgBox "ERROR: Non-numerical value found in Hours, Landings, or Approaches.", vbCritical
+                    ShowNewEntryValidationError Array(CStr(checkField)), _
+                                                "NEWENTRY-E008", _
+                                                "Hours, landings, and approaches must be numbers."
                     GoTo Cleanup
                 End If
             End If
@@ -235,31 +247,28 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If NewEntryBooleanValue("neOPC") And _
                (NewEntryNumericValue("neIfrIf") > 0 Or NewEntryNumericValue("neIfrSim") > 0) And _
                Not NewEntryBooleanValue("neIPC") Then
-                response = MsgBox("Warning: OPC is ticked and instrument hours are logged, but IPC is not ticked. Continue?", _
-                                  vbOKCancel + vbExclamation, _
-                                  "OPC Without IPC")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields Array("neOPC", "neIPC", "neIfrIf", "neIfrSim")
+                If Not ConfirmNewEntryValidationWarning(Array("neOPC", "neIPC", "neIfrIf", "neIfrSim"), _
+                                                        "NEWENTRY-W001", _
+                                                        "OPC is ticked and instrument time is logged, but IPC is not ticked.", _
+                                                        "OPC Without IPC") Then
                     GoTo Cleanup
                 End If
             End If
 
             If NewEntryBooleanValue("neIPC") And Not NewEntryBooleanValue("neFR") Then
-                response = MsgBox("Warning: IPC is ticked, but Flight Review is not ticked. Continue?", _
-                                  vbOKCancel + vbExclamation, _
-                                  "IPC Without Flight Review")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields Array("neIPC", "neFR")
+                If Not ConfirmNewEntryValidationWarning(Array("neIPC", "neFR"), _
+                                                        "NEWENTRY-W002", _
+                                                        "IPC is ticked, but Flight Review is not ticked.", _
+                                                        "IPC Without Flight Review") Then
                     GoTo Cleanup
                 End If
             End If
 
             If NewEntryBooleanValue("neIPC") And NewEntryNumericValue("neCircling") = 0 Then
-                response = MsgBox("No Circling Approach was recorded on this IPC. This means you will not be recent for circling approaches until your next IPC. Continue?", _
-                                  vbOKCancel + vbExclamation, _
-                                  "IPC Without Circling Approach")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields Array("neIPC", "neCircling")
+                If Not ConfirmNewEntryValidationWarning(Array("neIPC", "neCircling"), _
+                                                        "NEWENTRY-W003", _
+                                                        "No circling approach was recorded on this IPC. You will not be recent for circling approaches until your next IPC.", _
+                                                        "IPC Without Circling Approach") Then
                     GoTo Cleanup
                 End If
             End If
@@ -270,11 +279,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             Dim unrecognisedAirportFields As Variant
             unrecognisedAirportFields = UnrecognisedNewEntryAirportFieldNames()
             If VariantArrayHasItems(unrecognisedAirportFields) Then
-                response = MsgBox(UnrecognisedNewEntryAirportWarningMessage(unrecognisedAirportFields), _
-                                  vbOKCancel + vbExclamation, _
-                                  "Unrecognised Airport")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields unrecognisedAirportFields
+                If Not ConfirmNewEntryValidationWarning(unrecognisedAirportFields, _
+                                                        "NEWENTRY-W004", _
+                                                        UnrecognisedNewEntryAirportWarningMessage(unrecognisedAirportFields), _
+                                                        "Unrecognised Airport") Then
                     GoTo Cleanup
                 End If
             End If
@@ -287,11 +295,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
             distantAirportFields = DistantNewEntryAirportFieldNames(distantAirportMessage)
             If VariantArrayHasItems(distantAirportFields) Then
-                response = MsgBox(distantAirportMessage, _
-                                  vbOKCancel + vbExclamation, _
-                                  "Distant Airport")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields distantAirportFields
+                If Not ConfirmNewEntryValidationWarning(distantAirportFields, _
+                                                        "NEWENTRY-W005", _
+                                                        distantAirportMessage, _
+                                                        "Distant Airport") Then
                     GoTo Cleanup
                 End If
             End If
@@ -304,11 +311,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
             highSpeedRouteFields = HighSpeedNewEntryRouteFieldNames(highSpeedRouteMessage)
             If VariantArrayHasItems(highSpeedRouteFields) Then
-                response = MsgBox(highSpeedRouteMessage, _
-                                  vbOKCancel + vbExclamation, _
-                                  "High Route Speed")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields highSpeedRouteFields
+                If Not ConfirmNewEntryValidationWarning(highSpeedRouteFields, _
+                                                        "NEWENTRY-W006", _
+                                                        highSpeedRouteMessage, _
+                                                        "High Route Speed") Then
                     GoTo Cleanup
                 End If
             End If
@@ -323,9 +329,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                 If Not copilotHoursRecorded And _
                    NewEntryNumericValue("neLandingsDay") = 0 And _
                    NewEntryNumericValue("neLandingsNight") = 0 Then
-                    response = MsgBox("Warning: No Landings Recorded. Proceed?", vbOKCancel + vbExclamation, "No Landings")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields Array("neLandingsDay", "neLandingsNight")
+                    If Not ConfirmNewEntryValidationWarning(Array("neLandingsDay", "neLandingsNight"), _
+                                                            "NEWENTRY-W007", _
+                                                            "No landings are recorded for this non-simulator entry.", _
+                                                            "No Landings") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -336,11 +343,11 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         If Not suppressWarnings Then
             If latestLogbookDate <> 0 Then
                 If CDate(NewEntryValue("neDate")) < latestLogbookDate Then
-                    response = MsgBox("Warning: This entry is dated before the latest existing Logbook entry (" & _
-                                      Format(latestLogbookDate, "dd mmm yyyy") & "). Continue?", _
-                                      vbOKCancel + vbExclamation, "Earlier Than Latest Logbook Entry")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields NewEntryDateInputFieldNames()
+                    If Not ConfirmNewEntryValidationWarning(NewEntryDateInputFieldNames(), _
+                                                            "NEWENTRY-W008", _
+                                                            "This entry is dated before the latest existing Logbook entry (" & _
+                                                            Format(latestLogbookDate, "dd mmm yyyy") & ").", _
+                                                            "Earlier Than Latest Logbook Entry") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -355,9 +362,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             'Check 1: Day hours recorded but no day landings
             If dayHours > 0 And Not copilotHoursRecorded Then
                 If NewEntryNumericValue("neLandingsDay") = 0 Then
-                    response = MsgBox("Warning: Day hours recorded, but no Day Landings recorded. Continue?", vbOKCancel + vbExclamation, "Day Hours Warning")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryDayFlightTimeFieldNames(), Array("neLandingsDay"))
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntryDayFlightTimeFieldNames(), Array("neLandingsDay")), _
+                                                            "NEWENTRY-W009", _
+                                                            "Day hours are recorded, but no day landings are recorded.", _
+                                                            "Day Hours Warning") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -366,9 +374,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             'Check 2: Day landings recorded but no day hours
             If NewEntryNumericValue("neLandingsDay") > 0 Then
                 If dayHours = 0 Then
-                    response = MsgBox("Warning: Day Landings recorded, but no Day hours recorded. Continue?", vbOKCancel + vbExclamation, "Day Landings Warning")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neLandingsDay"), NewEntryDayFlightTimeFieldNames())
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(Array("neLandingsDay"), NewEntryDayFlightTimeFieldNames()), _
+                                                            "NEWENTRY-W010", _
+                                                            "Day landings are recorded, but no day hours are recorded.", _
+                                                            "Day Landings Warning") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -383,9 +392,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             'Check 1: Night hours recorded but no night landings
             If nightHours > 0 And Not copilotHoursRecorded Then
                 If NewEntryNumericValue("neLandingsNight") = 0 Then
-                    response = MsgBox("Warning: Night hours recorded, but no Night Landings recorded. Continue?", vbOKCancel + vbExclamation, "Night Hours Warning")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryNightFlightTimeFieldNames(), Array("neLandingsNight"))
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntryNightFlightTimeFieldNames(), Array("neLandingsNight")), _
+                                                            "NEWENTRY-W011", _
+                                                            "Night hours are recorded, but no night landings are recorded.", _
+                                                            "Night Hours Warning") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -394,9 +404,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             'Check 2: Night landings recorded but no night hours
             If NewEntryNumericValue("neLandingsNight") > 0 Then
                 If nightHours = 0 Then
-                    response = MsgBox("Warning: Night Landings recorded, but no Night hours recorded. Continue?", vbOKCancel + vbExclamation, "Night Landings Warning")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neLandingsNight"), NewEntryNightFlightTimeFieldNames())
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(Array("neLandingsNight"), NewEntryNightFlightTimeFieldNames()), _
+                                                            "NEWENTRY-W012", _
+                                                            "Night landings are recorded, but no night hours are recorded.", _
+                                                            "Night Landings Warning") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -409,9 +420,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                       If NewEntryNumericValue("neIfrIf") = 0 And _
                           NewEntryNumericValue("neIfrSim") = 0 And _
                     CountPositiveNewEntryFields(NewEntryApproachFieldNames()) = 0 Then
-                    response = MsgBox("OPC is ticked but no instrument hours/approaches recorded. Continue?", vbOKCancel + vbExclamation, "OPC Validation")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryCurrencyFieldNames(), Array("neIfrIf", "neIfrSim"), NewEntryApproachFieldNames())
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntryCurrencyFieldNames(), Array("neIfrIf", "neIfrSim"), NewEntryApproachFieldNames()), _
+                                                            "NEWENTRY-W013", _
+                                                            "OPC is ticked, but no instrument time or approaches are recorded.", _
+                                                            "OPC Validation") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -423,9 +435,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If CountPositiveNewEntryFields(NewEntryApproachFieldNames()) > 0 Then
                      If NewEntryNumericValue("neIfrIf") = 0 And _
                          NewEntryNumericValue("neIfrSim") = 0 Then
-                    response = MsgBox("Warning: Approaches recorded with no Instrument hours. Continue?", vbOKCancel + vbExclamation, "Approaches Warning")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryApproachFieldNames(), Array("neIfrIf", "neIfrSim"))
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntryApproachFieldNames(), Array("neIfrIf", "neIfrSim")), _
+                                                            "NEWENTRY-W014", _
+                                                            "Approaches are recorded, but no instrument time is recorded.", _
+                                                            "Approaches Warning") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -437,9 +450,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         If Not suppressWarnings Then
             If (NewEntryNumericValue("neLandingsDay") + NewEntryNumericValue("neLandingsNight")) > _
                 6 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
-                response = MsgBox("Warning: Number of Landings seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Landings Warning")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neLandingsDay", "neLandingsNight"), NewEntryFlightTimeFieldNames())
+                If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(Array("neLandingsDay", "neLandingsNight"), NewEntryFlightTimeFieldNames()), _
+                                                        "NEWENTRY-W015", _
+                                                        "The number of landings seems high compared with the total hours.", _
+                                                        "High Landings Warning") Then
                     GoTo Cleanup
                 End If
             End If
@@ -450,9 +464,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         If Not suppressWarnings Then
             If SumNewEntryFields(NewEntryApproachFieldNames()) > _
                 3 * SumNewEntryFields(NewEntryFlightTimeFieldNames()) Then
-                response = MsgBox("Warning: Number of Approaches seems high compared to number of hours. Continue?", vbOKCancel + vbExclamation, "High Approaches Warning")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryApproachFieldNames(), NewEntryFlightTimeFieldNames())
+                If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntryApproachFieldNames(), NewEntryFlightTimeFieldNames()), _
+                                                        "NEWENTRY-W016", _
+                                                        "The number of approaches seems high compared with the total hours.", _
+                                                        "High Approaches Warning") Then
                     GoTo Cleanup
                 End If
             End If
@@ -467,9 +482,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                     "neMeIcusDay", "neMeIcusNight", _
                     "neMeDualDay", "neMeDualNight", _
                     "neCopilotDay", "neCopilotNight")) > 0 Then
-                    response = MsgBox("Warning: Dual, ICUS, or Copilot hours recorded, but no Other Pilot or Crew recorded. Continue?", vbOKCancel + vbExclamation, "Other Crew Warning")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields NewEntryOtherCrewWarningFieldNames()
+                    If Not ConfirmNewEntryValidationWarning(NewEntryOtherCrewWarningFieldNames(), _
+                                                            "NEWENTRY-W017", _
+                                                            "Dual, ICUS, or copilot hours are recorded, but no other pilot or crew is recorded.", _
+                                                            "Other Crew Warning") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -485,11 +501,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             currentMultiEngineHours = SumNewEntryFields(NewEntryMultiEngineFieldNames())
 
             If currentSingleEngineHours > 0 And currentMultiEngineHours > 0 Then
-                response = MsgBox("Warning: This entry records both Single Engine and Multi Engine hours. Continue?", _
-                                  vbOKCancel + vbExclamation, _
-                                  "Mixed Engine Class Hours")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntrySingleEngineFieldNames(), NewEntryMultiEngineFieldNames())
+                If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntrySingleEngineFieldNames(), NewEntryMultiEngineFieldNames()), _
+                                                        "NEWENTRY-W018", _
+                                                        "This entry records both single-engine and multi-engine hours.", _
+                                                        "Mixed Engine Class Hours") Then
                     GoTo Cleanup
                 End If
             End If
@@ -512,19 +527,17 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                                                                         NewEntryMultiEngineColumnNames())
 
                 If currentSingleEngineHours > 0 And currentMultiEngineHours = 0 And hasMultiEngineHistory Then
-                    response = MsgBox("Warning: This type has previously been logged with Multi Engine hours, but this entry records Single Engine hours. Continue?", _
-                                      vbOKCancel + vbExclamation, _
-                                      "Aircraft Type Engine Class")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neType"), NewEntrySingleEngineFieldNames())
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(Array("neType"), NewEntrySingleEngineFieldNames()), _
+                                                            "NEWENTRY-W019", _
+                                                            "This aircraft type has previously been logged with multi-engine hours, but this entry records single-engine hours.", _
+                                                            "Aircraft Type Engine Class") Then
                         GoTo Cleanup
                     End If
                 ElseIf currentMultiEngineHours > 0 And currentSingleEngineHours = 0 And hasSingleEngineHistory Then
-                    response = MsgBox("Warning: This type has previously been logged with Single Engine hours, but this entry records Multi Engine hours. Continue?", _
-                                      vbOKCancel + vbExclamation, _
-                                      "Aircraft Type Engine Class")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields CombineNewEntryFieldNames(Array("neType"), NewEntryMultiEngineFieldNames())
+                    If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(Array("neType"), NewEntryMultiEngineFieldNames()), _
+                                                            "NEWENTRY-W020", _
+                                                            "This aircraft type has previously been logged with single-engine hours, but this entry records multi-engine hours.", _
+                                                            "Aircraft Type Engine Class") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -568,11 +581,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                 Next rr
 
                 If hasRegWithDifferentType Then
-                    response = MsgBox("Warning: This Registration has previously been logged with a different aircraft Type. Continue?", _
-                                      vbOKCancel + vbExclamation, _
-                                      "Type/Registration Mismatch")
-                    If response = vbCancel Then
-                        MarkNewEntryProblemFields Array("neType", "neReg")
+                    If Not ConfirmNewEntryValidationWarning(Array("neType", "neReg"), _
+                                                            "NEWENTRY-W021", _
+                                                            "This registration has previously been logged with a different aircraft type.", _
+                                                            "Type/Registration Mismatch") Then
                         GoTo Cleanup
                     End If
                 End If
@@ -595,9 +607,10 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
         If Not suppressWarnings Then
             If dupFound Then
-                response = MsgBox("Warning: An entry with the same Date, Type, Registration and Remarks already exists in the Logbook. This may be a duplicate. Continue?", vbOKCancel + vbExclamation, "Duplicate Entry")
-                If response = vbCancel Then
-                    MarkNewEntryProblemFields CombineNewEntryFieldNames(NewEntryDateInputFieldNames(), Array("neType", "neReg", "neRemarks"))
+                If Not ConfirmNewEntryValidationWarning(CombineNewEntryFieldNames(NewEntryDateInputFieldNames(), Array("neType", "neReg", "neRemarks")), _
+                                                        "NEWENTRY-W022", _
+                                                        "An entry with the same date, type, registration, and remarks already exists in the Logbook. This may be a duplicate.", _
+                                                        "Duplicate Entry") Then
                     GoTo Cleanup
                 End If
             End If
@@ -840,6 +853,7 @@ Cleanup:
             Application.StatusBar = False
         End If
         Application.DisplayStatusBar = previousDisplayStatusBar
+        NavigateToPendingNewEntryProblemField
         TraceAddToLogbookLayout "Cleanup after app state restore", tbl
 
         If logbookWasProtected Then
@@ -1922,9 +1936,44 @@ Private Sub ClearNewEntryValidationHighlights()
     On Error GoTo 0
 End Sub
 
+Private Sub ShowNewEntryValidationError(ByVal fieldNames As Variant, _
+                                        ByVal code As String, _
+                                        ByVal message As String)
+    MarkNewEntryProblemFields fieldNames
+    NavigateToPendingNewEntryProblemField
+    MsgBox BuildNewEntryValidationMessage("Blocking error", message, code), _
+           vbCritical, "Entry Blocked"
+End Sub
+
+Private Function ConfirmNewEntryValidationWarning(ByVal fieldNames As Variant, _
+                                                 ByVal code As String, _
+                                                 ByVal message As String, _
+                                                 ByVal title As String) As Boolean
+    ConfirmNewEntryValidationWarning = _
+        (MsgBox(BuildNewEntryValidationMessage("Warning", _
+                                               message & vbCrLf & vbCrLf & _
+                                               "Choose OK to add the entry anyway, or Cancel to return to the highlighted field(s).", _
+                                               code), _
+                vbOKCancel + vbExclamation, title) = vbOK)
+    If Not ConfirmNewEntryValidationWarning Then
+        MarkNewEntryProblemFields fieldNames
+        NavigateToPendingNewEntryProblemField
+    End If
+End Function
+
+Private Function BuildNewEntryValidationMessage(ByVal category As String, _
+                                                ByVal message As String, _
+                                                ByVal code As String) As String
+    BuildNewEntryValidationMessage = category & ": " & message & vbCrLf & vbCrLf & _
+                                     "Your entry has been left unchanged." & vbCrLf & _
+                                     "Technical code: " & code
+End Function
+
 Private Sub MarkNewEntryProblemFields(ByVal fieldNames As Variant)
     Dim fieldName As Variant
     Dim inputArea As Range
+
+    mPendingNewEntryNavigationFields = fieldNames
 
     On Error Resume Next
     For Each fieldName In fieldNames
@@ -1937,6 +1986,29 @@ Private Sub MarkNewEntryProblemFields(ByVal fieldNames As Variant)
         Set inputArea = Nothing
     Next fieldName
     On Error GoTo 0
+End Sub
+
+Private Sub ClearPendingNewEntryValidationNavigation()
+    mPendingNewEntryNavigationFields = Empty
+End Sub
+
+Private Sub NavigateToPendingNewEntryProblemField()
+    If Not VariantArrayHasItems(mPendingNewEntryNavigationFields) Then Exit Sub
+
+    NavigateToNewEntryField CStr(mPendingNewEntryNavigationFields(LBound(mPendingNewEntryNavigationFields)))
+End Sub
+
+Private Sub NavigateToNewEntryField(ByVal fieldName As String)
+    Dim inputCell As Range
+
+    On Error GoTo CleanExit
+    Set inputCell = NewEntryCell(fieldName)
+    If inputCell.MergeCells Then Set inputCell = inputCell.MergeArea.Cells(1, 1)
+
+    inputCell.Worksheet.Activate
+    inputCell.Select
+
+CleanExit:
 End Sub
 
 Private Sub ClearNewEntryValidationHighlight(ByVal inputArea As Range)
@@ -2072,8 +2144,7 @@ Private Function UnrecognisedNewEntryAirportWarningMessage(ByVal fieldNames As V
         airportText = "An airport code is not recognised."
     End If
 
-    UnrecognisedNewEntryAirportWarningMessage = _
-        "Warning: " & airportText & " Continue?"
+    UnrecognisedNewEntryAirportWarningMessage = airportText
 End Function
 
 Private Function NewEntryAirportIsRecognised(ByVal airportCode As String) As Boolean
@@ -2255,12 +2326,11 @@ Private Function DistantNewEntryAirportFieldNames(ByRef warningMessage As String
         Exit Function
     End If
 
-    warningMessage = "Warning: One or more route airport distance checks look unusual." & _
+    warningMessage = "One or more route airport distance checks look unusual." & _
                      vbCrLf & vbCrLf
     For i = 1 To warningLines.Count
         warningMessage = warningMessage & CStr(warningLines(i)) & vbCrLf
     Next i
-    warningMessage = warningMessage & vbCrLf & "Continue?"
 
     ReDim result(0 To problemFields.Count - 1)
     For i = 1 To problemFields.Count
@@ -2385,12 +2455,12 @@ Private Function HighSpeedNewEntryRouteFieldNames(ByRef warningMessage As String
         Exit Function
     End If
 
-    warningMessage = "Warning: The route from " & fromIcao & AirportNameSuffix(fromName) & _
+    warningMessage = "The route from " & fromIcao & AirportNameSuffix(fromName) & _
                      " to " & toIcao & AirportNameSuffix(toName) & " is about " & _
                      Format$(routeDistanceNm, "#,##0") & " NM. With " & _
                      Format$(totalFlightHours, "0.0#") & " flight hours recorded, the implied " & _
                      "average speed is " & Format$(impliedSpeedKt, "#,##0") & _
-                     " knots. Continue?"
+                     " knots."
     HighSpeedNewEntryRouteFieldNames = CombineNewEntryFieldNames( _
         Array("neFrom", "neTo"), NewEntryFlightTimeFieldNames())
 End Function
@@ -3416,7 +3486,7 @@ Private Function MapLogTenRecord(ByVal sourceRow As Object, _
     mapped.CompareMode = vbTextCompare
 
     If Not IsDate(FieldValue(sourceRow, "Date")) Then
-        errors.Add "Row " & rowNumber & ": invalid or missing Date."
+        errors.Add "LOGTEN-E001 Row " & rowNumber & ": invalid or missing Date."
         Exit Function
     End If
 
@@ -3445,7 +3515,7 @@ Private Function MapLogTenRecord(ByVal sourceRow As Object, _
 
     accountedHours = picHours + p1usHours + sicHours
     If totalHours > 0 And accountedHours > totalHours + 0.0001 Then
-        errors.Add "Row " & rowNumber & ": PIC/P1u/s/SIC hours exceed Total Time."
+        errors.Add "LOGTEN-E002 Row " & rowNumber & ": PIC/P1u/s/SIC hours exceed Total Time."
         Exit Function
     End If
 
@@ -4119,6 +4189,8 @@ Private Sub WriteLogTenImportReport(ByVal mappedRows As Collection, _
     Dim item As Variant
     Dim mapped As Object
     Dim key As Variant
+    Dim firstIssueRow As Long
+    Dim issueRows As Long
 
     Set ws = EnsureLogTenImportReportSheet()
     ws.Cells.Clear
@@ -4135,17 +4207,21 @@ Private Sub WriteLogTenImportReport(ByVal mappedRows As Collection, _
     rowIndex = 8
     ws.Cells(rowIndex, 1).Value = "Issues"
     rowIndex = rowIndex + 1
+    firstIssueRow = rowIndex
     For Each item In errors
         ws.Cells(rowIndex, 1).Value = CStr(item)
         rowIndex = rowIndex + 1
+        issueRows = issueRows + 1
     Next item
     For Each key In unknownTypes.Keys
-        ws.Cells(rowIndex, 1).Value = "Unknown aircraft type: " & CStr(key)
+        ws.Cells(rowIndex, 1).Value = "LOGTEN-E003 Unknown aircraft type: " & CStr(key)
         rowIndex = rowIndex + 1
+        issueRows = issueRows + 1
     Next key
     For Each key In ignoredApproaches.Keys
-        ws.Cells(rowIndex, 1).Value = "Ignored approach label: " & CStr(key)
+        ws.Cells(rowIndex, 1).Value = "LOGTEN-W001 Ignored approach label: " & CStr(key)
         rowIndex = rowIndex + 1
+        issueRows = issueRows + 1
     Next key
 
     rowIndex = rowIndex + 2
@@ -4163,6 +4239,10 @@ Private Sub WriteLogTenImportReport(ByVal mappedRows As Collection, _
     Next mapped
 
     ws.Columns.AutoFit
+    If validationOnly And issueRows > 0 Then
+        ws.Activate
+        ws.Cells(firstIssueRow, 1).Select
+    End If
 End Sub
 
 Private Function EnsureLogTenImportReportSheet() As Worksheet
