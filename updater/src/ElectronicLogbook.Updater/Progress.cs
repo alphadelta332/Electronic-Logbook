@@ -19,6 +19,7 @@ public static class UpdaterPhaseIds
     public const string UpdateHoursOverTimeChart = "update-hours-over-time-chart";
     public const string ValidatePreservedData = "validate-preserved-data";
     public const string SaveOutputWorkbook = "save-output-workbook";
+    public const string CopyPortableStorage = "copy-portable-storage";
     public const string Completed = "completed";
     public const string Failed = "failed";
 }
@@ -52,6 +53,7 @@ public static class UpdaterPhasePolicies
             [UpdaterPhaseIds.UpdateHoursOverTimeChart] = 120,
             [UpdaterPhaseIds.ValidatePreservedData] = 120,
             [UpdaterPhaseIds.SaveOutputWorkbook] = 180,
+            [UpdaterPhaseIds.CopyPortableStorage] = 60,
             [UpdaterPhaseIds.Completed] = 0,
             [UpdaterPhaseIds.Failed] = 0
         };

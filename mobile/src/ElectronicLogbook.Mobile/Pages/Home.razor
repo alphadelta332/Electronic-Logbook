@@ -1,0 +1,578 @@
+@page "/"
+@inject BrowserLogbookStore LogbookStore
+
+<PageTitle>Electronic Logbook</PageTitle>
+
+<section class="status-band">
+    <div>
+        <span class="label">Logbook</span>
+        <strong>@Document.LogbookId.Value</strong>
+    </div>
+    <div>
+        <span class="label">Current entries</span>
+        <strong>@CurrentEntries.Count</strong>
+    </div>
+    <div>
+        <span class="label">Unexported</span>
+        <strong>@ExchangeStatus.PendingOperationCount</strong>
+    </div>
+</section>
+
+<section class="notice">
+    @ExchangeStatus.BackupNotice
+</section>
+
+@if (!string.IsNullOrWhiteSpace(StorageError))
+{
+    <section class="storage-block" role="alert">
+        @StorageError
+    </section>
+}
+
+<div class="workspace">
+    <section class="panel entry-panel">
+        <div class="section-heading">
+            <h1>@(EditingEntryId is null ? "New Flight" : "Edit Flight")</h1>
+            <span>@Draft.Date.ToString("dd MMM yyyy")</span>
+        </div>
+
+        <div class="form-grid">
+            <label>
+                Date
+                <input type="date" @bind="Draft.Date" />
+            </label>
+            <label>
+                Aircraft type
+                <input @bind="Draft.AircraftType" list="aircraft-types" />
+            </label>
+            <label>
+                Registration
+                <input @bind="Draft.Registration" list="registrations" />
+            </label>
+            <label>
+                Flight number
+                <input @bind="Draft.FlightNumber" />
+            </label>
+            <label>
+                From
+                <input @bind="Draft.From" list="airports" />
+            </label>
+            <label>
+                To
+                <input @bind="Draft.To" list="airports" />
+            </label>
+            <label>
+                Route
+                <input @bind="Draft.Route" />
+            </label>
+            <label>
+                PIC
+                <input type="number" step="0.1" @bind="Draft.PilotInCommand" />
+            </label>
+            <label>
+                Multi-pilot
+                <input type="number" step="0.1" @bind="Draft.MultiPilot" />
+            </label>
+            <label>
+                Co-pilot
+                <input type="number" step="0.1" @bind="Draft.CoPilot" />
+            </label>
+            <label>
+                Dual
+                <input type="number" step="0.1" @bind="Draft.Dual" />
+            </label>
+            <label>
+                Instructor
+                <input type="number" step="0.1" @bind="Draft.Instructor" />
+            </label>
+            <label>
+                Day
+                <input type="number" step="0.1" @bind="Draft.Day" />
+            </label>
+            <label>
+                Night
+                <input type="number" step="0.1" @bind="Draft.Night" />
+            </label>
+            <label>
+                Instrument actual
+                <input type="number" step="0.1" @bind="Draft.InstrumentActual" />
+            </label>
+            <label>
+                Instrument sim
+                <input type="number" step="0.1" @bind="Draft.InstrumentSimulated" />
+            </label>
+            <label>
+                Takeoffs day
+                <input type="number" @bind="Draft.TakeoffsDay" />
+            </label>
+            <label>
+                Takeoffs night
+                <input type="number" @bind="Draft.TakeoffsNight" />
+            </label>
+            <label>
+                Landings day
+                <input type="number" @bind="Draft.LandingsDay" />
+            </label>
+            <label>
+                Landings night
+                <input type="number" @bind="Draft.LandingsNight" />
+            </label>
+            <label>
+                IFR approaches
+                <input type="number" @bind="Draft.IfrApproaches" />
+            </label>
+            <label>
+                Holding
+                <input type="number" @bind="Draft.Holding" />
+            </label>
+            <label>
+                RNAV
+                <input type="number" @bind="Draft.Rnav" />
+            </label>
+            <label>
+                Circling
+                <input type="number" @bind="Draft.Circling" />
+            </label>
+        </div>
+
+        <datalist id="aircraft-types">
+            @foreach (var value in RecentValues(entry => entry.AircraftType))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="registrations">
+            @foreach (var value in RecentValues(entry => entry.Registration))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="airports">
+            @foreach (var value in RecentValues(entry => entry.From).Concat(RecentValues(entry => entry.To)).Distinct(StringComparer.OrdinalIgnoreCase).Order())
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+
+        <label class="wide-field">
+            Remarks
+            <textarea @bind="Draft.Remarks"></textarea>
+        </label>
+
+        <div class="calculated-total">
+            <span>Total flight time</span>
+            <strong>@FormatHours(Draft.TotalFlightTime) hr</strong>
+        </div>
+
+        <div class="custom-fields">
+            @foreach (var field in CustomFields)
+            {
+                <label>
+                    @field.Label
+                    <input @bind="Draft.CustomValues[field.Id]" />
+                </label>
+            }
+        </div>
+
+        @if (HasAttemptedSubmit && DraftErrors.Count > 0)
+        {
+            <div class="validation-summary" role="alert">
+                @foreach (var error in DraftErrors)
+                {
+                    <span>@error</span>
+                }
+            </div>
+        }
+
+        <div class="actions">
+            <button type="button" class="primary" @onclick="SaveEntryAsync" disabled="@IsStorageBlocked">@(EditingEntryId is null ? "Add entry" : "Save correction")</button>
+            <button type="button" @onclick="ResetDraft" disabled="@IsStorageBlocked">Clear</button>
+        </div>
+    </section>
+
+    <section class="panel list-panel">
+        <div class="section-heading">
+            <h2>Current Record</h2>
+            <span>@Document.Operations.Count operation(s)</span>
+        </div>
+
+        @if (CurrentEntries.Count == 0)
+        {
+            <p class="empty">No portable entries in this device copy yet.</p>
+        }
+        else
+        {
+            <div class="entry-list">
+                @foreach (var entry in CurrentEntries)
+                {
+                    <article class="entry-row">
+                        <div>
+                            <strong>@FormatDate(entry.Entry!.Date)</strong>
+                            <span>@entry.Entry.AircraftType @entry.Entry.Registration</span>
+                        </div>
+                        <div>
+                            <strong>@entry.Entry.From - @entry.Entry.To</strong>
+                            <span>@FormatHours((entry.Entry.PilotInCommand ?? 0) + (entry.Entry.Dual ?? 0)) hr total</span>
+                        </div>
+                        <div class="row-actions">
+                            <button type="button" @onclick="() => EditEntry(entry)">Edit</button>
+                            <button type="button" @onclick="() => CloneEntry(entry.Entry)">Clone</button>
+                            <button type="button" @onclick="() => ShowHistory(entry)">History</button>
+                            <button type="button" @onclick="() => DeleteEntryAsync(entry)">Delete</button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+
+        @if (HistoryEntry is not null)
+        {
+            <div class="history-panel">
+                <div class="section-heading">
+                    <h2>Revision History</h2>
+                    <button type="button" @onclick="() => HistoryEntry = null">Close</button>
+                </div>
+                @foreach (var revisionId in HistoryEntry.RevisionHistory)
+                {
+                    var operation = Document.Operations.First(operation => operation.RevisionId == revisionId);
+                    <div class="history-row">
+                        <strong>@operation.Kind</strong>
+                        <span>@operation.RevisionId.Value</span>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="exchange-box">
+            <button type="button">Import package</button>
+            <button type="button" class="primary">Export package</button>
+        </div>
+    </section>
+</div>
+
+@code {
+    private readonly DeviceId DeviceId = new("dev_mobile_preview");
+    private readonly CustomFieldDefinition[] CustomFields =
+    [
+        new(new CustomFieldId("cf_workbook_1"), "Custom 1", 1),
+        new(new CustomFieldId("cf_workbook_2"), "Custom 2", 2),
+        new(new CustomFieldId("cf_workbook_3"), "Custom 3", 3),
+        new(new CustomFieldId("cf_workbook_4"), "Custom 4", 4)
+    ];
+
+    private PortableLogbookDocument Document { get; set; } =
+        PortableLogbookDocument.CreateAustraliaFirst(new LogbookId("log_mobile_preview"), [], []);
+
+    private EntryDraft Draft { get; set; } = EntryDraft.Create();
+
+    private bool HasAttemptedSubmit { get; set; }
+
+    private EntryId? EditingEntryId { get; set; }
+
+    private RevisionId? EditingRevisionId { get; set; }
+
+    private PortableLogbookMaterializedEntry? HistoryEntry { get; set; }
+
+    private bool IsStorageBlocked { get; set; }
+
+    private string? StorageError { get; set; }
+
+    private IReadOnlyList<PortableLogbookMaterializedEntry> CurrentEntries =>
+        PortableLogbookMerger.Merge(Document.Operations)
+            .Entries
+            .Values
+            .Where(entry => !entry.IsDeleted && entry.Entry is not null)
+            .OrderByDescending(entry => entry.Entry!.Date)
+            .ToArray();
+
+    private PortableLogbookExchangeStatusSnapshot ExchangeStatus =>
+        PortableLogbookExchangeStatus.Create(
+            new PortableLogbookWorkingCopyState(
+                Document.Operations.Count > 0,
+                Document.Operations.Count,
+                Document.Operations.Count(operation => operation.Kind == PortableOperationKind.Create),
+                Document.Operations.Count(operation => operation.Kind == PortableOperationKind.Correction),
+                Document.Operations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
+                Document.Operations.Select(operation => operation.RevisionId).ToArray(),
+                DateTimeOffset.UtcNow),
+            [],
+            null);
+
+    private IReadOnlyList<string> DraftErrors => ValidateDraft();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            Document = await LogbookStore.LoadDocumentAsync() ?? Document;
+        }
+        catch (BrowserLogbookStoreException ex)
+        {
+            StorageError = ex.Message + " Export a valid backup package from a compatible device before using this app version.";
+            IsStorageBlocked = true;
+        }
+    }
+
+    private async Task SaveEntryAsync()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        HasAttemptedSubmit = true;
+        if (DraftErrors.Count > 0)
+        {
+            return;
+        }
+
+        PortableLogbookOperation operation = EditingEntryId is null || EditingRevisionId is null
+            ? new CreateEntryOperation(
+                Document.LogbookId,
+                EntryId.New(),
+                RevisionId.New(),
+                DeviceId,
+                DateTimeOffset.UtcNow,
+                Draft.ToEntry(CustomFields))
+            : new CorrectEntryOperation(
+                Document.LogbookId,
+                EditingEntryId.Value,
+                RevisionId.New(),
+                new HashSet<RevisionId> { EditingRevisionId.Value },
+                DeviceId,
+                DateTimeOffset.UtcNow,
+                Draft.ToEntry(CustomFields));
+
+        Document = PortableLogbookDocument.CreateAustraliaFirst(
+            Document.LogbookId,
+            CustomFields,
+            Document.Operations.Concat([operation]));
+        await LogbookStore.SaveDocumentAsync(Document);
+        ResetDraft();
+    }
+
+    private void ResetDraft()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        Draft = EntryDraft.Create();
+        HasAttemptedSubmit = false;
+        EditingEntryId = null;
+        EditingRevisionId = null;
+    }
+
+    private void CloneEntry(PortableLogbookEntry entry)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        Draft = EntryDraft.FromEntry(entry);
+        HasAttemptedSubmit = false;
+    }
+
+    private void EditEntry(PortableLogbookMaterializedEntry entry)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        if (entry.Entry is null)
+        {
+            return;
+        }
+
+        Draft = EntryDraft.FromEntry(entry.Entry);
+        EditingEntryId = entry.EntryId;
+        EditingRevisionId = entry.CurrentRevisionId;
+        HasAttemptedSubmit = false;
+    }
+
+    private async Task DeleteEntryAsync(PortableLogbookMaterializedEntry entry)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var operation = new DeleteEntryOperation(
+            Document.LogbookId,
+            entry.EntryId,
+            RevisionId.New(),
+            new HashSet<RevisionId> { entry.CurrentRevisionId },
+            DeviceId,
+            DateTimeOffset.UtcNow);
+
+        Document = PortableLogbookDocument.CreateAustraliaFirst(
+            Document.LogbookId,
+            CustomFields,
+            Document.Operations.Concat([operation]));
+        HistoryEntry = null;
+        await LogbookStore.SaveDocumentAsync(Document);
+    }
+
+    private void ShowHistory(PortableLogbookMaterializedEntry entry)
+    {
+        HistoryEntry = entry;
+    }
+
+    private static string FormatHours(decimal hours) => hours.ToString("0.0");
+
+    private static string FormatDate(DateOnly? date) => date?.ToString("dd MMM yyyy") ?? "No date";
+
+    private IEnumerable<string> RecentValues(Func<PortableLogbookEntry, string?> selector) =>
+        CurrentEntries
+            .Select(entry => selector(entry.Entry!))
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .Take(12);
+
+    private string[] ValidateDraft()
+    {
+        var errors = new List<string>();
+        if (string.IsNullOrWhiteSpace(Draft.From))
+        {
+            errors.Add("From is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Draft.To))
+        {
+            errors.Add("To is required.");
+        }
+
+        if (Draft.TotalFlightTime <= 0)
+        {
+            errors.Add("Enter at least one flight-time value.");
+        }
+
+        return errors.ToArray();
+    }
+
+    private sealed class EntryDraft
+    {
+        public DateOnly Date { get; set; }
+        public string AircraftType { get; set; } = string.Empty;
+        public string Registration { get; set; } = string.Empty;
+        public string FlightNumber { get; set; } = string.Empty;
+        public string From { get; set; } = string.Empty;
+        public string To { get; set; } = string.Empty;
+        public string Route { get; set; } = string.Empty;
+        public decimal MultiPilot { get; set; }
+        public decimal PilotInCommand { get; set; }
+        public decimal CoPilot { get; set; }
+        public decimal Dual { get; set; }
+        public decimal Instructor { get; set; }
+        public decimal Day { get; set; }
+        public decimal Night { get; set; }
+        public decimal InstrumentActual { get; set; }
+        public decimal InstrumentSimulated { get; set; }
+        public int? TakeoffsDay { get; set; }
+        public int? TakeoffsNight { get; set; }
+        public int? LandingsDay { get; set; }
+        public int? LandingsNight { get; set; }
+        public int? IfrApproaches { get; set; }
+        public int? Holding { get; set; }
+        public int? Rnav { get; set; }
+        public int? Circling { get; set; }
+        public string Remarks { get; set; } = string.Empty;
+        public Dictionary<CustomFieldId, string> CustomValues { get; } = [];
+
+        public decimal TotalFlightTime =>
+            MultiPilot + PilotInCommand + CoPilot + Dual + Instructor;
+
+        public static EntryDraft Create()
+        {
+            var draft = new EntryDraft
+            {
+                Date = DateOnly.FromDateTime(DateTime.Today)
+            };
+            foreach (var field in PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Custom 1", "Custom 2", "Custom 3", "Custom 4"]))
+            {
+                draft.CustomValues[field.Id] = string.Empty;
+            }
+
+            return draft;
+        }
+
+        public static EntryDraft FromEntry(PortableLogbookEntry entry)
+        {
+            var draft = Create();
+            draft.Date = DateOnly.FromDateTime(DateTime.Today);
+            draft.AircraftType = entry.AircraftType ?? string.Empty;
+            draft.Registration = entry.Registration ?? string.Empty;
+            draft.FlightNumber = entry.FlightNumber ?? string.Empty;
+            draft.From = entry.From ?? string.Empty;
+            draft.To = entry.To ?? string.Empty;
+            draft.Route = entry.Route ?? string.Empty;
+            draft.MultiPilot = entry.MultiPilot ?? 0;
+            draft.PilotInCommand = entry.PilotInCommand ?? 0;
+            draft.CoPilot = entry.CoPilot ?? 0;
+            draft.Dual = entry.Dual ?? 0;
+            draft.Instructor = entry.Instructor ?? 0;
+            draft.Day = entry.Day ?? 0;
+            draft.Night = entry.Night ?? 0;
+            draft.InstrumentActual = entry.InstrumentActual ?? 0;
+            draft.InstrumentSimulated = entry.InstrumentSimulated ?? 0;
+            draft.TakeoffsDay = entry.TakeoffsDay;
+            draft.TakeoffsNight = entry.TakeoffsNight;
+            draft.LandingsDay = entry.LandingsDay;
+            draft.LandingsNight = entry.LandingsNight;
+            draft.IfrApproaches = entry.IfrApproaches;
+            draft.Holding = entry.Holding;
+            draft.Rnav = entry.Rnav;
+            draft.Circling = entry.Circling;
+            draft.Remarks = entry.Details ?? string.Empty;
+            foreach (var customField in entry.CustomFields)
+            {
+                draft.CustomValues[customField.Key] = customField.Value ?? string.Empty;
+            }
+
+            return draft;
+        }
+
+        public PortableLogbookEntry ToEntry(IEnumerable<CustomFieldDefinition> fields)
+        {
+            IReadOnlyDictionary<CustomFieldId, string?> customValues = fields
+                .Select(field => new KeyValuePair<CustomFieldId, string>(field.Id, CustomValues.GetValueOrDefault(field.Id, string.Empty)))
+                .Where(pair => !string.IsNullOrWhiteSpace(pair.Value))
+                .ToDictionary(pair => pair.Key, pair => (string?)pair.Value);
+
+            return PortableLogbookEntry.Empty with
+            {
+                Date = Date,
+                AircraftType = AircraftType.Trim(),
+                Registration = Registration.Trim(),
+                FlightNumber = FlightNumber.Trim(),
+                From = From.Trim(),
+                To = To.Trim(),
+                Route = Route.Trim(),
+                Details = Remarks.Trim(),
+                MultiPilot = MultiPilot,
+                PilotInCommand = PilotInCommand,
+                CoPilot = CoPilot,
+                Dual = Dual,
+                Instructor = Instructor,
+                Day = Day,
+                Night = Night,
+                InstrumentActual = InstrumentActual,
+                InstrumentSimulated = InstrumentSimulated,
+                TakeoffsDay = TakeoffsDay,
+                TakeoffsNight = TakeoffsNight,
+                LandingsDay = LandingsDay,
+                LandingsNight = LandingsNight,
+                IfrApproaches = IfrApproaches,
+                Holding = Holding,
+                Rnav = Rnav,
+                Circling = Circling,
+                CustomFields = customValues
+            };
+        }
+    }
+}

@@ -197,6 +197,8 @@ Write-Step "Fast validation"
 & (Join-Path $repoRoot "tools\Test-ReleaseMetadata.ps1") -RepoRoot $repoRoot
 & (Join-Path $repoRoot "tools\Test-VbaSourceQuality.ps1") -RepoRoot $repoRoot
 
+Invoke-DotNet -Arguments @("build", (Join-Path $repoRoot "ElectronicLogbook.Updater.sln"), "--configuration", "Release") `
+    -FailureMessage "Solution build failed."
 Invoke-DotNet -Arguments @("test", (Join-Path $repoRoot "ElectronicLogbook.Updater.sln"), "--configuration", "Release") `
     -FailureMessage "External updater tests failed."
 

@@ -1,0 +1,4 @@
+Date,Aircraft ID,Aircraft Type,From,To,Route,Total Time,Night,PIC,P1u/s,SIC,Simulator,PIC/P1 Crew,SIC/P2 Crew,Observer,Day Ldg,Night Ldg,Approach 1,Approach 2,Actual Inst,Flight #,Remarks,IPC/ICC,Flight Review
+2026-07-18,VH-UNK,ZZZZ,YSBK,YSBK,,1.0,0,1.0,0,0,0,Alex Pilot,,,1,0,,,0,EL-BLOCK-1,Unknown type should block,,
+not-a-date,VH-ABC,C172,YSBK,YSBK,,1.0,0,1.0,0,0,0,Alex Pilot,,,1,0,,,0,EL-BLOCK-2,Invalid date should block,,
+2026-07-19,VH-ABC,C172,YSBK,YSBK,,1.0,0,0.8,0.4,0,0,Alex Pilot,,,1,0,,,0,EL-BLOCK-3,Crew hours exceed total,,

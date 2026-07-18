@@ -177,6 +177,16 @@ public sealed class ExcelWorkbookMigrator
                     "Airport visit stats were written before save, but Airports[Visits] is blank after save.");
             }
 
+            dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
+            var logbookRows = (int)outputLogbook.ListRows.Count;
+            CloseWorkbook(outputWorkbook);
+            outputWorkbook = null;
+            CloseWorkbook(sourceWorkbook);
+            sourceWorkbook = null;
+
+            step = SetStep(UpdaterPhaseIds.CopyPortableStorage, "copying portable logbook storage");
+            CopyPortableWorkbookStorage(request.SourcePath, request.OutputPath);
+
             _progressSink?.Report(new UpdaterProgressEvent(
                 UpdaterProgressEventTypes.UpdateCompleted,
                 UpdaterPhaseIds.Completed,
@@ -185,8 +195,6 @@ public sealed class ExcelWorkbookMigrator
                 DateTimeOffset.UtcNow,
                 TimeoutSeconds: UpdaterPhasePolicies.GetTimeoutSeconds(UpdaterPhaseIds.Completed)));
 
-            dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
-            var logbookRows = (int)outputLogbook.ListRows.Count;
             migrationSucceeded = true;
             return new MigrationReport(
                 request.SourcePath,
@@ -260,6 +268,11 @@ public sealed class ExcelWorkbookMigrator
                 TryDelete(request.OutputPath);
             }
         }
+    }
+
+    internal static bool CopyPortableWorkbookStorage(string sourcePath, string outputPath)
+    {
+        return PortableLogbookWorkbookPackageStorage.CopyEnvelope(sourcePath, outputPath);
     }
 
     private static void UnprotectWorkbookForMigration(object workbookObject)

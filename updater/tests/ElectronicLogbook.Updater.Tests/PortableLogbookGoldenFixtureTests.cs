@@ -28,6 +28,27 @@ public sealed class PortableLogbookGoldenFixtureTests
         Assert.IsType<CreateEntryOperation>(Assert.Single(document.Operations));
     }
 
+    [Fact]
+    public void WorkbookStorageBridgeCanOpenGoldenFixtureDocument()
+    {
+        var document = PortableLogbookJson.Deserialize(
+            File.ReadAllText(Path.Combine("Fixtures", "portable-logbook-v1.json")))
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var key = PortableLogbookKey.FromBytes(Enumerable.Range(1, PortableLogbookPackage.KeySizeBytes).Select(value => (byte)value).ToArray());
+        var encryptedPackage = PortableLogbookPackage.Write(document, key);
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, encryptedPackage, []);
+
+        var serializedEnvelope = PortableLogbookWorkbookStorage.Serialize(envelope);
+        var reopened = PortableLogbookWorkbookStorage.OpenEnvelope(
+            PortableLogbookWorkbookStorage.Deserialize(serializedEnvelope),
+            key);
+
+        var operation = Assert.IsType<CreateEntryOperation>(Assert.Single(reopened.Document.Operations));
+        Assert.Equal(new EntryId("ent_fixture"), operation.EntryId);
+        Assert.Equal(new RevisionId("rev_create"), operation.RevisionId);
+        Assert.Equal("VH-ABC", operation.Entry.Registration);
+    }
+
     private static PortableLogbookDocument CreateGoldenDocument()
     {
         var logbookId = new LogbookId("log_fixture");

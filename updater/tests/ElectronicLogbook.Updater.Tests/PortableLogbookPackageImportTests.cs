@@ -101,6 +101,39 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal(PortableLogbookPackageError.WrongLogbook, exception.Error);
     }
 
+    [Fact]
+    public void ImportPackageCanRebuildReplacementReplicaAfterLocalLoss()
+    {
+        var key = PortableLogbookKey.Generate();
+        var create = CreateOperation();
+        var correction = CorrectOperation(create, "VH-RECOVERED", "rev_recovered");
+        var survivingReplica = Document(create.LogbookId, [create, correction]);
+        var recoveryPackage = PortableLogbookPackage.Write(survivingReplica, key);
+        var replacementReplica = Document(create.LogbookId, []);
+
+        var result = PortableLogbookPackageImport.ImportPackage(
+            replacementReplica,
+            recoveryPackage,
+            key,
+            [],
+            ImportedAt);
+
+        Assert.Equal(PortableLogbookPackageImportStatus.Applied, result.Status);
+        Assert.Equal(PortableLogbookImportPlanStatus.ReadyToApply, result.Plan?.Status);
+        Assert.Equal(2, result.Plan?.Preview.NewOperations.Count);
+        Assert.Equal([create.EntryId, correction.EntryId], result.Document.Operations.Select(operation => operation.EntryId));
+        Assert.Equal([create.RevisionId, correction.RevisionId], result.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.NotNull(result.NewReceipt);
+        Assert.NotNull(result.StorageEnvelope);
+        Assert.NotNull(result.EncryptedHistoryPackage);
+        Assert.Equal(result.Document.LogbookId, result.StorageEnvelope.LogbookId);
+        Assert.Equal(result.NewReceipt.PackageSha256, Assert.Single(result.StorageEnvelope.ImportReceipts).PackageSha256);
+        var reopened = PortableLogbookWorkbookStorage.OpenEnvelope(result.StorageEnvelope, key);
+        Assert.Equal(result.Document.Operations.Select(operation => operation.RevisionId), reopened.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal(correction.RevisionId, reopened.Document.Operations.Last().RevisionId);
+        Assert.Equal(correction.EntryId, reopened.Document.Operations.Last().EntryId);
+    }
+
     private static PortableLogbookDocument Document(
         LogbookId logbookId,
         IReadOnlyList<PortableLogbookOperation> operations) =>

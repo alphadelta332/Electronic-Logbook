@@ -44,6 +44,7 @@ public sealed class ProgressTests
             UpdaterPhaseIds.UpdateHoursOverTimeChart,
             UpdaterPhaseIds.ValidatePreservedData,
             UpdaterPhaseIds.SaveOutputWorkbook,
+            UpdaterPhaseIds.CopyPortableStorage,
             UpdaterPhaseIds.Completed,
             UpdaterPhaseIds.Failed
         };

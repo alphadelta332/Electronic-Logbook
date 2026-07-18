@@ -101,6 +101,41 @@ public sealed class PortableLogbookPrintedCopyTests
         Assert.Throws<ArgumentOutOfRangeException>(() => PortableLogbookPrintedCopy.CreatePagePlan(request, recordsPerPage: 0));
     }
 
+    [Fact]
+    public void CreatePagePlanExcludesDeletedRecordsButPreservesTheirAuditHistory()
+    {
+        var createCurrent = CreateOperation("ent_current", "rev_current", "VH-CUR", DateTimeOffset.Parse("2026-07-18T00:00:00Z"));
+        var createDeleted = CreateOperation("ent_deleted", "rev_deleted_create", "VH-DEL", DateTimeOffset.Parse("2026-07-18T00:01:00Z"));
+        var delete = new DeleteEntryOperation(
+            createDeleted.LogbookId,
+            createDeleted.EntryId,
+            new RevisionId("rev_deleted_tombstone"),
+            new HashSet<RevisionId> { createDeleted.RevisionId },
+            createDeleted.DeviceId,
+            createDeleted.CreatedAt.AddMinutes(1));
+        var document = PortableLogbookDocument.CreateAustraliaFirst(
+            createCurrent.LogbookId,
+            [],
+            [createCurrent, createDeleted, delete]);
+        var request = PortableLogbookPrintedCopy.CreateRequest(
+            document,
+            "Alex Pilot",
+            new DateOnly(1990, 1, 2),
+            new DateOnly(2026, 7, 18));
+
+        var plan = PortableLogbookPrintedCopy.CreatePagePlan(request, recordsPerPage: 10);
+
+        var page = Assert.Single(plan.Pages);
+        var currentRecord = Assert.Single(page.Records);
+        Assert.Equal(createCurrent.EntryId, currentRecord.EntryId);
+        Assert.Equal(1, plan.AuditSummary.CurrentRecordCount);
+        Assert.Equal(3, plan.AuditSummary.RevisionCount);
+        Assert.Contains(
+            request.AuditSnapshot.RevisionHistory,
+            history => history.EntryId == createDeleted.EntryId &&
+                history.Revisions.Last().Kind == PortableOperationKind.Deletion);
+    }
+
     private static PortableLogbookDocument CreateDocument()
     {
         var create = new CreateEntryOperation(
@@ -145,4 +180,25 @@ public sealed class PortableLogbookPrintedCopyTests
 
         return PortableLogbookDocument.CreateAustraliaFirst(logbookId, [], operations);
     }
+
+    private static CreateEntryOperation CreateOperation(
+        string entryId,
+        string revisionId,
+        string registration,
+        DateTimeOffset createdAt) =>
+        new(
+            new LogbookId("log_print"),
+            new EntryId(entryId),
+            new RevisionId(revisionId),
+            new DeviceId("dev_excel"),
+            createdAt,
+            PortableLogbookEntry.Empty with
+            {
+                Date = new DateOnly(2026, 7, 18),
+                AircraftType = "C172",
+                Registration = registration,
+                From = "YSBK",
+                To = "YSBK",
+                PilotInCommand = 1.2m
+            });
 }

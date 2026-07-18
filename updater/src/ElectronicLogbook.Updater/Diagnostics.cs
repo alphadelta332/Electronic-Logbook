@@ -173,6 +173,8 @@ public static partial class DiagnosticBundleFactory
                 "Do not use the updated workbook. Keep the original workbook and contact support with the diagnostic bundle.",
             UpdaterPhaseIds.SaveOutputWorkbook =>
                 "Close Excel, check write access and available disk space, then re-run the updater.",
+            UpdaterPhaseIds.CopyPortableStorage =>
+                "Do not use the updated workbook. Keep the original workbook and contact support with the diagnostic bundle.",
             _ =>
                 "Keep the original workbook and any updater backup, then re-run the updater or contact support with the diagnostic bundle."
         };

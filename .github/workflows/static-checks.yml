@@ -58,6 +58,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build and test updater
+      - name: Build solution
+        run: dotnet build ElectronicLogbook.Updater.sln --configuration Release
+
+      - name: Test solution
         shell: pwsh
-        run: dotnet test ElectronicLogbook.Updater.sln --configuration Release
+        run: dotnet test ElectronicLogbook.Updater.sln --configuration Release --no-build
