@@ -13,4 +13,8 @@
     <EmbeddedResource Include="..\..\release-manifest-signing-public-key.pem" Link="release-manifest-signing-public-key.pem" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\ElectronicLogbook.Portable\ElectronicLogbook.Portable.csproj" />
+  </ItemGroup>
+
 </Project>
