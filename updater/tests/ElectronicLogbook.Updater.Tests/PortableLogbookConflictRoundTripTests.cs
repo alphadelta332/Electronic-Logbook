@@ -43,6 +43,45 @@ public sealed class PortableLogbookConflictRoundTripTests
         Assert.Equal("VH-FINAL", current.Entry?.Registration);
     }
 
+    [Fact]
+    public void DeleteOperationCanResolveConflictToTombstone()
+    {
+        var create = new CreateEntryOperation(
+            new LogbookId("log_conflict_roundtrip"),
+            new EntryId("ent_1"),
+            new RevisionId("rev_create"),
+            new DeviceId("dev_excel"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            Entry("VH-BASE"));
+        var excelCorrection = Correct(create, "rev_excel", "VH-EXCEL", "dev_excel", create.CreatedAt.AddMinutes(1));
+        var mobileCorrection = Correct(create, "rev_mobile", "VH-MOBILE", "dev_mobile", create.CreatedAt.AddMinutes(2));
+        var local = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create, excelCorrection]);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create, mobileCorrection]);
+        var preview = PortableLogbookExchange.PreviewImport(local, incoming);
+        var conflict = Assert.Single(preview.Conflicts);
+        var deletion = new DeleteEntryOperation(
+            create.LogbookId,
+            conflict.EntryId,
+            new RevisionId("rev_deleted"),
+            conflict.HeadRevisionIds.ToHashSet(),
+            new DeviceId("dev_mobile"),
+            create.CreatedAt.AddMinutes(3));
+        var resolvedDocument = PortableLogbookDocument.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            local.Operations.Concat(preview.NewOperations).Concat([deletion]));
+
+        var validation = PortableLogbookValidator.Validate(resolvedDocument);
+        var merge = PortableLogbookMerger.Merge(resolvedDocument.Operations);
+
+        Assert.True(validation.IsValid);
+        Assert.Empty(merge.Conflicts);
+        var current = Assert.Single(merge.Entries.Values);
+        Assert.Equal(deletion.RevisionId, current.CurrentRevisionId);
+        Assert.True(current.IsDeleted);
+        Assert.Null(current.Entry);
+    }
+
     private static CorrectEntryOperation Correct(
         CreateEntryOperation create,
         string revisionId,

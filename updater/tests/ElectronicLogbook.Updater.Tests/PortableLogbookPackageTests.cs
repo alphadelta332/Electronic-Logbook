@@ -24,6 +24,72 @@ public sealed class PortableLogbookPackageTests
     }
 
     [Fact]
+    public void EncryptionPlanCanBeAssembledWithExternalAesGcmOutput()
+    {
+        var document = CreateDocument();
+        var key = FixedKey(1);
+        var createdAt = DateTimeOffset.Parse("2026-07-19T04:05:06Z");
+        var plan = PortableLogbookPackage.CreateEncryptionPlan(document, createdAt);
+        var ciphertext = new byte[plan.CompressedPlaintext.Length];
+        var tag = new byte[16];
+        using var aes = new AesGcm(key, tag.Length);
+        aes.Encrypt(plan.Nonce, plan.CompressedPlaintext, ciphertext, tag, plan.ManifestBytes);
+
+        var packageBytes = PortableLogbookPackage.Assemble(plan, ciphertext, tag);
+        var result = PortableLogbookPackage.Read(packageBytes, key, document.LogbookId);
+
+        Assert.Equal(createdAt, result.Manifest.CreatedAt);
+        Assert.Equal(document.LogbookId, result.Document.LogbookId);
+        Assert.Equal(document.Operations.Count, result.Document.Operations.Count);
+    }
+
+    [Fact]
+    public void DecryptionPlanCanBeReadWithExternalAesGcmOutput()
+    {
+        var document = CreateDocument();
+        var key = FixedKey(1);
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        var plan = PortableLogbookPackage.CreateDecryptionPlan(packageBytes, document.LogbookId);
+        var compressedPlaintext = new byte[plan.Ciphertext.Length];
+        using var aes = new AesGcm(key, plan.Tag.Length);
+        aes.Decrypt(plan.Nonce, plan.Ciphertext, plan.Tag, compressedPlaintext, plan.ManifestBytes);
+
+        var result = PortableLogbookPackage.ReadDecrypted(plan, compressedPlaintext, document.LogbookId);
+
+        Assert.Equal(document.LogbookId, result.Manifest.LogbookId);
+        Assert.Equal(document.Operations.Count, result.Document.Operations.Count);
+        Assert.Equal(document.Operations.Select(operation => operation.RevisionId), result.Document.Operations.Select(operation => operation.RevisionId));
+    }
+
+    [Fact]
+    public void DecryptionPlanRejectsWrongLogbookBeforeExternalDecryption()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+
+        var error = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.CreateDecryptionPlan(packageBytes, new LogbookId("log_other")));
+
+        Assert.Equal(PortableLogbookPackageError.WrongLogbook, error.Error);
+    }
+
+    [Fact]
+    public void AssembleRejectsInvalidExternalCryptoOutput()
+    {
+        var plan = PortableLogbookPackage.CreateEncryptionPlan(
+            CreateDocument(),
+            DateTimeOffset.Parse("2026-07-19T04:05:06Z"));
+
+        var tagError = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Assemble(plan, new byte[plan.CompressedPlaintext.Length], new byte[15]));
+        var ciphertextError = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Assemble(plan, new byte[plan.CompressedPlaintext.Length + 1], new byte[16]));
+
+        Assert.Equal(PortableLogbookPackageError.InvalidTag, tagError.Error);
+        Assert.Equal(PortableLogbookPackageError.InvalidCiphertext, ciphertextError.Error);
+    }
+
+    [Fact]
     public void ReadRejectsWrongEncryptionKey()
     {
         var document = CreateDocument();

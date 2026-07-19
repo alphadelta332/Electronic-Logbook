@@ -81,7 +81,7 @@ main {
 
 .status-band {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     gap: 1px;
     overflow: hidden;
     border: 1px solid #d7dde5;
@@ -112,6 +112,15 @@ main {
     padding: 12px 14px;
     background: #fff8dd;
     color: #574812;
+}
+
+.exchange-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: -4px 0 12px;
+    color: #5d6978;
+    font-size: 0.86rem;
 }
 
 .storage-block {
@@ -201,6 +210,17 @@ textarea {
     flex-wrap: wrap;
 }
 
+.exchange-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+    margin-top: 14px;
+    border: 1px solid #d7dde5;
+    border-radius: 8px;
+    padding: 12px;
+    background: #f8fafc;
+}
+
 .entry-list {
     display: grid;
     gap: 10px;
@@ -259,6 +279,12 @@ textarea {
     padding: 10px 12px;
     background: #fff1ec;
     color: #7e2f1e;
+}
+
+.warning-summary {
+    border-color: #d6c58a;
+    background: #fff8dd;
+    color: #574812;
 }
 
 .history-panel {

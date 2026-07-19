@@ -169,7 +169,7 @@ public sealed class PortableLogbookPrintedCopyTests
                 DateTimeOffset.Parse("2026-07-18T00:00:00Z").AddMinutes(index),
                 PortableLogbookEntry.Empty with
                 {
-                    Date = new DateOnly(2026, 7, 18).AddDays(index),
+                    Date = new DateOnly(2026, 7, 18).AddDays(1 - index),
                     AircraftType = "C172",
                     Registration = $"VH-AB{index}",
                     From = "YSBK",

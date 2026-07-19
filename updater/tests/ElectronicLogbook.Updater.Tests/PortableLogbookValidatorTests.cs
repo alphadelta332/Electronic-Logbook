@@ -153,6 +153,43 @@ public sealed class PortableLogbookValidatorTests
     }
 
     [Fact]
+    public void ValidateRejectsInvalidEntryPayloads()
+    {
+        var create = CreateOperation() with
+        {
+            Entry = CreateOperation().Entry with
+            {
+                Registration = "",
+                PilotInCommand = 0
+            }
+        };
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+
+        var result = PortableLogbookValidator.Validate(document, new DateOnly(2026, 7, 19));
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Code == PortableLogbookValidationCode.InvalidEntryField);
+        Assert.Contains(result.Errors, error => error.Message.Contains("Registration is required", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Message.Contains("cannot be zero", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidateUsesSuppliedTodayForFutureDateChecks()
+    {
+        var create = CreateOperation() with
+        {
+            Entry = CreateOperation().Entry with { Date = new DateOnly(2026, 7, 20) }
+        };
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+
+        var futureForSuppliedDate = PortableLogbookValidator.Validate(document, new DateOnly(2026, 7, 19));
+        var validOnSuppliedDate = PortableLogbookValidator.Validate(document, new DateOnly(2026, 7, 20));
+
+        Assert.Contains(futureForSuppliedDate.Errors, error => error.Code == PortableLogbookValidationCode.InvalidEntryField);
+        Assert.True(validOnSuppliedDate.IsValid);
+    }
+
+    [Fact]
     public void ValidateRejectsCyclicRevisionHistory()
     {
         var create = CreateOperation();

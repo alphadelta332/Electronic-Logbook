@@ -2,7 +2,12 @@ namespace ElectronicLogbook.Portable;
 
 public static class PortableLogbookValidator
 {
-    public static PortableLogbookValidationResult Validate(PortableLogbookDocument document)
+    public static PortableLogbookValidationResult Validate(PortableLogbookDocument document) =>
+        Validate(document, DateOnly.FromDateTime(DateTime.UtcNow));
+
+    public static PortableLogbookValidationResult Validate(
+        PortableLogbookDocument document,
+        DateOnly today)
     {
         ArgumentNullException.ThrowIfNull(document);
 
@@ -59,7 +64,7 @@ public static class PortableLogbookValidator
 
         foreach (var operation in document.Operations)
         {
-            ValidateOperation(document, operation, revisionsByEntry, customFieldIds, errors);
+            ValidateOperation(document, operation, revisionsByEntry, customFieldIds, today, errors);
         }
 
         ValidateAcyclicRevisionGraph(document.Operations, errors);
@@ -72,6 +77,7 @@ public static class PortableLogbookValidator
         PortableLogbookOperation operation,
         IReadOnlyDictionary<EntryId, HashSet<RevisionId>> revisionsByEntry,
         IReadOnlySet<CustomFieldId> customFieldIds,
+        DateOnly today,
         List<PortableLogbookValidationError> errors)
     {
         if (operation.LogbookId != document.LogbookId)
@@ -98,18 +104,18 @@ public static class PortableLogbookValidator
                         $"Create revision '{create.RevisionId}' must not have parent revisions."));
                 }
 
-                ValidateEntryFields(create.RevisionId, create.Entry, customFieldIds, errors);
+                ValidateEntryFields(create.RevisionId, create.Entry, customFieldIds, today, errors);
                 break;
             case CorrectEntryOperation correction:
                 ValidateParentCount(correction, minimumParents: 1, errors);
-                ValidateEntryFields(correction.RevisionId, correction.Entry, customFieldIds, errors);
+                ValidateEntryFields(correction.RevisionId, correction.Entry, customFieldIds, today, errors);
                 break;
             case DeleteEntryOperation deletion:
                 ValidateParentCount(deletion, minimumParents: 1, errors);
                 break;
             case ResolveConflictOperation resolution:
                 ValidateParentCount(resolution, minimumParents: 2, errors);
-                ValidateEntryFields(resolution.RevisionId, resolution.Entry, customFieldIds, errors);
+                ValidateEntryFields(resolution.RevisionId, resolution.Entry, customFieldIds, today, errors);
                 break;
         }
 
@@ -144,6 +150,7 @@ public static class PortableLogbookValidator
         RevisionId revisionId,
         PortableLogbookEntry entry,
         IReadOnlySet<CustomFieldId> definedCustomFieldIds,
+        DateOnly today,
         List<PortableLogbookValidationError> errors)
     {
         foreach (var fieldId in entry.CustomFields.Keys.Where(fieldId => !definedCustomFieldIds.Contains(fieldId)))
@@ -151,6 +158,13 @@ public static class PortableLogbookValidator
             errors.Add(new PortableLogbookValidationError(
                 PortableLogbookValidationCode.UnknownCustomFieldId,
                 $"Revision '{revisionId}' references undefined custom field '{fieldId}'."));
+        }
+
+        foreach (var violation in PortableLogbookEntryRules.Validate(entry, today).Errors)
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidEntryField,
+                $"Revision '{revisionId}' has invalid entry data: {violation.Message}"));
         }
     }
 
@@ -230,5 +244,6 @@ public enum PortableLogbookValidationCode
     MissingParentRevision,
     SelfParentRevision,
     UnknownCustomFieldId,
+    InvalidEntryField,
     CyclicRevisionHistory
 }
