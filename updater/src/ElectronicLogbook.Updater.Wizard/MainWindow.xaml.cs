@@ -625,6 +625,7 @@ public partial class MainWindow : Window
         UpdateProgressBar.IsIndeterminate = false;
         UpdateProgressBar.Value = 0;
         UpdateLogTextBox.Clear();
+        OpenUpdatedCheckBox.Content = "Open updated workbook when I click Finish";
 
         var progressSink = new RecordingUpdaterProgressSink(new WizardProgressSink(AppendProgressEvent));
 
@@ -946,6 +947,14 @@ public partial class MainWindow : Window
         if (recovery.Action != HandoffRecoveryAction.None)
         {
             AppendLog(recovery.Message);
+            if (!string.IsNullOrWhiteSpace(recovery.SourceWorkbookPath))
+            {
+                AppendLog($"Recovered workbook: {recovery.SourceWorkbookPath}");
+            }
+            if (!string.IsNullOrWhiteSpace(recovery.BackupWorkbookPath))
+            {
+                AppendLog($"Recovery backup: {recovery.BackupWorkbookPath}");
+            }
         }
 
         return recovery;
@@ -1019,7 +1028,7 @@ public partial class MainWindow : Window
             : $"{label}: {workbookPath} ({string.Join(", ", details)})";
     }
 
-    private void RestoreBackupButton_OnClick(object sender, RoutedEventArgs e)
+    private async void RestoreBackupButton_OnClick(object sender, RoutedEventArgs e)
     {
         if (string.IsNullOrWhiteSpace(_lastOutputPath) ||
             string.IsNullOrWhiteSpace(_lastBackupPath))
@@ -1044,16 +1053,22 @@ public partial class MainWindow : Window
                 _lastOutputPath,
                 _lastBackupPath,
                 _lastBackupExpectedVersion);
+            _lastOutputPath = result.RestoredWorkbookPath;
+            _lastOutputExpectedVersion = result.RestoredWorkbookVersion;
             CompleteTitleText.Text = "Backup Restored";
-            CompleteSummaryText.Text = "The retained backup has been restored to the original workbook filename.";
-            CompleteOutputPathText.Text = BuildRestoredWorkbookDisplayText(result.RestoredWorkbookPath);
+            CompleteSummaryText.Text = "The retained backup was validated and restored to the original workbook filename.";
+            CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Restored workbook",
+                result.RestoredWorkbookPath,
+                result.RestoredWorkbookVersion,
+                "Restored workbook: not available");
             CompleteBackupPathText.Text = result.FailedWorkbookPath is null
-                ? $"Retained backup: {_lastBackupPath}"
+                ? $"Retained backup: {_lastBackupPath} (validated version {result.BackupWorkbookVersion})"
                 : $"Previous failed workbook kept: {result.FailedWorkbookPath}";
             RestoreBackupButton.IsEnabled = false;
             OpenUpdatedCheckBox.IsEnabled = true;
-            OpenUpdatedCheckBox.IsChecked = false;
-            _lastOutputExpectedVersion = null;
+            OpenUpdatedCheckBox.IsChecked = true;
+            OpenUpdatedCheckBox.Content = "Open restored workbook when I click Finish";
             FooterStatusText.Text = "Backup restored.";
         }
         catch (Exception ex)
@@ -1066,14 +1081,6 @@ public partial class MainWindow : Window
                 MessageBoxImage.Error);
             FooterStatusText.Text = "Restore failed.";
         }
-    }
-
-    private static string BuildRestoredWorkbookDisplayText(string restoredWorkbookPath)
-    {
-        var details = File.Exists(restoredWorkbookPath)
-            ? $" (saved {File.GetLastWriteTime(restoredWorkbookPath):G})"
-            : string.Empty;
-        return $"Restored workbook: {restoredWorkbookPath}{details}";
     }
 
     private void OpenDiagnosticReportButton_OnClick(object sender, RoutedEventArgs e)

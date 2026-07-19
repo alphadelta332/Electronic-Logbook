@@ -15,7 +15,9 @@ public enum HandoffRecoveryAction
 
 public sealed record HandoffRecoveryResult(
     HandoffRecoveryAction Action,
-    string Message)
+    string Message,
+    string? SourceWorkbookPath = null,
+    string? BackupWorkbookPath = null)
 {
     public static HandoffRecoveryResult None { get; } = new(
         HandoffRecoveryAction.None,
@@ -24,7 +26,9 @@ public sealed record HandoffRecoveryResult(
 
 public sealed record BackupRestoreResult(
     string RestoredWorkbookPath,
-    string? FailedWorkbookPath);
+    string? FailedWorkbookPath,
+    string RestoredWorkbookVersion,
+    string BackupWorkbookVersion);
 
 public static class WorkbookHandoff
 {
@@ -182,7 +186,9 @@ public static class WorkbookHandoff
             fileSystem.DeleteFile(journalPath);
             return new HandoffRecoveryResult(
                 HandoffRecoveryAction.CompletedJournalCleaned,
-                "A completed workbook handoff journal was cleaned up.");
+                "A completed workbook handoff journal was cleaned up.",
+                journal.SourceWorkbookPath,
+                backupExists ? journal.BackupWorkbookPath : null);
         }
 
         if (backupExists)
@@ -195,7 +201,9 @@ public static class WorkbookHandoff
             fileSystem.DeleteFile(journalPath);
             return new HandoffRecoveryResult(
                 HandoffRecoveryAction.BackupRestored,
-                "The previous workbook backup was restored after an interrupted handoff.");
+                "The previous workbook backup was restored after an interrupted handoff.",
+                journal.SourceWorkbookPath,
+                journal.BackupWorkbookPath);
         }
 
         throw new InvalidOperationException(
@@ -263,7 +271,7 @@ public static class WorkbookHandoff
             throw new FileNotFoundException("Backup workbook not found.", backupWorkbookPath);
         }
 
-        packageValidation.ValidateWorkbookPackage(backupWorkbookPath, expectedBackupVersion);
+        var backupVersion = packageValidation.ValidateWorkbookPackage(backupWorkbookPath, expectedBackupVersion);
         var failedWorkbookPath = fileSystem.FileExists(sourceWorkbookPath)
             ? BuildFailedRestorePath(sourceWorkbookPath, fileSystem)
             : null;
@@ -276,8 +284,8 @@ public static class WorkbookHandoff
         try
         {
             fileSystem.CopyFile(backupWorkbookPath, sourceWorkbookPath, overwrite: false);
-            packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedBackupVersion);
-            return new BackupRestoreResult(sourceWorkbookPath, failedWorkbookPath);
+            var restoredVersion = packageValidation.ValidateWorkbookPackage(sourceWorkbookPath, expectedBackupVersion);
+            return new BackupRestoreResult(sourceWorkbookPath, failedWorkbookPath, restoredVersion, backupVersion);
         }
         catch
         {

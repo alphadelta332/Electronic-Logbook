@@ -143,6 +143,21 @@ public static class PortableLogbookEntryRules
                 "This entry has instrument time but no approach activity."));
         }
 
+        var flightTime = FlightTime(entry);
+        if (flightTime > 0 && totalLandings > flightTime * 6)
+        {
+            warnings.Add(new PortableLogbookEntryRuleWarning(
+                PortableLogbookEntryRuleWarningCode.HighLandingsForFlightTime,
+                "The number of landings seems high compared with the total flight time."));
+        }
+
+        if (flightTime > 0 && totalApproaches > flightTime * 3)
+        {
+            warnings.Add(new PortableLogbookEntryRuleWarning(
+                PortableLogbookEntryRuleWarningCode.HighApproachesForFlightTime,
+                "The number of approaches seems high compared with the total flight time."));
+        }
+
         return warnings;
     }
 
@@ -243,5 +258,7 @@ public enum PortableLogbookEntryRuleWarningCode
     NightTimeWithoutNightLanding,
     NightLandingWithoutNightTime,
     ApproachWithoutInstrumentTime,
-    InstrumentTimeWithoutApproach
+    InstrumentTimeWithoutApproach,
+    HighLandingsForFlightTime,
+    HighApproachesForFlightTime
 }

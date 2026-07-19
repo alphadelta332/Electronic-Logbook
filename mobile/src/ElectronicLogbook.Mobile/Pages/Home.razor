@@ -52,7 +52,7 @@
             <span>@Draft.Date.ToString("dd MMM yyyy")</span>
         </div>
 
-        <div class="form-grid">
+        <div class="form-grid" @oninput="MarkDraftEdited" @onchange="MarkDraftEdited">
             <label>
                 Date
                 <input type="date" max="@TodayIso" @bind="Draft.Date" />
@@ -67,7 +67,7 @@
             </label>
             <label>
                 Flight number
-                <input @bind="Draft.FlightNumber" />
+                <input @bind="Draft.FlightNumber" list="flight-numbers" />
             </label>
             <label>
                 From
@@ -79,7 +79,7 @@
             </label>
             <label>
                 Route
-                <input @bind="Draft.Route" />
+                <input @bind="Draft.Route" list="routes" />
             </label>
             <label>
                 PIC
@@ -169,6 +169,18 @@
                 <option value="@value"></option>
             }
         </datalist>
+        <datalist id="flight-numbers">
+            @foreach (var value in RecentValues(entry => entry.FlightNumber))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="routes">
+            @foreach (var value in RecentValues(entry => entry.Route))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
 
         <label class="wide-field">
             Remarks
@@ -190,9 +202,9 @@
             }
         </div>
 
-        @if (HasAttemptedSubmit && DraftErrors.Count > 0)
+        @if (ShouldShowDraftErrors)
         {
-            <div class="validation-summary" role="alert">
+            <div class="validation-summary" role="alert" aria-live="polite">
                 @foreach (var error in DraftErrors)
                 {
                     <span>@error</span>
@@ -305,13 +317,24 @@
         }
 
         <div class="exchange-box">
+            @if (PackageKeyStatus == "Not set")
+            {
+                <button type="button" @onclick="SetupPackageKeyAsync" disabled="@IsStorageBlocked" title="Create this device's browser-held package key.">Set up key</button>
+            }
             <button type="button" @onclick="PreviewPackageAsync" disabled="@IsStorageBlocked" title="Read package manifest without changing this device copy.">Preview package</button>
-            <button type="button" class="primary" disabled title="@PackageExchangeTitle">Export package</button>
+            <button type="button" @onclick="ApplyPackageAsync" disabled="@IsPackageImportDisabled" title="@PackageImportTitle">Import package</button>
+            <button type="button" class="primary" @onclick="ExportPackageAsync" disabled="@IsPackageExportDisabled" title="@PackageExchangeTitle">Export package</button>
         </div>
         @if (!string.IsNullOrWhiteSpace(PackageExchangeError))
         {
             <div class="validation-summary" role="alert">
                 <span>@PackageExchangeError</span>
+            </div>
+        }
+        @if (!string.IsNullOrWhiteSpace(PackageExchangeMessage))
+        {
+            <div class="exchange-message" role="status">
+                <span>@PackageExchangeMessage</span>
             </div>
         }
         @if (ImportPlan is not null)
@@ -321,6 +344,28 @@
                 <span>@ImportPlan.OperationCount operation(s)</span>
                 <span>Created @FormatTimestamp(ImportPlan.PackageCreatedAt)</span>
                 <span>@FormatPackageCompatibility(ImportCompatibility)</span>
+                @if (ImportExchangePlan is not null)
+                {
+                    <span>@FormatImportStatus(ImportExchangePlan.Status)</span>
+                    <span>@ImportExchangePlan.Preview.NewOperations.Count new / @ImportExchangePlan.Preview.DuplicateOperationCount duplicate</span>
+                }
+                @if (ImportExchangePlan?.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
+                {
+                    <div class="custom-field-conflicts">
+                        @foreach (var conflict in ImportExchangePlan.Preview.CustomFieldDefinitions.Conflicts)
+                        {
+                            <div>
+                                <strong>@conflict.Id.Value</strong>
+                                <span>Local: @conflict.LocalDefinition.Label</span>
+                                <span>Imported: @conflict.IncomingDefinition.Label</span>
+                            </div>
+                        }
+                        <div class="row-actions">
+                            <button type="button" @onclick="() => ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice.KeepLocal)" disabled="@IsPackageImportDisabled">Keep local labels</button>
+                            <button type="button" @onclick="() => ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice.UseIncoming)" disabled="@IsPackageImportDisabled">Use imported labels</button>
+                        </div>
+                    </div>
+                }
             </div>
         }
     </section>
@@ -343,9 +388,13 @@
 
     private DateTimeOffset? LastSuccessfulExportAt { get; set; }
 
+    private BrowserLogbookExportCheckpoint? LastSuccessfulExport { get; set; }
+
     private EntryDraft Draft { get; set; } = EntryDraft.Create();
 
     private bool HasAttemptedSubmit { get; set; }
+
+    private bool HasEditedDraft { get; set; }
 
     private EntryId? EditingEntryId { get; set; }
 
@@ -363,14 +412,33 @@
 
     private MobilePackageImportCompatibility? ImportCompatibility { get; set; }
 
+    private PortableLogbookImportPlan? ImportExchangePlan { get; set; }
+
+    private BrowserFile? PendingImportFile { get; set; }
+
     private string? PackageExchangeError { get; set; }
+
+    private string? PackageExchangeMessage { get; set; }
 
     private static string TodayIso => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
 
     private string PackageExchangeTitle =>
         PackageKeyStatus == "Unavailable"
             ? "This browser cannot hold a non-extractable package key."
-            : "Package import and export are pending secure exchange wiring.";
+            : PackageKeyStatus == "Not set"
+            ? "Set up this device's package key before exporting."
+            : "Export an encrypted portable logbook package.";
+
+    private string PackageImportTitle =>
+        PackageKeyStatus == "Unavailable"
+            ? "This browser cannot hold a non-extractable package key."
+            : PackageKeyStatus == "Not set"
+            ? "Set up this device's package key before importing encrypted packages."
+            : "Import a compatible package and apply it when it has no unresolved conflicts.";
+
+    private bool IsPackageExportDisabled => IsStorageBlocked || PackageKeyStatus != "Ready";
+
+    private bool IsPackageImportDisabled => IsStorageBlocked || PackageKeyStatus != "Ready";
 
     private PortableLogbookMergeResult MergeResult =>
         PortableLogbookMerger.Merge(Document.Operations);
@@ -400,6 +468,8 @@
 
     private IReadOnlyList<string> DraftWarnings => ValidateDraftWarnings();
 
+    private bool ShouldShowDraftErrors => DraftErrors.Count > 0 && (HasAttemptedSubmit || HasEditedDraft);
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -410,6 +480,7 @@
                 Document = state.Document;
                 ImportReceipts = state.ImportReceipts;
                 LastSuccessfulExportAt = state.LastSuccessfulExportAt;
+                LastSuccessfulExport = state.LastSuccessfulExport;
             }
 
             await RefreshPackageKeyStatusAsync();
@@ -485,8 +556,11 @@
         }
 
         PackageExchangeError = null;
+        PackageExchangeMessage = null;
         ImportPlan = null;
         ImportCompatibility = null;
+        ImportExchangePlan = null;
+        PendingImportFile = null;
         try
         {
             var file = await FileStore.PickElogbookAsync();
@@ -495,12 +569,162 @@
                 return;
             }
 
+            PendingImportFile = file;
             ImportPlan = MobilePackageImportPlan.Inspect(file);
             ImportCompatibility = MobilePackageImportPlan.CheckCompatibility(ImportPlan, Document.LogbookId);
+            PackageExchangeMessage = "Package manifest previewed.";
         }
         catch (Exception ex) when (ex is BrowserFileStoreException or PortableLogbookPackageException)
         {
             PackageExchangeError = ex.Message;
+        }
+    }
+
+    private async Task SetupPackageKeyAsync()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        PackageExchangeError = null;
+        PackageExchangeMessage = null;
+        try
+        {
+            if (!await PackageKeyStore.IsSupportedAsync())
+            {
+                PackageKeyStatus = "Unavailable";
+                return;
+            }
+
+            await PackageKeyStore.EnsurePackageKeyAsync(Document.LogbookId);
+            PackageKeyStatus = await PackageKeyStore.HasPackageKeyAsync(Document.LogbookId)
+                ? "Ready"
+                : "Not set";
+            PackageExchangeMessage = PackageKeyStatus == "Ready"
+                ? "Package key is ready on this device."
+                : "Package key was not created.";
+        }
+        catch (JSException ex)
+        {
+            PackageKeyStatus = "Unavailable";
+            PackageExchangeError = ex.Message;
+        }
+    }
+
+    private async Task ExportPackageAsync()
+    {
+        if (IsPackageExportDisabled)
+        {
+            return;
+        }
+
+        PackageExchangeError = null;
+        PackageExchangeMessage = null;
+        try
+        {
+            var exportedAt = DateTimeOffset.UtcNow;
+            var result = await MobilePackageExportWorkflow.ExportAsync(Document, PackageKeyStore, FileStore, exportedAt);
+            LastSuccessfulExportAt = result.ExportedAt;
+            LastSuccessfulExport = BrowserLogbookExportCheckpoint.Create(Document, result);
+            await SaveStateAsync();
+            PackageExchangeMessage = $"Exported {result.FileName}.";
+        }
+        catch (Exception ex) when (ex is MobilePackageExportPlanException or BrowserFileStoreException or JSException)
+        {
+            PackageExchangeError = ex.Message;
+            await RefreshPackageKeyStatusAsync();
+        }
+    }
+
+    private async Task ApplyPackageAsync()
+    {
+        if (IsPackageImportDisabled)
+        {
+            return;
+        }
+
+        PackageExchangeError = null;
+        PackageExchangeMessage = null;
+        ImportExchangePlan = null;
+        try
+        {
+            var file = PendingImportFile ?? await FileStore.PickElogbookAsync();
+            if (file is null)
+            {
+                return;
+            }
+
+            PendingImportFile = file;
+            ImportPlan = MobilePackageImportPlan.Inspect(file);
+            ImportCompatibility = MobilePackageImportPlan.CheckCompatibility(ImportPlan, Document.LogbookId);
+            var result = await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+                Document,
+                file,
+                PackageKeyStore,
+                ImportReceipts,
+                DateTimeOffset.UtcNow);
+            ImportExchangePlan = result.Plan;
+            if (result.Status == MobilePackageImportApplyStatus.RequiresResolution)
+            {
+                PackageExchangeError = "Package needs custom field resolution before imported changes can be applied.";
+                return;
+            }
+
+            Document = result.Document;
+            ImportReceipts = result.ImportReceipts;
+            await SaveStateAsync();
+            PackageExchangeMessage = FormatApplyStatus(result.Status);
+            ResetDraft();
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or PortableLogbookPackageException or MobilePackageImportWorkflowException or PortableLogbookImportException or JSException)
+        {
+            PackageExchangeError = ex.Message;
+            await RefreshPackageKeyStatusAsync();
+        }
+    }
+
+    private async Task ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice choice)
+    {
+        if (IsPackageImportDisabled)
+        {
+            return;
+        }
+
+        PackageExchangeError = null;
+        PackageExchangeMessage = null;
+        if (PendingImportFile is null || ImportExchangePlan is null)
+        {
+            PackageExchangeError = "Pick and inspect a package before resolving custom field labels.";
+            return;
+        }
+
+        try
+        {
+            var resolutions = ImportExchangePlan
+                .Preview
+                .CustomFieldDefinitions
+                .Conflicts
+                .Select(conflict => new PortableLogbookCustomFieldDefinitionResolution(conflict.Id, choice))
+                .ToArray();
+            var result = await MobilePackageImportApplyWorkflow.ApplyWithCustomFieldResolutionsAsync(
+                Document,
+                PendingImportFile,
+                PackageKeyStore,
+                ImportReceipts,
+                resolutions,
+                DateTimeOffset.UtcNow);
+            ImportExchangePlan = result.Plan;
+            Document = result.Document;
+            ImportReceipts = result.ImportReceipts;
+            await SaveStateAsync();
+            PackageExchangeMessage = FormatApplyStatus(result.Status);
+            ResetDraft();
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or PortableLogbookPackageException or MobilePackageImportWorkflowException or ArgumentException or JSException)
+        {
+            PackageExchangeError = ex.Message;
+            await RefreshPackageKeyStatusAsync();
         }
     }
 
@@ -513,6 +737,7 @@
 
         Draft = EntryDraft.Create(FindDraftDefaults());
         HasAttemptedSubmit = false;
+        HasEditedDraft = false;
         EditingEntryId = null;
         EditingRevisionId = null;
     }
@@ -526,6 +751,7 @@
 
         Draft = EntryDraft.FromEntry(entry);
         HasAttemptedSubmit = false;
+        HasEditedDraft = false;
     }
 
     private void EditEntry(PortableLogbookMaterializedEntry entry)
@@ -544,6 +770,12 @@
         EditingEntryId = entry.EntryId;
         EditingRevisionId = entry.CurrentRevisionId;
         HasAttemptedSubmit = false;
+        HasEditedDraft = false;
+    }
+
+    private void MarkDraftEdited()
+    {
+        HasEditedDraft = true;
     }
 
     private async Task DeleteEntryAsync(PortableLogbookMaterializedEntry entry)
@@ -598,7 +830,7 @@
     }
 
     private ValueTask SaveStateAsync() =>
-        LogbookStore.SaveStateAsync(new BrowserLogbookState(Document, ImportReceipts, LastSuccessfulExportAt));
+        LogbookStore.SaveStateAsync(new BrowserLogbookState(Document, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport));
 
     private void ShowHistory(PortableLogbookMaterializedEntry entry)
     {
@@ -619,6 +851,27 @@
             MobilePackageImportCompatibility.WrongLogbook => "Wrong logbook",
             MobilePackageImportCompatibility.UnsupportedSchema => "Unsupported schema",
             _ => "Not checked"
+        };
+
+    private static string FormatImportStatus(PortableLogbookImportPlanStatus status) =>
+        status switch
+        {
+            PortableLogbookImportPlanStatus.ReadyToApply => "Ready to apply",
+            PortableLogbookImportPlanStatus.DuplicateOnly => "Duplicate operations only",
+            PortableLogbookImportPlanStatus.RequiresConflictResolution => "Conflict resolution required",
+            PortableLogbookImportPlanStatus.RequiresCustomFieldResolution => "Custom field resolution required",
+            _ => "Not checked"
+        };
+
+    private static string FormatApplyStatus(MobilePackageImportApplyStatus status) =>
+        status switch
+        {
+            MobilePackageImportApplyStatus.Applied => "Imported package changes.",
+            MobilePackageImportApplyStatus.AppliedWithConflicts => "Imported package changes. Resolve the highlighted conflicts before relying on current entries.",
+            MobilePackageImportApplyStatus.DuplicateOperationsRecorded => "Recorded package receipt; no new operations were needed.",
+            MobilePackageImportApplyStatus.PackageReplay => "Package was already imported on this device.",
+            MobilePackageImportApplyStatus.RequiresResolution => "Package requires resolution before import.",
+            _ => "Package import finished."
         };
 
     private PortableLogbookOperation FindOperation(RevisionId revisionId) =>
@@ -670,9 +923,8 @@
 
     private string[] ValidateDraftWarnings()
     {
-        return PortableLogbookEntryRules
-            .Warn(Draft.ToEntry(CustomFields))
-            .Select(warning => warning.Message)
+        return MobileLogbookEntryWarnings
+            .Create(Draft.ToEntry(CustomFields), CurrentEntries, EditingEntryId)
             .ToArray();
     }
 

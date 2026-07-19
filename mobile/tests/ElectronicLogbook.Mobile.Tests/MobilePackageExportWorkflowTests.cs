@@ -24,6 +24,7 @@ public sealed class MobilePackageExportWorkflowTests
         Assert.Equal("log_mobile_20260719_040506.elogbook", result.FileName);
         Assert.Equal(BrowserFileStore.ElogbookContentType, result.ContentType);
         Assert.Equal(exportedAt, result.ExportedAt);
+        Assert.Matches("^[0-9a-f]{64}$", result.PackageSha256);
         Assert.Equal(
             [
                 "electronicLogbookKeys.hasPackageKey",

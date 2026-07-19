@@ -226,6 +226,22 @@ textarea {
     background: #f8fafc;
 }
 
+.custom-field-conflicts {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 8px;
+}
+
+.custom-field-conflicts div {
+    min-width: 0;
+}
+
+.custom-field-conflicts strong,
+.custom-field-conflicts span {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
 .entry-list {
     display: grid;
     gap: 10px;

@@ -9,6 +9,18 @@ tests and manual smoke checks, not real flight records.
 `dynamic-blocking.csv` keeps the same header set but includes rows that should be blocked:
 an unknown aircraft type, invalid date, and crew-hour totals exceeding total time.
 
+`dynamic-simulator.csv` covers a simulator-only row: blank aircraft type, zero total
+flight time, non-zero simulator time, and an approach.
+
+`dynamic-duplicates.csv` contains two identical dynamic rows so preview/import checks can
+exercise duplicate-key handling.
+
+`dynamic-locale-sensitive.tsv` uses tab delimiters, quoted comma-containing text, and
+`H:MM` duration fields that should not depend on decimal separator settings.
+
+`dynamic-malformed.csv` isolates blocking malformed rows for invalid dates, unknown
+aircraft types, and crew-hour totals exceeding total time.
+
 `default-full-export-detected.csv` mimics the old/default LogTen full export shape by using
 the `flight_flightdate` header. The importer should reject it and tell the user to use the
 dynamic export format.

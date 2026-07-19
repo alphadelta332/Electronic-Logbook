@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Mobile;
@@ -30,7 +31,12 @@ public static class MobilePackageExportWorkflow
 
         await fileStore.ShareOrDownloadAsync(plan.FileName, packageBytes, plan.ContentType).ConfigureAwait(false);
 
-        return new MobilePackageExportWorkflowResult(plan.FileName, plan.ContentType, plan.ExportedAt, packageBytes);
+        return new MobilePackageExportWorkflowResult(
+            plan.FileName,
+            plan.ContentType,
+            plan.ExportedAt,
+            Convert.ToHexString(SHA256.HashData(packageBytes)).ToLowerInvariant(),
+            packageBytes);
     }
 }
 
@@ -38,4 +44,5 @@ public sealed record MobilePackageExportWorkflowResult(
     string FileName,
     string ContentType,
     DateTimeOffset ExportedAt,
+    string PackageSha256,
     byte[] PackageBytes);

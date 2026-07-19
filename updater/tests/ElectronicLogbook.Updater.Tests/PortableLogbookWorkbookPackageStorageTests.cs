@@ -98,6 +98,46 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         Assert.Null(PortableLogbookWorkbookPackageStorage.ReadEnvelope(destination));
     }
 
+    [Fact]
+    public void OpenStateReturnsNullWhenWorkbookHasNoPortableStoragePart()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+
+        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbook, PortableLogbookKey.Generate());
+
+        Assert.Null(state);
+    }
+
+    [Fact]
+    public void OpenStateDecryptsStoredPortableHistoryPackage()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var key = PortableLogbookKey.Generate();
+        var envelope = CreateEnvelope("log_open", key);
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbook, envelope);
+
+        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbook, key);
+
+        Assert.NotNull(state);
+        Assert.Equal(envelope.LogbookId, state.Document.LogbookId);
+        Assert.Equal(envelope.SchemaVersion, state.Document.SchemaVersion);
+        Assert.Single(state.Document.Operations);
+        Assert.Empty(state.ImportReceipts);
+    }
+
+    [Fact]
+    public void OpenStateRejectsWrongKeyWithoutReturningStoredState()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var envelope = CreateEnvelope("log_wrong_key", PortableLogbookKey.Generate());
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbook, envelope);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookWorkbookPackageStorage.OpenState(workbook, PortableLogbookKey.Generate()));
+
+        Assert.Equal(PortableLogbookPackageError.AuthenticationFailed, exception.Error);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))

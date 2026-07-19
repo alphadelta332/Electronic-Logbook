@@ -1,0 +1,3 @@
+Date,Aircraft ID,Aircraft Type,From,To,Total Time,Simulator,PIC/P1 Crew,Day Ldg,Night Ldg,Approach 1,Approach 2,Route,Night,PIC,P1u/s,SIC,SIC/P2 Crew,Observer,Actual Inst,Flight #,Remarks,IPC/ICC,Flight Review
+2024-06-01,VH-DUP,C172,YSBK,YSCN,1.1,0,Sample Pilot,1,0,,,,0,1.1,0,0,,,0,DUP-001,Duplicate fixture row,,
+2024-06-01,VH-DUP,C172,YSBK,YSCN,1.1,0,Sample Pilot,1,0,,,,0,1.1,0,0,,,0,DUP-001,Duplicate fixture row,,

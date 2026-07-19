@@ -295,6 +295,8 @@ public sealed class WorkbookHandoffTests : IDisposable
         var result = WorkbookHandoff.RecoverIfNeeded(source);
 
         Assert.Equal(HandoffRecoveryAction.BackupRestored, result.Action);
+        Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
+        Assert.Equal(Path.GetFullPath(backup), result.BackupWorkbookPath);
         Assert.Equal("old workbook", File.ReadAllText(source));
         Assert.False(File.Exists(backup));
         Assert.False(File.Exists(replacement));
@@ -317,6 +319,8 @@ public sealed class WorkbookHandoffTests : IDisposable
         var result = WorkbookHandoff.RecoverIfNeeded(source);
 
         Assert.Equal(HandoffRecoveryAction.CompletedJournalCleaned, result.Action);
+        Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
+        Assert.Equal(Path.GetFullPath(backup), result.BackupWorkbookPath);
         Assert.Equal("new workbook", File.ReadAllText(source));
         Assert.Equal("old workbook", File.ReadAllText(backup));
         Assert.False(File.Exists(staged));
@@ -517,6 +521,8 @@ public sealed class WorkbookHandoffTests : IDisposable
 
         Assert.Equal("2.0.0", WorkbookPackageValidator.ValidateWorkbookPackage(source));
         Assert.Equal(Path.GetFullPath(source), result.RestoredWorkbookPath);
+        Assert.Equal("2.0.0", result.RestoredWorkbookVersion);
+        Assert.Equal("2.0.0", result.BackupWorkbookVersion);
         Assert.NotNull(result.FailedWorkbookPath);
         Assert.True(File.Exists(result.FailedWorkbookPath));
         Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(result.FailedWorkbookPath));
@@ -536,6 +542,8 @@ public sealed class WorkbookHandoffTests : IDisposable
 
         Assert.Equal("2.0.0", WorkbookPackageValidator.ValidateWorkbookPackage(source));
         Assert.Equal(Path.GetFullPath(source), result.RestoredWorkbookPath);
+        Assert.Equal("2.0.0", result.RestoredWorkbookVersion);
+        Assert.Equal("2.0.0", result.BackupWorkbookVersion);
         Assert.Null(result.FailedWorkbookPath);
         Assert.True(File.Exists(backup));
     }

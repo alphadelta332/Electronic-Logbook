@@ -48,6 +48,50 @@ public sealed class PortableLogbookWorkbookProjectionTests
     }
 
     [Fact]
+    public void ReconcileTreatsDirectCellEditAsCorrectionForSameStableEntryId()
+    {
+        var customFieldId = new CustomFieldId("cf_workbook_1");
+        var knownEntry = Entry("VH-ABC") with
+        {
+            FlightNumber = "ABC123",
+            Route = "BK",
+            Details = "Original details",
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [customFieldId] = "Original"
+            }
+        };
+        var editedRow = knownEntry with
+        {
+            FlightNumber = "ABC124",
+            Route = "BK CN",
+            Details = "Edited directly in workbook",
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [customFieldId] = "Edited"
+            }
+        };
+        var known = KnownEntry("ent_1", "rev_1", knownEntry);
+
+        var result = Reconcile(
+            [known],
+            [new PortableLogbookWorkbookRow(known.EntryId, known.CurrentRevisionId, editedRow)],
+            new PortableLogbookIdFactory(() => new EntryId("unused"), () => new RevisionId("rev_cell_edit")));
+
+        var correction = Assert.IsType<CorrectEntryOperation>(Assert.Single(result.Operations));
+        Assert.Equal(known.EntryId, correction.EntryId);
+        Assert.Equal(new RevisionId("rev_cell_edit"), correction.RevisionId);
+        Assert.Equal(known.CurrentRevisionId, Assert.Single(correction.ParentRevisionIds));
+        Assert.Equal("ABC124", correction.Entry.FlightNumber);
+        Assert.Equal("BK CN", correction.Entry.Route);
+        Assert.Equal("Edited directly in workbook", correction.Entry.Details);
+        Assert.Equal("Edited", correction.Entry.CustomFields[customFieldId]);
+        Assert.Equal(0, result.CreateCount);
+        Assert.Equal(1, result.CorrectionCount);
+        Assert.Equal(0, result.DeletionCount);
+    }
+
+    [Fact]
     public void ReconcileDeletesKnownRowsMissingFromWorkbookProjection()
     {
         var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
@@ -71,6 +115,58 @@ public sealed class PortableLogbookWorkbookProjectionTests
         var result = Reconcile([known], []);
 
         Assert.Empty(result.Operations);
+    }
+
+    [Fact]
+    public void ReconcileKeepsStableIdsWhenWorkbookRowsAreSorted()
+    {
+        var first = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
+        var second = KnownEntry("ent_2", "rev_2", Entry("VH-DEF"));
+
+        var result = Reconcile(
+            [first, second],
+            [
+                new PortableLogbookWorkbookRow(second.EntryId, second.CurrentRevisionId, Entry("VH-DEF")),
+                new PortableLogbookWorkbookRow(first.EntryId, first.CurrentRevisionId, Entry("VH-ABC"))
+            ]);
+
+        Assert.Empty(result.Operations);
+    }
+
+    [Fact]
+    public void ReconcileCreatesOnlyInsertedWorkbookRows()
+    {
+        var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
+
+        var result = Reconcile(
+            [known],
+            [
+                new PortableLogbookWorkbookRow(null, null, Entry("VH-NEW")),
+                new PortableLogbookWorkbookRow(known.EntryId, known.CurrentRevisionId, Entry("VH-ABC"))
+            ],
+            new PortableLogbookIdFactory(() => new EntryId("ent_new"), () => new RevisionId("rev_new")));
+
+        var create = Assert.IsType<CreateEntryOperation>(Assert.Single(result.Operations));
+        Assert.Equal(new EntryId("ent_new"), create.EntryId);
+        Assert.Equal("VH-NEW", create.Entry.Registration);
+        Assert.Equal(1, result.CreateCount);
+    }
+
+    [Fact]
+    public void ReconcileDeletesOnlyRemovedWorkbookRows()
+    {
+        var retained = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
+        var removed = KnownEntry("ent_2", "rev_2", Entry("VH-DEF"));
+
+        var result = Reconcile(
+            [retained, removed],
+            [new PortableLogbookWorkbookRow(retained.EntryId, retained.CurrentRevisionId, Entry("VH-ABC"))],
+            new PortableLogbookIdFactory(() => new EntryId("unused"), () => new RevisionId("rev_delete")));
+
+        var deletion = Assert.IsType<DeleteEntryOperation>(Assert.Single(result.Operations));
+        Assert.Equal(removed.EntryId, deletion.EntryId);
+        Assert.Equal(removed.CurrentRevisionId, Assert.Single(deletion.ParentRevisionIds));
+        Assert.Equal(1, result.DeletionCount);
     }
 
     [Fact]

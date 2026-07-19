@@ -21,8 +21,16 @@ public static class PortableLogbookSetup
             resolvedDeviceId,
             createdAt,
             idFactory);
+        var workbookRows = document
+            .Operations
+            .OfType<CreateEntryOperation>()
+            .Select(operation => new PortableLogbookWorkbookRow(
+                operation.EntryId,
+                operation.RevisionId,
+                operation.Entry))
+            .ToArray();
         var packageBytes = PortableLogbookPackage.Write(document, resolvedKey);
-        return new PortableLogbookSetupPlan(resolvedLogbookId, resolvedDeviceId, resolvedKey, document, packageBytes);
+        return new PortableLogbookSetupPlan(resolvedLogbookId, resolvedDeviceId, resolvedKey, document, workbookRows, packageBytes);
     }
 }
 
@@ -31,4 +39,5 @@ public sealed record PortableLogbookSetupPlan(
     DeviceId DeviceId,
     PortableLogbookKey Key,
     PortableLogbookDocument InitialDocument,
+    IReadOnlyList<PortableLogbookWorkbookRow> WorkbookRows,
     byte[] InitialPackageBytes);

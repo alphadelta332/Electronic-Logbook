@@ -3,9 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
+    "generate:icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Generate-AppIcons.ps1",
     "publish:pwa": "dotnet publish src/ElectronicLogbook.Mobile/ElectronicLogbook.Mobile.csproj -c Release -o artifacts/pages",
     "prepare:android-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Prepare-CapacitorAssets.ps1",
-    "sync:android": "npm run publish:pwa && npm run prepare:android-assets && capacitor sync android",
+    "sync:android": "npm run generate:icons && npm run publish:pwa && npm run prepare:android-assets && capacitor sync android",
     "build:android": "npm run sync:android && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {

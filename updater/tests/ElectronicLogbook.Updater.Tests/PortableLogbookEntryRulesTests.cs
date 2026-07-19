@@ -158,6 +158,23 @@ public sealed class PortableLogbookEntryRulesTests
             warning => warning.Code == PortableLogbookEntryRuleWarningCode.InstrumentTimeWithoutApproach);
     }
 
+    [Fact]
+    public void WarnReportsHighLandingsAndApproachesComparedWithFlightTime()
+    {
+        var entry = CompleteEntry() with
+        {
+            PilotInCommand = 1.0m,
+            LandingsDay = 7,
+            IfrApproaches = 4,
+            InstrumentActual = 0.5m
+        };
+
+        var warnings = PortableLogbookEntryRules.Warn(entry);
+
+        Assert.Contains(warnings, warning => warning.Code == PortableLogbookEntryRuleWarningCode.HighLandingsForFlightTime);
+        Assert.Contains(warnings, warning => warning.Code == PortableLogbookEntryRuleWarningCode.HighApproachesForFlightTime);
+    }
+
     private static PortableLogbookEntry CompleteEntry() =>
         PortableLogbookEntry.Empty with
         {

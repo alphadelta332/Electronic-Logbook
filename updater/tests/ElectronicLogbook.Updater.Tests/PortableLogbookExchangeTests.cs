@@ -15,6 +15,13 @@ public sealed class PortableLogbookExchangeTests
 
         Assert.Empty(preview.NewOperations);
         Assert.Equal(1, preview.DuplicateOperationCount);
+        var duplicate = Assert.Single(preview.DuplicateOperations);
+        Assert.Equal(create.RevisionId, duplicate.RevisionId);
+        var duplicateSummary = Assert.Single(preview.DuplicateOperationSummaries);
+        Assert.Equal(create.EntryId, duplicateSummary.EntryId);
+        Assert.Equal(create.RevisionId, duplicateSummary.RevisionId);
+        Assert.Equal(PortableOperationKind.Create, duplicateSummary.Kind);
+        Assert.Equal("VH-ABC", duplicateSummary.Registration);
         Assert.False(preview.HasConflicts);
     }
 
@@ -31,6 +38,14 @@ public sealed class PortableLogbookExchangeTests
         Assert.Equal(1, preview.DuplicateOperationCount);
         Assert.Equal(1, preview.CorrectionCount);
         Assert.Equal(correction.RevisionId, Assert.Single(preview.NewOperations).RevisionId);
+        var summary = Assert.Single(preview.NewOperationSummaries);
+        Assert.Equal(create.EntryId, summary.EntryId);
+        Assert.Equal(correction.RevisionId, summary.RevisionId);
+        Assert.Equal(PortableOperationKind.Correction, summary.Kind);
+        Assert.Equal("VH-XYZ", summary.Registration);
+        Assert.Equal(new DateOnly(2026, 7, 18), summary.Date);
+        Assert.Equal("YSBK", summary.From);
+        Assert.Equal("YSBK", summary.To);
         Assert.False(preview.HasConflicts);
     }
 
@@ -51,6 +66,11 @@ public sealed class PortableLogbookExchangeTests
         var preview = PortableLogbookExchange.PreviewImport(local, incoming);
 
         Assert.Equal(1, preview.DeletionCount);
+        var summary = Assert.Single(preview.NewOperationSummaries);
+        Assert.Equal(create.EntryId, summary.EntryId);
+        Assert.Equal(deletion.RevisionId, summary.RevisionId);
+        Assert.Equal(PortableOperationKind.Deletion, summary.Kind);
+        Assert.Null(summary.Registration);
         Assert.False(preview.HasConflicts);
     }
 

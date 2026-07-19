@@ -34,6 +34,7 @@ public static class PortableLogbookAudit
         return new PortableLogbookAuditSnapshot(
             document.LogbookId,
             document.SchemaVersion,
+            document.CustomFieldDefinitions,
             currentRecords,
             revisionHistory,
             merge.Conflicts);
@@ -57,6 +58,7 @@ public static class PortableLogbookAudit
 public sealed record PortableLogbookAuditSnapshot(
     LogbookId LogbookId,
     int SchemaVersion,
+    IReadOnlyList<CustomFieldDefinition> CustomFieldDefinitions,
     IReadOnlyList<PortableLogbookCurrentRecord> CurrentRecords,
     IReadOnlyList<PortableLogbookEntryRevisionHistory> RevisionHistory,
     IReadOnlyList<PortableLogbookConflict> Conflicts);

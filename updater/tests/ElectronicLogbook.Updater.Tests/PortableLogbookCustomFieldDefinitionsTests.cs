@@ -31,4 +31,47 @@ public sealed class PortableLogbookCustomFieldDefinitionsTests
         Assert.Equal(local, conflict.LocalDefinition);
         Assert.Equal(incoming, conflict.IncomingDefinition);
     }
+
+    [Fact]
+    public void ResolveKeepsLocalDefinitionWhenSelected()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var local = new CustomFieldDefinition(fieldId, "Training kind", 1);
+        var incoming = new CustomFieldDefinition(fieldId, "Training category", 1);
+        var merge = PortableLogbookCustomFieldDefinitions.Merge([local], [incoming]);
+
+        var resolved = PortableLogbookCustomFieldDefinitions.Resolve(
+            merge,
+            [new PortableLogbookCustomFieldDefinitionResolution(fieldId, PortableLogbookCustomFieldDefinitionChoice.KeepLocal)]);
+
+        Assert.Equal(local, Assert.Single(resolved));
+    }
+
+    [Fact]
+    public void ResolveUsesIncomingDefinitionWhenSelected()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var local = new CustomFieldDefinition(fieldId, "Training kind", 1);
+        var incoming = new CustomFieldDefinition(fieldId, "Training category", 1);
+        var merge = PortableLogbookCustomFieldDefinitions.Merge([local], [incoming]);
+
+        var resolved = PortableLogbookCustomFieldDefinitions.Resolve(
+            merge,
+            [new PortableLogbookCustomFieldDefinitionResolution(fieldId, PortableLogbookCustomFieldDefinitionChoice.UseIncoming)]);
+
+        Assert.Equal(incoming, Assert.Single(resolved));
+    }
+
+    [Fact]
+    public void ResolveRequiresEveryConflictToHaveExplicitChoice()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var local = new CustomFieldDefinition(fieldId, "Training kind", 1);
+        var incoming = new CustomFieldDefinition(fieldId, "Training category", 1);
+        var merge = PortableLogbookCustomFieldDefinitions.Merge([local], [incoming]);
+
+        var error = Assert.Throws<ArgumentException>(() => PortableLogbookCustomFieldDefinitions.Resolve(merge, []));
+
+        Assert.Contains(fieldId.Value, error.Message, StringComparison.Ordinal);
+    }
 }

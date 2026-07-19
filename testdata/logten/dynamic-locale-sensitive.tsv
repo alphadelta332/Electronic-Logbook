@@ -1,0 +1,2 @@
+Date	Aircraft ID	Aircraft Type	From	To	Total Time	Simulator	PIC/P1 Crew	Day Ldg	Night Ldg	Approach 1	Approach 2	Route	Night	PIC	P1u/s	SIC	SIC/P2 Crew	Observer	Actual Inst	Flight #	Remarks	IPC/ICC	Flight Review
+2024-07-12	VH-TSV	PA28	YMEN	YMAV	1:15	0	"Pilot, Test"	1	0	1;LNAV/VNAV	1;GLS	"ALPHA, BRAVO"	0:20	0:45	0:30	0	Instructor	Observer	0:35	TSV-001	"Quoted, comma-containing remarks"		Flight review noted

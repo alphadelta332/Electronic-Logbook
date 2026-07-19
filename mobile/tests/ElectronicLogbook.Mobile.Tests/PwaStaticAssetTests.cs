@@ -30,6 +30,23 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void PublishedServiceWorkerUsesRollbackSafeLifecycle()
+    {
+        var worker = ReadMobileAsset("service-worker.published.js");
+        var installIndex = worker.IndexOf("async function onInstall", StringComparison.Ordinal);
+        var activateIndex = worker.IndexOf("async function onActivate", StringComparison.Ordinal);
+        var cachePopulateIndex = worker.IndexOf("cache.addAll(assetsRequests)", StringComparison.Ordinal);
+        var oldCacheDeleteIndex = worker.IndexOf("caches.delete(key)", StringComparison.Ordinal);
+
+        Assert.True(installIndex >= 0);
+        Assert.True(activateIndex > installIndex);
+        Assert.True(cachePopulateIndex > installIndex && cachePopulateIndex < activateIndex);
+        Assert.True(oldCacheDeleteIndex > activateIndex);
+        Assert.DoesNotContain("skipWaiting", worker, StringComparison.Ordinal);
+        Assert.DoesNotContain("clients.claim", worker, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DevelopmentServiceWorkerDoesNotEnableOfflineCaching()
     {
         var worker = ReadMobileAsset("service-worker.js");
@@ -54,6 +71,18 @@ public sealed class PwaStaticAssetTests
         var icons = root.GetProperty("icons").EnumerateArray().ToArray();
         Assert.Contains(icons, icon => icon.GetProperty("sizes").GetString() == "192x192");
         Assert.Contains(icons, icon => icon.GetProperty("sizes").GetString() == "512x512");
+    }
+
+    [Theory]
+    [InlineData("icon-192.png", 192, 192)]
+    [InlineData("icon-512.png", 512, 512)]
+    public void PwaIconsHaveInstallablePngDimensions(string fileName, int expectedWidth, int expectedHeight)
+    {
+        var path = GetMobileAssetPath(fileName);
+        var dimensions = ReadPngDimensions(path);
+
+        Assert.Equal((expectedWidth, expectedHeight), dimensions);
+        Assert.True(new FileInfo(path).Length > 1024);
     }
 
     [Fact]
@@ -141,7 +170,10 @@ public sealed class PwaStaticAssetTests
     }
 
     private static string ReadMobileAsset(string relativePath) =>
-        File.ReadAllText(Path.GetFullPath(Path.Combine(
+        File.ReadAllText(GetMobileAssetPath(relativePath));
+
+    private static string GetMobileAssetPath(string relativePath) =>
+        Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..",
             "..",
@@ -151,5 +183,22 @@ public sealed class PwaStaticAssetTests
             "src",
             "ElectronicLogbook.Mobile",
             "wwwroot",
-            relativePath)));
+            relativePath));
+
+    private static (int Width, int Height) ReadPngDimensions(string path)
+    {
+        Span<byte> header = stackalloc byte[24];
+        using var stream = File.OpenRead(path);
+        var bytesRead = stream.Read(header);
+
+        Assert.Equal(24, bytesRead);
+        Assert.True(header[..8].SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }));
+
+        var width = ReadBigEndianInt32(header[16..20]);
+        var height = ReadBigEndianInt32(header[20..24]);
+        return (width, height);
+    }
+
+    private static int ReadBigEndianInt32(ReadOnlySpan<byte> bytes) =>
+        (bytes[0] << 24) | (bytes[1] << 16) | (bytes[2] << 8) | bytes[3];
 }

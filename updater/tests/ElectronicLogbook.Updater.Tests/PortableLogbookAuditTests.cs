@@ -59,6 +59,18 @@ public sealed class PortableLogbookAuditTests
     }
 
     [Fact]
+    public void CreatePreservesCustomFieldDefinitionsForAuditOutput()
+    {
+        var field = new CustomFieldDefinition(new CustomFieldId("cf_role"), "Role", 1);
+        var create = CreateOperation("ent_a", "rev_create", "VH-AAA", DateTimeOffset.Parse("2026-07-18T00:00:00Z"));
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [field], [create]);
+
+        var audit = PortableLogbookAudit.Create(document);
+
+        Assert.Equal([field], audit.CustomFieldDefinitions);
+    }
+
+    [Fact]
     public void CreateRejectsInvalidDocuments()
     {
         var create = CreateOperation("ent_a", "rev_create", "VH-AAA", DateTimeOffset.Parse("2026-07-18T00:00:00Z"));

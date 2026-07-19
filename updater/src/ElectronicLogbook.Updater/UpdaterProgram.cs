@@ -30,6 +30,14 @@ public static class UpdaterProgram
             if (recovery.Action != HandoffRecoveryAction.None)
             {
                 Console.WriteLine($"[updater] {recovery.Message}");
+                if (!string.IsNullOrWhiteSpace(recovery.SourceWorkbookPath))
+                {
+                    Console.WriteLine($"[updater] Recovered workbook: {recovery.SourceWorkbookPath}");
+                }
+                if (!string.IsNullOrWhiteSpace(recovery.BackupWorkbookPath))
+                {
+                    Console.WriteLine($"[updater] Recovery backup: {recovery.BackupWorkbookPath}");
+                }
             }
 
             masterPath = options.MasterPath;

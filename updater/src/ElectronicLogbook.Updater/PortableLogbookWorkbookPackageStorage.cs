@@ -45,6 +45,17 @@ public static class PortableLogbookWorkbookPackageStorage
         return PortableLogbookWorkbookStorage.Deserialize(json);
     }
 
+    public static PortableLogbookWorkbookStorageState? OpenState(string workbookPath, PortableLogbookKey key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(key);
+
+        var envelope = ReadEnvelope(workbookPath);
+        return envelope is null
+            ? null
+            : PortableLogbookWorkbookStorage.OpenEnvelope(envelope, key);
+    }
+
     public static bool CopyEnvelope(string sourceWorkbookPath, string destinationWorkbookPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceWorkbookPath);

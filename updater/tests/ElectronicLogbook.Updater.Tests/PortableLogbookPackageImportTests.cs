@@ -21,6 +21,13 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal(PortableLogbookPackageImportStatus.Applied, result.Status);
         Assert.Equal([create.RevisionId, correction.RevisionId], result.Document.Operations.Select(operation => operation.RevisionId));
         Assert.Equal(PortableLogbookImportPlanStatus.ReadyToApply, result.Plan?.Status);
+        Assert.NotNull(result.Plan);
+        var plan = result.Plan!;
+        var summary = Assert.Single(plan.Preview.NewOperationSummaries);
+        Assert.Equal(correction.EntryId, summary.EntryId);
+        Assert.Equal(correction.RevisionId, summary.RevisionId);
+        Assert.Equal(PortableOperationKind.Correction, summary.Kind);
+        Assert.Equal("VH-NEW", summary.Registration);
         Assert.NotNull(result.NewReceipt);
         Assert.Equal(ImportedAt, result.NewReceipt.ImportedAt);
         Assert.NotNull(result.EncryptedHistoryPackage);

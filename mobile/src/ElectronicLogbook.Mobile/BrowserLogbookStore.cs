@@ -52,7 +52,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         return new BrowserLogbookState(
             document,
             stored.ImportReceipts ?? [],
-            stored.LastSuccessfulExportAt);
+            stored.LastSuccessfulExport?.ExportedAt ?? stored.LastSuccessfulExportAt,
+            stored.LastSuccessfulExport);
     }
 
     public async ValueTask SaveDocumentAsync(PortableLogbookDocument document)
@@ -72,13 +73,16 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         var document = state.Document;
         ArgumentNullException.ThrowIfNull(document);
         EnsureSaveableDocument(document);
+        var existing = await LoadStateAsync();
+        EnsureSchemaUpgradeHasBackup(existing, document);
 
         var stored = new BrowserLogbookStoredDocument(
             CurrentStoreVersion,
             document.SchemaVersion,
             PortableLogbookJson.Serialize(document),
             state.ImportReceipts,
-            state.LastSuccessfulExportAt);
+            state.LastSuccessfulExport?.ExportedAt ?? state.LastSuccessfulExportAt,
+            state.LastSuccessfulExport);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
             DocumentKey,
@@ -104,6 +108,18 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         await SaveStateAsync(state with { LastSuccessfulExportAt = exportedAt });
     }
 
+    public async ValueTask RecordSuccessfulExportAsync(MobilePackageExportWorkflowResult export)
+    {
+        ArgumentNullException.ThrowIfNull(export);
+        var state = await LoadStateAsync()
+            ?? throw new BrowserLogbookStoreException("Cannot record an export before a portable document exists.");
+        await SaveStateAsync(state with
+        {
+            LastSuccessfulExportAt = export.ExportedAt,
+            LastSuccessfulExport = BrowserLogbookExportCheckpoint.Create(state.Document, export)
+        });
+    }
+
     private static PortableLogbookDocument ReadDocument(string json)
     {
         var document = PortableLogbookJson.Deserialize(json)
@@ -125,6 +141,21 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
                 $"Portable schema version {document.SchemaVersion} cannot be saved by this app.");
         }
     }
+
+    private static void EnsureSchemaUpgradeHasBackup(BrowserLogbookState? existing, PortableLogbookDocument document)
+    {
+        if (existing is null || existing.Document.SchemaVersion >= document.SchemaVersion)
+        {
+            return;
+        }
+
+        if (existing.LastSuccessfulExport is null ||
+            !existing.LastSuccessfulExport.Covers(existing.Document))
+        {
+            throw new BrowserLogbookStoreException(
+                "Stored logbook state must be exported as a valid backup package before this app can upgrade its local schema.");
+        }
+    }
 }
 
 public sealed record BrowserLogbookStoredDocument(
@@ -132,11 +163,50 @@ public sealed record BrowserLogbookStoredDocument(
     int SchemaVersion,
     string DocumentJson,
     IReadOnlyList<PortableLogbookPackageReceipt>? ImportReceipts = null,
-    DateTimeOffset? LastSuccessfulExportAt = null);
+    DateTimeOffset? LastSuccessfulExportAt = null,
+    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null);
 
 public sealed record BrowserLogbookState(
     PortableLogbookDocument Document,
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
-    DateTimeOffset? LastSuccessfulExportAt);
+    DateTimeOffset? LastSuccessfulExportAt,
+    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null);
+
+public sealed record BrowserLogbookExportCheckpoint(
+    DateTimeOffset ExportedAt,
+    int SchemaVersion,
+    LogbookId LogbookId,
+    int OperationCount,
+    DateTimeOffset? LatestOperationCreatedAt,
+    string PackageSha256)
+{
+    public static BrowserLogbookExportCheckpoint Create(
+        PortableLogbookDocument document,
+        MobilePackageExportWorkflowResult export)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(export);
+        return new BrowserLogbookExportCheckpoint(
+            export.ExportedAt,
+            document.SchemaVersion,
+            document.LogbookId,
+            document.Operations.Count,
+            LatestOperationCreatedAtFor(document),
+            export.PackageSha256);
+    }
+
+    public bool Covers(PortableLogbookDocument document) =>
+        SchemaVersion == document.SchemaVersion &&
+        LogbookId == document.LogbookId &&
+        OperationCount >= document.Operations.Count &&
+        LatestOperationCreatedAt == LatestOperationCreatedAtFor(document) &&
+        PackageSha256.Length == 64 &&
+        PackageSha256.All(Uri.IsHexDigit);
+
+    private static DateTimeOffset? LatestOperationCreatedAtFor(PortableLogbookDocument document) =>
+        document.Operations.Count == 0
+            ? null
+            : document.Operations.Max(operation => operation.CreatedAt);
+}
 
 public sealed class BrowserLogbookStoreException(string message) : Exception(message);

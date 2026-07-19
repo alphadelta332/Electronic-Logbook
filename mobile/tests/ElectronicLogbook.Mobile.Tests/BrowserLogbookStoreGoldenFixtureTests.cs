@@ -77,6 +77,24 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task SaveAndLoadStateRoundTripsValidExportCheckpoint()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var checkpoint = CreateCheckpoint(document);
+        var jsRuntime = new MemoryJsRuntime();
+        var store = new BrowserLogbookStore(jsRuntime);
+
+        await store.SaveStateAsync(new BrowserLogbookState(document, [], checkpoint.ExportedAt, checkpoint));
+
+        var state = await store.LoadStateAsync();
+
+        Assert.NotNull(state);
+        Assert.Equal(checkpoint.ExportedAt, state.LastSuccessfulExportAt);
+        Assert.Equal(checkpoint, state.LastSuccessfulExport);
+    }
+
+    [Fact]
     public async Task SaveDocumentAsyncPreservesExistingExchangeMetadata()
     {
         var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
@@ -161,6 +179,32 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task RecordSuccessfulExportAsyncPersistsPackageCheckpoint()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var exportedAt = DateTimeOffset.Parse("2026-07-19T03:00:00Z");
+        var export = new MobilePackageExportWorkflowResult(
+            "log_fixture_20260719_030000.elogbook",
+            BrowserFileStore.ElogbookContentType,
+            exportedAt,
+            new string('a', 64),
+            [1, 2, 3]);
+        var store = new BrowserLogbookStore(new MemoryJsRuntime());
+        await store.SaveStateAsync(new BrowserLogbookState(document, [], null));
+
+        await store.RecordSuccessfulExportAsync(export);
+
+        var state = await store.LoadStateAsync();
+
+        Assert.NotNull(state);
+        Assert.Equal(exportedAt, state.LastSuccessfulExportAt);
+        Assert.NotNull(state.LastSuccessfulExport);
+        Assert.True(state.LastSuccessfulExport.Covers(document));
+        Assert.Equal(export.PackageSha256, state.LastSuccessfulExport.PackageSha256);
+    }
+
+    [Fact]
     public async Task LoadDocumentAsyncCanReadLegacyRawGoldenFixtureJson()
     {
         var store = new BrowserLogbookStore(new MemoryJsRuntime { StoredJson = ReadGoldenFixture() });
@@ -241,6 +285,83 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
         Assert.False(jsRuntime.SaveWasCalled);
     }
 
+    [Fact]
+    public async Task SaveStateAsyncRejectsSchemaUpgradeWithoutValidBackupCheckpoint()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var oldDocument = document with { SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion - 1 };
+        var originalJson = JsonSerializer.Serialize(
+            new BrowserLogbookStoredDocument(
+                1,
+                oldDocument.SchemaVersion,
+                PortableLogbookJson.Serialize(oldDocument),
+                [],
+                null),
+            PortableLogbookJson.SerializerOptions);
+        var jsRuntime = new MemoryJsRuntime { StoredJson = originalJson };
+        var store = new BrowserLogbookStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<BrowserLogbookStoreException>(async () =>
+            await store.SaveStateAsync(new BrowserLogbookState(document, [], null)));
+
+        Assert.Contains("valid backup package", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalJson, jsRuntime.StoredJson);
+    }
+
+    [Fact]
+    public async Task SaveStateAsyncRejectsSchemaUpgradeWithStaleBackupCheckpoint()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var oldDocument = document with { SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion - 1 };
+        var staleCheckpoint = CreateCheckpoint(oldDocument) with { OperationCount = oldDocument.Operations.Count - 1 };
+        var originalJson = JsonSerializer.Serialize(
+            new BrowserLogbookStoredDocument(
+                1,
+                oldDocument.SchemaVersion,
+                PortableLogbookJson.Serialize(oldDocument),
+                [],
+                staleCheckpoint.ExportedAt,
+                staleCheckpoint),
+            PortableLogbookJson.SerializerOptions);
+        var jsRuntime = new MemoryJsRuntime { StoredJson = originalJson };
+        var store = new BrowserLogbookStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<BrowserLogbookStoreException>(async () =>
+            await store.SaveStateAsync(new BrowserLogbookState(document, [], null)));
+
+        Assert.Contains("valid backup package", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalJson, jsRuntime.StoredJson);
+    }
+
+    [Fact]
+    public async Task SaveStateAsyncAllowsSchemaUpgradeAfterValidBackupCheckpoint()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var oldDocument = document with { SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion - 1 };
+        var checkpoint = CreateCheckpoint(oldDocument);
+        var originalJson = JsonSerializer.Serialize(
+            new BrowserLogbookStoredDocument(
+                1,
+                oldDocument.SchemaVersion,
+                PortableLogbookJson.Serialize(oldDocument),
+                [],
+                checkpoint.ExportedAt,
+                checkpoint),
+            PortableLogbookJson.SerializerOptions);
+        var jsRuntime = new MemoryJsRuntime { StoredJson = originalJson };
+        var store = new BrowserLogbookStore(jsRuntime);
+
+        await store.SaveStateAsync(new BrowserLogbookState(document, [], checkpoint.ExportedAt, checkpoint));
+
+        Assert.True(jsRuntime.SaveWasCalled);
+        var state = await store.LoadStateAsync();
+        Assert.NotNull(state);
+        Assert.Equal(PortableLogbookDocument.CurrentSchemaVersion, state.Document.SchemaVersion);
+    }
+
     private static void AssertGoldenFixtureDocument(PortableLogbookDocument? document)
     {
         Assert.NotNull(document);
@@ -258,6 +379,15 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
 
     private static string ReadGoldenFixture() =>
         File.ReadAllText(Path.Combine("Fixtures", "portable-logbook-v1.json"));
+
+    private static BrowserLogbookExportCheckpoint CreateCheckpoint(PortableLogbookDocument document) =>
+        new(
+            DateTimeOffset.Parse("2026-07-19T03:00:00Z"),
+            document.SchemaVersion,
+            document.LogbookId,
+            document.Operations.Count,
+            document.Operations.Max(operation => operation.CreatedAt),
+            new string('a', 64));
 
     private static string Normalize(string value) =>
         value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();

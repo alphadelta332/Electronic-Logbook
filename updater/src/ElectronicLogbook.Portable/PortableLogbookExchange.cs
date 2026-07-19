@@ -21,17 +21,23 @@ public static class PortableLogbookExchange
             incomingDocument.CustomFieldDefinitions);
 
         var localRevisionIds = localDocument.Operations.Select(operation => operation.RevisionId).ToHashSet();
+        var duplicateOperations = incomingDocument.Operations
+            .Where(operation => localRevisionIds.Contains(operation.RevisionId))
+            .OrderBy(operation => operation.CreatedAt)
+            .ThenBy(operation => operation.RevisionId.Value, StringComparer.Ordinal)
+            .ToArray();
         var newOperations = incomingDocument.Operations
             .Where(operation => !localRevisionIds.Contains(operation.RevisionId))
             .OrderBy(operation => operation.CreatedAt)
             .ThenBy(operation => operation.RevisionId.Value, StringComparer.Ordinal)
             .ToArray();
-        var duplicateCount = incomingDocument.Operations.Count - newOperations.Length;
         var merged = PortableLogbookMerger.Merge(localDocument.Operations.Concat(newOperations));
 
         return new PortableLogbookImportPreview(
             newOperations,
-            duplicateCount,
+            duplicateOperations,
+            newOperations.Select(CreateChangeSummary).ToArray(),
+            duplicateOperations.Select(CreateChangeSummary).ToArray(),
             newOperations.Count(operation => operation.Kind == PortableOperationKind.Create),
             newOperations.Count(operation => operation.Kind == PortableOperationKind.Correction),
             newOperations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
@@ -80,19 +86,61 @@ public static class PortableLogbookExchange
             throw new ArgumentException("Portable logbook document is invalid.", parameterName);
         }
     }
+
+    private static PortableLogbookImportChangeSummary CreateChangeSummary(PortableLogbookOperation operation)
+    {
+        var entry = EntryPayload(operation);
+        return new PortableLogbookImportChangeSummary(
+            operation.EntryId,
+            operation.RevisionId,
+            operation.Kind,
+            entry?.Date,
+            entry?.AircraftType,
+            entry?.Registration,
+            entry?.From,
+            entry?.To,
+            entry?.Details,
+            operation is DeleteEntryOperation delete ? delete.Reason : null);
+    }
+
+    private static PortableLogbookEntry? EntryPayload(PortableLogbookOperation operation) =>
+        operation switch
+        {
+            CreateEntryOperation create => create.Entry,
+            CorrectEntryOperation correction => correction.Entry,
+            ResolveConflictOperation resolution => resolution.Entry,
+            DeleteEntryOperation => null,
+            _ => throw new InvalidOperationException($"Unsupported operation type {operation.GetType().Name}.")
+        };
 }
 
 public sealed record PortableLogbookImportPreview(
     IReadOnlyList<PortableLogbookOperation> NewOperations,
-    int DuplicateOperationCount,
+    IReadOnlyList<PortableLogbookOperation> DuplicateOperations,
+    IReadOnlyList<PortableLogbookImportChangeSummary> NewOperationSummaries,
+    IReadOnlyList<PortableLogbookImportChangeSummary> DuplicateOperationSummaries,
     int CreateCount,
     int CorrectionCount,
     int DeletionCount,
     IReadOnlyList<PortableLogbookConflict> Conflicts,
     PortableLogbookCustomFieldDefinitionMergeResult CustomFieldDefinitions)
 {
+    public int DuplicateOperationCount => DuplicateOperations.Count;
+
     public bool HasConflicts => Conflicts.Count > 0;
 }
+
+public sealed record PortableLogbookImportChangeSummary(
+    EntryId EntryId,
+    RevisionId RevisionId,
+    PortableOperationKind Kind,
+    DateOnly? Date,
+    string? AircraftType,
+    string? Registration,
+    string? From,
+    string? To,
+    string? Details,
+    string? DeletionReason);
 
 public sealed record PortableLogbookImportPlan(
     PortableLogbookImportPlanStatus Status,
