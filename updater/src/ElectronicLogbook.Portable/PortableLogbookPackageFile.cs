@@ -33,16 +33,8 @@ public static class PortableLogbookPackageFile
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         EnsurePackageExtension(path);
 
-        var fileInfo = new FileInfo(path);
         options ??= PortableLogbookPackageReadOptions.Default;
-        if (fileInfo.Length > options.MaxPackageBytes)
-        {
-            throw new PortableLogbookPackageException(
-                PortableLogbookPackageError.PackageTooLarge,
-                $"Package is larger than the configured {options.MaxPackageBytes} byte limit.");
-        }
-
-        return PortableLogbookPackage.Read(File.ReadAllBytes(path), key, expectedLogbookId, options);
+        return PortableLogbookPackage.Read(ReadPackageFileBytes(path, options), key, expectedLogbookId, options);
     }
 
     public static PortableLogbookPackageManifest ReadManifest(
@@ -53,6 +45,22 @@ public static class PortableLogbookPackageFile
         EnsurePackageExtension(path);
         options ??= PortableLogbookPackageReadOptions.Default;
 
+        return PortableLogbookPackage.ReadManifest(ReadPackageFileBytes(path, options), options);
+    }
+
+    public static PortableLogbookPackageManifest ReadManifestForInspection(
+        string path,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        EnsurePackageExtension(path);
+        options ??= PortableLogbookPackageReadOptions.Default;
+
+        return PortableLogbookPackage.ReadManifestForInspection(ReadPackageFileBytes(path, options), options);
+    }
+
+    private static byte[] ReadPackageFileBytes(string path, PortableLogbookPackageReadOptions options)
+    {
         var fileInfo = new FileInfo(path);
         if (fileInfo.Length > options.MaxPackageBytes)
         {
@@ -61,7 +69,7 @@ public static class PortableLogbookPackageFile
                 $"Package is larger than the configured {options.MaxPackageBytes} byte limit.");
         }
 
-        return PortableLogbookPackage.ReadManifest(File.ReadAllBytes(path), options);
+        return File.ReadAllBytes(path);
     }
 
     private static void EnsurePackageExtension(string path)

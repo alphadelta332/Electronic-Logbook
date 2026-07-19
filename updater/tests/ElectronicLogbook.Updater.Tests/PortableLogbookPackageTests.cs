@@ -276,6 +276,25 @@ public sealed class PortableLogbookPackageTests
     }
 
     [Fact]
+    public void ReadManifestForInspectionReturnsUnsupportedSchemaManifestWithoutKey()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+        var manifest = ReadManifest(packageBytes) with
+        {
+            SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion + 1
+        };
+        var modified = ReplaceManifestForAuthenticationFailure(packageBytes, manifest);
+
+        var inspected = PortableLogbookPackage.ReadManifestForInspection(modified);
+        var strictError = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.ReadManifest(modified));
+
+        Assert.Equal(manifest.SchemaVersion, inspected.SchemaVersion);
+        Assert.Equal(PortableLogbookPackageError.UnsupportedSchemaVersion, strictError.Error);
+    }
+
+    [Fact]
     public void ReadManifestRejectsOversizedPackageBeforeParsingManifest()
     {
         var document = CreateDocument();

@@ -45,6 +45,41 @@ public sealed class PortableLogbookWorkbookStorageTests
     }
 
     [Fact]
+    public void OpenEnvelopePreservesSetupRowStableIdsForReconciliationAfterSaveReopen()
+    {
+        var key = PortableLogbookKey.Generate();
+        var setup = PortableLogbookSetup.CreateInitialSetupPlan(
+            [Entry("VH-ABC"), Entry("VH-DEF")],
+            [],
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            new LogbookId("log_storage"),
+            new DeviceId("dev_excel"),
+            key,
+            new PortableLogbookIdFactory(
+                QueueIds([new EntryId("ent_1"), new EntryId("ent_2")]),
+                QueueIds([new RevisionId("rev_1"), new RevisionId("rev_2")])));
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
+            setup.InitialDocument,
+            setup.InitialPackageBytes,
+            []);
+        var roundTripped = PortableLogbookWorkbookStorage.Deserialize(
+            PortableLogbookWorkbookStorage.Serialize(envelope));
+
+        var reopened = PortableLogbookWorkbookStorage.OpenEnvelope(roundTripped, key);
+        var knownEntries = PortableLogbookMerger.Merge(reopened.Document.Operations).Entries.Values;
+        var validation = PortableLogbookWorkbookRowValidator.Validate(setup.WorkbookRows, knownEntries);
+        var reconciliation = PortableLogbookWorkbookProjection.Reconcile(
+            knownEntries,
+            setup.WorkbookRows,
+            setup.LogbookId,
+            setup.DeviceId,
+            DateTimeOffset.Parse("2026-07-19T00:00:00Z"));
+
+        Assert.True(validation.IsValid);
+        Assert.Empty(reconciliation.Operations);
+    }
+
+    [Fact]
     public void StorageEnvelopeJsonDoesNotExposeRawFlightDetails()
     {
         var document = CreateDocument();
@@ -142,5 +177,22 @@ public sealed class PortableLogbookWorkbookStorageTests
             });
 
         return PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+    }
+
+    private static PortableLogbookEntry Entry(string registration) =>
+        PortableLogbookEntry.Empty with
+        {
+            Date = new DateOnly(2026, 7, 18),
+            AircraftType = "C172",
+            Registration = registration,
+            From = "YSBK",
+            To = "YSCN",
+            PilotInCommand = 1.2m
+        };
+
+    private static Func<T> QueueIds<T>(IEnumerable<T> ids)
+    {
+        var queue = new Queue<T>(ids);
+        return () => queue.Dequeue();
     }
 }

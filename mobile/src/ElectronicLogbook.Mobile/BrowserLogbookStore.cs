@@ -23,37 +23,44 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             return null;
         }
 
-        using var parsed = JsonDocument.Parse(json);
-        if (!parsed.RootElement.TryGetProperty("storeVersion", out _))
+        try
         {
-            return new BrowserLogbookState(ReadDocument(json), [], null);
-        }
+            using var parsed = JsonDocument.Parse(json);
+            if (!parsed.RootElement.TryGetProperty("storeVersion", out _))
+            {
+                return new BrowserLogbookState(ReadDocument(json), [], null);
+            }
 
-        var stored = JsonSerializer.Deserialize<BrowserLogbookStoredDocument>(json, PortableLogbookJson.SerializerOptions)
-            ?? throw new BrowserLogbookStoreException("Stored logbook state is invalid.");
-        if (stored.StoreVersion != CurrentStoreVersion)
+            var stored = JsonSerializer.Deserialize<BrowserLogbookStoredDocument>(json, PortableLogbookJson.SerializerOptions)
+                ?? throw new BrowserLogbookStoreException("Stored logbook state is invalid.");
+            if (stored.StoreVersion != CurrentStoreVersion)
+            {
+                throw new BrowserLogbookStoreException(
+                    $"Stored logbook state version {stored.StoreVersion} is not supported by this app.");
+            }
+
+            if (stored.SchemaVersion > PortableLogbookDocument.CurrentSchemaVersion)
+            {
+                throw new BrowserLogbookStoreException(
+                    $"Stored portable schema version {stored.SchemaVersion} is newer than this app supports.");
+            }
+
+            var document = ReadDocument(stored.DocumentJson);
+            if (document.SchemaVersion != stored.SchemaVersion)
+            {
+                throw new BrowserLogbookStoreException("Stored logbook state schema metadata does not match the document.");
+            }
+
+            return new BrowserLogbookState(
+                document,
+                stored.ImportReceipts ?? [],
+                stored.LastSuccessfulExportAt ?? stored.LastSuccessfulExport?.ExportedAt,
+                stored.LastSuccessfulExport);
+        }
+        catch (JsonException ex)
         {
-            throw new BrowserLogbookStoreException(
-                $"Stored logbook state version {stored.StoreVersion} is not supported by this app.");
+            throw new BrowserLogbookStoreException("Stored logbook state is not valid JSON.", ex);
         }
-
-        if (stored.SchemaVersion > PortableLogbookDocument.CurrentSchemaVersion)
-        {
-            throw new BrowserLogbookStoreException(
-                $"Stored portable schema version {stored.SchemaVersion} is newer than this app supports.");
-        }
-
-        var document = ReadDocument(stored.DocumentJson);
-        if (document.SchemaVersion != stored.SchemaVersion)
-        {
-            throw new BrowserLogbookStoreException("Stored logbook state schema metadata does not match the document.");
-        }
-
-        return new BrowserLogbookState(
-            document,
-            stored.ImportReceipts ?? [],
-            stored.LastSuccessfulExport?.ExportedAt ?? stored.LastSuccessfulExportAt,
-            stored.LastSuccessfulExport);
     }
 
     public async ValueTask SaveDocumentAsync(PortableLogbookDocument document)
@@ -61,10 +68,14 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         ArgumentNullException.ThrowIfNull(document);
         EnsureSaveableDocument(document);
         var existing = await LoadStateAsync();
+        var existingExportCheckpoint = existing?.LastSuccessfulExport?.Covers(document) == true
+            ? existing.LastSuccessfulExport
+            : null;
         await SaveStateAsync(new BrowserLogbookState(
             document,
             existing?.ImportReceipts ?? [],
-            existing?.LastSuccessfulExportAt));
+            existing?.LastSuccessfulExportAt,
+            existingExportCheckpoint));
     }
 
     public async ValueTask SaveStateAsync(BrowserLogbookState state)
@@ -81,7 +92,7 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             document.SchemaVersion,
             PortableLogbookJson.Serialize(document),
             state.ImportReceipts,
-            state.LastSuccessfulExport?.ExportedAt ?? state.LastSuccessfulExportAt,
+            state.LastSuccessfulExportAt ?? state.LastSuccessfulExport?.ExportedAt,
             state.LastSuccessfulExport);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
@@ -209,4 +220,5 @@ public sealed record BrowserLogbookExportCheckpoint(
             : document.Operations.Max(operation => operation.CreatedAt);
 }
 
-public sealed class BrowserLogbookStoreException(string message) : Exception(message);
+public sealed class BrowserLogbookStoreException(string message, Exception? innerException = null)
+    : Exception(message, innerException);

@@ -202,6 +202,26 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void ReplaceSourceWithUpdatedDeletesTempJournalWhenJournalWriteFails()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "logbook_updated.xlsm");
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+
+        Assert.Throws<IOException>(() =>
+            WorkbookHandoff.ReplaceSourceWithUpdated(
+                source,
+                staged,
+                expectedFinalVersion: null,
+                expectedBackupVersion: null,
+                new ThrowingJournalMoveFileSystem(source)));
+
+        Assert.Empty(Directory.EnumerateFiles(_directory, "*.tmp"));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
     public void ReplaceSourceWithUpdatedKeepsRecoverableStateWhenSourceIsLocked()
     {
         var source = Path.Combine(_directory, "logbook.xlsm");
@@ -567,6 +587,56 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void RestoreBackupLeavesSourceWhenFailedWorkbookMoveFails()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var backup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260717-120000.xlsm");
+
+        Assert.Throws<IOException>(() =>
+            WorkbookHandoff.RestoreBackup(
+                source,
+                backup,
+                "2.0.0",
+                new ThrowingMoveBySourceFileSystem(source),
+                WorkbookPackageValidation.Instance));
+
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.True(File.Exists(backup));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "logbook_FailedRestore_*.xlsm"));
+    }
+
+    [Fact]
+    public void RestoreBackupRollsBackWhenBackupCopyFails()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var backup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260717-120000.xlsm");
+
+        Assert.Throws<IOException>(() =>
+            WorkbookHandoff.RestoreBackup(
+                source,
+                backup,
+                "2.0.0",
+                new ThrowingCopyFileSystem(),
+                WorkbookPackageValidation.Instance));
+
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.True(File.Exists(backup));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "logbook_FailedRestore_*.xlsm"));
+    }
+
+    [Fact]
     public void RestoreBackupRollsBackFailedRestoreValidation()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(
@@ -698,6 +768,21 @@ public sealed class WorkbookHandoffTests : IDisposable
                 string.Equals(Path.GetFullPath(destinationPath), _destinationToFail, StringComparison.OrdinalIgnoreCase))
             {
                 throw new IOException("Simulated recovery move failure.");
+            }
+
+            File.Move(sourcePath, destinationPath, overwrite);
+        }
+    }
+
+    private sealed class ThrowingMoveBySourceFileSystem(string sourceToFail) : LocalFileSystem
+    {
+        private readonly string _sourceToFail = Path.GetFullPath(sourceToFail);
+
+        public override void MoveFile(string sourcePath, string destinationPath, bool overwrite = false)
+        {
+            if (string.Equals(Path.GetFullPath(sourcePath), _sourceToFail, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new IOException("Simulated source archive failure.");
             }
 
             File.Move(sourcePath, destinationPath, overwrite);

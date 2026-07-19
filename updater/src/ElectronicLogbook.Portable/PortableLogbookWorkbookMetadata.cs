@@ -18,7 +18,7 @@ public static class PortableLogbookWorkbookMetadata
 
     public static bool IsPortableMetadataColumn(string workbookColumnName) =>
         HiddenLogbookColumns.Any(column =>
-            string.Equals(column.WorkbookColumnName, workbookColumnName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(column.WorkbookColumnName, workbookColumnName.Trim(), StringComparison.OrdinalIgnoreCase));
 
     public static IReadOnlyList<string> FilterUserExportColumns(IEnumerable<string> workbookColumnNames)
     {
@@ -27,12 +27,46 @@ public static class PortableLogbookWorkbookMetadata
             .Where(columnName => !IsPortableMetadataColumn(columnName))
             .ToArray();
     }
+
+    public static PortableLogbookMetadataColumnPlan CreateHiddenColumnPlan(IEnumerable<string> workbookColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(workbookColumnNames);
+
+        var plannedColumns = workbookColumnNames.ToList();
+        var existing = plannedColumns.Select(columnName => columnName.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var columnsToAdd = new List<PortableLogbookMetadataColumnDefinition>();
+
+        foreach (var metadataColumn in HiddenLogbookColumns)
+        {
+            if (existing.Contains(metadataColumn.WorkbookColumnName))
+            {
+                continue;
+            }
+
+            plannedColumns.Add(metadataColumn.WorkbookColumnName);
+            existing.Add(metadataColumn.WorkbookColumnName);
+            columnsToAdd.Add(metadataColumn);
+        }
+
+        return new PortableLogbookMetadataColumnPlan(
+            plannedColumns,
+            columnsToAdd,
+            HiddenLogbookColumns.Select(column => column.WorkbookColumnName).ToArray());
+    }
 }
 
 public sealed record PortableLogbookMetadataColumnDefinition(
     string Id,
     string WorkbookColumnName,
     PortableLogbookMetadataColumnKind Kind);
+
+public sealed record PortableLogbookMetadataColumnPlan(
+    IReadOnlyList<string> WorkbookColumnNames,
+    IReadOnlyList<PortableLogbookMetadataColumnDefinition> ColumnsToAdd,
+    IReadOnlyList<string> ColumnsToHide)
+{
+    public bool RequiresMutation => ColumnsToAdd.Count > 0;
+}
 
 public enum PortableLogbookMetadataColumnKind
 {

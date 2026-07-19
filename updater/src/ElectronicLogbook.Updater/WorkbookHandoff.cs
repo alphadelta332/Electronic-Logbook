@@ -447,8 +447,16 @@ public static class WorkbookHandoff
         IWorkbookFileSystem fileSystem)
     {
         var tempPath = $"{journalPath}.{Guid.NewGuid():N}.tmp";
-        fileSystem.WriteAllText(tempPath, JsonSerializer.Serialize(journal, JsonDefaults.Indented));
-        fileSystem.MoveFile(tempPath, journalPath, overwrite: true);
+        try
+        {
+            fileSystem.WriteAllText(tempPath, JsonSerializer.Serialize(journal, JsonDefaults.Indented));
+            fileSystem.MoveFile(tempPath, journalPath, overwrite: true);
+        }
+        catch
+        {
+            TryDelete(tempPath, fileSystem);
+            throw;
+        }
     }
 
     private static HandoffJournal ReadJournal(

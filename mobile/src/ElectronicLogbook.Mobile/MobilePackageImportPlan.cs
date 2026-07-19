@@ -7,7 +7,7 @@ public static class MobilePackageImportPlan
     public static MobilePackageImportPlanResult Inspect(BrowserFile file)
     {
         BrowserFileStore.ValidateElogbookFile(file);
-        var manifest = PortableLogbookPackage.ReadManifest(
+        var manifest = PortableLogbookPackage.ReadManifestForInspection(
             file.Bytes,
             new PortableLogbookPackageReadOptions(BrowserFileStore.MaxElogbookBytes));
         return new MobilePackageImportPlanResult(

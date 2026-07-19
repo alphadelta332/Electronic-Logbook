@@ -164,7 +164,7 @@
             }
         </datalist>
         <datalist id="airports">
-            @foreach (var value in RecentValues(entry => entry.From).Concat(RecentValues(entry => entry.To)).Distinct(StringComparer.OrdinalIgnoreCase).Order())
+            @foreach (var value in RecentAirportValues())
             {
                 <option value="@value"></option>
             }
@@ -190,6 +190,7 @@
         <div class="calculated-total">
             <span>Logged time</span>
             <strong>@FormatHours(Draft.LoggedTime) hr</strong>
+            <button type="button" @onclick="UseFlightTimeAsDay" disabled="@IsStorageBlocked">Use flight time as day</button>
         </div>
 
         <div class="custom-fields">
@@ -325,6 +326,9 @@
             <button type="button" @onclick="ApplyPackageAsync" disabled="@IsPackageImportDisabled" title="@PackageImportTitle">Import package</button>
             <button type="button" class="primary" @onclick="ExportPackageAsync" disabled="@IsPackageExportDisabled" title="@PackageExchangeTitle">Export package</button>
         </div>
+        <div class="key-notice" role="status">
+            @PackageKeyNotice
+        </div>
         @if (!string.IsNullOrWhiteSpace(PackageExchangeError))
         {
             <div class="validation-summary" role="alert">
@@ -348,6 +352,16 @@
                 {
                     <span>@FormatImportStatus(ImportExchangePlan.Status)</span>
                     <span>@ImportExchangePlan.Preview.NewOperations.Count new / @ImportExchangePlan.Preview.DuplicateOperationCount duplicate</span>
+                    <div class="import-summary">
+                        @foreach (var summary in ImportExchangePlan.Preview.NewOperationSummaries.Take(8))
+                        {
+                            <span>@FormatImportSummary(summary)</span>
+                        }
+                        @foreach (var summary in ImportExchangePlan.Preview.DuplicateOperationSummaries.Take(4))
+                        {
+                            <span>Duplicate: @FormatImportSummary(summary)</span>
+                        }
+                    </div>
                 }
                 @if (ImportExchangePlan?.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
                 {
@@ -436,9 +450,14 @@
             ? "Set up this device's package key before importing encrypted packages."
             : "Import a compatible package and apply it when it has no unresolved conflicts.";
 
+    private string PackageKeyNotice => MobilePackageKeyNotice.Create(PackageKeyStatus);
+
     private bool IsPackageExportDisabled => IsStorageBlocked || PackageKeyStatus != "Ready";
 
-    private bool IsPackageImportDisabled => IsStorageBlocked || PackageKeyStatus != "Ready";
+    private bool IsPackageImportDisabled =>
+        IsStorageBlocked ||
+        PackageKeyStatus != "Ready" ||
+        ImportCompatibility is MobilePackageImportCompatibility.WrongLogbook or MobilePackageImportCompatibility.UnsupportedSchema;
 
     private PortableLogbookMergeResult MergeResult =>
         PortableLogbookMerger.Merge(Document.Operations);
@@ -719,6 +738,7 @@
             ImportReceipts = result.ImportReceipts;
             await SaveStateAsync();
             PackageExchangeMessage = FormatApplyStatus(result.Status);
+            ClearPendingImportPreview();
             ResetDraft();
         }
         catch (Exception ex) when (ex is BrowserFileStoreException or PortableLogbookPackageException or MobilePackageImportWorkflowException or ArgumentException or JSException)
@@ -778,6 +798,18 @@
         HasEditedDraft = true;
     }
 
+    private void UseFlightTimeAsDay()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        Draft.Day = Draft.FlightTime;
+        Draft.Night = 0;
+        MarkDraftEdited();
+    }
+
     private async Task DeleteEntryAsync(PortableLogbookMaterializedEntry entry)
     {
         if (IsStorageBlocked)
@@ -796,6 +828,10 @@
         Document = MobileLogbookDocument.AppendOperation(Document, CustomFields, operation);
         HistoryEntry = null;
         await SaveStateAsync();
+        if (EditingEntryId == entry.EntryId)
+        {
+            ResetDraft();
+        }
     }
 
     private async Task ResolveConflictAsync(PortableLogbookConflict conflict, RevisionId selectedRevisionId)
@@ -837,6 +873,14 @@
         HistoryEntry = entry;
     }
 
+    private void ClearPendingImportPreview()
+    {
+        ImportPlan = null;
+        ImportCompatibility = null;
+        ImportExchangePlan = null;
+        PendingImportFile = null;
+    }
+
     private static string FormatHours(decimal hours) => hours.ToString("0.0");
 
     private static string FormatDate(DateOnly? date) => date?.ToString("dd MMM yyyy") ?? "No date";
@@ -874,6 +918,17 @@
             _ => "Package import finished."
         };
 
+    private static string FormatImportSummary(PortableLogbookImportChangeSummary summary)
+    {
+        var date = summary.Date?.ToString("dd MMM yyyy") ?? "No date";
+        var aircraft = $"{summary.AircraftType} {summary.Registration}".Trim();
+        var route = $"{summary.From} - {summary.To}".Trim();
+        var detail = summary.Kind == PortableOperationKind.Deletion
+            ? summary.DeletionReason ?? "Deleted entry"
+            : FirstNonBlank(aircraft, route, summary.Details, summary.EntryId.Value);
+        return $"{summary.Kind}: {date} {detail}".Trim();
+    }
+
     private PortableLogbookOperation FindOperation(RevisionId revisionId) =>
         Document.Operations.First(operation => operation.RevisionId == revisionId);
 
@@ -904,13 +959,12 @@
     }
 
     private IEnumerable<string> RecentValues(Func<PortableLogbookEntry, string?> selector) =>
-        CurrentEntries
-            .Select(entry => selector(entry.Entry!))
-            .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Select(value => value!.Trim())
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Order(StringComparer.OrdinalIgnoreCase)
-            .Take(12);
+        MobileRecentValues.Create(CurrentEntries, selector);
+
+    private IEnumerable<string> RecentAirportValues() =>
+        MobileRecentValues.CreateMany(
+            CurrentEntries,
+            entry => [entry.From, entry.To]);
 
     private string[] ValidateDraft()
     {
@@ -928,8 +982,11 @@
             .ToArray();
     }
 
-    private PortableLogbookEntry? FindDraftDefaults() =>
-        CurrentEntries.FirstOrDefault()?.Entry;
+    private MobileEntryDraftDefaults FindDraftDefaults() =>
+        MobileEntryDraftDefaultPlanner.Create(CurrentEntries);
+
+    private static string FirstNonBlank(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
     private sealed class EntryDraft
     {
@@ -965,14 +1022,16 @@
 
         public decimal LoggedTime => FlightTime + InstrumentSimulated;
 
-        public static EntryDraft Create(PortableLogbookEntry? defaults = null)
+        public static EntryDraft Create(MobileEntryDraftDefaults? defaults = null)
         {
+            defaults ??= MobileEntryDraftDefaults.Empty;
             var draft = new EntryDraft
             {
                 Date = DateOnly.FromDateTime(DateTime.Today),
-                AircraftType = defaults?.AircraftType ?? string.Empty,
-                Registration = defaults?.Registration ?? string.Empty,
-                From = FirstNonBlank(defaults?.To, defaults?.From)
+                AircraftType = defaults.AircraftType,
+                Registration = defaults.Registration,
+                From = defaults.From,
+                Route = defaults.Route
             };
             foreach (var field in PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Custom 1", "Custom 2", "Custom 3", "Custom 4"]))
             {
@@ -981,9 +1040,6 @@
 
             return draft;
         }
-
-        private static string FirstNonBlank(params string?[] values) =>
-            values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
 
         public static EntryDraft FromEntry(PortableLogbookEntry entry)
         {

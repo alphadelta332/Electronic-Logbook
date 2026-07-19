@@ -53,7 +53,53 @@ public sealed class ProgressTests
         {
             Assert.NotNull(UpdaterPhasePolicies.GetTimeoutSeconds(phaseId));
         }
+        Assert.Equal(
+            expectedPhaseIds.Order(StringComparer.Ordinal),
+            UpdaterPhasePolicies.PhaseIds.Order(StringComparer.Ordinal));
         Assert.Null(UpdaterPhasePolicies.GetTimeoutSeconds("unknown-phase"));
+    }
+
+    [Fact]
+    public void PhaseProgressDefinesPercentsForWizardMigrationPhases()
+    {
+        var expectedPhaseIds = new[]
+        {
+            UpdaterPhaseIds.StartExcel,
+            UpdaterPhaseIds.OpenSourceWorkbook,
+            UpdaterPhaseIds.OpenMasterCopy,
+            UpdaterPhaseIds.PrepareMasterCopy,
+            UpdaterPhaseIds.ReadSourceValidationData,
+            UpdaterPhaseIds.CopyLogbookData,
+            UpdaterPhaseIds.CopyKeywordsData,
+            UpdaterPhaseIds.CopyRoutesData,
+            UpdaterPhaseIds.CopyNamedPreferences,
+            UpdaterPhaseIds.RestoreLogbookPresentation,
+            UpdaterPhaseIds.RefreshAirportVisitStats,
+            UpdaterPhaseIds.CopyBaseAirportSelections,
+            UpdaterPhaseIds.CalculateOutputWorkbook,
+            UpdaterPhaseIds.RefreshPivotTables,
+            UpdaterPhaseIds.UpdateHoursOverTimeChart,
+            UpdaterPhaseIds.ValidatePreservedData,
+            UpdaterPhaseIds.SaveOutputWorkbook,
+            UpdaterPhaseIds.CopyPortableStorage,
+            UpdaterPhaseIds.Completed
+        };
+
+        var lastPercent = -1;
+        foreach (var phaseId in expectedPhaseIds)
+        {
+            var percent = UpdaterPhaseProgress.GetPercent(phaseId);
+
+            Assert.NotNull(percent);
+            Assert.InRange(percent.Value, lastPercent + 1, 100);
+            lastPercent = percent.Value;
+        }
+
+        Assert.Null(UpdaterPhaseProgress.GetPercent(UpdaterPhaseIds.Failed));
+        Assert.Null(UpdaterPhaseProgress.GetPercent("unknown-phase"));
+        Assert.Equal(
+            expectedPhaseIds.Order(StringComparer.Ordinal),
+            UpdaterPhaseProgress.PhaseIds.Order(StringComparer.Ordinal));
     }
 
     [Fact]

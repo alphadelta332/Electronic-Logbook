@@ -1,4 +1,7 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 using Microsoft.JSInterop;
@@ -79,6 +82,73 @@ public sealed class MobilePackageImportApplyWorkflowTests
         Assert.Same(local, result.Document);
         Assert.Same(receipt, Assert.Single(result.ImportReceipts));
         Assert.Null(result.Plan);
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
+    public async Task ApplyIfReadyAsyncRejectsWrongLogbookBeforeDecryptingOrRecordingReceipt()
+    {
+        var local = CreateDocument("rev_local", 1.0m);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(new LogbookId("log_other"), [], []);
+        var packageBytes = PortableLogbookPackage.Write(incoming, FixedKey());
+        var jsRuntime = new RecordingJsRuntime();
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var error = await Assert.ThrowsAsync<MobilePackageImportWorkflowException>(async () =>
+            await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+                local,
+                file,
+                new BrowserPackageKeyStore(jsRuntime),
+                [],
+                DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
+
+        Assert.Contains("WrongLogbook", error.Message, StringComparison.Ordinal);
+        Assert.Single(local.Operations);
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
+    public async Task ApplyIfReadyAsyncRejectsUnsupportedSchemaBeforeDecryptingOrRecordingReceipt()
+    {
+        var local = CreateDocument("rev_local", 1.0m);
+        var packageBytes = PortableLogbookPackage.Write(local, FixedKey());
+        var manifest = PortableLogbookPackage.ReadManifest(packageBytes) with
+        {
+            SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion + 1
+        };
+        var modified = ReplaceManifest(packageBytes, manifest);
+        var jsRuntime = new RecordingJsRuntime();
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, modified);
+
+        var error = await Assert.ThrowsAsync<MobilePackageImportWorkflowException>(async () =>
+            await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+                local,
+                file,
+                new BrowserPackageKeyStore(jsRuntime),
+                [],
+                DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
+
+        Assert.Contains("UnsupportedSchema", error.Message, StringComparison.Ordinal);
+        Assert.Single(local.Operations);
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
+    public async Task ApplyIfReadyAsyncRejectsInvalidFileBeforeDecryptingOrRecordingReceipt()
+    {
+        var local = CreateDocument("rev_local", 1.0m);
+        var jsRuntime = new RecordingJsRuntime();
+        var file = new BrowserFile("backup.txt", BrowserFileStore.ElogbookContentType, [1, 2, 3]);
+
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () =>
+            await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+                local,
+                file,
+                new BrowserPackageKeyStore(jsRuntime),
+                [],
+                DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
+
+        Assert.Single(local.Operations);
         Assert.Empty(jsRuntime.Calls);
     }
 
@@ -203,6 +273,30 @@ public sealed class MobilePackageImportApplyWorkflowTests
         Assert.Single(result.ImportReceipts);
     }
 
+    [Fact]
+    public async Task ApplyWithCustomFieldResolutionsAsyncReusesReadPackageWhenResolutionIsNotRequired()
+    {
+        var local = CreateDocument("rev_local", 1.0m);
+        var incoming = CreateDocument("rev_local", 1.0m, CreateCorrection("rev_incoming", "rev_local", 1.4m));
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var jsRuntime = RuntimeWithDecryption(packageBytes, key, local.LogbookId);
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyWithCustomFieldResolutionsAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [],
+            [],
+            DateTimeOffset.Parse("2026-07-19T00:01:00Z"));
+
+        Assert.Equal(MobilePackageImportApplyStatus.Applied, result.Status);
+        Assert.Equal(2, result.Document.Operations.Count);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.decrypt", call.Identifier);
+    }
+
     private static PortableLogbookDocument CreateDocument(
         string revisionId,
         decimal pilotInCommand,
@@ -273,6 +367,23 @@ public sealed class MobilePackageImportApplyWorkflowTests
         var key = new byte[PortableLogbookPackage.KeySizeBytes];
         Array.Fill<byte>(key, 7);
         return key;
+    }
+
+    private static byte[] ReplaceManifest(
+        byte[] packageBytes,
+        PortableLogbookPackageManifest manifest)
+    {
+        var newManifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, PortableLogbookJson.SerializerOptions);
+        var originalManifestLength = BinaryPrimitives.ReadInt32LittleEndian(packageBytes.AsSpan("ELOGPKG1".Length, sizeof(int)));
+        var remainderStart = "ELOGPKG1".Length + sizeof(int) + originalManifestLength;
+        using var output = new MemoryStream();
+        output.Write(Encoding.ASCII.GetBytes("ELOGPKG1"));
+        Span<byte> manifestLength = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(manifestLength, newManifestBytes.Length);
+        output.Write(manifestLength);
+        output.Write(newManifestBytes);
+        output.Write(packageBytes.AsSpan(remainderStart));
+        return output.ToArray();
     }
 
     private sealed class RecordingJsRuntime : IJSRuntime

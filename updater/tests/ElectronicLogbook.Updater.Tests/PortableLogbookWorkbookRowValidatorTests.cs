@@ -34,6 +34,19 @@ public sealed class PortableLogbookWorkbookRowValidatorTests
     }
 
     [Fact]
+    public void ValidateRejectsMissingEntryPayload()
+    {
+        var result = PortableLogbookWorkbookRowValidator.Validate(
+            [new PortableLogbookWorkbookRow(null, null, null!)],
+            []);
+
+        Assert.False(result.IsValid);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(PortableLogbookWorkbookRowValidationCode.MissingEntryPayload, error.Code);
+        Assert.Equal(1, error.RowNumber);
+    }
+
+    [Fact]
     public void ValidateRejectsUnknownEntryId()
     {
         var result = PortableLogbookWorkbookRowValidator.Validate(
@@ -65,6 +78,24 @@ public sealed class PortableLogbookWorkbookRowValidatorTests
             [known]);
 
         Assert.Contains(result.Errors, error => error.Code == PortableLogbookWorkbookRowValidationCode.StaleCurrentRevisionId);
+    }
+
+    [Fact]
+    public void ValidateRejectsDuplicateKnownEntryIdRows()
+    {
+        var known = Known("ent_1", "rev_current");
+
+        var result = PortableLogbookWorkbookRowValidator.Validate(
+            [
+                new PortableLogbookWorkbookRow(known.EntryId, known.CurrentRevisionId, Entry("VH-ABC")),
+                new PortableLogbookWorkbookRow(known.EntryId, known.CurrentRevisionId, Entry("VH-EDITED"))
+            ],
+            [known]);
+
+        Assert.False(result.IsValid);
+        var error = Assert.Single(result.Errors);
+        Assert.Equal(PortableLogbookWorkbookRowValidationCode.DuplicateEntryId, error.Code);
+        Assert.Equal(2, error.RowNumber);
     }
 
     private static PortableLogbookMaterializedEntry Known(string entryId, string revisionId) =>

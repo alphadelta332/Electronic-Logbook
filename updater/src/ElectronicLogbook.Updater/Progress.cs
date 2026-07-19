@@ -68,6 +68,42 @@ public static class UpdaterPhasePolicies
     }
 }
 
+public static class UpdaterPhaseProgress
+{
+    private static readonly IReadOnlyDictionary<string, int> PercentByPhase =
+        new Dictionary<string, int>(StringComparer.Ordinal)
+        {
+            [UpdaterPhaseIds.StartExcel] = 5,
+            [UpdaterPhaseIds.OpenSourceWorkbook] = 10,
+            [UpdaterPhaseIds.OpenMasterCopy] = 15,
+            [UpdaterPhaseIds.PrepareMasterCopy] = 20,
+            [UpdaterPhaseIds.ReadSourceValidationData] = 25,
+            [UpdaterPhaseIds.CopyLogbookData] = 40,
+            [UpdaterPhaseIds.CopyKeywordsData] = 50,
+            [UpdaterPhaseIds.CopyRoutesData] = 58,
+            [UpdaterPhaseIds.CopyNamedPreferences] = 64,
+            [UpdaterPhaseIds.RestoreLogbookPresentation] = 70,
+            [UpdaterPhaseIds.RefreshAirportVisitStats] = 76,
+            [UpdaterPhaseIds.CopyBaseAirportSelections] = 80,
+            [UpdaterPhaseIds.CalculateOutputWorkbook] = 84,
+            [UpdaterPhaseIds.RefreshPivotTables] = 89,
+            [UpdaterPhaseIds.UpdateHoursOverTimeChart] = 93,
+            [UpdaterPhaseIds.ValidatePreservedData] = 96,
+            [UpdaterPhaseIds.SaveOutputWorkbook] = 98,
+            [UpdaterPhaseIds.CopyPortableStorage] = 99,
+            [UpdaterPhaseIds.Completed] = 100
+        };
+
+    public static IReadOnlyCollection<string> PhaseIds => PercentByPhase.Keys.ToArray();
+
+    public static int? GetPercent(string phaseId)
+    {
+        return PercentByPhase.TryGetValue(phaseId, out var percent)
+            ? percent
+            : null;
+    }
+}
+
 public sealed record UpdaterProgressEvent(
     string EventType,
     string PhaseId,

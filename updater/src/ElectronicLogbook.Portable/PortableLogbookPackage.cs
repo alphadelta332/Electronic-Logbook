@@ -113,6 +113,16 @@ public static class PortableLogbookPackage
         return manifest;
     }
 
+    public static PortableLogbookPackageManifest ReadManifestForInspection(
+        ReadOnlySpan<byte> packageBytes,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        options ??= PortableLogbookPackageReadOptions.Default;
+        var (manifest, _, _) = ReadManifestAndPayloadOffset(packageBytes, options);
+        ValidateManifestForInspection(manifest);
+        return manifest;
+    }
+
     public static PortableLogbookPackageReadResult Read(
         ReadOnlySpan<byte> packageBytes,
         ReadOnlySpan<byte> key,
@@ -273,18 +283,25 @@ public static class PortableLogbookPackage
 
     private static void ValidateManifest(PortableLogbookPackageManifest manifest, LogbookId? expectedLogbookId)
     {
-        if (manifest.FormatVersion != FormatVersion)
-        {
-            throw new PortableLogbookPackageException(
-                PortableLogbookPackageError.UnsupportedFormatVersion,
-                $"Package format version {manifest.FormatVersion} is not supported.");
-        }
+        ValidateManifestForInspection(manifest);
 
         if (manifest.SchemaVersion != PortableLogbookDocument.CurrentSchemaVersion)
         {
             throw new PortableLogbookPackageException(
                 PortableLogbookPackageError.UnsupportedSchemaVersion,
                 $"Package schema version {manifest.SchemaVersion} is not supported.");
+        }
+
+        ValidateExpectedLogbook(manifest, expectedLogbookId);
+    }
+
+    private static void ValidateManifestForInspection(PortableLogbookPackageManifest manifest)
+    {
+        if (manifest.FormatVersion != FormatVersion)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.UnsupportedFormatVersion,
+                $"Package format version {manifest.FormatVersion} is not supported.");
         }
 
         if (!string.Equals(manifest.Compression, "gzip", StringComparison.Ordinal))
@@ -300,7 +317,10 @@ public static class PortableLogbookPackage
                 PortableLogbookPackageError.UnsupportedEncryption,
                 $"Package encryption '{manifest.Encryption}' is not supported.");
         }
+    }
 
+    private static void ValidateExpectedLogbook(PortableLogbookPackageManifest manifest, LogbookId? expectedLogbookId)
+    {
         if (expectedLogbookId is not null && manifest.LogbookId != expectedLogbookId.Value)
         {
             throw new PortableLogbookPackageException(

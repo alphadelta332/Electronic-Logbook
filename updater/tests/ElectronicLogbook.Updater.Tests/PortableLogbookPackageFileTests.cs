@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Text;
+using System.Text.Json;
 using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater.Tests;
@@ -40,6 +43,28 @@ public sealed class PortableLogbookPackageFileTests : IDisposable
 
         Assert.Equal(document.LogbookId, manifest.LogbookId);
         Assert.Equal(document.Operations.Count, manifest.OperationCount);
+    }
+
+    [Fact]
+    public void ReadManifestForInspectionReturnsUnsupportedSchemaMetadataWithoutKey()
+    {
+        var document = CreateDocument();
+        var key = PortableLogbookKey.Generate();
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        var manifest = PortableLogbookPackage.ReadManifest(packageBytes) with
+        {
+            SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion + 1
+        };
+        var path = Path.Combine(tempDirectory, "future.elogbook");
+        Directory.CreateDirectory(tempDirectory);
+        File.WriteAllBytes(path, ReplaceManifest(packageBytes, manifest));
+
+        var inspected = PortableLogbookPackageFile.ReadManifestForInspection(path);
+        var strictError = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackageFile.ReadManifest(path));
+
+        Assert.Equal(manifest.SchemaVersion, inspected.SchemaVersion);
+        Assert.Equal(PortableLogbookPackageError.UnsupportedSchemaVersion, strictError.Error);
     }
 
     [Theory]
@@ -86,11 +111,34 @@ public sealed class PortableLogbookPackageFileTests : IDisposable
     }
 
     [Fact]
+    public void ReadManifestForInspectionRejectsOversizedFileBeforePackageParsing()
+    {
+        Directory.CreateDirectory(tempDirectory);
+        var path = Path.Combine(tempDirectory, "oversized.elogbook");
+        File.WriteAllBytes(path, new byte[128]);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackageFile.ReadManifestForInspection(path, new PortableLogbookPackageReadOptions(127)));
+
+        Assert.Equal(PortableLogbookPackageError.PackageTooLarge, exception.Error);
+    }
+
+    [Fact]
     public void ReadManifestRejectsNonElogbookExtension()
     {
         var path = Path.Combine(tempDirectory, "export.zip");
 
         var exception = Assert.Throws<ArgumentException>(() => PortableLogbookPackageFile.ReadManifest(path));
+
+        Assert.Equal("path", exception.ParamName);
+    }
+
+    [Fact]
+    public void ReadManifestForInspectionRejectsNonElogbookExtension()
+    {
+        var path = Path.Combine(tempDirectory, "export.zip");
+
+        var exception = Assert.Throws<ArgumentException>(() => PortableLogbookPackageFile.ReadManifestForInspection(path));
 
         Assert.Equal("path", exception.ParamName);
     }
@@ -122,5 +170,22 @@ public sealed class PortableLogbookPackageFileTests : IDisposable
             });
 
         return PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+    }
+
+    private static byte[] ReplaceManifest(
+        byte[] packageBytes,
+        PortableLogbookPackageManifest manifest)
+    {
+        var newManifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, PortableLogbookJson.SerializerOptions);
+        var originalManifestLength = BinaryPrimitives.ReadInt32LittleEndian(packageBytes.AsSpan("ELOGPKG1".Length, sizeof(int)));
+        var remainderStart = "ELOGPKG1".Length + sizeof(int) + originalManifestLength;
+        using var output = new MemoryStream();
+        output.Write(Encoding.ASCII.GetBytes("ELOGPKG1"));
+        Span<byte> manifestLength = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(manifestLength, newManifestBytes.Length);
+        output.Write(manifestLength);
+        output.Write(newManifestBytes);
+        output.Write(packageBytes.AsSpan(remainderStart));
+        return output.ToArray();
     }
 }

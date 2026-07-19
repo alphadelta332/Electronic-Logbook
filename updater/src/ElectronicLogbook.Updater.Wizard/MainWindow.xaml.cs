@@ -27,27 +27,6 @@ public partial class MainWindow : Window
     ];
 
     private readonly RunContext _context;
-    private readonly IReadOnlyDictionary<string, int> _phaseProgress = new Dictionary<string, int>(StringComparer.Ordinal)
-    {
-        [UpdaterPhaseIds.StartExcel] = 5,
-        [UpdaterPhaseIds.OpenSourceWorkbook] = 10,
-        [UpdaterPhaseIds.OpenMasterCopy] = 15,
-        [UpdaterPhaseIds.PrepareMasterCopy] = 20,
-        [UpdaterPhaseIds.ReadSourceValidationData] = 25,
-        [UpdaterPhaseIds.CopyLogbookData] = 40,
-        [UpdaterPhaseIds.CopyKeywordsData] = 50,
-        [UpdaterPhaseIds.CopyRoutesData] = 58,
-        [UpdaterPhaseIds.CopyBaseAirportSelections] = 64,
-        [UpdaterPhaseIds.CopyNamedPreferences] = 70,
-        [UpdaterPhaseIds.RestoreLogbookPresentation] = 76,
-        [UpdaterPhaseIds.CalculateOutputWorkbook] = 82,
-        [UpdaterPhaseIds.RefreshPivotTables] = 88,
-        [UpdaterPhaseIds.UpdateHoursOverTimeChart] = 92,
-        [UpdaterPhaseIds.ValidatePreservedData] = 96,
-        [UpdaterPhaseIds.SaveOutputWorkbook] = 99,
-        [UpdaterPhaseIds.Completed] = 100
-    };
-
     private int _stepIndex;
     private bool _isUpdating;
     private bool _isCheckingAvailability = true;
@@ -896,7 +875,7 @@ public partial class MainWindow : Window
             {
                 UpdateProgressBar.Value = progressEvent.Percent.Value;
             }
-            else if (_phaseProgress.TryGetValue(progressEvent.PhaseId, out var phasePercent))
+            else if (UpdaterPhaseProgress.GetPercent(progressEvent.PhaseId) is { } phasePercent)
             {
                 UpdateProgressBar.Value = phasePercent;
             }

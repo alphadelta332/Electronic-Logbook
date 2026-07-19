@@ -133,6 +133,26 @@ public sealed class PortableLogbookEntryRulesTests
     }
 
     [Fact]
+    public void WarnDoesNotReportMissingLandingForCopilotFlightTime()
+    {
+        var entry = CompleteEntry() with
+        {
+            PilotInCommand = 0,
+            CoPilot = 1.0m,
+            Day = 1.0m,
+            Night = 1.0m,
+            LandingsDay = 0,
+            LandingsNight = 0
+        };
+
+        var warnings = PortableLogbookEntryRules.Warn(entry);
+
+        Assert.DoesNotContain(warnings, warning => warning.Code == PortableLogbookEntryRuleWarningCode.FlightTimeWithoutLanding);
+        Assert.DoesNotContain(warnings, warning => warning.Code == PortableLogbookEntryRuleWarningCode.DayTimeWithoutDayLanding);
+        Assert.DoesNotContain(warnings, warning => warning.Code == PortableLogbookEntryRuleWarningCode.NightTimeWithoutNightLanding);
+    }
+
+    [Fact]
     public void WarnReportsInstrumentApproachMismatches()
     {
         var approachWithoutInstrument = CompleteEntry() with

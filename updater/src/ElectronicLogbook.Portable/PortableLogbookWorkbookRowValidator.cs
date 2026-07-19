@@ -11,10 +11,20 @@ public static class PortableLogbookWorkbookRowValidator
 
         var knownByEntryId = knownEntries.ToDictionary(entry => entry.EntryId);
         var errors = new List<PortableLogbookWorkbookRowValidationError>();
+        var seenEntryIds = new HashSet<EntryId>();
         var rowNumber = 0;
         foreach (var row in rows)
         {
             rowNumber++;
+            if (row.Entry is null)
+            {
+                errors.Add(new PortableLogbookWorkbookRowValidationError(
+                    rowNumber,
+                    PortableLogbookWorkbookRowValidationCode.MissingEntryPayload,
+                    "Workbook row is missing its portable entry payload."));
+                continue;
+            }
+
             if (row.EntryId is null && row.CurrentRevisionId is not null)
             {
                 errors.Add(new PortableLogbookWorkbookRowValidationError(
@@ -26,6 +36,15 @@ public static class PortableLogbookWorkbookRowValidator
 
             if (row.EntryId is null)
             {
+                continue;
+            }
+
+            if (!seenEntryIds.Add(row.EntryId.Value))
+            {
+                errors.Add(new PortableLogbookWorkbookRowValidationError(
+                    rowNumber,
+                    PortableLogbookWorkbookRowValidationCode.DuplicateEntryId,
+                    $"Workbook row duplicates entry ID '{row.EntryId}'."));
                 continue;
             }
 
@@ -74,5 +93,7 @@ public enum PortableLogbookWorkbookRowValidationCode
     RevisionWithoutEntryId,
     UnknownEntryId,
     MissingCurrentRevisionId,
-    StaleCurrentRevisionId
+    StaleCurrentRevisionId,
+    DuplicateEntryId,
+    MissingEntryPayload
 }

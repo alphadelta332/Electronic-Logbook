@@ -40,28 +40,7 @@ public static class MobilePackageImportApplyWorkflow
                 null);
         }
 
-        var importedDocument = plan.Status switch
-        {
-            PortableLogbookImportPlanStatus.DuplicateOnly => localDocument,
-            PortableLogbookImportPlanStatus.RequiresConflictResolution => PortableLogbookDocument.CreateAustraliaFirst(
-                localDocument.LogbookId,
-                plan.Preview.CustomFieldDefinitions.Definitions,
-                localDocument.Operations.Concat(plan.Preview.NewOperations)),
-            _ => PortableLogbookExchange.ApplyImport(localDocument, read.Document)
-        };
-        var receipt = PortableLogbookImportLedger.CreateReceipt(file.Bytes, read.Manifest, importedAt);
-        var updatedReceipts = receipts.Concat([receipt]).ToArray();
-        return new MobilePackageImportApplyWorkflowResult(
-            plan.Status switch
-            {
-                PortableLogbookImportPlanStatus.DuplicateOnly => MobilePackageImportApplyStatus.DuplicateOperationsRecorded,
-                PortableLogbookImportPlanStatus.RequiresConflictResolution => MobilePackageImportApplyStatus.AppliedWithConflicts,
-                _ => MobilePackageImportApplyStatus.Applied
-            },
-            importedDocument,
-            updatedReceipts,
-            plan,
-            receipt);
+        return ApplyReadyPlan(localDocument, file.Bytes, read.Manifest, read.Document, receipts, plan, importedAt);
     }
 
     public static async ValueTask<MobilePackageImportApplyWorkflowResult> ApplyWithCustomFieldResolutionsAsync(
@@ -94,7 +73,7 @@ public static class MobilePackageImportApplyWorkflow
         var plan = PortableLogbookExchange.PlanImport(localDocument, read.Document);
         if (plan.Status != PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
         {
-            return await ApplyIfReadyAsync(localDocument, file, keyStore, receipts, importedAt).ConfigureAwait(false);
+            return ApplyReadyPlan(localDocument, file.Bytes, read.Manifest, read.Document, receipts, plan, importedAt);
         }
 
         var resolvedDefinitions = PortableLogbookCustomFieldDefinitions.Resolve(
@@ -110,6 +89,39 @@ public static class MobilePackageImportApplyWorkflow
             plan.Preview.HasConflicts
                 ? MobilePackageImportApplyStatus.AppliedWithConflicts
                 : MobilePackageImportApplyStatus.Applied,
+            importedDocument,
+            updatedReceipts,
+            plan,
+            receipt);
+    }
+
+    private static MobilePackageImportApplyWorkflowResult ApplyReadyPlan(
+        PortableLogbookDocument localDocument,
+        byte[] packageBytes,
+        PortableLogbookPackageManifest manifest,
+        PortableLogbookDocument readDocument,
+        IReadOnlyList<PortableLogbookPackageReceipt> receipts,
+        PortableLogbookImportPlan plan,
+        DateTimeOffset importedAt)
+    {
+        var importedDocument = plan.Status switch
+        {
+            PortableLogbookImportPlanStatus.DuplicateOnly => localDocument,
+            PortableLogbookImportPlanStatus.RequiresConflictResolution => PortableLogbookDocument.CreateAustraliaFirst(
+                localDocument.LogbookId,
+                plan.Preview.CustomFieldDefinitions.Definitions,
+                localDocument.Operations.Concat(plan.Preview.NewOperations)),
+            _ => PortableLogbookExchange.ApplyImport(localDocument, readDocument)
+        };
+        var receipt = PortableLogbookImportLedger.CreateReceipt(packageBytes, manifest, importedAt);
+        var updatedReceipts = receipts.Concat([receipt]).ToArray();
+        return new MobilePackageImportApplyWorkflowResult(
+            plan.Status switch
+            {
+                PortableLogbookImportPlanStatus.DuplicateOnly => MobilePackageImportApplyStatus.DuplicateOperationsRecorded,
+                PortableLogbookImportPlanStatus.RequiresConflictResolution => MobilePackageImportApplyStatus.AppliedWithConflicts,
+                _ => MobilePackageImportApplyStatus.Applied
+            },
             importedDocument,
             updatedReceipts,
             plan,

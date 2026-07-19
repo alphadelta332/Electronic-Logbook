@@ -183,6 +183,35 @@ public sealed class PortableLogbookWorkbookProjectionTests
         Assert.Contains(exception.RowValidation.Errors, error => error.Code == PortableLogbookWorkbookRowValidationCode.UnknownEntryId);
     }
 
+    [Fact]
+    public void ReconcileRejectsRowsWithMissingEntryPayload()
+    {
+        var exception = Assert.Throws<PortableLogbookWorkbookProjectionException>(() => Reconcile(
+            [],
+            [new PortableLogbookWorkbookRow(null, null, null!)],
+            new PortableLogbookIdFactory(() => new EntryId("ent_created"), () => new RevisionId("rev_created"))));
+
+        Assert.Equal(PortableLogbookWorkbookProjectionError.InvalidRowMetadata, exception.Error);
+        Assert.Contains(exception.RowValidation.Errors, error => error.Code == PortableLogbookWorkbookRowValidationCode.MissingEntryPayload);
+    }
+
+    [Fact]
+    public void ReconcileRejectsDuplicateKnownEntryIdRows()
+    {
+        var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
+
+        var exception = Assert.Throws<PortableLogbookWorkbookProjectionException>(() => Reconcile(
+            [known],
+            [
+                new PortableLogbookWorkbookRow(known.EntryId, known.CurrentRevisionId, Entry("VH-ABC")),
+                new PortableLogbookWorkbookRow(known.EntryId, known.CurrentRevisionId, Entry("VH-EDITED"))
+            ],
+            new PortableLogbookIdFactory(() => new EntryId("ent_created"), () => new RevisionId("rev_created"))));
+
+        Assert.Equal(PortableLogbookWorkbookProjectionError.InvalidRowMetadata, exception.Error);
+        Assert.Contains(exception.RowValidation.Errors, error => error.Code == PortableLogbookWorkbookRowValidationCode.DuplicateEntryId);
+    }
+
     private static PortableLogbookProjectionResult Reconcile(
         IEnumerable<PortableLogbookMaterializedEntry> knownEntries,
         IEnumerable<PortableLogbookWorkbookRow> currentRows,

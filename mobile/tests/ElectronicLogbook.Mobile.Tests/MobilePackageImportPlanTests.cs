@@ -1,3 +1,6 @@
+using System.Buffers.Binary;
+using System.Text;
+using System.Text.Json;
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 
@@ -85,6 +88,26 @@ public sealed class MobilePackageImportPlanTests
         Assert.Equal(MobilePackageImportCompatibility.UnsupportedSchema, compatibility);
     }
 
+    [Fact]
+    public void InspectReportsUnsupportedSchemaManifestWithoutDecryptingPackage()
+    {
+        var document = CreateDocument();
+        var key = PortableLogbookKey.FromBytes(Enumerable.Range(1, PortableLogbookPackage.KeySizeBytes).Select(value => (byte)value).ToArray());
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        var manifest = PortableLogbookPackage.ReadManifest(packageBytes) with
+        {
+            SchemaVersion = PortableLogbookDocument.CurrentSchemaVersion + 1
+        };
+        var modified = ReplaceManifest(packageBytes, manifest);
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, modified);
+
+        var plan = MobilePackageImportPlan.Inspect(file);
+        var compatibility = MobilePackageImportPlan.CheckCompatibility(plan, document.LogbookId);
+
+        Assert.Equal(manifest.SchemaVersion, plan.SchemaVersion);
+        Assert.Equal(MobilePackageImportCompatibility.UnsupportedSchema, compatibility);
+    }
+
     private static PortableLogbookDocument CreateDocument()
     {
         var logbookId = new LogbookId("log_mobile");
@@ -104,5 +127,22 @@ public sealed class MobilePackageImportPlanTests
                 PilotInCommand = 1.2m
             });
         return PortableLogbookDocument.CreateAustraliaFirst(logbookId, [], [create]);
+    }
+
+    private static byte[] ReplaceManifest(
+        byte[] packageBytes,
+        PortableLogbookPackageManifest manifest)
+    {
+        var newManifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, PortableLogbookJson.SerializerOptions);
+        var originalManifestLength = BinaryPrimitives.ReadInt32LittleEndian(packageBytes.AsSpan("ELOGPKG1".Length, sizeof(int)));
+        var remainderStart = "ELOGPKG1".Length + sizeof(int) + originalManifestLength;
+        using var output = new MemoryStream();
+        output.Write(Encoding.ASCII.GetBytes("ELOGPKG1"));
+        Span<byte> manifestLength = stackalloc byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(manifestLength, newManifestBytes.Length);
+        output.Write(manifestLength);
+        output.Write(newManifestBytes);
+        output.Write(packageBytes.AsSpan(remainderStart));
+        return output.ToArray();
     }
 }

@@ -45,6 +45,11 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
     public static void ValidateElogbookFile(BrowserFile file)
     {
         ArgumentNullException.ThrowIfNull(file);
+        if (file.Bytes is null)
+        {
+            throw new BrowserFileStoreException("Selected file did not include package bytes.");
+        }
+
         if (!IsElogbookFile(file))
         {
             throw new BrowserFileStoreException("Selected file must use the .elogbook extension.");
@@ -105,6 +110,16 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentNullException.ThrowIfNull(bytes);
         ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
+        if (!fileName.EndsWith(ElogbookExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BrowserFileStoreException($"Exported package file names must use the {ElogbookExtension} extension.");
+        }
+
+        if (bytes.Length > MaxElogbookBytes)
+        {
+            throw new BrowserFileStoreException(
+                $"Exported package is larger than the {MaxElogbookBytes} byte package limit.");
+        }
     }
 }
 

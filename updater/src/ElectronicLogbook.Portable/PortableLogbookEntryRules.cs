@@ -88,14 +88,15 @@ public static class PortableLogbookEntryRules
         var landingsDay = entry.LandingsDay.GetValueOrDefault();
         var landingsNight = entry.LandingsNight.GetValueOrDefault();
         var totalLandings = landingsDay + landingsNight;
-        if (FlightTime(entry) > 0 && totalLandings == 0)
+        var hasCopilotFlightTime = Value(entry.CoPilot) > 0;
+        if (FlightTime(entry) > 0 && totalLandings == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.FlightTimeWithoutLanding,
                 "This entry has flight time but no landings."));
         }
 
-        if (Value(entry.Day) > 0 && landingsDay == 0)
+        if (Value(entry.Day) > 0 && landingsDay == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.DayTimeWithoutDayLanding,
@@ -109,7 +110,7 @@ public static class PortableLogbookEntryRules
                 "This entry has a day landing but no day time."));
         }
 
-        if (Value(entry.Night) > 0 && landingsNight == 0)
+        if (Value(entry.Night) > 0 && landingsNight == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.NightTimeWithoutNightLanding,

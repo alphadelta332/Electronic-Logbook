@@ -152,6 +152,25 @@ public sealed class BrowserFileStoreTests
         Assert.Empty(jsRuntime.Calls);
     }
 
+    [Fact]
+    public async Task ExportHelpersRejectWrongExtensionAndOversizedPackagesBeforeCallingJavaScript()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var store = new BrowserFileStore(jsRuntime);
+        var oversized = new byte[BrowserFileStore.MaxElogbookBytes + 1];
+
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.CanShareAsync("logbook.zip", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadAsync("logbook.zip", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareAsync("logbook.zip", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareOrDownloadAsync("logbook.zip", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.CanShareAsync("logbook.elogbook", oversized));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadAsync("logbook.elogbook", oversized));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareAsync("logbook.elogbook", oversized));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", oversized));
+
+        Assert.Empty(jsRuntime.Calls);
+    }
+
     [Theory]
     [InlineData("backup.elogbook", true)]
     [InlineData("BACKUP.ELOGBOOK", true)]
@@ -180,6 +199,16 @@ public sealed class BrowserFileStoreTests
         var error = Assert.Throws<BrowserFileStoreException>(() => BrowserFileStore.ValidateElogbookFile(file));
 
         Assert.Contains(".elogbook", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateElogbookFileRejectsMissingBytes()
+    {
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, null!);
+
+        var error = Assert.Throws<BrowserFileStoreException>(() => BrowserFileStore.ValidateElogbookFile(file));
+
+        Assert.Contains("package bytes", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
