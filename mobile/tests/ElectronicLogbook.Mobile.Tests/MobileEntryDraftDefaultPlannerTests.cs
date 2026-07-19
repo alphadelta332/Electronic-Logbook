@@ -16,7 +16,7 @@ public sealed class MobileEntryDraftDefaultPlannerTests
 
         var defaults = MobileEntryDraftDefaultPlanner.Create(entries);
 
-        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", "YSCN YMML"), defaults);
+        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", "YMML", "YSCN YMML"), defaults);
     }
 
     [Fact]
@@ -26,7 +26,7 @@ public sealed class MobileEntryDraftDefaultPlannerTests
             Current("ent_latest", Entry("C172", "VH-ABC", "YSBK", "", "YSBK YSCN"))
         ]);
 
-        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSBK", "YSBK YSCN"), defaults);
+        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSBK", "YSCN", "YSBK YSCN"), defaults);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class MobileEntryDraftDefaultPlannerTests
             Current("ent_latest", Entry("C172", "VH-ABC", "YSBK", "YSCN", "YSBK YSCN"))
         ]);
 
-        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", string.Empty), defaults);
+        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", string.Empty, string.Empty), defaults);
     }
 
     [Fact]
@@ -61,7 +61,17 @@ public sealed class MobileEntryDraftDefaultPlannerTests
 
         var defaults = MobileEntryDraftDefaultPlanner.Create(entries);
 
-        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", "YSCN YMML"), defaults);
+        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", "YMML", "YSCN YMML"), defaults);
+    }
+
+    [Fact]
+    public void CreateDefaultsDestinationFromAirportLikeEndOfCarriedRoute()
+    {
+        var defaults = MobileEntryDraftDefaultPlanner.Create([
+            Current("ent_latest", Entry("C172", "VH-ABC", "YSBK", "YSCN", "YSCN/12/YMML"))
+        ]);
+
+        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", "YMML", "YSCN/12/YMML"), defaults);
     }
 
     private static PortableLogbookMaterializedEntry Current(string entryId, PortableLogbookEntry entry) =>

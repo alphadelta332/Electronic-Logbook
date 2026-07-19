@@ -233,6 +233,13 @@ public static class PortableLogbookPackage
                 $"Package is larger than the configured {options.MaxPackageBytes} byte limit.");
         }
 
+        if (packageBytes.Length == 0)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.PackageEmpty,
+                "Package is empty.");
+        }
+
         if (packageBytes.Length < Magic.Length + sizeof(int) + NonceSizeBytes + TagSizeBytes + 1)
         {
             throw new PortableLogbookPackageException(
@@ -448,6 +455,7 @@ public enum PortableLogbookPackageError
     UnsupportedEncryption,
     WrongLogbook,
     PackageTooLarge,
+    PackageEmpty,
     AuthenticationFailed,
     InvalidPayload,
     ManifestPayloadMismatch,

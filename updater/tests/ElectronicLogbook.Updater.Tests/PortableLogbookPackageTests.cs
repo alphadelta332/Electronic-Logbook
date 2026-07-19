@@ -168,6 +168,24 @@ public sealed class PortableLogbookPackageTests
     }
 
     [Fact]
+    public void ReadRejectsEmptyPackageBeforeParsing()
+    {
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Read([], FixedKey(1)));
+
+        Assert.Equal(PortableLogbookPackageError.PackageEmpty, exception.Error);
+    }
+
+    [Fact]
+    public void ReadManifestForInspectionRejectsEmptyPackageBeforeParsing()
+    {
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.ReadManifestForInspection([]));
+
+        Assert.Equal(PortableLogbookPackageError.PackageEmpty, exception.Error);
+    }
+
+    [Fact]
     public void ReadRejectsInvalidMagic()
     {
         var bytes = new byte[64];

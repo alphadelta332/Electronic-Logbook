@@ -33,8 +33,20 @@ public static class PortableLogbookWorkbookStorage
     public static PortableLogbookWorkbookStorageEnvelope Deserialize(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
-        var envelope = JsonSerializer.Deserialize<PortableLogbookWorkbookStorageEnvelope>(json, PortableLogbookJson.SerializerOptions)
-            ?? throw new ArgumentException("Workbook portable-logbook storage envelope is invalid.", nameof(json));
+        PortableLogbookWorkbookStorageEnvelope envelope;
+        try
+        {
+            envelope = JsonSerializer.Deserialize<PortableLogbookWorkbookStorageEnvelope>(json, PortableLogbookJson.SerializerOptions)
+                ?? throw new JsonException("Workbook portable-logbook storage envelope is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw new PortableLogbookWorkbookStorageException(
+                PortableLogbookWorkbookStorageError.InvalidEnvelope,
+                "Workbook portable-logbook storage envelope is not valid JSON.",
+                ex);
+        }
+
         if (envelope.StorageVersion != CurrentStorageVersion)
         {
             throw new PortableLogbookWorkbookStorageException(
@@ -44,7 +56,11 @@ public static class PortableLogbookWorkbookStorage
 
         try
         {
-            _ = Convert.FromBase64String(envelope.EncryptedHistoryPackageBase64);
+            var encryptedHistoryPackage = Convert.FromBase64String(envelope.EncryptedHistoryPackageBase64);
+            if (encryptedHistoryPackage.Length == 0)
+            {
+                throw new FormatException("Encrypted history package is empty.");
+            }
         }
         catch (FormatException ex)
         {
@@ -119,6 +135,7 @@ public sealed class PortableLogbookWorkbookStorageException : Exception
 
 public enum PortableLogbookWorkbookStorageError
 {
+    InvalidEnvelope,
     UnsupportedStorageVersion,
     InvalidEncryptedHistoryPackage,
     EnvelopeDocumentMismatch,

@@ -27,6 +27,9 @@ public sealed class PortableLogbookPackageExportTests
         Assert.Empty(result.Projection.Operations);
         Assert.False(result.WorkingCopyBeforeExport.ExportRequired);
         Assert.Equal([create.RevisionId], result.Document.Operations.Select(operation => operation.RevisionId));
+        var workbookRow = Assert.Single(result.WorkbookRows);
+        Assert.Equal(create.EntryId, workbookRow.EntryId);
+        Assert.Equal(create.RevisionId, workbookRow.CurrentRevisionId);
         var read = PortableLogbookPackage.Read(result.PackageBytes, key, create.LogbookId);
         Assert.Equal(create.RevisionId, Assert.Single(read.Document.Operations).RevisionId);
         Assert.Equal(receipt.PackageSha256, Assert.Single(result.StorageEnvelope.ImportReceipts).PackageSha256);
@@ -53,6 +56,10 @@ public sealed class PortableLogbookPackageExportTests
         Assert.True(result.WorkingCopyBeforeExport.ExportRequired);
         Assert.Equal(1, result.WorkingCopyBeforeExport.PendingCorrectionCount);
         Assert.Equal([create.RevisionId, new RevisionId("rev_export")], result.Document.Operations.Select(operation => operation.RevisionId));
+        var workbookRow = Assert.Single(result.WorkbookRows);
+        Assert.Equal(create.EntryId, workbookRow.EntryId);
+        Assert.Equal(new RevisionId("rev_export"), workbookRow.CurrentRevisionId);
+        Assert.Equal("VH-UPDATED", workbookRow.Entry.Registration);
         var read = PortableLogbookPackage.Read(result.PackageBytes, key, create.LogbookId);
         var correction = Assert.IsType<CorrectEntryOperation>(read.Document.Operations.Last());
         Assert.Equal("VH-UPDATED", correction.Entry.Registration);
@@ -80,6 +87,7 @@ public sealed class PortableLogbookPackageExportTests
         var deletion = Assert.IsType<DeleteEntryOperation>(result.Document.Operations.Last());
         Assert.Equal(known.EntryId, deletion.EntryId);
         Assert.Equal(known.CurrentRevisionId, Assert.Single(deletion.ParentRevisionIds));
+        Assert.Empty(result.WorkbookRows);
     }
 
     private static PortableLogbookDocument Document(

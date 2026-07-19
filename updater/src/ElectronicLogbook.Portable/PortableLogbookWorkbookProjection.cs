@@ -2,6 +2,27 @@ namespace ElectronicLogbook.Portable;
 
 public static class PortableLogbookWorkbookProjection
 {
+    public static IReadOnlyList<PortableLogbookWorkbookRow> CreateCurrentRows(PortableLogbookDocument document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+
+        return CreateCurrentRows(PortableLogbookMerger.Merge(document.Operations));
+    }
+
+    public static IReadOnlyList<PortableLogbookWorkbookRow> CreateCurrentRows(PortableLogbookMergeResult mergeResult)
+    {
+        ArgumentNullException.ThrowIfNull(mergeResult);
+
+        return mergeResult
+            .Entries
+            .Values
+            .Where(entry => !entry.IsDeleted && entry.Entry is not null)
+            .OrderBy(entry => entry.Entry!.Date)
+            .ThenBy(entry => entry.EntryId.Value, StringComparer.Ordinal)
+            .Select(entry => new PortableLogbookWorkbookRow(entry.EntryId, entry.CurrentRevisionId, entry.Entry!))
+            .ToArray();
+    }
+
     public static PortableLogbookProjectionResult Reconcile(
         IEnumerable<PortableLogbookMaterializedEntry> knownEntries,
         IEnumerable<PortableLogbookWorkbookRow> currentRows,

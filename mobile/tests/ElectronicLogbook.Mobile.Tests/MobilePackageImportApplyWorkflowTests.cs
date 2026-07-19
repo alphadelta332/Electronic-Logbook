@@ -297,6 +297,96 @@ public sealed class MobilePackageImportApplyWorkflowTests
         Assert.Equal("electronicLogbookKeys.decrypt", call.Identifier);
     }
 
+    [Fact]
+    public async Task ApplyIfReadyAsyncSupportsPwaPackageToPackageRoundTripWithoutFieldOrIdLoss()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var localCreate = CreateOperation("rev_local", 1.0m, fieldId, "Local");
+        var incomingCorrection = new CorrectEntryOperation(
+            localCreate.LogbookId,
+            localCreate.EntryId,
+            new RevisionId("rev_mobile_edit"),
+            new HashSet<RevisionId> { localCreate.RevisionId },
+            new DeviceId("dev_excel"),
+            DateTimeOffset.Parse("2026-07-18T00:05:00Z"),
+            Entry(1.4m, fieldId, "Imported") with
+            {
+                Date = new DateOnly(2026, 7, 19),
+                AircraftType = "DA42",
+                Registration = "VH-XYZ",
+                FlightNumber = "ELB42",
+                From = "YSBK",
+                To = "YMML",
+                Route = "YSBK YSCN",
+                Details = "Package round trip",
+                MultiPilot = 0.3m,
+                CoPilot = 0.2m,
+                Dual = 0.4m,
+                Instructor = 0.5m,
+                Day = 1.2m,
+                Night = 0.2m,
+                InstrumentActual = 0.6m,
+                InstrumentSimulated = 0.7m,
+                TakeoffsDay = 1,
+                TakeoffsNight = 2,
+                LandingsDay = 1,
+                LandingsNight = 2,
+                IfrApproaches = 2,
+                Holding = 1,
+                Rnav = 1,
+                Circling = 1
+            });
+        var definition = new CustomFieldDefinition(fieldId, "Training kind", 1);
+        var local = PortableLogbookDocument.CreateAustraliaFirst(localCreate.LogbookId, [definition], [localCreate]);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(localCreate.LogbookId, [definition], [localCreate, incomingCorrection]);
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var jsRuntime = RuntimeWithDecryption(packageBytes, key, local.LogbookId);
+        var file = new BrowserFile("workbook-export.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [],
+            DateTimeOffset.Parse("2026-07-19T00:01:00Z"));
+        var exportedPackage = PortableLogbookPackage.Write(result.Document, key);
+        var exported = PortableLogbookPackage.Read(exportedPackage, key, local.LogbookId);
+        var materialized = Assert.Single(PortableLogbookMerger.Merge(exported.Document.Operations).Entries.Values);
+
+        Assert.Equal(MobilePackageImportApplyStatus.Applied, result.Status);
+        Assert.Equal([localCreate.RevisionId, incomingCorrection.RevisionId], exported.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal(incomingCorrection.EntryId, materialized.EntryId);
+        Assert.Equal(incomingCorrection.RevisionId, materialized.CurrentRevisionId);
+        Assert.Equal(new DateOnly(2026, 7, 19), materialized.Entry?.Date);
+        Assert.Equal("DA42", materialized.Entry?.AircraftType);
+        Assert.Equal("VH-XYZ", materialized.Entry?.Registration);
+        Assert.Equal("ELB42", materialized.Entry?.FlightNumber);
+        Assert.Equal("YSBK", materialized.Entry?.From);
+        Assert.Equal("YMML", materialized.Entry?.To);
+        Assert.Equal("YSBK YSCN", materialized.Entry?.Route);
+        Assert.Equal("Package round trip", materialized.Entry?.Details);
+        Assert.Equal(0.3m, materialized.Entry?.MultiPilot);
+        Assert.Equal(1.4m, materialized.Entry?.PilotInCommand);
+        Assert.Equal(0.2m, materialized.Entry?.CoPilot);
+        Assert.Equal(0.4m, materialized.Entry?.Dual);
+        Assert.Equal(0.5m, materialized.Entry?.Instructor);
+        Assert.Equal(1.2m, materialized.Entry?.Day);
+        Assert.Equal(0.2m, materialized.Entry?.Night);
+        Assert.Equal(0.6m, materialized.Entry?.InstrumentActual);
+        Assert.Equal(0.7m, materialized.Entry?.InstrumentSimulated);
+        Assert.Equal(1, materialized.Entry?.TakeoffsDay);
+        Assert.Equal(2, materialized.Entry?.TakeoffsNight);
+        Assert.Equal(1, materialized.Entry?.LandingsDay);
+        Assert.Equal(2, materialized.Entry?.LandingsNight);
+        Assert.Equal(2, materialized.Entry?.IfrApproaches);
+        Assert.Equal(1, materialized.Entry?.Holding);
+        Assert.Equal(1, materialized.Entry?.Rnav);
+        Assert.Equal(1, materialized.Entry?.Circling);
+        Assert.Equal("Imported", materialized.Entry?.CustomFields[fieldId]);
+        Assert.Equal("Training kind", Assert.Single(exported.Document.CustomFieldDefinitions).Label);
+    }
+
     private static PortableLogbookDocument CreateDocument(
         string revisionId,
         decimal pilotInCommand,
@@ -310,13 +400,20 @@ public sealed class MobilePackageImportApplyWorkflowTests
     }
 
     private static CreateEntryOperation CreateOperation(string revisionId, decimal pilotInCommand) =>
+        CreateOperation(revisionId, pilotInCommand, null, null);
+
+    private static CreateEntryOperation CreateOperation(
+        string revisionId,
+        decimal pilotInCommand,
+        CustomFieldId? customFieldId,
+        string? customFieldValue) =>
         new(
             new LogbookId("log_mobile"),
             new EntryId("ent_1"),
             new RevisionId(revisionId),
             new DeviceId("dev_mobile"),
             DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
-            Entry(pilotInCommand));
+            Entry(pilotInCommand, customFieldId, customFieldValue));
 
     private static CorrectEntryOperation CreateCorrection(
         string revisionId,
@@ -332,6 +429,12 @@ public sealed class MobilePackageImportApplyWorkflowTests
             Entry(pilotInCommand));
 
     private static PortableLogbookEntry Entry(decimal pilotInCommand) =>
+        Entry(pilotInCommand, null, null);
+
+    private static PortableLogbookEntry Entry(
+        decimal pilotInCommand,
+        CustomFieldId? customFieldId,
+        string? customFieldValue) =>
         PortableLogbookEntry.Empty with
         {
             Date = new DateOnly(2026, 7, 18),
@@ -339,7 +442,10 @@ public sealed class MobilePackageImportApplyWorkflowTests
             Registration = "VH-ABC",
             From = "YSBK",
             To = "YSCN",
-            PilotInCommand = pilotInCommand
+            PilotInCommand = pilotInCommand,
+            CustomFields = customFieldId.HasValue
+                ? new Dictionary<CustomFieldId, string?> { [customFieldId.Value] = customFieldValue }
+                : new Dictionary<CustomFieldId, string?>()
         };
 
     private static RecordingJsRuntime RuntimeWithDecryption(

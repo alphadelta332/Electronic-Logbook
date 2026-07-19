@@ -68,6 +68,7 @@ public sealed class PortableLogbookPrintedCopyTests
         Assert.Single(plan.Pages[1].Records);
         Assert.Equal(3, plan.AuditSummary.CurrentRecordCount);
         Assert.Equal(3, plan.AuditSummary.RevisionCount);
+        Assert.Equal(document.LogbookId, plan.AuditSummary.LogbookId);
         Assert.Equal(new DateOnly(2019, 7, 18), plan.AuditSummary.Retention.RetainAfter);
         Assert.Equal(3, plan.RevisionHistory.Count);
         Assert.Equal("Alex Pilot", plan.CertificationBlock.HolderFullName);
@@ -180,13 +181,18 @@ public sealed class PortableLogbookPrintedCopyTests
         Assert.Contains("Page 1 of 2", html, StringComparison.Ordinal);
         Assert.Contains("Page 2 of 2", html, StringComparison.Ordinal);
         Assert.Contains("Audit summary", html, StringComparison.Ordinal);
+        Assert.Contains("Logbook ID", html, StringComparison.Ordinal);
+        Assert.Contains("log_print", html, StringComparison.Ordinal);
         Assert.Contains("Current records", html, StringComparison.Ordinal);
         Assert.Contains("Complete revision history", html, StringComparison.Ordinal);
+        Assert.Contains("@page{size:A4;margin:0;}", html, StringComparison.Ordinal);
+        Assert.Contains("thead{display:table-header-group;}", html, StringComparison.Ordinal);
         Assert.Contains("Revision history records", html, StringComparison.Ordinal);
         Assert.Contains("Minimum retained operations", html, StringComparison.Ordinal);
         Assert.Contains("2019-07-18", html, StringComparison.Ordinal);
         Assert.Contains("Alex Pilot", html, StringComparison.Ordinal);
         Assert.Contains("1990-01-02", html, StringComparison.Ordinal);
+        Assert.Contains("current regulatory review are required", html, StringComparison.Ordinal);
         Assert.Contains("VH-AB1", html, StringComparison.Ordinal);
         Assert.Contains("ent_1", html, StringComparison.Ordinal);
         Assert.Contains("rev_1", html, StringComparison.Ordinal);

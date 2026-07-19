@@ -11,9 +11,12 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Preview package", page, StringComparison.Ordinal);
         Assert.Contains("Import package", page, StringComparison.Ordinal);
         Assert.Contains("Export package", page, StringComparison.Ordinal);
+        Assert.Contains("Support summary", page, StringComparison.Ordinal);
         Assert.Contains("SetupPackageKeyAsync", page, StringComparison.Ordinal);
         Assert.Contains("ApplyPackageAsync", page, StringComparison.Ordinal);
         Assert.Contains("ExportPackageAsync", page, StringComparison.Ordinal);
+        Assert.Contains("ExportSupportSummaryAsync", page, StringComparison.Ordinal);
+        Assert.Contains("MobileSupportSummaryExportWorkflow.ExportAsync", page, StringComparison.Ordinal);
         Assert.Contains("class=\"key-notice\"", page, StringComparison.Ordinal);
         Assert.Contains("MobilePackageKeyNotice.Create", page, StringComparison.Ordinal);
         Assert.Contains("ImportCompatibility is MobilePackageImportCompatibility.WrongLogbook or MobilePackageImportCompatibility.UnsupportedSchema", page, StringComparison.Ordinal);
@@ -56,9 +59,36 @@ public sealed class PwaPageWiringTests
         Assert.Contains("list=\"routes\"", page, StringComparison.Ordinal);
         Assert.Contains("datalist id=\"routes\"", page, StringComparison.Ordinal);
         Assert.Contains("RecentValues(entry => entry.Route)", page, StringComparison.Ordinal);
+        Assert.Contains("Recent remarks", page, StringComparison.Ordinal);
+        Assert.Contains("UseRecentRemark", page, StringComparison.Ordinal);
+        Assert.Contains("RecentValues(entry => entry.Details)", page, StringComparison.Ordinal);
         Assert.Contains("RecentAirportValues()", page, StringComparison.Ordinal);
+        Assert.Contains("MobileAirportSuggestions.Create", page, StringComparison.Ordinal);
         Assert.Contains("MobileRecentValues.Create", page, StringComparison.Ordinal);
-        Assert.Contains("MobileRecentValues.CreateMany", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageOffersDirectRouteShortcut()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("Direct", page, StringComparison.Ordinal);
+        Assert.Contains("UseDirectRoute", page, StringComparison.Ordinal);
+        Assert.True(
+            page.IndexOf("input @bind=\"Draft.Route\"", StringComparison.Ordinal) <
+            page.IndexOf("@onclick=\"UseDirectRoute\"", StringComparison.Ordinal));
+        Assert.Contains("Draft.Route = string.Equals(from, to, StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
+        Assert.Contains("? from", page, StringComparison.Ordinal);
+        Assert.Contains(": $\"{from} {to}\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageUsesMobileFriendlyCodeInputHints()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Equal(6, CountOccurrences(page, "autocapitalize=\"characters\""));
+        Assert.Equal(6, CountOccurrences(page, "spellcheck=\"false\""));
     }
 
     [Fact]
@@ -70,6 +100,41 @@ public sealed class PwaPageWiringTests
         Assert.Contains("UseFlightTimeAsDay", page, StringComparison.Ordinal);
         Assert.Contains("Draft.Day = Draft.FlightTime", page, StringComparison.Ordinal);
         Assert.Contains("Draft.Night = 0", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageShowsAutomaticCountTotals()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("Takeoffs", page, StringComparison.Ordinal);
+        Assert.Contains("@Draft.TotalTakeoffs", page, StringComparison.Ordinal);
+        Assert.Contains("Landings", page, StringComparison.Ordinal);
+        Assert.Contains("@Draft.TotalLandings", page, StringComparison.Ordinal);
+        Assert.Contains("Approaches", page, StringComparison.Ordinal);
+        Assert.Contains("@Draft.TotalApproaches", page, StringComparison.Ordinal);
+        Assert.Contains("public int TotalTakeoffs => TakeoffsDay.GetValueOrDefault() + TakeoffsNight.GetValueOrDefault();", page, StringComparison.Ordinal);
+        Assert.Contains("public int TotalLandings => LandingsDay.GetValueOrDefault() + LandingsNight.GetValueOrDefault();", page, StringComparison.Ordinal);
+        Assert.Contains("public int TotalApproaches =>", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageAppliesDefaultDestinationFromDraftDefaults()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("To = defaults.To", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageOffersTakeoffLandingMatchShortcut()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("Match takeoffs", page, StringComparison.Ordinal);
+        Assert.Contains("MatchTakeoffsToLandings", page, StringComparison.Ordinal);
+        Assert.Contains("Draft.TakeoffsDay = Draft.LandingsDay", page, StringComparison.Ordinal);
+        Assert.Contains("Draft.TakeoffsNight = Draft.LandingsNight", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -104,4 +169,17 @@ public sealed class PwaPageWiringTests
             "ElectronicLogbook.Mobile",
             "Pages",
             relativePath)));
+
+    private static int CountOccurrences(string value, string pattern)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = value.IndexOf(pattern, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += pattern.Length;
+        }
+
+        return count;
+    }
 }

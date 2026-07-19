@@ -63,14 +63,19 @@ public sealed class PwaStaticAssetTests
 
         Assert.Equal("Electronic Logbook", root.GetProperty("name").GetString());
         Assert.Equal("Logbook", root.GetProperty("short_name").GetString());
+        Assert.Contains("offline", root.GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("standalone", root.GetProperty("display").GetString());
         Assert.False(root.GetProperty("prefer_related_applications").GetBoolean());
         Assert.Equal("./", root.GetProperty("start_url").GetString());
         Assert.Equal("./", root.GetProperty("id").GetString());
+        Assert.Equal("./", root.GetProperty("scope").GetString());
+        Assert.Contains(root.GetProperty("categories").EnumerateArray(), category => category.GetString() == "productivity");
+        Assert.Contains(root.GetProperty("categories").EnumerateArray(), category => category.GetString() == "utilities");
 
         var icons = root.GetProperty("icons").EnumerateArray().ToArray();
         Assert.Contains(icons, icon => icon.GetProperty("sizes").GetString() == "192x192");
         Assert.Contains(icons, icon => icon.GetProperty("sizes").GetString() == "512x512");
+        Assert.All(icons, icon => Assert.Equal("any maskable", icon.GetProperty("purpose").GetString()));
     }
 
     [Theory]
@@ -160,6 +165,23 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("file.arrayBuffer()", bridge, StringComparison.Ordinal);
         Assert.Contains("bytes", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("electronicLogbookStore.save", ExtractFileBridge(bridge), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BrowserFileBridgeRejectsOversizedPackagesBeforeReadingBytes()
+    {
+        var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
+        var emptyCheckIndex = bridge.IndexOf("file.size === 0", StringComparison.Ordinal);
+        var sizeCheckIndex = bridge.IndexOf("file.size > maxElogbookBytes", StringComparison.Ordinal);
+        var readIndex = bridge.IndexOf("file.arrayBuffer()", StringComparison.Ordinal);
+
+        Assert.Contains("const maxElogbookBytes = 64 * 1024 * 1024", bridge, StringComparison.Ordinal);
+        Assert.True(emptyCheckIndex >= 0);
+        Assert.True(sizeCheckIndex >= 0);
+        Assert.True(sizeCheckIndex > emptyCheckIndex);
+        Assert.True(readIndex > sizeCheckIndex);
+        Assert.Contains("reject(new Error(\"Selected file is empty.\"))", bridge, StringComparison.Ordinal);
+        Assert.Contains("reject(new Error(`Selected file is larger than the ${maxElogbookBytes} byte package limit.`))", bridge, StringComparison.Ordinal);
     }
 
     private static string ExtractFileBridge(string bridge)

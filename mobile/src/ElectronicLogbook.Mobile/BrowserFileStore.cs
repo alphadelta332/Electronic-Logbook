@@ -1,4 +1,5 @@
 using Microsoft.JSInterop;
+using System.Text;
 
 namespace ElectronicLogbook.Mobile;
 
@@ -7,6 +8,9 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
     public const string ElogbookContentType = "application/vnd.electronic-logbook";
     public const string ElogbookExtension = ".elogbook";
     public const int MaxElogbookBytes = 64 * 1024 * 1024;
+    public const string JsonContentType = "application/json";
+    public const string JsonExtension = ".json";
+    public const int MaxJsonDownloadBytes = 1024 * 1024;
 
     public ValueTask<BrowserFile?> PickAsync(string accept = ".elogbook") =>
         jsRuntime.InvokeAsync<BrowserFile?>("electronicLogbookFiles.pick", accept);
@@ -55,6 +59,11 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
             throw new BrowserFileStoreException("Selected file must use the .elogbook extension.");
         }
 
+        if (file.Bytes.Length == 0)
+        {
+            throw new BrowserFileStoreException("Selected file is empty.");
+        }
+
         if (file.Bytes.Length > MaxElogbookBytes)
         {
             throw new BrowserFileStoreException(
@@ -74,6 +83,23 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
             fileName,
             bytes,
             contentType);
+    }
+
+    public ValueTask DownloadJsonAsync(string fileName, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        return DownloadJsonAsync(fileName, Encoding.UTF8.GetBytes(json));
+    }
+
+    public ValueTask DownloadJsonAsync(string fileName, byte[] bytes)
+    {
+        ValidateJsonDownloadArguments(fileName, bytes);
+
+        return jsRuntime.InvokeVoidAsync(
+            "electronicLogbookFiles.download",
+            fileName,
+            bytes,
+            JsonContentType);
     }
 
     public ValueTask ShareAsync(
@@ -115,10 +141,36 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
             throw new BrowserFileStoreException($"Exported package file names must use the {ElogbookExtension} extension.");
         }
 
+        if (bytes.Length == 0)
+        {
+            throw new BrowserFileStoreException("Exported package is empty.");
+        }
+
         if (bytes.Length > MaxElogbookBytes)
         {
             throw new BrowserFileStoreException(
                 $"Exported package is larger than the {MaxElogbookBytes} byte package limit.");
+        }
+    }
+
+    private static void ValidateJsonDownloadArguments(string fileName, byte[] bytes)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        ArgumentNullException.ThrowIfNull(bytes);
+        if (!fileName.EndsWith(JsonExtension, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new BrowserFileStoreException($"Downloaded JSON file names must use the {JsonExtension} extension.");
+        }
+
+        if (bytes.Length == 0)
+        {
+            throw new BrowserFileStoreException("Downloaded JSON file is empty.");
+        }
+
+        if (bytes.Length > MaxJsonDownloadBytes)
+        {
+            throw new BrowserFileStoreException(
+                $"Downloaded JSON file is larger than the {MaxJsonDownloadBytes} byte limit.");
         }
     }
 }

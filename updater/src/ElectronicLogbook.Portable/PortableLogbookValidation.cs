@@ -33,6 +33,8 @@ public static class PortableLogbookValidator
                 "Jurisdiction profile version must be at least 1."));
         }
 
+        ValidateDocumentIdentifiers(document, errors);
+
         var duplicateCustomFieldIds = document.CustomFieldDefinitions
             .GroupBy(field => field.Id)
             .Where(group => group.Count() > 1)
@@ -80,6 +82,8 @@ public static class PortableLogbookValidator
         DateOnly today,
         List<PortableLogbookValidationError> errors)
     {
+        ValidateOperationIdentifiers(operation, errors);
+
         if (operation.LogbookId != document.LogbookId)
         {
             errors.Add(new PortableLogbookValidationError(
@@ -144,6 +148,65 @@ public static class PortableLogbookValidator
         errors.Add(new PortableLogbookValidationError(
             PortableLogbookValidationCode.InvalidParentCount,
             $"Revision '{operation.RevisionId}' requires at least {minimumParents} parent revision(s)."));
+    }
+
+    private static void ValidateDocumentIdentifiers(
+        PortableLogbookDocument document,
+        List<PortableLogbookValidationError> errors)
+    {
+        if (IsBlank(document.LogbookId.Value))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                "Document logbook ID is required."));
+        }
+
+        foreach (var field in document.CustomFieldDefinitions.Where(field => IsBlank(field.Id.Value)))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                $"Custom field '{field.Label}' has an invalid ID."));
+        }
+    }
+
+    private static void ValidateOperationIdentifiers(
+        PortableLogbookOperation operation,
+        List<PortableLogbookValidationError> errors)
+    {
+        if (IsBlank(operation.LogbookId.Value))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                $"Revision '{operation.RevisionId}' has an invalid logbook ID."));
+        }
+
+        if (IsBlank(operation.EntryId.Value))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                $"Revision '{operation.RevisionId}' has an invalid entry ID."));
+        }
+
+        if (IsBlank(operation.RevisionId.Value))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                "Operation revision ID is required."));
+        }
+
+        if (IsBlank(operation.DeviceId.Value))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                $"Revision '{operation.RevisionId}' has an invalid device ID."));
+        }
+
+        foreach (var parentRevisionId in operation.ParentRevisionIds.Where(parentRevisionId => IsBlank(parentRevisionId.Value)))
+        {
+            errors.Add(new PortableLogbookValidationError(
+                PortableLogbookValidationCode.InvalidIdentifier,
+                $"Revision '{operation.RevisionId}' references invalid parent revision '{parentRevisionId}'."));
+        }
     }
 
     private static void ValidateEntryFields(
@@ -222,6 +285,8 @@ public static class PortableLogbookValidator
         visited.Add(revisionId);
         return false;
     }
+
+    private static bool IsBlank(string? value) => string.IsNullOrWhiteSpace(value);
 }
 
 public sealed record PortableLogbookValidationResult(
@@ -240,6 +305,7 @@ public enum PortableLogbookValidationCode
     DuplicateCustomFieldId,
     DuplicateRevisionId,
     OperationLogbookMismatch,
+    InvalidIdentifier,
     InvalidParentCount,
     MissingParentRevision,
     SelfParentRevision,

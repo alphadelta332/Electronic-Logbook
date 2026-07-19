@@ -68,6 +68,57 @@ public sealed class PortableLogbookValidatorTests
     }
 
     [Fact]
+    public void ValidateRejectsBlankDocumentAndCustomFieldIdentifiers()
+    {
+        var document = PortableLogbookDocument.CreateAustraliaFirst(
+            new LogbookId(" "),
+            [new CustomFieldDefinition(new CustomFieldId(" "), "Training", 1)],
+            []);
+
+        var result = PortableLogbookValidator.Validate(document);
+
+        Assert.False(result.IsValid);
+        Assert.True(result.Errors.Count(error => error.Code == PortableLogbookValidationCode.InvalidIdentifier) >= 2);
+    }
+
+    [Fact]
+    public void ValidateRejectsBlankOperationIdentifiers()
+    {
+        var create = CreateOperation() with
+        {
+            EntryId = new EntryId(" "),
+            RevisionId = new RevisionId(" "),
+            DeviceId = new DeviceId(" ")
+        };
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+
+        var result = PortableLogbookValidator.Validate(document);
+
+        Assert.False(result.IsValid);
+        Assert.True(result.Errors.Count(error => error.Code == PortableLogbookValidationCode.InvalidIdentifier) >= 3);
+    }
+
+    [Fact]
+    public void ValidateRejectsBlankParentRevisionIdentifiers()
+    {
+        var create = CreateOperation();
+        var correction = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_correction"),
+            new HashSet<RevisionId> { new(" ") },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            create.Entry);
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create, correction]);
+
+        var result = PortableLogbookValidator.Validate(document);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, error => error.Code == PortableLogbookValidationCode.InvalidIdentifier);
+    }
+
+    [Fact]
     public void ValidateRejectsConflictingDuplicateRevisionPayloads()
     {
         var create = CreateOperation();

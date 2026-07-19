@@ -22,7 +22,7 @@ public static class MobileRecentValues
         ArgumentNullException.ThrowIfNull(selector);
 
         return currentEntries
-            .Where(entry => entry.Entry is not null)
+            .Where(entry => !entry.IsDeleted && entry.Entry is not null)
             .SelectMany(entry => selector(entry.Entry!))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value!.Trim())

@@ -22,6 +22,21 @@ public sealed class BrowserFileStoreTests
     }
 
     [Fact]
+    public async Task DownloadJsonAsyncCallsBrowserFileBridgeWithoutPackageExtension()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var store = new BrowserFileStore(jsRuntime);
+
+        await store.DownloadJsonAsync("summary.json", "{\"operationCount\":1}");
+
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookFiles.download", call.Identifier);
+        Assert.Equal("summary.json", call.Arguments[0]);
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes("{\"operationCount\":1}"), Assert.IsType<byte[]>(call.Arguments[1]));
+        Assert.Equal(BrowserFileStore.JsonContentType, call.Arguments[2]);
+    }
+
+    [Fact]
     public async Task CanShareAsyncCallsBrowserShareCapabilityBridge()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -131,6 +146,19 @@ public sealed class BrowserFileStoreTests
     }
 
     [Fact]
+    public async Task PickElogbookAsyncRejectsEmptySelectedFile()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, []));
+        var store = new BrowserFileStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.PickElogbookAsync());
+
+        Assert.Contains("empty", error.Message, StringComparison.Ordinal);
+        Assert.Single(jsRuntime.Calls);
+    }
+
+    [Fact]
     public async Task DownloadAsyncRejectsInvalidArgumentsBeforeCallingJavaScript()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -148,6 +176,8 @@ public sealed class BrowserFileStoreTests
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareOrDownloadAsync(" ", []));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", null!));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", [], " "));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.DownloadJsonAsync(" ", "{}"));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.DownloadJsonAsync("summary.json", (string)null!));
 
         Assert.Empty(jsRuntime.Calls);
     }
@@ -167,6 +197,35 @@ public sealed class BrowserFileStoreTests
         await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadAsync("logbook.elogbook", oversized));
         await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareAsync("logbook.elogbook", oversized));
         await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", oversized));
+
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
+    public async Task ExportHelpersRejectEmptyPackagesBeforeCallingJavaScript()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var store = new BrowserFileStore(jsRuntime);
+
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.CanShareAsync("logbook.elogbook", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadAsync("logbook.elogbook", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareAsync("logbook.elogbook", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", []));
+
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
+    public async Task DownloadJsonAsyncRejectsWrongExtensionAndEmptyOrOversizedFilesBeforeCallingJavaScript()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var store = new BrowserFileStore(jsRuntime);
+
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadJsonAsync("summary.elogbook", "{}"));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadJsonAsync("summary.json", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadJsonAsync(
+            "summary.json",
+            new byte[BrowserFileStore.MaxJsonDownloadBytes + 1]));
 
         Assert.Empty(jsRuntime.Calls);
     }
@@ -209,6 +268,16 @@ public sealed class BrowserFileStoreTests
         var error = Assert.Throws<BrowserFileStoreException>(() => BrowserFileStore.ValidateElogbookFile(file));
 
         Assert.Contains("package bytes", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ValidateElogbookFileRejectsEmptyPackage()
+    {
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, []);
+
+        var error = Assert.Throws<BrowserFileStoreException>(() => BrowserFileStore.ValidateElogbookFile(file));
+
+        Assert.Contains("empty", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]

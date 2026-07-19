@@ -69,6 +69,13 @@ public static class PortableLogbookPackageFile
                 $"Package is larger than the configured {options.MaxPackageBytes} byte limit.");
         }
 
+        if (fileInfo.Length == 0)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.PackageEmpty,
+                "Package file is empty.");
+        }
+
         return File.ReadAllBytes(path);
     }
 

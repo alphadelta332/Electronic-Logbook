@@ -29,6 +29,10 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal(PortableOperationKind.Correction, summary.Kind);
         Assert.Equal("VH-NEW", summary.Registration);
         Assert.NotNull(result.NewReceipt);
+        var workbookRow = Assert.Single(result.WorkbookRows!);
+        Assert.Equal(create.EntryId, workbookRow.EntryId);
+        Assert.Equal(correction.RevisionId, workbookRow.CurrentRevisionId);
+        Assert.Equal("VH-NEW", workbookRow.Entry.Registration);
         Assert.Equal(ImportedAt, result.NewReceipt.ImportedAt);
         Assert.NotNull(result.EncryptedHistoryPackage);
         Assert.NotNull(result.StorageEnvelope);
@@ -51,6 +55,9 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal(PortableLogbookImportPlanStatus.DuplicateOnly, result.Plan?.Status);
         Assert.Equal([create.RevisionId], result.Document.Operations.Select(operation => operation.RevisionId));
         Assert.NotNull(result.NewReceipt);
+        var workbookRow = Assert.Single(result.WorkbookRows!);
+        Assert.Equal(create.EntryId, workbookRow.EntryId);
+        Assert.Equal(create.RevisionId, workbookRow.CurrentRevisionId);
         Assert.NotNull(result.StorageEnvelope);
     }
 
@@ -69,6 +76,7 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal(PortableLogbookPackageImportStatus.PackageReplay, result.Status);
         Assert.Null(result.Plan);
         Assert.Null(result.NewReceipt);
+        Assert.Null(result.WorkbookRows);
         Assert.Null(result.StorageEnvelope);
         Assert.Equal(receipt.PackageSha256, Assert.Single(result.ImportReceipts).PackageSha256);
     }
@@ -89,6 +97,7 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal(PortableLogbookPackageImportStatus.RequiresResolution, result.Status);
         Assert.Equal(PortableLogbookImportPlanStatus.RequiresConflictResolution, result.Plan?.Status);
         Assert.Null(result.NewReceipt);
+        Assert.Null(result.WorkbookRows);
         Assert.Null(result.StorageEnvelope);
         Assert.Equal([create.RevisionId, localCorrection.RevisionId], result.Document.Operations.Select(operation => operation.RevisionId));
     }
@@ -131,6 +140,8 @@ public sealed class PortableLogbookPackageImportTests
         Assert.Equal([create.EntryId, correction.EntryId], result.Document.Operations.Select(operation => operation.EntryId));
         Assert.Equal([create.RevisionId, correction.RevisionId], result.Document.Operations.Select(operation => operation.RevisionId));
         Assert.NotNull(result.NewReceipt);
+        Assert.Equal(1, result.WorkbookRows?.Count);
+        Assert.Equal(correction.RevisionId, Assert.Single(result.WorkbookRows!).CurrentRevisionId);
         Assert.NotNull(result.StorageEnvelope);
         Assert.NotNull(result.EncryptedHistoryPackage);
         Assert.Equal(result.Document.LogbookId, result.StorageEnvelope.LogbookId);

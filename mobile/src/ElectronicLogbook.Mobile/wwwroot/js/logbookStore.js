@@ -3,6 +3,7 @@
     const documentStoreName = "portable-documents";
     const keyStoreName = "portable-keys";
     const version = 2;
+    const maxElogbookBytes = 64 * 1024 * 1024;
 
     function openDatabase() {
         return new Promise((resolve, reject) => {
@@ -131,6 +132,16 @@
                 }
 
                 try {
+                    if (file.size === 0) {
+                        reject(new Error("Selected file is empty."));
+                        return;
+                    }
+
+                    if (file.size > maxElogbookBytes) {
+                        reject(new Error(`Selected file is larger than the ${maxElogbookBytes} byte package limit.`));
+                        return;
+                    }
+
                     const bytes = new Uint8Array(await file.arrayBuffer());
                     resolve({
                         fileName: file.name,

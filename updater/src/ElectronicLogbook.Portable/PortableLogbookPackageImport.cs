@@ -49,6 +49,7 @@ public static class PortableLogbookPackageImport
                 ? PortableLogbookPackageImportStatus.DuplicateOperationsRecorded
                 : PortableLogbookPackageImportStatus.Applied,
             importedDocument,
+            PortableLogbookWorkbookProjection.CreateCurrentRows(importedDocument),
             updatedReceipts,
             plan,
             receipt,
@@ -60,6 +61,7 @@ public static class PortableLogbookPackageImport
 public sealed record PortableLogbookPackageImportResult(
     PortableLogbookPackageImportStatus Status,
     PortableLogbookDocument Document,
+    IReadOnlyList<PortableLogbookWorkbookRow>? WorkbookRows,
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
     PortableLogbookImportPlan? Plan,
     PortableLogbookPackageReceipt? NewReceipt,
@@ -72,6 +74,7 @@ public sealed record PortableLogbookPackageImportResult(
         new(
             PortableLogbookPackageImportStatus.PackageReplay,
             document,
+            null,
             receipts,
             null,
             null,
@@ -85,6 +88,7 @@ public sealed record PortableLogbookPackageImportResult(
         new(
             PortableLogbookPackageImportStatus.RequiresResolution,
             document,
+            null,
             receipts,
             plan,
             null,
@@ -94,6 +98,7 @@ public sealed record PortableLogbookPackageImportResult(
     public static PortableLogbookPackageImportResult Imported(
         PortableLogbookPackageImportStatus status,
         PortableLogbookDocument document,
+        IReadOnlyList<PortableLogbookWorkbookRow> workbookRows,
         IReadOnlyList<PortableLogbookPackageReceipt> receipts,
         PortableLogbookImportPlan plan,
         PortableLogbookPackageReceipt receipt,
@@ -102,6 +107,7 @@ public sealed record PortableLogbookPackageImportResult(
         new(
             status,
             document,
+            workbookRows,
             receipts,
             plan,
             receipt,

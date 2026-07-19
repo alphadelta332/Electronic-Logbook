@@ -32,8 +32,48 @@ public sealed class PortableLogbookSummaryTests
         Assert.Equal(1, summary.CreateCount);
         Assert.Equal(1, summary.CorrectionCount);
         Assert.Equal(1, summary.DeletionCount);
+        Assert.Equal(1, summary.DistinctDeviceCount);
+        Assert.Equal(0, summary.CurrentRecordCount);
+        Assert.Equal(1, summary.DeletedCurrentRecordCount);
+        Assert.Equal(0, summary.UnresolvedConflictCount);
         Assert.Equal(create.CreatedAt, summary.FirstOperationAt);
         Assert.Equal(deletion.CreatedAt, summary.LastOperationAt);
+    }
+
+    [Fact]
+    public void CreateReportsRedactedCurrentRecordAndConflictCounts()
+    {
+        var create = CreateOperation("rev_create", PortableOperationKind.Create, DateTimeOffset.Parse("2026-07-18T00:00:00Z"));
+        var localCorrection = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_local"),
+            new HashSet<RevisionId> { create.RevisionId },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            Entry("VH-LOCAL"));
+        var incomingCorrection = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_incoming"),
+            new HashSet<RevisionId> { create.RevisionId },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(2),
+            Entry("VH-INCOMING"));
+        var current = CreateOperation("rev_current", PortableOperationKind.Create, DateTimeOffset.Parse("2026-07-18T00:03:00Z")) with
+        {
+            EntryId = new EntryId("ent_current")
+        };
+        var document = PortableLogbookDocument.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            [create, localCorrection, incomingCorrection, current]);
+
+        var summary = PortableLogbookSummary.Create(document);
+
+        Assert.Equal(1, summary.CurrentRecordCount);
+        Assert.Equal(0, summary.DeletedCurrentRecordCount);
+        Assert.Equal(1, summary.UnresolvedConflictCount);
     }
 
     [Fact]
@@ -49,6 +89,10 @@ public sealed class PortableLogbookSummaryTests
         Assert.DoesNotContain("VH-SECRET", json, StringComparison.Ordinal);
         Assert.DoesNotContain("YSBK", json, StringComparison.Ordinal);
         Assert.DoesNotContain("Training details", json, StringComparison.Ordinal);
+        Assert.Contains("currentRecordCount", json, StringComparison.Ordinal);
+        Assert.Contains("unresolvedConflictCount", json, StringComparison.Ordinal);
+        Assert.Contains("distinctDeviceCount", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("dev_excel", json, StringComparison.Ordinal);
     }
 
     private static CreateEntryOperation CreateOperation(

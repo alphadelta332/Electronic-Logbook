@@ -5,6 +5,37 @@ namespace ElectronicLogbook.Updater.Tests;
 public sealed class PortableLogbookWorkbookProjectionTests
 {
     [Fact]
+    public void CreateCurrentRowsReturnsCurrentNonDeletedRowsWithStableMetadata()
+    {
+        var create = Create("ent_1", "rev_create", Entry("VH-OLD"));
+        var correction = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_correct"),
+            new HashSet<RevisionId> { create.RevisionId },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            Entry("VH-NEW"));
+        var deleted = Create("ent_2", "rev_deleted_create", Entry("VH-DEL"));
+        var deletion = new DeleteEntryOperation(
+            deleted.LogbookId,
+            deleted.EntryId,
+            new RevisionId("rev_deleted"),
+            new HashSet<RevisionId> { deleted.RevisionId },
+            deleted.DeviceId,
+            deleted.CreatedAt.AddMinutes(1),
+            "Removed");
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create, correction, deleted, deletion]);
+
+        var rows = PortableLogbookWorkbookProjection.CreateCurrentRows(document);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(create.EntryId, row.EntryId);
+        Assert.Equal(correction.RevisionId, row.CurrentRevisionId);
+        Assert.Equal("VH-NEW", row.Entry.Registration);
+    }
+
+    [Fact]
     public void ReconcileProducesNoOperationsForUnchangedKnownRows()
     {
         var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
@@ -235,6 +266,18 @@ public sealed class PortableLogbookWorkbookProjectionTests
             isDeleted,
             entry,
             [new RevisionId(revisionId)]);
+
+    private static CreateEntryOperation Create(
+        string entryId,
+        string revisionId,
+        PortableLogbookEntry entry) =>
+        new(
+            new LogbookId("log_test"),
+            new EntryId(entryId),
+            new RevisionId(revisionId),
+            new DeviceId("dev_test"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            entry);
 
     private static PortableLogbookEntry Entry(string registration) =>
         PortableLogbookEntry.Empty with

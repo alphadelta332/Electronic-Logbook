@@ -109,12 +109,36 @@ public sealed class PortableLogbookWorkbookStorageTests
     }
 
     [Fact]
+    public void DeserializeRejectsMalformedEnvelopeJsonWithTypedStorageError()
+    {
+        var exception = Assert.Throws<PortableLogbookWorkbookStorageException>(
+            () => PortableLogbookWorkbookStorage.Deserialize("{ not valid json"));
+
+        Assert.Equal(PortableLogbookWorkbookStorageError.InvalidEnvelope, exception.Error);
+    }
+
+    [Fact]
     public void DeserializeRejectsInvalidEncryptedPackageBase64()
     {
         var document = CreateDocument();
         var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, [1, 2, 3], []) with
         {
             EncryptedHistoryPackageBase64 = "not base64"
+        };
+
+        var exception = Assert.Throws<PortableLogbookWorkbookStorageException>(
+            () => PortableLogbookWorkbookStorage.Deserialize(PortableLogbookWorkbookStorage.Serialize(envelope)));
+
+        Assert.Equal(PortableLogbookWorkbookStorageError.InvalidEncryptedHistoryPackage, exception.Error);
+    }
+
+    [Fact]
+    public void DeserializeRejectsEmptyEncryptedPackage()
+    {
+        var document = CreateDocument();
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, [1, 2, 3], []) with
+        {
+            EncryptedHistoryPackageBase64 = string.Empty
         };
 
         var exception = Assert.Throws<PortableLogbookWorkbookStorageException>(

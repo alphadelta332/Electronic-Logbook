@@ -8,6 +8,18 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class BrowserLogbookStoreGoldenFixtureTests
 {
     [Fact]
+    public void MobileEndpointSerializesPortableSchemaV1ToGoldenFixture()
+    {
+        var fixtureJson = ReadGoldenFixture();
+        var document = PortableLogbookJson.Deserialize(fixtureJson)
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+
+        var serialized = PortableLogbookJson.Serialize(document);
+
+        Assert.Equal(Normalize(fixtureJson), Normalize(serialized));
+    }
+
+    [Fact]
     public async Task LoadDocumentAsyncCanReadGoldenFixtureFromVersionedBrowserEnvelope()
     {
         var fixtureJson = ReadGoldenFixture();

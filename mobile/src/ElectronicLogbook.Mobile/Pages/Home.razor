@@ -59,27 +59,28 @@
             </label>
             <label>
                 Aircraft type
-                <input @bind="Draft.AircraftType" list="aircraft-types" />
+                <input @bind="Draft.AircraftType" list="aircraft-types" autocapitalize="characters" spellcheck="false" />
             </label>
             <label>
                 Registration
-                <input @bind="Draft.Registration" list="registrations" />
+                <input @bind="Draft.Registration" list="registrations" autocapitalize="characters" spellcheck="false" />
             </label>
             <label>
                 Flight number
-                <input @bind="Draft.FlightNumber" list="flight-numbers" />
+                <input @bind="Draft.FlightNumber" list="flight-numbers" autocapitalize="characters" spellcheck="false" />
             </label>
             <label>
                 From
-                <input @bind="Draft.From" list="airports" />
+                <input @bind="Draft.From" list="airports" autocapitalize="characters" spellcheck="false" />
             </label>
             <label>
                 To
-                <input @bind="Draft.To" list="airports" />
+                <input @bind="Draft.To" list="airports" autocapitalize="characters" spellcheck="false" />
             </label>
             <label>
                 Route
-                <input @bind="Draft.Route" list="routes" />
+                <input @bind="Draft.Route" list="routes" autocapitalize="characters" spellcheck="false" />
+                <button class="field-action" type="button" @onclick="UseDirectRoute" disabled="@IsStorageBlocked">Direct</button>
             </label>
             <label>
                 PIC
@@ -181,16 +182,37 @@
                 <option value="@value"></option>
             }
         </datalist>
-
         <label class="wide-field">
             Remarks
             <textarea @bind="Draft.Remarks"></textarea>
         </label>
+        <select class="wide-field recent-remarks" @onchange="UseRecentRemark" disabled="@IsStorageBlocked">
+            <option value="">Recent remarks</option>
+            @foreach (var value in RecentValues(entry => entry.Details))
+            {
+                <option value="@value">@value</option>
+            }
+        </select>
 
         <div class="calculated-total">
-            <span>Logged time</span>
-            <strong>@FormatHours(Draft.LoggedTime) hr</strong>
+            <span>
+                Logged time
+                <strong>@FormatHours(Draft.LoggedTime) hr</strong>
+            </span>
+            <span>
+                Takeoffs
+                <strong>@Draft.TotalTakeoffs</strong>
+            </span>
+            <span>
+                Landings
+                <strong>@Draft.TotalLandings</strong>
+            </span>
+            <span>
+                Approaches
+                <strong>@Draft.TotalApproaches</strong>
+            </span>
             <button type="button" @onclick="UseFlightTimeAsDay" disabled="@IsStorageBlocked">Use flight time as day</button>
+            <button type="button" @onclick="MatchTakeoffsToLandings" disabled="@IsStorageBlocked">Match takeoffs</button>
         </div>
 
         <div class="custom-fields">
@@ -322,6 +344,7 @@
             {
                 <button type="button" @onclick="SetupPackageKeyAsync" disabled="@IsStorageBlocked" title="Create this device's browser-held package key.">Set up key</button>
             }
+            <button type="button" @onclick="ExportSupportSummaryAsync" disabled="@IsStorageBlocked" title="Download a redacted local JSON summary for support or pilot feedback.">Support summary</button>
             <button type="button" @onclick="PreviewPackageAsync" disabled="@IsStorageBlocked" title="Read package manifest without changing this device copy.">Preview package</button>
             <button type="button" @onclick="ApplyPackageAsync" disabled="@IsPackageImportDisabled" title="@PackageImportTitle">Import package</button>
             <button type="button" class="primary" @onclick="ExportPackageAsync" disabled="@IsPackageExportDisabled" title="@PackageExchangeTitle">Export package</button>
@@ -656,6 +679,27 @@
         }
     }
 
+    private async Task ExportSupportSummaryAsync()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        PackageExchangeError = null;
+        PackageExchangeMessage = null;
+        try
+        {
+            var exportedAt = DateTimeOffset.UtcNow;
+            var result = await MobileSupportSummaryExportWorkflow.ExportAsync(Document, FileStore, exportedAt);
+            PackageExchangeMessage = $"Exported {result.FileName}.";
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or JSException)
+        {
+            PackageExchangeError = ex.Message;
+        }
+    }
+
     private async Task ApplyPackageAsync()
     {
         if (IsPackageImportDisabled)
@@ -807,6 +851,55 @@
 
         Draft.Day = Draft.FlightTime;
         Draft.Night = 0;
+        MarkDraftEdited();
+    }
+
+    private void UseRecentRemark(ChangeEventArgs args)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var value = args.Value?.ToString();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        Draft.Remarks = value;
+        MarkDraftEdited();
+    }
+
+    private void MatchTakeoffsToLandings()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        Draft.TakeoffsDay = Draft.LandingsDay;
+        Draft.TakeoffsNight = Draft.LandingsNight;
+        MarkDraftEdited();
+    }
+
+    private void UseDirectRoute()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var from = Draft.From.Trim();
+        var to = Draft.To.Trim();
+        if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
+        {
+            return;
+        }
+
+        Draft.Route = string.Equals(from, to, StringComparison.OrdinalIgnoreCase)
+            ? from
+            : $"{from} {to}";
         MarkDraftEdited();
     }
 
@@ -962,9 +1055,7 @@
         MobileRecentValues.Create(CurrentEntries, selector);
 
     private IEnumerable<string> RecentAirportValues() =>
-        MobileRecentValues.CreateMany(
-            CurrentEntries,
-            entry => [entry.From, entry.To]);
+        MobileAirportSuggestions.Create(CurrentEntries);
 
     private string[] ValidateDraft()
     {
@@ -1022,6 +1113,16 @@
 
         public decimal LoggedTime => FlightTime + InstrumentSimulated;
 
+        public int TotalTakeoffs => TakeoffsDay.GetValueOrDefault() + TakeoffsNight.GetValueOrDefault();
+
+        public int TotalLandings => LandingsDay.GetValueOrDefault() + LandingsNight.GetValueOrDefault();
+
+        public int TotalApproaches =>
+            IfrApproaches.GetValueOrDefault() +
+            Holding.GetValueOrDefault() +
+            Rnav.GetValueOrDefault() +
+            Circling.GetValueOrDefault();
+
         public static EntryDraft Create(MobileEntryDraftDefaults? defaults = null)
         {
             defaults ??= MobileEntryDraftDefaults.Empty;
@@ -1031,6 +1132,7 @@
                 AircraftType = defaults.AircraftType,
                 Registration = defaults.Registration,
                 From = defaults.From,
+                To = defaults.To,
                 Route = defaults.Route
             };
             foreach (var field in PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Custom 1", "Custom 2", "Custom 3", "Custom 4"]))

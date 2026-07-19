@@ -124,6 +124,45 @@ public sealed class PortableLogbookPackageFileTests : IDisposable
     }
 
     [Fact]
+    public void ReadRejectsEmptyFileBeforePackageParsing()
+    {
+        Directory.CreateDirectory(tempDirectory);
+        var path = Path.Combine(tempDirectory, "empty.elogbook");
+        File.WriteAllBytes(path, []);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackageFile.Read(path, PortableLogbookKey.Generate()));
+
+        Assert.Equal(PortableLogbookPackageError.PackageEmpty, exception.Error);
+    }
+
+    [Fact]
+    public void ReadManifestRejectsEmptyFileBeforePackageParsing()
+    {
+        Directory.CreateDirectory(tempDirectory);
+        var path = Path.Combine(tempDirectory, "empty.elogbook");
+        File.WriteAllBytes(path, []);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackageFile.ReadManifest(path));
+
+        Assert.Equal(PortableLogbookPackageError.PackageEmpty, exception.Error);
+    }
+
+    [Fact]
+    public void ReadManifestForInspectionRejectsEmptyFileBeforePackageParsing()
+    {
+        Directory.CreateDirectory(tempDirectory);
+        var path = Path.Combine(tempDirectory, "empty.elogbook");
+        File.WriteAllBytes(path, []);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackageFile.ReadManifestForInspection(path));
+
+        Assert.Equal(PortableLogbookPackageError.PackageEmpty, exception.Error);
+    }
+
+    [Fact]
     public void ReadManifestRejectsNonElogbookExtension()
     {
         var path = Path.Combine(tempDirectory, "export.zip");

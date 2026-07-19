@@ -40,6 +40,7 @@ public static class PortableLogbookPackageExport
 
         return new PortableLogbookPackageExportResult(
             exportedDocument,
+            PortableLogbookWorkbookProjection.CreateCurrentRows(exportedDocument),
             projection,
             workingCopy,
             packageBytes,
@@ -50,6 +51,7 @@ public static class PortableLogbookPackageExport
 
 public sealed record PortableLogbookPackageExportResult(
     PortableLogbookDocument Document,
+    IReadOnlyList<PortableLogbookWorkbookRow> WorkbookRows,
     PortableLogbookProjectionResult Projection,
     PortableLogbookWorkingCopyState WorkingCopyBeforeExport,
     byte[] PackageBytes,

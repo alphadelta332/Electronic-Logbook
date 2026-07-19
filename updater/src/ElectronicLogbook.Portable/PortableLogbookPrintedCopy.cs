@@ -56,6 +56,7 @@ public static class PortableLogbookPrintedCopy
         return new PortableLogbookPrintedCopyPagePlan(
             pages,
             new PortableLogbookPrintedCopyAuditSummary(
+                request.AuditSnapshot.LogbookId,
                 request.AuditSnapshot.CurrentRecords.Count,
                 request.AuditSnapshot.RevisionHistory.Sum(history => history.Revisions.Count),
                 request.AuditSnapshot.Conflicts.Count,
@@ -83,6 +84,9 @@ public static class PortableLogbookPrintedCopy
         builder.AppendLine("body{font-family:Arial,sans-serif;color:#111;margin:0;}");
         builder.AppendLine(".page{box-sizing:border-box;min-height:270mm;padding:14mm 12mm;page-break-after:always;}");
         builder.AppendLine(".page:last-child{page-break-after:auto;}");
+        builder.AppendLine("@page{size:A4;margin:0;}");
+        builder.AppendLine("tr{page-break-inside:avoid;}");
+        builder.AppendLine("thead{display:table-header-group;}");
         builder.AppendLine("h1{font-size:20px;margin:0 0 8px;}");
         builder.AppendLine("h2{font-size:15px;margin:16px 0 6px;}");
         builder.AppendLine("p{margin:4px 0;}");
@@ -126,6 +130,7 @@ public static class PortableLogbookPrintedCopy
     {
         builder.AppendLine("<h2>Audit summary</h2>");
         builder.AppendLine("<dl class=\"summary\">");
+        AppendSummaryItem(builder, "Logbook ID", summary.LogbookId.Value);
         AppendSummaryItem(builder, "Current records", summary.CurrentRecordCount);
         AppendSummaryItem(builder, "Revision history records", summary.RevisionCount);
         AppendSummaryItem(builder, "Unresolved conflicts", summary.ConflictCount);
@@ -352,6 +357,7 @@ public sealed record PortableLogbookPrintedCopyPage(
     IReadOnlyList<PortableLogbookCurrentRecord> Records);
 
 public sealed record PortableLogbookPrintedCopyAuditSummary(
+    LogbookId LogbookId,
     int CurrentRecordCount,
     int RevisionCount,
     int ConflictCount,

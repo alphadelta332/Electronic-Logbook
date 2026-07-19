@@ -21,6 +21,7 @@ body {
 
 button,
 input,
+select,
 textarea {
     font: inherit;
 }
@@ -184,7 +185,15 @@ label {
     font-weight: 600;
 }
 
+.field-action {
+    justify-self: end;
+    min-height: 28px;
+    padding: 4px 8px;
+    font-size: 0.78rem;
+}
+
 input,
+select,
 textarea {
     width: 100%;
     min-height: 42px;
@@ -198,6 +207,10 @@ textarea {
 textarea {
     min-height: 84px;
     resize: vertical;
+}
+
+.recent-remarks {
+    width: 100%;
 }
 
 .wide-field,
@@ -311,6 +324,13 @@ textarea {
 
 .calculated-total span {
     color: #344154;
+    display: grid;
+    gap: 2px;
+    min-width: 68px;
+}
+
+.calculated-total strong {
+    color: #18212f;
 }
 
 .validation-summary {

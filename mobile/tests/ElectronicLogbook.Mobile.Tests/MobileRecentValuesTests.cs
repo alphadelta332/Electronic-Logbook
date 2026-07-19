@@ -35,6 +35,20 @@ public sealed class MobileRecentValuesTests
     }
 
     [Fact]
+    public void CreateIgnoresDeletedEntries()
+    {
+        var entries = new[]
+        {
+            Current("ent_deleted", "VH-DELETED") with { IsDeleted = true },
+            Current("ent_current", "VH-CURRENT")
+        };
+
+        var values = MobileRecentValues.Create(entries, entry => entry.Registration);
+
+        Assert.Equal(["VH-CURRENT"], values);
+    }
+
+    [Fact]
     public void CreateManyKeepsMultipleValuesPerRecentEntry()
     {
         var entries = new[]
