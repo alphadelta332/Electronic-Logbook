@@ -13,6 +13,12 @@ diagnostics_*.txt
 **/TestResults/
 mobile/node_modules/
 mobile/artifacts/
+mobile/android/app/src/main/res/drawable/splash.png
+mobile/android/app/src/main/res/drawable-land-*/splash.png
+mobile/android/app/src/main/res/drawable-port-*/splash.png
+mobile/android/app/src/main/res/mipmap-*/ic_launcher.png
+mobile/android/app/src/main/res/mipmap-*/ic_launcher_foreground.png
+mobile/android/app/src/main/res/mipmap-*/ic_launcher_round.png
 updater/dist/
 PUBLIC_RELEASE_EXCEL_HANDOVER.md
 regulations.txt
