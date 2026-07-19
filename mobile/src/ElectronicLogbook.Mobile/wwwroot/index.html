@@ -12,6 +12,11 @@
     <link href="manifest.webmanifest" rel="manifest" />
     <link rel="apple-touch-icon" sizes="512x512" href="icon-512.png" />
     <link rel="apple-touch-icon" sizes="192x192" href="icon-192.png" />
+    <script>
+        if (location.protocol === "https:" && location.hostname === "localhost") {
+            document.documentElement.classList.add("capacitor-native");
+        }
+    </script>
 </head>
 
 <body>
@@ -30,7 +35,11 @@
     </div>
     <script src="js/logbookStore.js"></script>
     <script src="_framework/blazor.webassembly.js"></script>
-    <script>navigator.serviceWorker.register('service-worker.js');</script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('service-worker.js');
+        }
+    </script>
 </body>
 
 </html>

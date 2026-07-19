@@ -1,0 +1,8 @@
+{
+  "appId": "com.alphadelta.electroniclogbook",
+  "appName": "Electronic Logbook",
+  "webDir": "artifacts/capacitor",
+  "server": {
+    "androidScheme": "https"
+  }
+}

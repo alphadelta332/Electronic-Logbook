@@ -11,6 +11,7 @@ diagnostics_*.txt
 **/bin/
 **/obj/
 **/TestResults/
+mobile/node_modules/
 mobile/artifacts/
 updater/dist/
 PUBLIC_RELEASE_EXCEL_HANDOVER.md

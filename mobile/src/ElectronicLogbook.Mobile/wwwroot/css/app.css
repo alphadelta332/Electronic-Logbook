@@ -3,6 +3,11 @@
     font-family: "Segoe UI", Arial, sans-serif;
     background: #f4f6f8;
     color: #18212f;
+    --native-safe-top: 0px;
+}
+
+html.capacitor-native {
+    --native-safe-top: 32px;
 }
 
 * {
@@ -48,7 +53,7 @@ button.primary {
     justify-content: space-between;
     gap: 16px;
     min-height: 58px;
-    padding: 10px clamp(16px, 4vw, 32px);
+    padding: calc(10px + var(--native-safe-top)) clamp(16px, 4vw, 32px) 10px;
     border-bottom: 1px solid #d7dde5;
     background: #ffffff;
 }
