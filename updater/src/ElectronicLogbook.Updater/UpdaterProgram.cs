@@ -6,6 +6,11 @@ public static class UpdaterProgram
 {
     public static async Task<int> RunAsync(string[] args)
     {
+        if (args.Length > 0 && string.Equals(args[0], "portable", StringComparison.OrdinalIgnoreCase))
+        {
+            return await PortableLogbookCommandRunner.RunAsync(args[1..]);
+        }
+
         string? downloadDirectory = null;
         UpdaterOptions? options = null;
         string? masterPath = null;

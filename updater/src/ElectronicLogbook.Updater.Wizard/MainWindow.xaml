@@ -38,6 +38,7 @@
                 <TextBlock Margin="0,16,0,0" x:Name="InstalledVersionText" Text="Installed version: unknown" />
                 <TextBlock Margin="0,6,0,0" x:Name="LatestVersionText" Text="Update channel: checking..." />
                 <TextBlock Margin="0,6,0,0" x:Name="LastCheckedText" Text="Last checked: never" />
+                <TextBlock Margin="0,6,0,0" x:Name="PortableLogbookStatusText" Text="Portable logbook: checking..." />
             </StackPanel>
 
             <StackPanel Grid.Row="0" x:Name="AvailablePanel" Visibility="Collapsed">

@@ -49,6 +49,86 @@ dotnet run --project updater/src/ElectronicLogbook.Updater -- `
 
 The updater writes a redacted JSON diagnostic report beside the final updated workbook.
 
+### Portable Logbook CLI
+
+The portable-logbook commands are development/operator primitives for the workbook package
+storage used by the future wizard UI. Run them only against a closed workbook.
+
+Inspect redacted portable-storage state without the package key:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable status `
+  --workbook "C:\Path\My Logbook.xlsm"
+```
+
+Seed encrypted portable storage and write the recovery code to a separate file:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable enable `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --recovery-output "C:\Path\ElectronicLogbook-RecoveryCode.txt" `
+  --save-windows-credential
+```
+
+`portable enable` refuses already-enabled workbooks, refuses to overwrite an existing
+recovery-code file, creates a timestamped workbook backup before writing storage, and
+does not print the recovery code in JSON output. `--save-windows-credential` additionally
+stores the generated package key in Windows Credential Manager and reports the target name
+in both command output and the recovery-code file; the separate recovery-code file is still
+required.
+
+For export/import commands, use either:
+
+```powershell
+--recovery-code-file "C:\Path\ElectronicLogbook-RecoveryCode.txt"
+```
+
+or, after enabling with `--save-windows-credential`:
+
+```powershell
+--windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx"
+```
+
+Export current stored portable history to an encrypted `.elogbook` package:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable export `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx" `
+  --output "C:\Path\My Logbook.elogbook"
+```
+
+Preview an incoming package without changing workbook storage:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable import-preview `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx" `
+  --package "C:\Path\Incoming.elogbook"
+```
+
+Apply a conflict-free package to encrypted workbook storage:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable import-apply `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx" `
+  --package "C:\Path\Incoming.elogbook"
+```
+
+`portable import-apply` creates a timestamped workbook backup before changing storage.
+It does not yet stamp hidden row IDs or rewrite visible worksheet rows; that remains a
+wizard/Excel integration task.
+
+Import preview/apply output includes row-level operation summaries for review. Add `--json`
+to any portable command for machine-readable output; command output never includes recovery
+codes or raw package keys.
+
 Run the disposable Excel migration test locally with:
 
 ```powershell

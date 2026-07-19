@@ -21,6 +21,8 @@ Private Const ADD_LOGBOOK_LAYOUT_DIAG_FLAG As String = "AddToLogbookLayoutDiagno
 Private Const LOGBOOK_ACTION_BUTTON_WIDTH As Double = 121.2
 Private Const LOGBOOK_ACTION_BUTTON_HEIGHT As Double = 45
 Private Const LOGBOOK_ACTION_BUTTON_POSITION_TOLERANCE As Double = 1
+Private Const PORTABLE_LOGBOOK_UPDATER_EXE_NAME As String = "ElectronicLogbook.Updater.exe"
+Private Const PORTABLE_LOGBOOK_UPDATER_PATH_NAME As String = "PortableLogbookUpdaterPath"
 Private mApplyingNewEntryLayout As Boolean
 Private mLastLogbookExportError As String
 Private mPendingNewEntryNavigationFields As Variant
@@ -7031,6 +7033,115 @@ Sub SetLogbookFilterArrows()
 
 End Sub
 
+Public Sub ShowPortableLogbookStatus()
+    Dim updaterPath As String
+    Dim outputPath As String
+    Dim errorPath As String
+    Dim commandLine As String
+    Dim shellObj As Object
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+    Dim suffix As String
+
+    On Error GoTo Fail
+
+    updaterPath = ResolvePortableLogbookUpdaterPath()
+    If updaterPath = "" Then
+        MsgBox "Portable Logbook status requires " & PORTABLE_LOGBOOK_UPDATER_EXE_NAME & _
+               " beside this workbook or in the named range " & PORTABLE_LOGBOOK_UPDATER_PATH_NAME & ".", _
+               vbExclamation, "Portable Logbook"
+        Exit Sub
+    End If
+
+    suffix = Format$(Now, "yyyymmdd-hhnnss") & "-" & CStr(CLng(Timer * 1000))
+    outputPath = Environ$("TEMP") & "\ElectronicLogbookPortableStatus-" & suffix & ".txt"
+    errorPath = Environ$("TEMP") & "\ElectronicLogbookPortableStatus-" & suffix & ".err"
+    commandLine = "cmd.exe /d /s /c " & QuoteCommandArgument( _
+        QuoteCommandArgument(updaterPath) & _
+        " portable status --workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " > " & QuoteCommandArgument(outputPath) & _
+        " 2> " & QuoteCommandArgument(errorPath))
+
+    Set shellObj = CreateObject("WScript.Shell")
+    exitCode = CLng(shellObj.Run(commandLine, 0, True))
+    outputText = ReadTextFileIfExists(outputPath)
+    errorText = ReadTextFileIfExists(errorPath)
+
+    DeleteFileIfExists outputPath
+    DeleteFileIfExists errorPath
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook status failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    DeleteFileIfExists outputPath
+    DeleteFileIfExists errorPath
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook status failed.", _
+        "PORTABLE-STATUS-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Private Function ResolvePortableLogbookUpdaterPath() As String
+    Dim namedPath As String
+    Dim candidate As String
+
+    On Error Resume Next
+    namedPath = Trim$(CStr(ThisWorkbook.Names(PORTABLE_LOGBOOK_UPDATER_PATH_NAME).RefersToRange.Value))
+    On Error GoTo 0
+    If namedPath <> "" Then
+        If Dir$(namedPath) <> "" Then
+            ResolvePortableLogbookUpdaterPath = namedPath
+            Exit Function
+        End If
+    End If
+
+    If ThisWorkbook.Path <> "" Then
+        candidate = ThisWorkbook.Path & "\" & PORTABLE_LOGBOOK_UPDATER_EXE_NAME
+        If Dir$(candidate) <> "" Then
+            ResolvePortableLogbookUpdaterPath = candidate
+            Exit Function
+        End If
+
+        candidate = ThisWorkbook.Path & "\updater\" & PORTABLE_LOGBOOK_UPDATER_EXE_NAME
+        If Dir$(candidate) <> "" Then
+            ResolvePortableLogbookUpdaterPath = candidate
+            Exit Function
+        End If
+    End If
+End Function
+
+Private Function QuoteCommandArgument(ByVal value As String) As String
+    QuoteCommandArgument = """" & value & """"
+End Function
+
+Private Function ReadTextFileIfExists(ByVal filePath As String) As String
+    Dim fileNum As Integer
+
+    If Trim$(filePath) = "" Then Exit Function
+    If Dir$(filePath) = "" Then Exit Function
+
+    fileNum = FreeFile
+    Open filePath For Input As #fileNum
+    ReadTextFileIfExists = Input$(LOF(fileNum), fileNum)
+    Close #fileNum
+End Function
+
+Private Sub DeleteFileIfExists(ByVal filePath As String)
+    On Error Resume Next
+    If Trim$(filePath) <> "" Then
+        If Dir$(filePath) <> "" Then Kill filePath
+    End If
+    On Error GoTo 0
+End Sub
+
 Public Sub ReportBug()
     Const BUG_REPORT_FORM_URL As String = _
         "https://docs.google.com/forms/d/e/1FAIpQLScCSzixoAFcyIBE6FI-wl1xMofomKPTePtUcwrUK7II7z_V9w/viewform"
@@ -8194,6 +8305,9 @@ Private Sub ConfigureNewEntryCommandButtons(ByVal ws As Worksheet)
 
         If InStr(nameText, "addtologbook") > 0 Or (InStr(labelText, "add to") > 0 And InStr(labelText, "logbook") > 0) Then
             actionName = "AddToLogbook"
+        ElseIf InStr(nameText, "portablelogbookstatus") > 0 Or _
+               (InStr(labelText, "portable") > 0 And InStr(labelText, "status") > 0) Then
+            actionName = "ShowPortableLogbookStatus"
         ElseIf InStr(nameText, "reportabug") > 0 Or InStr(labelText, "report a bug") > 0 Then
             actionName = "ReportBug"
         ElseIf InStr(nameText, "suppresswarnings") > 0 Or InStr(labelText, "suppress warnings") > 0 Then

@@ -49,6 +49,24 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadEnvelopeAllowsWorkbookFileSharedForReadWrite()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var envelope = CreateEnvelope("log_shared_read", PortableLogbookKey.Generate());
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbook, envelope);
+        using var sharedOpen = new FileStream(
+            workbook,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        var read = PortableLogbookWorkbookPackageStorage.ReadEnvelope(workbook);
+
+        Assert.NotNull(read);
+        Assert.Equal(envelope.LogbookId, read.LogbookId);
+    }
+
+    [Fact]
     public void WriteEnvelopeRegistersCustomXmlContentTypeAndRelationship()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);

@@ -136,6 +136,8 @@ public partial class MainWindow : Window
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
+        PortableLogbookStatusText.Text = await TryReadPortableLogbookStatusTextWithRetryAsync(_context.SourcePath);
+
         var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
         string? availabilityFailureReason = null;
@@ -1269,6 +1271,64 @@ public partial class MainWindow : Window
         catch (System.Xml.XmlException)
         {
             return null;
+        }
+    }
+
+    private static async Task<string> TryReadPortableLogbookStatusTextWithRetryAsync(string workbookPath)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var status = await Task.Run(() => TryReadPortableLogbookStatusText(workbookPath));
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                return status;
+            }
+
+            if (attempt < 9)
+            {
+                await Task.Delay(1000);
+            }
+        }
+
+        return "Portable logbook: unavailable";
+    }
+
+    private static string? TryReadPortableLogbookStatusText(string workbookPath)
+    {
+        if (!File.Exists(workbookPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var status = PortableLogbookCommandRunner.ReadStatus(workbookPath);
+            if (!status.IsEnabled || status.Summary is null)
+            {
+                return "Portable logbook: not enabled";
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "Portable logbook: enabled ({0} current, {1} conflicts)",
+                status.Summary.CurrentRecordCount,
+                status.Summary.UnresolvedConflictCount);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (InvalidDataException)
+        {
+            return "Portable logbook: storage unreadable";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return "Portable logbook: storage unreadable";
         }
     }
 

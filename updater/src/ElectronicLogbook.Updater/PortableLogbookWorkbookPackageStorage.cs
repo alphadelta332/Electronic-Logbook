@@ -26,7 +26,12 @@ public static class PortableLogbookWorkbookPackageStorage
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
 
-        using var archive = ZipFile.OpenRead(workbookPath);
+        using var packageStream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(packageStream, ZipArchiveMode.Read, leaveOpen: false);
         var entry = archive.GetEntry(PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath);
         if (entry is null)
         {
