@@ -32,6 +32,7 @@ public sealed class PortableLogbookKey : IEquatable<PortableLogbookKey>
     public static PortableLogbookKey FromRecoveryCode(string recoveryCode)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(recoveryCode);
+        recoveryCode = NormalizeRecoveryCode(recoveryCode);
 
         try
         {
@@ -67,5 +68,20 @@ public sealed class PortableLogbookKey : IEquatable<PortableLogbookKey>
         var padded = value.Replace('-', '+').Replace('_', '/');
         padded = padded.PadRight(padded.Length + ((4 - (padded.Length % 4)) % 4), '=');
         return Convert.FromBase64String(padded);
+    }
+
+    private static string NormalizeRecoveryCode(string recoveryCode)
+    {
+        var trimmed = recoveryCode.Trim();
+        foreach (var line in trimmed.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = line.Trim();
+            if (candidate.StartsWith("Recovery code:", StringComparison.OrdinalIgnoreCase))
+            {
+                return candidate.Split(':', 2)[1].Trim().Replace(" ", "", StringComparison.Ordinal);
+            }
+        }
+
+        return trimmed.Replace(" ", "", StringComparison.Ordinal);
     }
 }

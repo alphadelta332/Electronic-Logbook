@@ -6,6 +6,81 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobileLogbookEntryWarningsTests
 {
     [Fact]
+    public void CreateIncludesSharedPortableEntryRuleWarnings()
+    {
+        var draft = Entry(new DateOnly(2026, 7, 19), "C172", "VH-ABC", "Check") with
+        {
+            Day = 1.0m,
+            PilotInCommand = 1.0m,
+            LandingsDay = 0,
+            LandingsNight = 0
+        };
+
+        var warnings = MobileLogbookEntryWarnings.Create(draft, []);
+
+        Assert.Contains(warnings, warning => warning.Contains("flight time but no landing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Contains("day time but no day landing", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CreateIncludesSharedInstrumentAndApproachWarnings()
+    {
+        var draft = Entry(new DateOnly(2026, 7, 19), "C172", "VH-ABC", "Check") with
+        {
+            InstrumentActual = 0.4m,
+            IfrApproaches = 0,
+            Holding = 0,
+            Rnav = 0,
+            Circling = 0
+        };
+
+        var warnings = MobileLogbookEntryWarnings.Create(draft, []);
+
+        Assert.Contains(warnings, warning => warning.Contains("instrument time", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Contains("approach", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CreateIncludesSharedHighCountWarnings()
+    {
+        var draft = Entry(new DateOnly(2026, 7, 19), "C172", "VH-ABC", "Check") with
+        {
+            PilotInCommand = 1.0m,
+            InstrumentActual = 0.5m,
+            LandingsDay = 7,
+            IfrApproaches = 4
+        };
+
+        var warnings = MobileLogbookEntryWarnings.Create(draft, []);
+
+        Assert.Contains(warnings, warning => warning.Contains("landings", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(warnings, warning => warning.Contains("approaches", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CreateIncludesSharedDayNightTimeConsistencyWarnings()
+    {
+        var missingDayNight = Entry(new DateOnly(2026, 7, 19), "C172", "VH-ABC", "Check") with
+        {
+            PilotInCommand = 1.0m,
+            Day = 0,
+            Night = 0
+        };
+        var excessiveDayNight = Entry(new DateOnly(2026, 7, 20), "C172", "VH-DEF", "Check") with
+        {
+            PilotInCommand = 1.0m,
+            Day = 0.8m,
+            Night = 0.5m
+        };
+
+        var missingWarnings = MobileLogbookEntryWarnings.Create(missingDayNight, []);
+        var excessiveWarnings = MobileLogbookEntryWarnings.Create(excessiveDayNight, []);
+
+        Assert.Contains(missingWarnings, warning => warning.Contains("no day or night time", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(excessiveWarnings, warning => warning.Contains("exceed the total flight time", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void CreateWarnsWhenDraftIsEarlierThanLatestExistingEntry()
     {
         var existing = Materialized("ent_latest", Entry(new DateOnly(2026, 7, 19), "C172", "VH-ABC", "Check"));
@@ -107,6 +182,7 @@ public sealed class MobileLogbookEntryWarningsTests
             From = "YSBK",
             To = "YSCN",
             PilotInCommand = 1.0m,
+            Day = 1.0m,
             Details = details
         };
 }

@@ -23,6 +23,7 @@ public static class MobileRecentValues
 
         return currentEntries
             .Where(entry => !entry.IsDeleted && entry.Entry is not null)
+            .OrderByDescending(entry => entry.Entry!.Date ?? DateOnly.MinValue)
             .SelectMany(entry => selector(entry.Entry!))
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Select(value => value!.Trim())

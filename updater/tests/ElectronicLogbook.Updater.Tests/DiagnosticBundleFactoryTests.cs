@@ -1,4 +1,5 @@
 using System.Text.Json;
+using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater.Tests;
 
@@ -16,19 +17,21 @@ public sealed class DiagnosticBundleFactoryTests : IDisposable
     {
         var sourcePath = Path.Combine("C:\\Users\\Pilot\\OneDrive\\Logbooks", "My Private Logbook.xlsm");
         var outputPath = Path.Combine(Path.GetTempPath(), "Updated Private Logbook.xlsm");
+        var recoveryCode = PortableLogbookKey.Generate().ToRecoveryCode();
+        var groupedRecoveryCode = string.Join(" ", recoveryCode.Chunk(4).Select(chunk => new string(chunk)));
         var report = BuildReport(sourcePath, outputPath);
         var progressEvents = new[]
         {
             new UpdaterProgressEvent(
                 UpdaterProgressEventTypes.PhaseStarted,
                 UpdaterPhaseIds.CopyLogbookData,
-                "copying Logbook data",
+                $"copying Logbook data from {sourcePath} using token ghp_abcdefghijklmnopqrstuvwxyz. Recovery code: {groupedRecoveryCode}",
                 40,
                 DateTimeOffset.Parse("2026-07-17T00:00:00Z"),
                 TimeoutSeconds: 300)
         };
         var exception = new IOException(
-            $"Could not replace {sourcePath} with token ghp_abcdefghijklmnopqrstuvwxyz.");
+            $"Could not replace {sourcePath} with token ghp_abcdefghijklmnopqrstuvwxyz. Recovery code: {recoveryCode}");
 
         var bundle = DiagnosticBundleFactory.Create(
             TestRepo.Version,
@@ -46,10 +49,15 @@ public sealed class DiagnosticBundleFactoryTests : IDisposable
         Assert.DoesNotContain("My Private Logbook.xlsm", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Updated Private Logbook.xlsm", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("ghp_abcdefghijklmnopqrstuvwxyz", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(recoveryCode, json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(groupedRecoveryCode, json, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("UPDATER-FILE-IO", json, StringComparison.Ordinal);
         Assert.Equal(3, bundle.SchemaVersion);
         Assert.Equal(12, bundle.WorkbookStructure.LogbookRows);
         Assert.Single(bundle.Phases);
+        Assert.Contains("[redacted-path]", bundle.Phases[0].Message, StringComparison.Ordinal);
+        Assert.Contains("[redacted-token]", bundle.Phases[0].Message, StringComparison.Ordinal);
+        Assert.Contains("[redacted-recovery-code]", bundle.Phases[0].Message, StringComparison.Ordinal);
         Assert.Null(bundle.Phases[0].RecoveryHint);
         Assert.Equal(300, bundle.Phases[0].TimeoutSeconds);
         Assert.NotNull(bundle.Error?.RecoveryHint);

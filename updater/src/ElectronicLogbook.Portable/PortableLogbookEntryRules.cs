@@ -89,7 +89,23 @@ public static class PortableLogbookEntryRules
         var landingsNight = entry.LandingsNight.GetValueOrDefault();
         var totalLandings = landingsDay + landingsNight;
         var hasCopilotFlightTime = Value(entry.CoPilot) > 0;
-        if (FlightTime(entry) > 0 && totalLandings == 0 && !hasCopilotFlightTime)
+        var flightTime = FlightTime(entry);
+        var dayNightTime = Value(entry.Day) + Value(entry.Night);
+        if (flightTime > 0 && dayNightTime == 0)
+        {
+            warnings.Add(new PortableLogbookEntryRuleWarning(
+                PortableLogbookEntryRuleWarningCode.FlightTimeWithoutDayOrNight,
+                "This entry has flight time but no day or night time."));
+        }
+
+        if (flightTime > 0 && dayNightTime > flightTime)
+        {
+            warnings.Add(new PortableLogbookEntryRuleWarning(
+                PortableLogbookEntryRuleWarningCode.DayNightTimeExceedsFlightTime,
+                "Day and night time exceed the total flight time for this entry."));
+        }
+
+        if (flightTime > 0 && totalLandings == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.FlightTimeWithoutLanding,
@@ -144,7 +160,6 @@ public static class PortableLogbookEntryRules
                 "This entry has instrument time but no approach activity."));
         }
 
-        var flightTime = FlightTime(entry);
         if (flightTime > 0 && totalLandings > flightTime * 6)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
@@ -217,7 +232,7 @@ public static class PortableLogbookEntryRules
         yield return ("Landings night", entry.LandingsNight);
         yield return ("IFR approaches", entry.IfrApproaches);
         yield return ("Holding", entry.Holding);
-        yield return ("RNAV", entry.Rnav);
+        yield return ("RNP", entry.Rnav);
         yield return ("Circling", entry.Circling);
     }
 
@@ -253,6 +268,8 @@ public enum PortableLogbookEntryRuleCode
 
 public enum PortableLogbookEntryRuleWarningCode
 {
+    FlightTimeWithoutDayOrNight,
+    DayNightTimeExceedsFlightTime,
     FlightTimeWithoutLanding,
     DayTimeWithoutDayLanding,
     DayLandingWithoutDayTime,

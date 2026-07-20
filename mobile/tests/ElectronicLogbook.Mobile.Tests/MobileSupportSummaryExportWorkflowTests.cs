@@ -17,7 +17,7 @@ public sealed class MobileSupportSummaryExportWorkflowTests
         var exportedAt = DateTimeOffset.Parse("2026-07-18T00:10:00Z");
         var document = PortableLogbookDocument.CreateAustraliaFirst(
             new LogbookId("log_support"),
-            [],
+            [new CustomFieldDefinition(new CustomFieldId("cf_support"), "Support notes", 1)],
             [CreateOperation()]);
 
         var result = await MobileSupportSummaryExportWorkflow.ExportAsync(document, fileStore, exportedAt);
@@ -42,6 +42,11 @@ public sealed class MobileSupportSummaryExportWorkflowTests
         Assert.DoesNotContain("YSBK", text, StringComparison.Ordinal);
         Assert.DoesNotContain("YSCN", text, StringComparison.Ordinal);
         Assert.DoesNotContain("dev_mobile", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ent_1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rev_1", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("cf_support", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Support notes", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("Line check notes", text, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -74,7 +79,11 @@ public sealed class MobileSupportSummaryExportWorkflowTests
                 Registration = "VH-SECRET",
                 From = "YSBK",
                 To = "YSCN",
-                PilotInCommand = 1.2m
+                PilotInCommand = 1.2m,
+                CustomFields = new Dictionary<CustomFieldId, string?>
+                {
+                    [new CustomFieldId("cf_support")] = "Line check notes"
+                }
             });
 
     private sealed class RecordingJsRuntime : IJSRuntime

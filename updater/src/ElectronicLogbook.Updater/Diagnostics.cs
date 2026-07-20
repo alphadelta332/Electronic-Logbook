@@ -79,7 +79,7 @@ public static partial class DiagnosticBundleFactory
                 .Select(progressEvent => new DiagnosticPhaseEvent(
                     progressEvent.EventType,
                     progressEvent.PhaseId,
-                    progressEvent.Message,
+                    RedactSensitiveText(progressEvent.Message, sensitivePaths),
                     progressEvent.Percent,
                     progressEvent.TimestampUtc,
                     RedactOptionalSensitiveText(progressEvent.RecoveryHint, sensitivePaths),
@@ -195,6 +195,8 @@ public static partial class DiagnosticBundleFactory
             }
         }
 
+        redacted = RecoveryCodeLineRegex().Replace(redacted, "Recovery code: [redacted-recovery-code]");
+
         return SensitiveTokenRegex().Replace(redacted, "[redacted-token]");
     }
 
@@ -209,4 +211,7 @@ public static partial class DiagnosticBundleFactory
 
     [GeneratedRegex(@"(?i)\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}\b")]
     private static partial Regex SensitiveTokenRegex();
+
+    [GeneratedRegex(@"(?i)\bRecovery code:\s*[A-Za-z0-9_-](?:[A-Za-z0-9_-]|\s){42,}")]
+    private static partial Regex RecoveryCodeLineRegex();
 }

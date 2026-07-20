@@ -5,8 +5,8 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobilePackageKeyNoticeTests
 {
     [Theory]
-    [InlineData("Ready", "stored only on this device")]
-    [InlineData("Not set", "cannot be recovered")]
+    [InlineData("Ready", "restore from the workbook recovery code")]
+    [InlineData("Not set", "restore one from a workbook recovery code")]
     [InlineData("Unavailable", "cannot create")]
     [InlineData("Checking", "Checking")]
     public void CreateReturnsStatusSpecificPackageKeyNotice(string status, string expectedText)

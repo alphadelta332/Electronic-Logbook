@@ -116,6 +116,29 @@ public sealed class PortableLogbookEntryRulesTests
     }
 
     [Fact]
+    public void WarnReportsDayNightTimeMismatchesAgainstFlightTime()
+    {
+        var missingDayNight = CompleteEntry() with
+        {
+            Day = 0,
+            Night = 0
+        };
+        var excessiveDayNight = CompleteEntry() with
+        {
+            PilotInCommand = 1.0m,
+            Day = 0.8m,
+            Night = 0.5m
+        };
+
+        Assert.Contains(
+            PortableLogbookEntryRules.Warn(missingDayNight),
+            warning => warning.Code == PortableLogbookEntryRuleWarningCode.FlightTimeWithoutDayOrNight);
+        Assert.Contains(
+            PortableLogbookEntryRules.Warn(excessiveDayNight),
+            warning => warning.Code == PortableLogbookEntryRuleWarningCode.DayNightTimeExceedsFlightTime);
+    }
+
+    [Fact]
     public void WarnReportsDayAndNightLandingMismatches()
     {
         var entry = CompleteEntry() with

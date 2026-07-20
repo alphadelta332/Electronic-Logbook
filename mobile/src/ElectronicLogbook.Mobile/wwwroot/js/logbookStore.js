@@ -83,6 +83,20 @@
             await withStore(keyStoreName, "readwrite", (store) => store.put(key, keyName));
             return true;
         },
+        importPackageKey: async (keyName, keyBytes) => {
+            if (!globalThis.crypto?.subtle) {
+                throw new Error("Web Crypto is not available in this browser.");
+            }
+
+            const key = await crypto.subtle.importKey(
+                "raw",
+                new Uint8Array(keyBytes),
+                { name: "AES-GCM" },
+                false,
+                ["encrypt", "decrypt"]);
+            await withStore(keyStoreName, "readwrite", (store) => store.put(key, keyName));
+            return true;
+        },
         deletePackageKey: async (keyName) => {
             await withStore(keyStoreName, "readwrite", (store) => store.delete(keyName));
         },
@@ -124,34 +138,49 @@
             const input = document.createElement("input");
             input.type = "file";
             input.accept = accept;
+            input.style.display = "none";
+            let pickerSettled = false;
+            const settle = (callback) => {
+                if (pickerSettled) {
+                    return;
+                }
+
+                pickerSettled = true;
+                input.remove();
+                callback();
+            };
             input.onchange = async () => {
                 const file = input.files?.[0];
                 if (!file) {
-                    resolve(null);
+                    settle(() => resolve(null));
                     return;
                 }
 
                 try {
                     if (file.size === 0) {
-                        reject(new Error("Selected file is empty."));
+                        settle(() => reject(new Error("Selected file is empty.")));
                         return;
                     }
 
                     if (file.size > maxElogbookBytes) {
-                        reject(new Error(`Selected file is larger than the ${maxElogbookBytes} byte package limit.`));
+                        settle(() => reject(new Error(`Selected file is larger than the ${maxElogbookBytes} byte package limit.`)));
                         return;
                     }
 
                     const bytes = new Uint8Array(await file.arrayBuffer());
-                    resolve({
+                    settle(() => resolve({
                         fileName: file.name,
                         contentType: file.type || "application/octet-stream",
                         bytes
-                    });
+                    }));
                 } catch (error) {
-                    reject(error);
+                    settle(() => reject(error));
                 }
             };
+            input.oncancel = () => {
+                settle(() => resolve(null));
+            };
+            document.body.appendChild(input);
             input.click();
         }),
         canShare: (fileName, bytes, contentType) => {
@@ -159,8 +188,12 @@
                 return false;
             }
 
-            const file = new File([new Uint8Array(bytes)], fileName, { type: contentType });
-            return navigator.canShare({ files: [file] });
+            try {
+                const file = new File([new Uint8Array(bytes)], fileName, { type: contentType });
+                return navigator.canShare({ files: [file] });
+            } catch {
+                return false;
+            }
         },
         share: async (fileName, bytes, contentType) => {
             if (!navigator.share || typeof File === "undefined") {

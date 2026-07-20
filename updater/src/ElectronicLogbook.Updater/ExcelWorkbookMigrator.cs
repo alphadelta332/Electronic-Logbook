@@ -55,9 +55,10 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.PhaseStarted,
                 phaseId,
                 message,
-                Percent: null,
+                null,
                 DateTimeOffset.UtcNow,
-                TimeoutSeconds: UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
+                null,
+                UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
             return message;
         }
 
@@ -191,9 +192,10 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.UpdateCompleted,
                 UpdaterPhaseIds.Completed,
                 "migration completed",
-                Percent: 100,
+                100,
                 DateTimeOffset.UtcNow,
-                TimeoutSeconds: UpdaterPhasePolicies.GetTimeoutSeconds(UpdaterPhaseIds.Completed)));
+                null,
+                UpdaterPhasePolicies.GetTimeoutSeconds(UpdaterPhaseIds.Completed)));
 
             migrationSucceeded = true;
             return new MigrationReport(
@@ -214,7 +216,7 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.PhaseFailed,
                 phaseId,
                 "migration cancelled",
-                Percent: null,
+                null,
                 DateTimeOffset.UtcNow,
                 DiagnosticBundleFactory.GetRecoveryHint(phaseId, new OperationCanceledException()),
                 UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
@@ -231,7 +233,7 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.PhaseFailed,
                 phaseId,
                 ex.Message,
-                Percent: null,
+                null,
                 DateTimeOffset.UtcNow,
                 DiagnosticBundleFactory.GetRecoveryHint(phaseId, ex),
                 UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
@@ -272,7 +274,9 @@ public sealed class ExcelWorkbookMigrator
 
     internal static bool CopyPortableWorkbookStorage(string sourcePath, string outputPath)
     {
-        return PortableLogbookWorkbookPackageStorage.CopyEnvelope(sourcePath, outputPath);
+        var envelopeCopied = PortableLogbookWorkbookPackageStorage.CopyEnvelope(sourcePath, outputPath);
+        var identityCopied = PortableLogbookWorkbookPackageStorage.CopyWorkbookIdentityMetadata(sourcePath, outputPath);
+        return envelopeCopied || identityCopied;
     }
 
     private static void UnprotectWorkbookForMigration(object workbookObject)
@@ -359,6 +363,83 @@ public sealed class ExcelWorkbookMigrator
             if (HasColumn((object)destination, name))
             {
                 CopyColumn(source, destination, name, sourceRows);
+            }
+        }
+
+        PreservePortableLogbookMetadataColumns(source, destination, sourceRows);
+    }
+
+    internal static bool ShouldPreservePortableMetadataColumns(IEnumerable<string> sourceColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(sourceColumnNames);
+        return sourceColumnNames.Any(PortableLogbookWorkbookMetadata.IsPortableMetadataColumn);
+    }
+
+    internal static PortableLogbookMetadataColumnPlan CreatePortableMetadataMigrationPlan(
+        IEnumerable<string> destinationColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(destinationColumnNames);
+        return PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(destinationColumnNames);
+    }
+
+    internal static PortableLogbookMetadataMigrationPlan CreatePortableMetadataMigrationPlan(
+        IEnumerable<string> sourceColumnNames,
+        IEnumerable<string> destinationColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(sourceColumnNames);
+        ArgumentNullException.ThrowIfNull(destinationColumnNames);
+
+        var sourceColumns = sourceColumnNames
+            .Select(columnName => columnName.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!ShouldPreservePortableMetadataColumns(sourceColumns))
+        {
+            return new PortableLogbookMetadataMigrationPlan(
+                PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(destinationColumnNames),
+                [],
+                []);
+        }
+
+        var columnPlan = CreatePortableMetadataMigrationPlan(destinationColumnNames);
+        var columnsToCopy = PortableLogbookWorkbookMetadata.HiddenLogbookColumns
+            .Where(column => sourceColumns.Contains(column.WorkbookColumnName))
+            .Select(column => column.WorkbookColumnName)
+            .ToArray();
+
+        return new PortableLogbookMetadataMigrationPlan(
+            columnPlan,
+            columnsToCopy,
+            columnPlan.ColumnsToHide);
+    }
+
+    private static void PreservePortableLogbookMetadataColumns(
+        dynamic source,
+        dynamic destination,
+        int rows)
+    {
+        var plan = CreatePortableMetadataMigrationPlan(
+            ReadTableColumnNames(source),
+            ReadTableColumnNames(destination));
+        if (!plan.ShouldPreserve)
+        {
+            return;
+        }
+
+        foreach (var column in plan.ColumnPlan.ColumnsToAdd)
+        {
+            destination.ListColumns.Add().Name = column.WorkbookColumnName;
+        }
+
+        foreach (var columnName in plan.ColumnsToCopy)
+        {
+            CopyColumn(source, destination, columnName, rows);
+        }
+
+        foreach (var columnName in plan.ColumnsToHide)
+        {
+            if (HasColumn((object)destination, columnName))
+            {
+                HideTableColumn(destination, columnName);
             }
         }
     }
@@ -2071,6 +2152,23 @@ public sealed class ExcelWorkbookMigrator
         return [raw];
     }
 
+    private static IReadOnlyList<string> ReadTableColumnNames(dynamic table)
+    {
+        var columns = new List<string>();
+        for (var index = 1; index <= (int)table.ListColumns.Count; index++)
+        {
+            columns.Add((string)table.ListColumns.Item(index).Name);
+        }
+
+        return columns;
+    }
+
+    private static void HideTableColumn(dynamic table, string columnName)
+    {
+        table.Parent.Columns.Item(table.ListColumns.Item(GetColumnIndex(table, columnName)).Range.Column)
+            .Hidden = true;
+    }
+
     private static void ResizeTable(dynamic table, int rows)
     {
         var currentRows = (int)table.ListRows.Count;
@@ -2362,4 +2460,12 @@ public sealed class ExcelWorkbookMigrator
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out int processId);
+}
+
+public sealed record PortableLogbookMetadataMigrationPlan(
+    PortableLogbookMetadataColumnPlan ColumnPlan,
+    IReadOnlyList<string> ColumnsToCopy,
+    IReadOnlyList<string> ColumnsToHide)
+{
+    public bool ShouldPreserve => ColumnsToCopy.Count > 0;
 }

@@ -8,11 +8,15 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Home.razor");
 
         Assert.Contains("Set up key", page, StringComparison.Ordinal);
+        Assert.Contains("Restore key", page, StringComparison.Ordinal);
+        Assert.Contains("Recovery code", page, StringComparison.Ordinal);
         Assert.Contains("Preview package", page, StringComparison.Ordinal);
         Assert.Contains("Import package", page, StringComparison.Ordinal);
         Assert.Contains("Export package", page, StringComparison.Ordinal);
         Assert.Contains("Support summary", page, StringComparison.Ordinal);
         Assert.Contains("SetupPackageKeyAsync", page, StringComparison.Ordinal);
+        Assert.Contains("RestorePackageKeyAsync", page, StringComparison.Ordinal);
+        Assert.Contains("PackageKeyStore.ImportRecoveryCodeAsync", page, StringComparison.Ordinal);
         Assert.Contains("ApplyPackageAsync", page, StringComparison.Ordinal);
         Assert.Contains("ExportPackageAsync", page, StringComparison.Ordinal);
         Assert.Contains("ExportSupportSummaryAsync", page, StringComparison.Ordinal);
@@ -88,7 +92,19 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Home.razor");
 
         Assert.Equal(6, CountOccurrences(page, "autocapitalize=\"characters\""));
-        Assert.Equal(6, CountOccurrences(page, "spellcheck=\"false\""));
+        Assert.Equal(7, CountOccurrences(page, "spellcheck=\"false\""));
+        Assert.Contains("class=\"recovery-code-input\"", page, StringComparison.Ordinal);
+        Assert.Contains("autocomplete=\"off\" spellcheck=\"false\" placeholder=\"Recovery code\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageClearsRecoveryCodeDraftAfterRestoreAttempt()
+    {
+        var page = ReadMobilePage("Home.razor");
+        var handler = ExtractMethodBody(page, "private async Task RestorePackageKeyAsync");
+
+        Assert.Contains("finally", handler, StringComparison.Ordinal);
+        Assert.Contains("RecoveryCodeDraft = string.Empty;", handler, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -147,6 +163,18 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void HomePagePreservesDateForEditingButUsesTodayForCloning()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("Draft = EntryDraft.FromEntry(entry, preserveDate: false);", page, StringComparison.Ordinal);
+        Assert.Contains("Draft = EntryDraft.FromEntry(entry.Entry, preserveDate: true);", page, StringComparison.Ordinal);
+        Assert.Contains("preserveDate && entry.Date is not null", page, StringComparison.Ordinal);
+        Assert.Contains("? entry.Date.Value", page, StringComparison.Ordinal);
+        Assert.Contains(": DateOnly.FromDateTime(DateTime.Today)", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HomePageShowsRowLevelImportSummariesAfterPackageRead()
     {
         var page = ReadMobilePage("Home.razor");
@@ -181,5 +209,39 @@ public sealed class PwaPageWiringTests
         }
 
         return count;
+    }
+
+    private static string ExtractMethodBody(string source, string methodName)
+    {
+        var methodIndex = source.IndexOf(methodName, StringComparison.Ordinal);
+        if (methodIndex < 0)
+        {
+            throw new InvalidOperationException($"Could not find method '{methodName}'.");
+        }
+
+        var openBraceIndex = source.IndexOf('{', methodIndex);
+        if (openBraceIndex < 0)
+        {
+            throw new InvalidOperationException($"Could not find method body for '{methodName}'.");
+        }
+
+        var depth = 0;
+        for (var index = openBraceIndex; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source.Substring(openBraceIndex, index - openBraceIndex + 1);
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not find end of method body for '{methodName}'.");
     }
 }

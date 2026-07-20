@@ -54,6 +54,35 @@ public sealed class BrowserPackageKeyStoreTests
     }
 
     [Fact]
+    public async Task ImportRecoveryCodeValidatesCodeAndStoresScopedNonExtractableBrowserKey()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+        var key = PortableLogbookKey.Generate();
+        var groupedRecoveryCode = string.Join(" ", key.ToRecoveryCode().Chunk(4).Select(chunk => new string(chunk)));
+
+        Assert.True(await store.ImportRecoveryCodeAsync(new LogbookId("log_mobile"), $"Recovery code: {groupedRecoveryCode}"));
+
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.importPackageKey", call.Identifier);
+        Assert.Equal("package-key:log_mobile", call.Arguments[0]);
+        Assert.Equal(key.ToBytes(), Assert.IsType<byte[]>(call.Arguments[1]));
+    }
+
+    [Fact]
+    public async Task ImportRecoveryCodeRejectsInvalidCodeBeforeCallingJavaScript()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await store.ImportRecoveryCodeAsync(new LogbookId("log_mobile"), "not-a-recovery-code"));
+
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
     public async Task EncryptAsyncCallsBrowserCryptoBridgeWithScopedKeyName()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -109,6 +138,7 @@ public sealed class BrowserPackageKeyStoreTests
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.HasPackageKeyAsync(logbookId));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.EnsurePackageKeyAsync(logbookId));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.DeletePackageKeyAsync(logbookId));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.ImportRecoveryCodeAsync(logbookId, PortableLogbookKey.Generate().ToRecoveryCode()));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.EncryptAsync(logbookId, new byte[12], [], []));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.DecryptAsync(logbookId, new byte[12], [], new byte[16], []));
 

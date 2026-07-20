@@ -26,7 +26,8 @@ public sealed class PwaStaticAssetTests
         Assert.Matches(new Regex(@"offlineAssetsInclude\s*=\s*\[[^\]]*\\\.css", RegexOptions.Singleline), worker);
         Assert.Contains("cache.addAll(assetsRequests)", worker, StringComparison.Ordinal);
         Assert.Contains("event.request.mode === 'navigate'", worker, StringComparison.Ordinal);
-        Assert.Contains("shouldServeIndexHtml ? 'index.html' : event.request", worker, StringComparison.Ordinal);
+        Assert.Contains("new Request(new URL(asset.url, baseUrl)", worker, StringComparison.Ordinal);
+        Assert.Contains("shouldServeIndexHtml ? new Request(new URL('index.html', baseUrl)) : event.request", worker, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -91,7 +92,7 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
-    public void BrowserKeyBridgeStoresNonExtractablePackageKeysWithoutExportingRawKeyBytes()
+    public void BrowserKeyBridgeStoresNonExtractablePackageKeysAndImportsRecoveryKeys()
     {
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
 
@@ -101,7 +102,9 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("[\"encrypt\", \"decrypt\"]", bridge, StringComparison.Ordinal);
         Assert.Contains("portable-keys", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("exportKey", bridge, StringComparison.Ordinal);
-        Assert.DoesNotContain("raw", bridge, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("crypto.subtle.importKey", bridge, StringComparison.Ordinal);
+        Assert.Contains("\"raw\"", bridge, StringComparison.Ordinal);
+        Assert.Contains("false,", bridge, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -144,6 +147,18 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void BrowserFileBridgeDoesNotUploadDownloadedSupportArtifacts()
+    {
+        var fileBridge = ExtractFileBridge(ReadMobileAsset(Path.Combine("js", "logbookStore.js")));
+
+        Assert.Contains("download: (fileName, bytes, contentType)", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("link.click()", fileBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("fetch(", fileBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("XMLHttpRequest", fileBridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("sendBeacon", fileBridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void BrowserFileBridgeSharesFilesThroughWebShareApiWhenAvailable()
     {
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
@@ -152,6 +167,7 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("navigator.share", bridge, StringComparison.Ordinal);
         Assert.Contains("new File([new Uint8Array(bytes)]", bridge, StringComparison.Ordinal);
         Assert.Contains("files: [file]", bridge, StringComparison.Ordinal);
+        Assert.Matches(new Regex(@"canShare:[\s\S]*try\s*\{[\s\S]*navigator\.canShare[\s\S]*\}\s*catch\s*\{[\s\S]*return false", RegexOptions.Singleline), bridge);
     }
 
     [Fact]
@@ -165,6 +181,23 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("file.arrayBuffer()", bridge, StringComparison.Ordinal);
         Assert.Contains("bytes", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("electronicLogbookStore.save", ExtractFileBridge(bridge), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void BrowserFileBridgeCleansUpTemporaryPickerInput()
+    {
+        var fileBridge = ExtractFileBridge(ReadMobileAsset(Path.Combine("js", "logbookStore.js")));
+
+        Assert.Contains("input.style.display = \"none\"", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("let pickerSettled = false", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("if (pickerSettled)", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("pickerSettled = true", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("input.remove()", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("document.body.appendChild(input)", fileBridge, StringComparison.Ordinal);
+        Assert.Contains("input.oncancel = () =>", fileBridge, StringComparison.Ordinal);
+        Assert.Matches(new Regex(@"input\.oncancel[\s\S]*settle\(\(\) => resolve\(null\)\)", RegexOptions.Singleline), fileBridge);
+        Assert.Matches(new Regex(@"file\.size === 0[\s\S]*settle\(\(\) => reject\(new Error\(""Selected file is empty\.""\)\)\)", RegexOptions.Singleline), fileBridge);
+        Assert.Matches(new Regex(@"file\.size > maxElogbookBytes[\s\S]*settle\(\(\) => reject\(new Error\(`Selected file is larger", RegexOptions.Singleline), fileBridge);
     }
 
     [Fact]

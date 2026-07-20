@@ -27,6 +27,93 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
     }
 
     [Fact]
+    public void MigratorOnlyPlansMetadataColumnPreservationForPortableSourceTables()
+    {
+        Assert.False(ExcelWorkbookMigrator.ShouldPreservePortableMetadataColumns(["Year", "Reg", "Circling"]));
+        Assert.True(ExcelWorkbookMigrator.ShouldPreservePortableMetadataColumns([
+            "Year",
+            "Reg",
+            "Portable Entry ID",
+            "Circling"
+        ]));
+    }
+
+    [Fact]
+    public void MigratorPlansMissingPortableMetadataColumnsForDestinationTable()
+    {
+        var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(["Year", "Reg", "Circling"]);
+
+        Assert.Equal(
+            ["Portable Entry ID", "Portable Current Revision ID"],
+            plan.ColumnsToAdd.Select(column => column.WorkbookColumnName));
+        Assert.Equal(
+            ["Portable Entry ID", "Portable Current Revision ID"],
+            plan.ColumnsToHide);
+    }
+
+    [Fact]
+    public void MigratorDoesNotDuplicateExistingPortableMetadataColumns()
+    {
+        var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan([
+            "Year",
+            "Portable Entry ID",
+            "Reg",
+            "Portable Current Revision ID",
+            "Circling"
+        ]);
+
+        Assert.False(plan.RequiresMutation);
+        Assert.Empty(plan.ColumnsToAdd);
+        Assert.Equal(
+            ["Portable Entry ID", "Portable Current Revision ID"],
+            plan.ColumnsToHide);
+    }
+
+    [Fact]
+    public void MigratorPlansPortableMetadataCopyOnlyWhenSourceContainsStableIds()
+    {
+        var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(
+            [
+                "Year",
+                "Portable Entry ID",
+                "Reg",
+                "Portable Current Revision ID",
+                "Circling"
+            ],
+            ["Year", "Reg", "Circling"]);
+
+        Assert.True(plan.ShouldPreserve);
+        Assert.Equal(
+            ["Portable Entry ID", "Portable Current Revision ID"],
+            plan.ColumnPlan.ColumnsToAdd.Select(column => column.WorkbookColumnName));
+        Assert.Equal(
+            ["Portable Entry ID", "Portable Current Revision ID"],
+            plan.ColumnsToCopy);
+        Assert.Equal(
+            ["Portable Entry ID", "Portable Current Revision ID"],
+            plan.ColumnsToHide);
+    }
+
+    [Fact]
+    public void MigratorSkipsPortableMetadataCopyForLegacySourceTables()
+    {
+        var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(
+            ["Year", "Reg", "Circling"],
+            [
+                "Year",
+                "Reg",
+                "Portable Entry ID",
+                "Portable Current Revision ID",
+                "Circling"
+            ]);
+
+        Assert.False(plan.ShouldPreserve);
+        Assert.Empty(plan.ColumnsToCopy);
+        Assert.Empty(plan.ColumnsToHide);
+        Assert.Empty(plan.ColumnPlan.ColumnsToAdd);
+    }
+
+    [Fact]
     public void MigratorCopiesPortableWorkbookStorageBetweenClosedPackages()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version, "source.xlsm");
@@ -53,14 +140,24 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
             PortableLogbookPackage.Write(document, key),
             []);
         PortableLogbookWorkbookPackageStorage.WriteEnvelope(source, envelope);
+        PortableLogbookWorkbookPackageStorage.EnsureWorkbookIdentityMetadata(
+            source,
+            create.LogbookId,
+            create.DeviceId,
+            document.SchemaVersion);
 
         var copied = ExcelWorkbookMigrator.CopyPortableWorkbookStorage(source, output);
         var read = PortableLogbookWorkbookPackageStorage.ReadEnvelope(output);
+        var identity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(output);
 
         Assert.True(copied);
         Assert.NotNull(read);
         Assert.Equal(envelope.LogbookId, read.LogbookId);
         Assert.Equal(envelope.Summary, read.Summary);
+        Assert.NotNull(identity);
+        Assert.Equal(create.LogbookId, identity.LogbookId);
+        Assert.Equal(create.DeviceId, identity.DeviceId);
+        Assert.Equal(document.SchemaVersion, identity.SchemaVersion);
     }
 
     public void Dispose()

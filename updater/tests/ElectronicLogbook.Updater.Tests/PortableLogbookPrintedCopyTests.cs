@@ -232,6 +232,47 @@ public sealed class PortableLogbookPrintedCopyTests
     }
 
     [Fact]
+    public void RenderHtmlIncludesUnresolvedConflictEntryAndHeadRevisions()
+    {
+        var create = CreateOperation("ent_conflict", "rev_create", "VH-OLD", DateTimeOffset.Parse("2026-07-18T00:00:00Z"));
+        var localCorrection = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_local_head"),
+            new HashSet<RevisionId> { create.RevisionId },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            create.Entry with { Registration = "VH-LOC" });
+        var incomingCorrection = new CorrectEntryOperation(
+            create.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_incoming_head"),
+            new HashSet<RevisionId> { create.RevisionId },
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(2),
+            create.Entry with { Registration = "VH-INC" });
+        var document = PortableLogbookDocument.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            [create, localCorrection, incomingCorrection]);
+        var request = PortableLogbookPrintedCopy.CreateRequest(
+            document,
+            "Alex Pilot",
+            new DateOnly(1990, 1, 2),
+            new DateOnly(2026, 7, 18));
+        var plan = PortableLogbookPrintedCopy.CreatePagePlan(request, recordsPerPage: 10);
+
+        var html = PortableLogbookPrintedCopy.RenderHtml(plan);
+
+        var conflict = Assert.Single(plan.Conflicts);
+        Assert.Equal(create.EntryId, conflict.EntryId);
+        Assert.Equal(1, plan.AuditSummary.ConflictCount);
+        Assert.Contains("Unresolved conflict details", html, StringComparison.Ordinal);
+        Assert.Contains("ent_conflict", html, StringComparison.Ordinal);
+        Assert.Contains("rev_incoming_head, rev_local_head", html, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RenderHtmlIncludesFullCurrentRecordPayloadAndCustomFieldLabels()
     {
         var roleField = new CustomFieldDefinition(new CustomFieldId("cf_role"), "Role", 1);
@@ -306,7 +347,7 @@ public sealed class PortableLogbookPrintedCopyTests
             "Landings night",
             "IFR approaches",
             "Holding",
-            "RNAV",
+            "RNP",
             "Circling",
             "Role",
             "Mission",

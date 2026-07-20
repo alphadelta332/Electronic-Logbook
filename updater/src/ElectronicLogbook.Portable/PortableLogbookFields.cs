@@ -29,7 +29,7 @@ public static class PortableLogbookFields
         Count("landingsNight", "Landings Night"),
         Count("ifrApproaches", "IFR Approaches"),
         Count("holding", "Holding"),
-        Count("rnav", "RNAV"),
+        Count("rnav", "RNP"),
         Count("circling", "Circling")
     ];
 

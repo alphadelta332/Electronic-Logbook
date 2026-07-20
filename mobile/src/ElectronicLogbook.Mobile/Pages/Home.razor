@@ -143,7 +143,7 @@
                 <input type="number" min="0" inputmode="numeric" @bind="Draft.Holding" />
             </label>
             <label>
-                RNAV
+                RNP
                 <input type="number" min="0" inputmode="numeric" @bind="Draft.Rnav" />
             </label>
             <label>
@@ -343,6 +343,8 @@
             @if (PackageKeyStatus == "Not set")
             {
                 <button type="button" @onclick="SetupPackageKeyAsync" disabled="@IsStorageBlocked" title="Create this device's browser-held package key.">Set up key</button>
+                <input type="password" class="recovery-code-input" @bind="RecoveryCodeDraft" autocomplete="off" spellcheck="false" placeholder="Recovery code" disabled="@IsStorageBlocked" />
+                <button type="button" @onclick="RestorePackageKeyAsync" disabled="@IsStorageBlocked" title="Restore this device's package key from an existing workbook recovery code.">Restore key</button>
             }
             <button type="button" @onclick="ExportSupportSummaryAsync" disabled="@IsStorageBlocked" title="Download a redacted local JSON summary for support or pilot feedback.">Support summary</button>
             <button type="button" @onclick="PreviewPackageAsync" disabled="@IsStorageBlocked" title="Read package manifest without changing this device copy.">Preview package</button>
@@ -456,6 +458,8 @@
     private string? PackageExchangeError { get; set; }
 
     private string? PackageExchangeMessage { get; set; }
+
+    private string RecoveryCodeDraft { get; set; } = string.Empty;
 
     private static string TodayIso => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
 
@@ -654,6 +658,41 @@
         }
     }
 
+    private async Task RestorePackageKeyAsync()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        PackageExchangeError = null;
+        PackageExchangeMessage = null;
+        try
+        {
+            if (!await PackageKeyStore.IsSupportedAsync())
+            {
+                PackageKeyStatus = "Unavailable";
+                return;
+            }
+
+            await PackageKeyStore.ImportRecoveryCodeAsync(Document.LogbookId, RecoveryCodeDraft);
+            PackageKeyStatus = await PackageKeyStore.HasPackageKeyAsync(Document.LogbookId)
+                ? "Ready"
+                : "Not set";
+            PackageExchangeMessage = PackageKeyStatus == "Ready"
+                ? "Package key restored on this device."
+                : "Package key was not restored.";
+        }
+        catch (Exception ex) when (ex is ArgumentException or JSException)
+        {
+            PackageExchangeError = ex.Message;
+        }
+        finally
+        {
+            RecoveryCodeDraft = string.Empty;
+        }
+    }
+
     private async Task ExportPackageAsync()
     {
         if (IsPackageExportDisabled)
@@ -813,7 +852,7 @@
             return;
         }
 
-        Draft = EntryDraft.FromEntry(entry);
+        Draft = EntryDraft.FromEntry(entry, preserveDate: false);
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
     }
@@ -830,7 +869,7 @@
             return;
         }
 
-        Draft = EntryDraft.FromEntry(entry.Entry);
+        Draft = EntryDraft.FromEntry(entry.Entry, preserveDate: true);
         EditingEntryId = entry.EntryId;
         EditingRevisionId = entry.CurrentRevisionId;
         HasAttemptedSubmit = false;
@@ -1143,10 +1182,12 @@
             return draft;
         }
 
-        public static EntryDraft FromEntry(PortableLogbookEntry entry)
+        public static EntryDraft FromEntry(PortableLogbookEntry entry, bool preserveDate)
         {
             var draft = Create();
-            draft.Date = DateOnly.FromDateTime(DateTime.Today);
+            draft.Date = preserveDate && entry.Date is not null
+                ? entry.Date.Value
+                : DateOnly.FromDateTime(DateTime.Today);
             draft.AircraftType = entry.AircraftType ?? string.Empty;
             draft.Registration = entry.Registration ?? string.Empty;
             draft.FlightNumber = entry.FlightNumber ?? string.Empty;

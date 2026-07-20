@@ -10,14 +10,14 @@ public sealed class MobileAirportSuggestionsTests
     {
         var entries = new[]
         {
-            Current("ent_1", Entry(" ysbk ", "yscn", "ysbk YWOL-WOL")),
-            Current("ent_2", Entry("YMML", "YSSY", "CN/SYD 12 B2 WAYPOINTTOOLONG")),
-            Current("ent_3", Entry("YSCN", "YSHW", "ysbk"))
+            Current("ent_old", Entry(new DateOnly(2026, 7, 18), "YMML", "YSSY", "CN/SYD 12 B2 WAYPOINTTOOLONG")),
+            Current("ent_latest", Entry(new DateOnly(2026, 7, 20), " ysbk ", "yscn", "ysbk YWOL-WOL")),
+            Current("ent_mid", Entry(new DateOnly(2026, 7, 19), "YSCN", "YSHW", "ysbk"))
         };
 
         var suggestions = MobileAirportSuggestions.Create(entries);
 
-        Assert.Equal(["YSBK", "YSCN", "YWOL", "WOL", "YMML", "YSSY", "CN", "SYD", "B2", "YSHW"], suggestions);
+        Assert.Equal(["YSBK", "YSCN", "YWOL", "WOL", "YSHW", "YMML", "YSSY", "CN", "SYD", "B2"], suggestions);
     }
 
     [Fact]
@@ -44,9 +44,12 @@ public sealed class MobileAirportSuggestionsTests
             [new RevisionId($"rev_{entryId}")]);
 
     private static PortableLogbookEntry Entry(string from, string to, string route) =>
+        Entry(new DateOnly(2026, 7, 19), from, to, route);
+
+    private static PortableLogbookEntry Entry(DateOnly date, string from, string to, string route) =>
         PortableLogbookEntry.Empty with
         {
-            Date = new DateOnly(2026, 7, 19),
+            Date = date,
             AircraftType = "C172",
             Registration = "VH-ABC",
             From = from,

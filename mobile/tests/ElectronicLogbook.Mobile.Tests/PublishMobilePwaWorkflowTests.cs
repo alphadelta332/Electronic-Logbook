@@ -21,7 +21,11 @@ public sealed class PublishMobilePwaWorkflowTests
         var workflow = ReadWorkflow();
 
         Assert.Contains("$basePath = \"/$($env:GITHUB_REPOSITORY.Split('/')[1])/\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("index.html did not contain the expected root base href.", workflow, StringComparison.Ordinal);
         Assert.Contains("$index.Replace('<base href=\"/\" />', \"<base href=\"\"$basePath\"\" />\")", workflow, StringComparison.Ordinal);
+        Assert.Contains("$serviceWorkerPath = Join-Path $siteRoot \"service-worker.js\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("service-worker.js did not contain the expected root cache base.", workflow, StringComparison.Ordinal);
+        Assert.Contains("$serviceWorker.Replace('const base = \"/\";', \"const base = \"\"$basePath\"\";\")", workflow, StringComparison.Ordinal);
         Assert.Contains(".nojekyll", workflow, StringComparison.Ordinal);
     }
 

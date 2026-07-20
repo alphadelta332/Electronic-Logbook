@@ -4,11 +4,15 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Controls;
 using System.Xml.Linq;
 using ElectronicLogbook.Updater;
+using ElectronicLogbook.Portable;
+using Microsoft.Win32;
 
 namespace ElectronicLogbook.Updater.Wizard;
 
@@ -92,6 +96,15 @@ public partial class MainWindow : Window
             : (_stepIndex == 3 ? "Start" : (_stepIndex == 5 ? "Finish" : "Next"));
 
         CancelButton.Content = _isUpdating ? "Cancel Update" : "Cancel";
+
+        var portableActionsEnabled = !_isUpdating && File.Exists(_context.SourcePath);
+        PortableEnableButton.IsEnabled = portableActionsEnabled;
+        PortableExportButton.IsEnabled = portableActionsEnabled;
+        PortableImportButton.IsEnabled = portableActionsEnabled;
+        PortablePrintedCopyButton.IsEnabled = portableActionsEnabled;
+        PortableRevisionHistoryButton.IsEnabled = portableActionsEnabled;
+        PortableResolveConflictButton.IsEnabled = portableActionsEnabled;
+        PortableRefreshStatusButton.IsEnabled = portableActionsEnabled;
     }
 
     private bool CanAdvanceFromCurrentStep()
@@ -401,6 +414,388 @@ public partial class MainWindow : Window
 
         return (tag, summary);
     }
+
+    private async void PortableRefreshStatusButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await RefreshPortableLogbookStatusAsync();
+    }
+
+    private async void PortableEnableButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseSavePath(
+            "Save portable recovery code",
+            "Text file (*.txt)|*.txt",
+            $"Electronic Logbook Portable Recovery {DateTime.Now:yyyy-MM-dd}.txt");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "Enable portable logbook",
+            () => PortableLogbookCommandRunner.Enable(_context.SourcePath, recoveryPath, DateTimeOffset.UtcNow),
+            FormatEnableResult);
+    }
+
+    private async void PortableExportButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var packagePath = ChooseSavePath(
+            "Save portable package",
+            "Portable logbook package (*.elogbook)|*.elogbook",
+            $"Electronic Logbook {DateTime.Now:yyyy-MM-dd}.elogbook");
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "Export portable package",
+            () => PortableLogbookCommandRunner.Export(_context.SourcePath, recoveryPath, packagePath, DateTimeOffset.UtcNow),
+            FormatExportResult);
+    }
+
+    private async void PortableImportButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var packagePath = ChooseOpenPath("Choose portable package", "Portable logbook package (*.elogbook)|*.elogbook");
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            return;
+        }
+
+        try
+        {
+            FooterStatusText.Text = "Previewing portable import...";
+            var preview = await Task.Run(() => PortableLogbookCommandRunner.PreviewImport(_context.SourcePath, recoveryPath, packagePath));
+            var previewText = FormatImportPreviewResult(preview);
+            if (!CanApplyPortableImportPreview(preview))
+            {
+                FooterStatusText.Text = "Portable import requires resolution.";
+                MessageBox.Show(
+                    this,
+                    previewText + Environment.NewLine + Environment.NewLine + "Resolve the reported conflicts before applying this package.",
+                    "Portable import preview",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var response = MessageBox.Show(
+                this,
+                previewText + Environment.NewLine + Environment.NewLine + "Apply this package to portable workbook storage?",
+                "Portable import preview",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No);
+            if (response != MessageBoxResult.Yes)
+            {
+                FooterStatusText.Text = "Portable import cancelled.";
+                return;
+            }
+
+            await RunPortableActionAsync(
+                "Import portable package",
+                () => PortableLogbookCommandRunner.ApplyImport(_context.SourcePath, recoveryPath, packagePath, DateTimeOffset.UtcNow),
+                FormatImportApplyResult);
+        }
+        catch (Exception ex)
+        {
+            ShowPortableActionError("Portable import failed", ex);
+        }
+    }
+
+    private static bool CanApplyPortableImportPreview(PortableLogbookImportPreviewResult preview) =>
+        preview.Status is "readyToApply" or "duplicateOnly";
+
+    private async void PortablePrintedCopyButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var outputPath = ChooseSavePath(
+            "Save printed copy",
+            "HTML file (*.html)|*.html",
+            $"Electronic Logbook Printed Copy {DateTime.Now:yyyy-MM-dd}.html");
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        var holderName = PromptForText("Portable printed copy", "Holder full name (rendered only into this printed copy):", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(holderName))
+        {
+            return;
+        }
+
+        var holderDateText = PromptForText("Portable printed copy", "Holder date of birth (yyyy-mm-dd, rendered only into this printed copy):", allowEmpty: false);
+        if (!TryParseIsoDate(holderDateText, out var holderDateOfBirth))
+        {
+            MessageBox.Show(this, "Enter the holder date of birth as yyyy-mm-dd.", "Portable printed copy", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "Create printed copy",
+            () => PortableLogbookCommandRunner.CreatePrintedCopy(
+                _context.SourcePath,
+                recoveryPath,
+                outputPath,
+                holderName,
+                holderDateOfBirth,
+                DateOnly.FromDateTime(DateTime.Today),
+                recordsPerPage: 25),
+            FormatPrintedCopyResult);
+    }
+
+    private async void PortableRevisionHistoryButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var entryId = PromptForText("Portable revision history", "Portable entry ID:", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "View revision history",
+            () => PortableLogbookCommandRunner.ReadRevisionHistory(_context.SourcePath, recoveryPath, new EntryId(entryId)),
+            FormatRevisionHistoryResult);
+    }
+
+    private async void PortableResolveConflictButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var entryId = PromptForText("Resolve portable conflict", "Portable entry ID:", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return;
+        }
+
+        var revisionId = PromptForText("Resolve portable conflict", "Conflict head revision ID to keep:", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(revisionId))
+        {
+            return;
+        }
+
+        var note = PromptForText("Resolve portable conflict", "Optional resolution note:", allowEmpty: true);
+        await RunPortableActionAsync(
+            "Resolve portable conflict",
+            () => PortableLogbookCommandRunner.ResolveConflict(
+                _context.SourcePath,
+                recoveryPath,
+                new EntryId(entryId),
+                new RevisionId(revisionId),
+                string.IsNullOrWhiteSpace(note) ? null : note,
+                DateTimeOffset.UtcNow),
+            FormatResolveConflictResult);
+    }
+
+    private async Task RunPortableActionAsync<TResult>(
+        string title,
+        Func<TResult> action,
+        Func<TResult, string> formatResult)
+    {
+        try
+        {
+            FooterStatusText.Text = title + "...";
+            var result = await Task.Run(action);
+            FooterStatusText.Text = title + " complete.";
+            await RefreshPortableLogbookStatusAsync(showUnavailableInFooter: false);
+            MessageBox.Show(this, formatResult(result), title, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ShowPortableActionError(title + " failed", ex);
+        }
+    }
+
+    private async Task RefreshPortableLogbookStatusAsync(bool showUnavailableInFooter = true)
+    {
+        PortableLogbookStatusText.Text = await TryReadPortableLogbookStatusTextWithRetryAsync(_context.SourcePath);
+        if (showUnavailableInFooter)
+        {
+            FooterStatusText.Text = PortableLogbookStatusText.Text;
+        }
+    }
+
+    private void ShowPortableActionError(string title, Exception ex)
+    {
+        FooterStatusText.Text = title + ".";
+        MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private string? ChooseOpenPath(string title, string filter)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            CheckFileExists = true
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    private string? ChooseSavePath(string title, string filter, string fileName)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            FileName = fileName,
+            OverwritePrompt = true
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    private string? PromptForText(string title, string prompt, bool allowEmpty)
+    {
+        var textBox = new TextBox { MinWidth = 320, Margin = new Thickness(0, 8, 0, 0) };
+        var okButton = new Button { Content = "OK", Width = 80, IsDefault = true };
+        var cancelButton = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+        var window = new Window
+        {
+            Title = title,
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            SizeToContent = SizeToContent.WidthAndHeight
+        };
+        okButton.Click += (_, _) =>
+        {
+            if (!allowEmpty && string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                return;
+            }
+
+            window.DialogResult = true;
+        };
+        var buttons = new StackPanel
+        {
+            Margin = new Thickness(0, 12, 0, 0),
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { okButton, cancelButton }
+        };
+        window.Content = new StackPanel
+        {
+            Margin = new Thickness(16),
+            Children =
+            {
+                new TextBlock { Text = prompt },
+                textBox,
+                buttons
+            }
+        };
+        return window.ShowDialog() == true ? textBox.Text.Trim() : null;
+    }
+
+    private static bool TryParseIsoDate(string? value, out DateOnly date) =>
+        DateOnly.TryParseExact(
+            value,
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out date);
+
+    private static string FormatEnableResult(PortableLogbookEnableResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable logbook enabled.",
+            $"Logbook ID: {result.LogbookId.Value}",
+            $"Device ID: {result.DeviceId.Value}",
+            $"Recovery file: {result.RecoveryOutputPath}",
+            $"Backup: {result.BackupPath}");
+
+    private static string FormatExportResult(PortableLogbookExportResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable package exported.",
+            $"Package: {result.PackageOutputPath}",
+            $"Operations: {result.OperationCount}",
+            $"Custom fields: {result.CustomFieldDefinitionCount}");
+
+    private static string FormatImportPreviewResult(PortableLogbookImportPreviewResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable import preview",
+            $"Status: {result.Status}",
+            $"New operations: {result.NewOperationCount}",
+            $"Duplicate operations: {result.DuplicateOperationCount}",
+            $"Creates: {result.CreateCount}",
+            $"Corrections: {result.CorrectionCount}",
+            $"Deletions: {result.DeletionCount}",
+            $"Entry conflicts: {result.ConflictCount}",
+            $"Custom-field conflicts: {result.CustomFieldConflictCount}");
+
+    private static string FormatImportApplyResult(PortableLogbookImportApplyResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable package import finished.",
+            $"Status: {result.Status}",
+            $"Storage updated: {result.StorageUpdated}",
+            $"Receipt recorded: {result.ReceiptRecorded}",
+            $"Backup: {result.BackupPath ?? "(none)"}",
+            $"Workbook rows requiring sync: {result.WorkbookRowCount}");
+
+    private static string FormatPrintedCopyResult(PortableLogbookPrintedCopyResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Printed copy created.",
+            $"Output: {result.OutputPath}",
+            $"Pages: {result.PageCount}",
+            $"Current records: {result.CurrentRecordCount}",
+            $"Revision history records: {result.RevisionCount}");
+
+    private static string FormatRevisionHistoryResult(PortableLogbookRevisionHistoryResult result)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Portable revision history");
+        builder.AppendLine($"Entry ID: {result.EntryId.Value}");
+        builder.AppendLine($"Current revision ID: {result.CurrentRevisionId?.Value ?? "(none)"}");
+        builder.AppendLine($"Deleted: {result.IsDeleted}");
+        builder.AppendLine($"Conflict: {result.HasConflict}");
+        builder.AppendLine($"Revisions: {result.RevisionCount}");
+        foreach (var revision in result.Revisions)
+        {
+            builder.AppendLine($"{revision.Kind}: {revision.RevisionId.Value} ({revision.CreatedAt:O})");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string FormatResolveConflictResult(PortableLogbookResolveConflictResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable conflict resolved.",
+            $"Entry ID: {result.EntryId.Value}",
+            $"Kept revision ID: {result.KeptRevisionId.Value}",
+            $"Resolution revision ID: {result.ResolutionRevisionId.Value}",
+            $"Remaining conflicts: {result.RemainingConflictCount}",
+            $"Backup: {result.BackupPath}");
 
     private async void RunPreflightButton_OnClick(object sender, RoutedEventArgs e)
     {
@@ -924,7 +1319,19 @@ public partial class MainWindow : Window
 
     private HandoffRecoveryResult RecoverPendingHandoffForWizard()
     {
-        var recovery = WorkbookHandoff.RecoverIfNeeded(_context.SourcePath);
+        HandoffRecoveryResult recovery;
+        try
+        {
+            recovery = WorkbookHandoff.RecoverIfNeeded(_context.SourcePath);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException or JsonException)
+        {
+            recovery = new HandoffRecoveryResult(
+                HandoffRecoveryAction.UnrecoverableFailure,
+                $"Recovery required: an interrupted workbook handoff could not be recovered automatically. {ex.Message}",
+                Path.GetFullPath(_context.SourcePath));
+        }
+
         if (recovery.Action != HandoffRecoveryAction.None)
         {
             AppendLog(recovery.Message);
@@ -934,7 +1341,7 @@ public partial class MainWindow : Window
             }
             if (!string.IsNullOrWhiteSpace(recovery.BackupWorkbookPath))
             {
-                AppendLog($"Recovery backup: {recovery.BackupWorkbookPath}");
+                AppendLog($"{recovery.BackupWorkbookLabel}: {recovery.BackupWorkbookPath}");
             }
         }
 

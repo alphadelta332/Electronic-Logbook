@@ -21,7 +21,15 @@ public static class PortableLogbookPackageFile
 
         var tempPath = path + ".tmp";
         File.WriteAllBytes(tempPath, packageBytes);
-        File.Move(tempPath, path, overwrite: true);
+        try
+        {
+            File.Move(tempPath, path, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteTempFile(tempPath);
+            throw;
+        }
     }
 
     public static PortableLogbookPackageReadResult Read(
@@ -35,6 +43,17 @@ public static class PortableLogbookPackageFile
 
         options ??= PortableLogbookPackageReadOptions.Default;
         return PortableLogbookPackage.Read(ReadPackageFileBytes(path, options), key, expectedLogbookId, options);
+    }
+
+    public static byte[] ReadBytes(
+        string path,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        EnsurePackageExtension(path);
+
+        options ??= PortableLogbookPackageReadOptions.Default;
+        return ReadPackageFileBytes(path, options);
     }
 
     public static PortableLogbookPackageManifest ReadManifest(
@@ -84,6 +103,18 @@ public static class PortableLogbookPackageFile
         if (!string.Equals(Path.GetExtension(path), Extension, StringComparison.OrdinalIgnoreCase))
         {
             throw new ArgumentException($"Portable logbook package files must use the '{Extension}' extension.", nameof(path));
+        }
+    }
+
+    private static void TryDeleteTempFile(string tempPath)
+    {
+        try
+        {
+            File.Delete(tempPath);
+        }
+        catch
+        {
+            // Preserve the original package write failure.
         }
     }
 }

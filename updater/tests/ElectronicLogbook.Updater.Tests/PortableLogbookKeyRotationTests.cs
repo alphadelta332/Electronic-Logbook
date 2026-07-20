@@ -52,6 +52,42 @@ public sealed class PortableLogbookKeyRotationTests
         Assert.Equal(PortableLogbookPackageError.AuthenticationFailed, exception.Error);
     }
 
+    [Fact]
+    public void RotatePackageKeyRejectsWrongLogbookBeforeDecrypting()
+    {
+        var document = CreateDocument();
+        var key = PortableLogbookKey.Generate();
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookKeyRotation.RotatePackageKey(
+                packageBytes,
+                key,
+                PortableLogbookKey.Generate(),
+                new LogbookId("log_other")));
+
+        Assert.Equal(PortableLogbookPackageError.WrongLogbook, exception.Error);
+    }
+
+    [Fact]
+    public void RotatePackageKeyHonoursConfiguredPackageReadLimit()
+    {
+        var document = CreateDocument();
+        var oldKey = PortableLogbookKey.Generate();
+        var packageBytes = PortableLogbookPackage.Write(document, oldKey);
+        var readOptions = new PortableLogbookPackageReadOptions(packageBytes.Length - 1);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookKeyRotation.RotatePackageKey(
+                packageBytes,
+                oldKey,
+                PortableLogbookKey.Generate(),
+                document.LogbookId,
+                readOptions));
+
+        Assert.Equal(PortableLogbookPackageError.PackageTooLarge, exception.Error);
+    }
+
     private static PortableLogbookDocument CreateDocument()
     {
         var create = new CreateEntryOperation(

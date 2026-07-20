@@ -51,11 +51,14 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
                 throw new BrowserLogbookStoreException("Stored logbook state schema metadata does not match the document.");
             }
 
+            var exportCheckpoint = stored.LastSuccessfulExport?.Covers(document) == true
+                ? stored.LastSuccessfulExport
+                : null;
             return new BrowserLogbookState(
                 document,
                 stored.ImportReceipts ?? [],
-                stored.LastSuccessfulExportAt ?? stored.LastSuccessfulExport?.ExportedAt,
-                stored.LastSuccessfulExport);
+                stored.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
+                exportCheckpoint);
         }
         catch (JsonException ex)
         {
@@ -86,14 +89,17 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         EnsureSaveableDocument(document);
         var existing = await LoadStateAsync();
         EnsureSchemaUpgradeHasBackup(existing, document);
+        var exportCheckpoint = state.LastSuccessfulExport?.Covers(document) == true
+            ? state.LastSuccessfulExport
+            : null;
 
         var stored = new BrowserLogbookStoredDocument(
             CurrentStoreVersion,
             document.SchemaVersion,
             PortableLogbookJson.Serialize(document),
             state.ImportReceipts,
-            state.LastSuccessfulExportAt ?? state.LastSuccessfulExport?.ExportedAt,
-            state.LastSuccessfulExport);
+            state.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
+            exportCheckpoint);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
             DocumentKey,

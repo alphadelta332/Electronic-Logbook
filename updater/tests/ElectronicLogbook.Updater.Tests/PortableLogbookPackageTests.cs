@@ -143,6 +143,28 @@ public sealed class PortableLogbookPackageTests
     }
 
     [Fact]
+    public void ReadRejectsPhysicallyTooShortPackageBeforeManifestParsing()
+    {
+        var bytes = Encoding.ASCII.GetBytes("ELOGPKG1");
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.Read(bytes, FixedKey(1)));
+
+        Assert.Equal(PortableLogbookPackageError.TruncatedPackage, exception.Error);
+    }
+
+    [Fact]
+    public void ReadManifestRejectsPhysicallyTooShortPackageBeforeManifestParsing()
+    {
+        var bytes = Encoding.ASCII.GetBytes("ELOGPKG1");
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.ReadManifest(bytes));
+
+        Assert.Equal(PortableLogbookPackageError.TruncatedPackage, exception.Error);
+    }
+
+    [Fact]
     public void ReadRejectsWrongLogbookBeforeDecryptingPayload()
     {
         var document = CreateDocument();

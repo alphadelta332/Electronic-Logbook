@@ -1,6 +1,7 @@
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 using Microsoft.JSInterop;
+using System.Security.Cryptography;
 
 namespace ElectronicLogbook.Mobile.Tests;
 
@@ -57,6 +58,26 @@ public sealed class MobilePackageExportWorkflowTests
         Assert.Equal("electronicLogbookKeys.hasPackageKey", call.Identifier);
     }
 
+    [Fact]
+    public async Task ExportAsyncProducesDecryptablePortablePackage()
+    {
+        var document = CreateDocument();
+        var exportedAt = DateTimeOffset.Parse("2026-07-19T04:05:06Z");
+        var key = PortableLogbookKey.FromBytes(Enumerable.Range(1, PortableLogbookPackage.KeySizeBytes).Select(value => (byte)value).ToArray());
+        var jsRuntime = new EncryptingJsRuntime(key);
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var fileStore = new BrowserFileStore(jsRuntime);
+
+        var result = await MobilePackageExportWorkflow.ExportAsync(document, keyStore, fileStore, exportedAt);
+        var read = PortableLogbookPackage.Read(result.PackageBytes, key, document.LogbookId);
+
+        Assert.Equal(exportedAt, read.Manifest.CreatedAt);
+        Assert.Equal(document.LogbookId, read.Document.LogbookId);
+        Assert.Equal(document.Operations.Select(operation => operation.RevisionId), read.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal(document.Operations.Count, read.Manifest.OperationCount);
+        Assert.Equal(result.PackageBytes, Assert.Single(jsRuntime.DownloadedPackages));
+    }
+
     private static PortableLogbookDocument CreateDocument()
     {
         var create = new CreateEntryOperation(
@@ -101,4 +122,53 @@ public sealed class MobilePackageExportWorkflowTests
     }
 
     private sealed record JsCall(string Identifier, IReadOnlyList<object?> Arguments);
+
+    private sealed class EncryptingJsRuntime(PortableLogbookKey key) : IJSRuntime
+    {
+        private readonly byte[] _keyBytes = key.ToBytes();
+
+        public List<byte[]> DownloadedPackages { get; } = [];
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        {
+            return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        }
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            args ??= [];
+            object? result = identifier switch
+            {
+                "electronicLogbookKeys.hasPackageKey" => true,
+                "electronicLogbookKeys.encrypt" => Encrypt(
+                    (byte[])args[1]!,
+                    (byte[])args[2]!,
+                    (byte[])args[3]!),
+                "electronicLogbookFiles.canShare" => false,
+                "electronicLogbookFiles.download" => CaptureDownload((byte[])args[1]!),
+                _ => throw new InvalidOperationException($"Unexpected JS call: {identifier}")
+            };
+
+            return new ValueTask<TValue>((TValue)result!);
+        }
+
+        private BrowserPackageCiphertext Encrypt(byte[] nonce, byte[] plaintext, byte[] additionalData)
+        {
+            var ciphertext = new byte[plaintext.Length];
+            var tag = new byte[16];
+            using var aes = new AesGcm(_keyBytes, tag.Length);
+            aes.Encrypt(nonce, plaintext, ciphertext, tag, additionalData);
+            return new BrowserPackageCiphertext(ciphertext, tag);
+        }
+
+        private object? CaptureDownload(byte[] packageBytes)
+        {
+            DownloadedPackages.Add(packageBytes);
+            return default;
+        }
+    }
 }

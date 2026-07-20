@@ -315,12 +315,25 @@ public sealed class WorkbookHandoffTests : IDisposable
         var result = WorkbookHandoff.RecoverIfNeeded(source);
 
         Assert.Equal(HandoffRecoveryAction.BackupRestored, result.Action);
+        Assert.StartsWith("Recovery complete:", result.Message, StringComparison.Ordinal);
+        Assert.Equal("Restored backup", result.BackupWorkbookLabel);
         Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
         Assert.Equal(Path.GetFullPath(backup), result.BackupWorkbookPath);
         Assert.Equal("old workbook", File.ReadAllText(source));
         Assert.False(File.Exists(backup));
         Assert.False(File.Exists(replacement));
         Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void HandoffRecoveryResultLabelsUnrecoverableFailureDistinctly()
+    {
+        var result = new HandoffRecoveryResult(
+            HandoffRecoveryAction.UnrecoverableFailure,
+            "Recovery required.",
+            Path.Combine(_directory, "logbook.xlsm"));
+
+        Assert.Equal("Recovery backup", result.BackupWorkbookLabel);
     }
 
     [Fact]
@@ -339,11 +352,79 @@ public sealed class WorkbookHandoffTests : IDisposable
         var result = WorkbookHandoff.RecoverIfNeeded(source);
 
         Assert.Equal(HandoffRecoveryAction.CompletedJournalCleaned, result.Action);
+        Assert.StartsWith("Clean-up complete:", result.Message, StringComparison.Ordinal);
+        Assert.Equal("Retained backup", result.BackupWorkbookLabel);
         Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
         Assert.Equal(Path.GetFullPath(backup), result.BackupWorkbookPath);
         Assert.Equal("new workbook", File.ReadAllText(source));
         Assert.Equal("old workbook", File.ReadAllText(backup));
         Assert.False(File.Exists(staged));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void RecoverIfNeededCleansCompletedSameDirectoryHandoffJournal()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "logbook_updated.xlsm");
+        var backup = Path.Combine(_directory, "logbook_Old_20260716-120000.xlsm");
+        File.WriteAllText(source, "new workbook");
+        File.WriteAllText(backup, "old workbook");
+        WriteJournal(source, staged, staged, backup, localStageCreated: false);
+
+        var result = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.CompletedJournalCleaned, result.Action);
+        Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
+        Assert.Equal(Path.GetFullPath(backup), result.BackupWorkbookPath);
+        Assert.Equal("new workbook", File.ReadAllText(source));
+        Assert.Equal("old workbook", File.ReadAllText(backup));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void RecoverIfNeededCleansCompletedSameDirectoryReplacementWhenJournalIsStale()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "logbook_updated.xlsm");
+        var backup = Path.Combine(_directory, "logbook_Old_20260716-120000.xlsm");
+        File.WriteAllText(source, "new workbook");
+        File.WriteAllText(staged, "leftover staged workbook");
+        File.WriteAllText(backup, "old workbook");
+        WriteJournal(source, staged, staged, backup, localStageCreated: false);
+
+        var result = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.CompletedJournalCleaned, result.Action);
+        Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
+        Assert.Equal(Path.GetFullPath(backup), result.BackupWorkbookPath);
+        Assert.Equal("new workbook", File.ReadAllText(source));
+        Assert.Equal("old workbook", File.ReadAllText(backup));
+        Assert.False(File.Exists(staged));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+    }
+
+    [Fact]
+    public void RecoverIfNeededCleansPreReplacementExternalJournalWithoutDeletingOriginalStage()
+    {
+        var source = Path.Combine(_directory, "logbook.xlsm");
+        var staged = Path.Combine(_directory, "external", "logbook_updated.xlsm");
+        var replacement = Path.Combine(_directory, ".logbook_Staged_test.xlsm");
+        var backup = Path.Combine(_directory, "logbook_Old_20260716-120000.xlsm");
+        Directory.CreateDirectory(Path.GetDirectoryName(staged)!);
+        File.WriteAllText(source, "old workbook");
+        File.WriteAllText(staged, "new workbook");
+        File.WriteAllText(replacement, "new workbook");
+        WriteJournal(source, staged, replacement, backup, localStageCreated: true);
+
+        var result = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.CompletedJournalCleaned, result.Action);
+        Assert.Equal(Path.GetFullPath(source), result.SourceWorkbookPath);
+        Assert.Null(result.BackupWorkbookPath);
+        Assert.Equal("old workbook", File.ReadAllText(source));
+        Assert.Equal("new workbook", File.ReadAllText(staged));
+        Assert.False(File.Exists(replacement));
         Assert.False(File.Exists(BuildJournalPath(source)));
     }
 
@@ -461,6 +542,38 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
+    public void CompletePostHandoffValidationDoesNotDeleteSamePrefixNonUpdaterBackups()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+        var retainedBackup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260716-120000.xlsm");
+        var olderBackup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260715-120000.xlsm");
+        var manualBackup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_manual.xlsm");
+        var malformedTimestampBackup = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.0",
+            "logbook_Old_20260715-copy.xlsm");
+
+        WorkbookHandoff.CompletePostHandoffValidation(source, retainedBackup, TestRepo.Version, "2.0.0");
+
+        Assert.True(File.Exists(retainedBackup));
+        Assert.False(File.Exists(olderBackup));
+        Assert.True(File.Exists(manualBackup));
+        Assert.True(File.Exists(malformedTimestampBackup));
+    }
+
+    [Fact]
     public void CompletePostHandoffValidationDoesNotDeleteOlderBackupsWhenRetainedBackupIsInvalid()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(
@@ -566,6 +679,22 @@ public sealed class WorkbookHandoffTests : IDisposable
         Assert.Equal("2.0.0", result.BackupWorkbookVersion);
         Assert.Null(result.FailedWorkbookPath);
         Assert.True(File.Exists(backup));
+    }
+
+    [Fact]
+    public void RestoreBackupRejectsSourceAsBackupPath()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            TestRepo.Version,
+            "logbook.xlsm");
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            WorkbookHandoff.RestoreBackup(source, source, TestRepo.Version));
+
+        Assert.Contains("must differ", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "logbook_FailedRestore_*.xlsm"));
     }
 
     [Fact]

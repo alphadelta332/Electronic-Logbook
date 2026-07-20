@@ -36,7 +36,7 @@ public sealed class PortableLogbookFieldsTests
                 "Landings Night",
                 "IFR Approaches",
                 "Holding",
-                "RNAV",
+                "RNP",
                 "Circling"
             ],
             workbookColumns);

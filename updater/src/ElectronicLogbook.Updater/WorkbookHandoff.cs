@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 
 namespace ElectronicLogbook.Updater;
@@ -10,7 +11,8 @@ public enum HandoffRecoveryAction
 {
     None,
     CompletedJournalCleaned,
-    BackupRestored
+    BackupRestored,
+    UnrecoverableFailure
 }
 
 public sealed record HandoffRecoveryResult(
@@ -22,6 +24,14 @@ public sealed record HandoffRecoveryResult(
     public static HandoffRecoveryResult None { get; } = new(
         HandoffRecoveryAction.None,
         "No interrupted workbook handoff was found.");
+
+    public string BackupWorkbookLabel => Action switch
+    {
+        HandoffRecoveryAction.CompletedJournalCleaned => "Retained backup",
+        HandoffRecoveryAction.BackupRestored => "Restored backup",
+        HandoffRecoveryAction.UnrecoverableFailure => "Recovery backup",
+        _ => "Backup"
+    };
 }
 
 public sealed record BackupRestoreResult(
@@ -175,7 +185,7 @@ public static class WorkbookHandoff
 
         if (sourceExists)
         {
-            if (journal.LocalStageCreated && replacementExists)
+            if (replacementExists && (journal.LocalStageCreated || backupExists))
             {
                 TryDelete(journal.ReplacementWorkbookPath, fileSystem);
             }
@@ -186,7 +196,7 @@ public static class WorkbookHandoff
             fileSystem.DeleteFile(journalPath);
             return new HandoffRecoveryResult(
                 HandoffRecoveryAction.CompletedJournalCleaned,
-                "A completed workbook handoff journal was cleaned up.",
+                "Clean-up complete: a completed workbook handoff journal was removed. The current workbook was left unchanged.",
                 journal.SourceWorkbookPath,
                 backupExists ? journal.BackupWorkbookPath : null);
         }
@@ -201,7 +211,7 @@ public static class WorkbookHandoff
             fileSystem.DeleteFile(journalPath);
             return new HandoffRecoveryResult(
                 HandoffRecoveryAction.BackupRestored,
-                "The previous workbook backup was restored after an interrupted handoff.",
+                "Recovery complete: the previous workbook backup was restored after an interrupted handoff.",
                 journal.SourceWorkbookPath,
                 journal.BackupWorkbookPath);
         }
@@ -265,6 +275,11 @@ public static class WorkbookHandoff
         packageValidation ??= WorkbookPackageValidation.Instance;
         sourceWorkbookPath = Path.GetFullPath(sourceWorkbookPath);
         backupWorkbookPath = Path.GetFullPath(backupWorkbookPath);
+
+        if (string.Equals(sourceWorkbookPath, backupWorkbookPath, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Backup workbook path must differ from source workbook path.");
+        }
 
         if (!fileSystem.FileExists(backupWorkbookPath))
         {
@@ -341,6 +356,10 @@ public static class WorkbookHandoff
         foreach (var backup in fileSystem.EnumerateFiles(directory, $"{baseName}_Old_*{extension}"))
         {
             var backupFullPath = Path.GetFullPath(backup);
+            if (!IsUpdaterBackupFileName(Path.GetFileName(backupFullPath), baseName, extension))
+            {
+                continue;
+            }
             if (string.Equals(backupFullPath, retainedFullPath, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
@@ -348,6 +367,45 @@ public static class WorkbookHandoff
 
             fileSystem.DeleteFile(backupFullPath);
         }
+    }
+
+    private static bool IsUpdaterBackupFileName(
+        string fileName,
+        string baseName,
+        string extension)
+    {
+        var prefix = $"{baseName}_Old_";
+        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(extension, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var markerLength = fileName.Length - prefix.Length - extension.Length;
+        if (markerLength < 15)
+        {
+            return false;
+        }
+
+        var marker = fileName.Substring(prefix.Length, markerLength);
+        if (!DateTime.TryParseExact(
+                marker.Substring(0, 15),
+                "yyyyMMdd-HHmmss",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _))
+        {
+            return false;
+        }
+
+        if (marker.Length == 15)
+        {
+            return true;
+        }
+
+        return marker[15] == '_' &&
+            marker.Length > 16 &&
+            marker.Substring(16).All(char.IsDigit);
     }
 
     private static string BuildFailedRestorePath(

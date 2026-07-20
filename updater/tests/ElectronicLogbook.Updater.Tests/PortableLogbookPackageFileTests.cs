@@ -46,6 +46,19 @@ public sealed class PortableLogbookPackageFileTests : IDisposable
     }
 
     [Fact]
+    public void WriteDeletesTempFileWhenFinalMoveFails()
+    {
+        var path = Path.Combine(tempDirectory, "blocked.elogbook");
+        Directory.CreateDirectory(path);
+
+        Assert.ThrowsAny<Exception>(() =>
+            PortableLogbookPackageFile.Write(path, CreateDocument(), PortableLogbookKey.Generate()));
+
+        Assert.True(Directory.Exists(path));
+        Assert.False(File.Exists(path + ".tmp"));
+    }
+
+    [Fact]
     public void ReadManifestForInspectionReturnsUnsupportedSchemaMetadataWithoutKey()
     {
         var document = CreateDocument();
@@ -119,6 +132,19 @@ public sealed class PortableLogbookPackageFileTests : IDisposable
 
         var exception = Assert.Throws<PortableLogbookPackageException>(
             () => PortableLogbookPackageFile.ReadManifestForInspection(path, new PortableLogbookPackageReadOptions(127)));
+
+        Assert.Equal(PortableLogbookPackageError.PackageTooLarge, exception.Error);
+    }
+
+    [Fact]
+    public void ReadBytesRejectsOversizedFileBeforeReturningContent()
+    {
+        Directory.CreateDirectory(tempDirectory);
+        var path = Path.Combine(tempDirectory, "oversized.elogbook");
+        File.WriteAllBytes(path, new byte[128]);
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackageFile.ReadBytes(path, new PortableLogbookPackageReadOptions(127)));
 
         Assert.Equal(PortableLogbookPackageError.PackageTooLarge, exception.Error);
     }

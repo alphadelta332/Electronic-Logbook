@@ -23,6 +23,31 @@ $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) (
 $componentNames = @("modBoot", "modAirports", "modLogbook", "frmExportLogbook", "ThisWorkbook")
 $issues = New-Object System.Collections.Generic.List[string]
 
+function Get-FirstDifferenceSummary {
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Expected,
+        [Parameter(Mandatory)]
+        [AllowEmptyString()]
+        [string]$Actual
+    )
+
+    $expectedLines = $Expected -split "`r?`n"
+    $actualLines = $Actual -split "`r?`n"
+    $lineCount = [Math]::Max($expectedLines.Count, $actualLines.Count)
+
+    for ($index = 0; $index -lt $lineCount; $index++) {
+        $expectedLine = if ($index -lt $expectedLines.Count) { $expectedLines[$index] } else { "<missing>" }
+        $actualLine = if ($index -lt $actualLines.Count) { $actualLines[$index] } else { "<missing>" }
+        if ($expectedLine -cne $actualLine) {
+            return "first difference at line $($index + 1): embedded='$expectedLine' tracked='$actualLine'"
+        }
+    }
+
+    return "different text with no line-level mismatch found"
+}
+
 function Get-WorkbookVbaSnapshot {
     param(
         [Parameter(Mandatory)]
@@ -86,7 +111,10 @@ try {
         # the project. VBA itself is case-insensitive, so casing-only differences
         # do not indicate a behavioural or source-parity mismatch.
         if ($embeddedSnapshot[$componentName] -ne $trackedSnapshot[$componentName]) {
-            $issues.Add("Workbook component '$componentName' differs from tracked source.")
+            $issues.Add(
+                "Workbook component '$componentName' differs from tracked source (" +
+                (Get-FirstDifferenceSummary -Expected $embeddedSnapshot[$componentName] -Actual $trackedSnapshot[$componentName]) +
+                ").")
         }
     }
 } finally {

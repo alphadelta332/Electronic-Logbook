@@ -29,4 +29,21 @@ public sealed class PortableLogbookKeyCustodyTests
         Assert.True(confirmed.RecoveryCodeConfirmed);
         Assert.False(rejected.RecoveryCodeConfirmed);
     }
+
+    [Fact]
+    public void RecoveryCodeParserAcceptsRecoveryFileLineAndGroupedCode()
+    {
+        var key = PortableLogbookKey.Generate();
+        var recoveryCode = key.ToRecoveryCode();
+        var groupedCode = string.Join(" ", recoveryCode.Chunk(4).Select(chunk => new string(chunk)));
+        var recoveryFileText = $"""
+            Electronic Logbook portable recovery code
+            Recovery code: {groupedCode}
+            Keep this file separate from the workbook.
+            """;
+
+        var parsed = PortableLogbookKey.FromRecoveryCode(recoveryFileText);
+
+        Assert.Equal(key, parsed);
+    }
 }

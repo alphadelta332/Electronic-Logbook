@@ -126,6 +126,31 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task LoadStateAsyncDropsStaleStoredExportCheckpointWithoutLosingTimestamp()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var checkpoint = CreateCheckpoint(document) with { OperationCount = document.Operations.Count - 1 };
+        var stored = new BrowserLogbookStoredDocument(
+            1,
+            document.SchemaVersion,
+            PortableLogbookJson.Serialize(document),
+            [],
+            checkpoint.ExportedAt,
+            checkpoint);
+        var store = new BrowserLogbookStore(new MemoryJsRuntime
+        {
+            StoredJson = JsonSerializer.Serialize(stored, PortableLogbookJson.SerializerOptions)
+        });
+
+        var state = await store.LoadStateAsync();
+
+        Assert.NotNull(state);
+        Assert.Equal(checkpoint.ExportedAt, state.LastSuccessfulExportAt);
+        Assert.Null(state.LastSuccessfulExport);
+    }
+
+    [Fact]
     public async Task SaveDocumentAsyncPreservesExistingExchangeMetadata()
     {
         var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
@@ -205,6 +230,40 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
                     ((CreateEntryOperation)Assert.Single(document.Operations)).Entry with { Details = "Changed after export" })
             ]).ToArray()
         });
+
+        var state = await store.LoadStateAsync();
+
+        Assert.NotNull(state);
+        Assert.Equal(checkpoint.ExportedAt, state.LastSuccessfulExportAt);
+        Assert.Null(state.LastSuccessfulExport);
+    }
+
+    [Fact]
+    public async Task SaveStateAsyncDropsStaleExportCheckpointForChangedDocument()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var checkpoint = CreateCheckpoint(document);
+        var changedDocument = document with
+        {
+            Operations = document.Operations.Concat([
+                new CorrectEntryOperation(
+                    document.LogbookId,
+                    new EntryId("ent_fixture"),
+                    new RevisionId("rev_state_changed"),
+                    new HashSet<RevisionId> { new("rev_create") },
+                    new DeviceId("dev_mobile"),
+                    DateTimeOffset.Parse("2026-07-19T04:00:00Z"),
+                    ((CreateEntryOperation)Assert.Single(document.Operations)).Entry with { Details = "Changed through state save" })
+            ]).ToArray()
+        };
+        var store = new BrowserLogbookStore(new MemoryJsRuntime());
+
+        await store.SaveStateAsync(new BrowserLogbookState(
+            changedDocument,
+            [],
+            checkpoint.ExportedAt,
+            checkpoint));
 
         var state = await store.LoadStateAsync();
 

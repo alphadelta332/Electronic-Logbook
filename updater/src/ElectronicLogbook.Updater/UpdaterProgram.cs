@@ -41,7 +41,7 @@ public static class UpdaterProgram
                 }
                 if (!string.IsNullOrWhiteSpace(recovery.BackupWorkbookPath))
                 {
-                    Console.WriteLine($"[updater] Recovery backup: {recovery.BackupWorkbookPath}");
+                    Console.WriteLine($"[updater] {recovery.BackupWorkbookLabel}: {recovery.BackupWorkbookPath}");
                 }
             }
 

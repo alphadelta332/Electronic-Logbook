@@ -17,6 +17,16 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
     public ValueTask<bool> EnsurePackageKeyAsync(LogbookId logbookId) =>
         jsRuntime.InvokeAsync<bool>("electronicLogbookKeys.ensurePackageKey", KeyName(logbookId));
 
+    public ValueTask<bool> ImportRecoveryCodeAsync(LogbookId logbookId, string recoveryCode)
+    {
+        var keyName = KeyName(logbookId);
+        var key = PortableLogbookKey.FromRecoveryCode(recoveryCode);
+        return jsRuntime.InvokeAsync<bool>(
+            "electronicLogbookKeys.importPackageKey",
+            keyName,
+            key.ToBytes());
+    }
+
     public ValueTask DeletePackageKeyAsync(LogbookId logbookId) =>
         jsRuntime.InvokeVoidAsync("electronicLogbookKeys.deletePackageKey", KeyName(logbookId));
 

@@ -20,6 +20,20 @@ public sealed class MobileEntryDraftDefaultPlannerTests
     }
 
     [Fact]
+    public void CreateSelectsLatestDatedEntryWhenInputIsUnsorted()
+    {
+        var entries = new[]
+        {
+            Current("ent_old", Entry(new DateOnly(2026, 7, 18), "PA28", "VH-OLD", "YMML", "YSSY", "YSSY YSBK")),
+            Current("ent_latest", Entry(new DateOnly(2026, 7, 19), "C172", "VH-ABC", "YSBK", "YSCN", "YSCN YMML"))
+        };
+
+        var defaults = MobileEntryDraftDefaultPlanner.Create(entries);
+
+        Assert.Equal(new MobileEntryDraftDefaults("C172", "VH-ABC", "YSCN", "YMML", "YSCN YMML"), defaults);
+    }
+
+    [Fact]
     public void CreateFallsBackToPreviousDepartureWhenLatestDestinationIsBlank()
     {
         var defaults = MobileEntryDraftDefaultPlanner.Create([
@@ -88,9 +102,18 @@ public sealed class MobileEntryDraftDefaultPlannerTests
         string from,
         string to,
         string route) =>
+        Entry(new DateOnly(2026, 7, 19), aircraftType, registration, from, to, route);
+
+    private static PortableLogbookEntry Entry(
+        DateOnly date,
+        string aircraftType,
+        string registration,
+        string from,
+        string to,
+        string route) =>
         PortableLogbookEntry.Empty with
         {
-            Date = new DateOnly(2026, 7, 19),
+            Date = date,
             AircraftType = aircraftType,
             Registration = registration,
             From = from,

@@ -48,8 +48,18 @@ jobs:
           $indexPath = Join-Path $siteRoot "index.html"
           $basePath = "/$($env:GITHUB_REPOSITORY.Split('/')[1])/"
           $index = Get-Content -LiteralPath $indexPath -Raw
+          if (-not $index.Contains('<base href="/" />')) {
+            throw "index.html did not contain the expected root base href."
+          }
           $index = $index.Replace('<base href="/" />', "<base href=""$basePath"" />")
           [System.IO.File]::WriteAllText($indexPath, $index, [System.Text.UTF8Encoding]::new($false))
+          $serviceWorkerPath = Join-Path $siteRoot "service-worker.js"
+          $serviceWorker = Get-Content -LiteralPath $serviceWorkerPath -Raw
+          if (-not $serviceWorker.Contains('const base = "/";')) {
+            throw "service-worker.js did not contain the expected root cache base."
+          }
+          $serviceWorker = $serviceWorker.Replace('const base = "/";', "const base = ""$basePath"";")
+          [System.IO.File]::WriteAllText($serviceWorkerPath, $serviceWorker, [System.Text.UTF8Encoding]::new($false))
           New-Item -ItemType File -Path (Join-Path $siteRoot ".nojekyll") -Force | Out-Null
 
       - name: Upload Pages artifact

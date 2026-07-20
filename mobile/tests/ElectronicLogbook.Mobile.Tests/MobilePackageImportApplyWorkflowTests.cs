@@ -153,6 +153,34 @@ public sealed class MobilePackageImportApplyWorkflowTests
     }
 
     [Fact]
+    public async Task ApplyIfReadyAsyncRejectsBrowserDecryptionFailureWithoutMutatingDocumentOrReceipts()
+    {
+        var local = CreateDocument("rev_local", 1.0m);
+        var incoming = CreateDocument("rev_local", 1.0m, CreateCorrection("rev_incoming", "rev_local", 1.4m));
+        var packageBytes = PortableLogbookPackage.Write(incoming, FixedKey());
+        var localPackageBytes = PortableLogbookPackage.Write(local, FixedKey());
+        var existingReceipt = PortableLogbookImportLedger.CreateReceipt(
+            localPackageBytes,
+            PortableLogbookPackage.ReadManifest(localPackageBytes),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"));
+        var jsRuntime = new ThrowingJsRuntime("Package key is not available.");
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var error = await Assert.ThrowsAsync<JSException>(async () =>
+            await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+                local,
+                file,
+                new BrowserPackageKeyStore(jsRuntime),
+                [existingReceipt],
+                DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
+
+        Assert.Contains("Package key is not available", error.Message, StringComparison.Ordinal);
+        Assert.Single(local.Operations);
+        Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.decrypt", jsRuntime.Calls[0].Identifier);
+    }
+
+    [Fact]
     public async Task ApplyIfReadyAsyncImportsEntryConflictsForLocalResolution()
     {
         var local = CreateDocument("rev_local", 1.0m);
@@ -274,6 +302,44 @@ public sealed class MobilePackageImportApplyWorkflowTests
     }
 
     [Fact]
+    public async Task ApplyWithCustomFieldResolutionsAsyncRejectsIncompleteResolutionWithoutMutatingDocumentOrReceipts()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var local = PortableLogbookDocument.CreateAustraliaFirst(
+            new LogbookId("log_mobile"),
+            [new CustomFieldDefinition(fieldId, "Training kind", 1)],
+            [CreateOperation("rev_local", 1.0m)]);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(
+            local.LogbookId,
+            [new CustomFieldDefinition(fieldId, "Training category", 1)],
+            [CreateOperation("rev_local", 1.0m), CreateCorrection("rev_incoming", "rev_local", 1.4m)]);
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var jsRuntime = RuntimeWithDecryption(packageBytes, key, local.LogbookId);
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+        var localPackageBytes = PortableLogbookPackage.Write(local, key);
+        var existingReceipt = PortableLogbookImportLedger.CreateReceipt(
+            localPackageBytes,
+            PortableLogbookPackage.ReadManifest(localPackageBytes),
+            DateTimeOffset.Parse("2026-07-18T00:01:00Z"));
+
+        var error = await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await MobilePackageImportApplyWorkflow.ApplyWithCustomFieldResolutionsAsync(
+                local,
+                file,
+                new BrowserPackageKeyStore(jsRuntime),
+                [existingReceipt],
+                [],
+                DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
+
+        Assert.Contains(fieldId.Value, error.Message, StringComparison.Ordinal);
+        Assert.Single(local.Operations);
+        Assert.Equal("Training kind", Assert.Single(local.CustomFieldDefinitions).Label);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.decrypt", call.Identifier);
+    }
+
+    [Fact]
     public async Task ApplyWithCustomFieldResolutionsAsyncReusesReadPackageWhenResolutionIsNotRequired()
     {
         var local = CreateDocument("rev_local", 1.0m);
@@ -295,6 +361,44 @@ public sealed class MobilePackageImportApplyWorkflowTests
         Assert.Equal(2, result.Document.Operations.Count);
         var call = Assert.Single(jsRuntime.Calls);
         Assert.Equal("electronicLogbookKeys.decrypt", call.Identifier);
+    }
+
+    [Fact]
+    public async Task ApplyWithCustomFieldResolutionsAsyncSkipsAlreadyRecordedPackageBeforeDecrypting()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var local = PortableLogbookDocument.CreateAustraliaFirst(
+            new LogbookId("log_mobile"),
+            [new CustomFieldDefinition(fieldId, "Training kind", 1)],
+            [CreateOperation("rev_local", 1.0m)]);
+        var incoming = PortableLogbookDocument.CreateAustraliaFirst(
+            local.LogbookId,
+            [new CustomFieldDefinition(fieldId, "Training category", 1)],
+            [CreateOperation("rev_local", 1.0m), CreateCorrection("rev_incoming", "rev_local", 1.4m)]);
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var manifest = PortableLogbookPackage.ReadManifest(packageBytes);
+        var receipt = PortableLogbookImportLedger.CreateReceipt(
+            packageBytes,
+            manifest,
+            DateTimeOffset.Parse("2026-07-19T00:01:00Z"));
+        var jsRuntime = new RecordingJsRuntime();
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyWithCustomFieldResolutionsAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [receipt],
+            [new PortableLogbookCustomFieldDefinitionResolution(fieldId, PortableLogbookCustomFieldDefinitionChoice.KeepLocal)],
+            DateTimeOffset.Parse("2026-07-19T00:02:00Z"));
+
+        Assert.Equal(MobilePackageImportApplyStatus.PackageReplay, result.Status);
+        Assert.Same(local, result.Document);
+        Assert.Same(receipt, Assert.Single(result.ImportReceipts));
+        Assert.Null(result.Plan);
+        Assert.Null(result.Receipt);
+        Assert.Empty(jsRuntime.Calls);
     }
 
     [Fact]
@@ -512,6 +616,26 @@ public sealed class MobilePackageImportApplyWorkflowTests
             Calls.Add(new JsCall(identifier, args ?? []));
             var result = Results.Count > 0 ? Results.Dequeue() : default;
             return new ValueTask<TValue>((TValue)result!);
+        }
+    }
+
+    private sealed class ThrowingJsRuntime(string message) : IJSRuntime
+    {
+        public List<JsCall> Calls { get; } = [];
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        {
+            return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        }
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add(new JsCall(identifier, args ?? []));
+            throw new JSException(message);
         }
     }
 

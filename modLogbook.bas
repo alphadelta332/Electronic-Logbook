@@ -6146,7 +6146,8 @@ Private Sub BuildLogbookExportColumns(ByVal sourceTable As ListObject, _
     customStart = sourceTable.ListColumns("OPC").Index + 1
     customEnd = sourceTable.ListColumns("SeIcusDay").Index - 1
     For columnIndex = customStart To customEnd
-        If LogbookExportColumnHasData(sourceTable, columnIndex, selectedRows) Then
+        If Not IsPortableLogbookMetadataColumnName(sourceTable.ListColumns(columnIndex).Name) And _
+           LogbookExportColumnHasData(sourceTable, columnIndex, selectedRows) Then
             outputHeaders.Add sourceTable.ListColumns(columnIndex).Name
             sourceIndexes.Add columnIndex
         End If
@@ -6169,6 +6170,15 @@ Private Sub AddLogbookExportColumn(ByVal sourceTable As ListObject, _
     outputHeaders.Add sourceTable.ListColumns(columnName).Name
     sourceIndexes.Add sourceTable.ListColumns(columnName).Index
 End Sub
+
+Private Function IsPortableLogbookMetadataColumnName(ByVal columnName As String) As Boolean
+    Dim normalized As String
+
+    normalized = LCase$(Trim$(columnName))
+    IsPortableLogbookMetadataColumnName = _
+        normalized = "portable entry id" Or _
+        normalized = "portable current revision id"
+End Function
 
 Private Function LogbookExportColumnHasData(ByVal sourceTable As ListObject, _
                                             ByVal columnIndex As Long, _
@@ -7034,42 +7044,18 @@ Sub SetLogbookFilterArrows()
 End Sub
 
 Public Sub ShowPortableLogbookStatus()
-    Dim updaterPath As String
-    Dim outputPath As String
-    Dim errorPath As String
-    Dim commandLine As String
-    Dim shellObj As Object
     Dim exitCode As Long
     Dim outputText As String
     Dim errorText As String
-    Dim suffix As String
+    Dim arguments As String
 
     On Error GoTo Fail
 
-    updaterPath = ResolvePortableLogbookUpdaterPath()
-    If updaterPath = "" Then
-        MsgBox "Portable Logbook status requires " & PORTABLE_LOGBOOK_UPDATER_EXE_NAME & _
-               " beside this workbook or in the named range " & PORTABLE_LOGBOOK_UPDATER_PATH_NAME & ".", _
-               vbExclamation, "Portable Logbook"
-        Exit Sub
-    End If
-
-    suffix = Format$(Now, "yyyymmdd-hhnnss") & "-" & CStr(CLng(Timer * 1000))
-    outputPath = Environ$("TEMP") & "\ElectronicLogbookPortableStatus-" & suffix & ".txt"
-    errorPath = Environ$("TEMP") & "\ElectronicLogbookPortableStatus-" & suffix & ".err"
-    commandLine = "cmd.exe /d /s /c " & QuoteCommandArgument( _
-        QuoteCommandArgument(updaterPath) & _
-        " portable status --workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
-        " > " & QuoteCommandArgument(outputPath) & _
-        " 2> " & QuoteCommandArgument(errorPath))
-
-    Set shellObj = CreateObject("WScript.Shell")
-    exitCode = CLng(shellObj.Run(commandLine, 0, True))
-    outputText = ReadTextFileIfExists(outputPath)
-    errorText = ReadTextFileIfExists(errorPath)
-
-    DeleteFileIfExists outputPath
-    DeleteFileIfExists errorPath
+    exitCode = RunPortableLogbookCommand( _
+        "status", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName), _
+        outputText, _
+        errorText)
 
     If exitCode = 0 Then
         MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
@@ -7080,14 +7066,456 @@ Public Sub ShowPortableLogbookStatus()
     Exit Sub
 
 Fail:
-    DeleteFileIfExists outputPath
-    DeleteFileIfExists errorPath
     MsgBox BuildUserFacingErrorMessage( _
         "Portable Logbook status failed.", _
         "PORTABLE-STATUS-E001", _
         Err.Description), _
         vbExclamation, "Portable Logbook"
 End Sub
+
+Public Sub EnablePortableLogbook()
+    Dim recoveryPath As String
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryOutputPath()
+    If recoveryPath = "" Then Exit Sub
+
+    exitCode = RunPortableLogbookCommand( _
+        "enable", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-output " & QuoteCommandArgument(recoveryPath), _
+        outputText, _
+        errorText)
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook enable failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook enable failed.", _
+        "PORTABLE-ENABLE-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Public Sub ExportPortableLogbookPackage()
+    Dim recoveryPath As String
+    Dim packagePath As String
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryCodePath()
+    If recoveryPath = "" Then Exit Sub
+
+    packagePath = ChoosePortablePackageOutputPath()
+    If packagePath = "" Then Exit Sub
+
+    exitCode = RunPortableLogbookCommand( _
+        "export", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+        " --output " & QuoteCommandArgument(packagePath), _
+        outputText, _
+        errorText)
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook export failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook export failed.", _
+        "PORTABLE-EXPORT-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Public Sub PreviewPortableLogbookPackageImport()
+    Dim recoveryPath As String
+    Dim packagePath As String
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryCodePath()
+    If recoveryPath = "" Then Exit Sub
+
+    packagePath = ChoosePortablePackageInputPath()
+    If packagePath = "" Then Exit Sub
+
+    exitCode = RunPortableLogbookCommand( _
+        "import-preview", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+        " --package " & QuoteCommandArgument(packagePath), _
+        outputText, _
+        errorText)
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook import preview failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook import preview failed.", _
+        "PORTABLE-IMPORT-PREVIEW-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Public Sub ImportPortableLogbookPackage()
+    Dim recoveryPath As String
+    Dim packagePath As String
+    Dim previewExitCode As Long
+    Dim applyExitCode As Long
+    Dim previewOutput As String
+    Dim previewError As String
+    Dim applyOutput As String
+    Dim applyError As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryCodePath()
+    If recoveryPath = "" Then Exit Sub
+
+    packagePath = ChoosePortablePackageInputPath()
+    If packagePath = "" Then Exit Sub
+
+    previewExitCode = RunPortableLogbookCommand( _
+        "import-preview", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+        " --package " & QuoteCommandArgument(packagePath), _
+        previewOutput, _
+        previewError)
+
+    If previewExitCode <> 0 Then
+        MsgBox "Portable Logbook import preview failed." & vbCrLf & vbCrLf & Trim$(previewError), _
+               vbExclamation, "Portable Logbook"
+        Exit Sub
+    End If
+
+    If MsgBox(Trim$(previewOutput) & vbCrLf & vbCrLf & _
+              "Apply this package to the workbook portable storage?", _
+              vbQuestion + vbYesNo + vbDefaultButton2, _
+              "Portable Logbook") <> vbYes Then
+        Exit Sub
+    End If
+
+    applyExitCode = RunPortableLogbookCommand( _
+        "import-apply", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+        " --package " & QuoteCommandArgument(packagePath), _
+        applyOutput, _
+        applyError)
+
+    If applyExitCode = 0 Then
+        MsgBox Trim$(applyOutput), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook import failed." & vbCrLf & vbCrLf & Trim$(applyError), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook import failed.", _
+        "PORTABLE-IMPORT-APPLY-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Public Sub ProducePortableLogbookPrintedCopy()
+    Dim recoveryPath As String
+    Dim outputPath As String
+    Dim holderName As String
+    Dim holderDateOfBirth As String
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryCodePath()
+    If recoveryPath = "" Then Exit Sub
+
+    outputPath = ChoosePortablePrintedCopyOutputPath()
+    If outputPath = "" Then Exit Sub
+
+    holderName = Trim$(InputBox$("Holder full name for this printed copy:", "Portable Logbook"))
+    If holderName = "" Then Exit Sub
+
+    holderDateOfBirth = Trim$(InputBox$("Holder date of birth (yyyy-mm-dd):", "Portable Logbook"))
+    If holderDateOfBirth = "" Then Exit Sub
+    If Not IsIsoDateOnly(holderDateOfBirth) Then
+        MsgBox "Enter the holder date of birth as yyyy-mm-dd.", vbExclamation, "Portable Logbook"
+        Exit Sub
+    End If
+
+    exitCode = RunPortableLogbookCommand( _
+        "printed-copy", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+        " --output " & QuoteCommandArgument(outputPath) & _
+        " --holder-name " & QuoteCommandArgument(holderName) & _
+        " --holder-date-of-birth " & QuoteCommandArgument(holderDateOfBirth) & _
+        " --certified-on " & QuoteCommandArgument(Format$(Date, "yyyy-mm-dd")), _
+        outputText, _
+        errorText)
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook printed copy failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook printed copy failed.", _
+        "PORTABLE-PRINTED-COPY-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Public Sub ViewPortableLogbookRevisionHistory()
+    Dim recoveryPath As String
+    Dim entryId As String
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryCodePath()
+    If recoveryPath = "" Then Exit Sub
+
+    entryId = Trim$(InputBox$("Portable entry ID to view:", "Portable Logbook"))
+    If entryId = "" Then Exit Sub
+
+    exitCode = RunPortableLogbookCommand( _
+        "revision-history", _
+        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+        " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+        " --entry-id " & QuoteCommandArgument(entryId), _
+        outputText, _
+        errorText)
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook revision history failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook revision history failed.", _
+        "PORTABLE-REVISION-HISTORY-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Public Sub ResolvePortableLogbookConflict()
+    Dim recoveryPath As String
+    Dim entryId As String
+    Dim revisionId As String
+    Dim note As String
+    Dim exitCode As Long
+    Dim outputText As String
+    Dim errorText As String
+
+    On Error GoTo Fail
+
+    recoveryPath = ChoosePortableRecoveryCodePath()
+    If recoveryPath = "" Then Exit Sub
+
+    entryId = Trim$(InputBox$("Portable entry ID to resolve:", "Portable Logbook"))
+    If entryId = "" Then Exit Sub
+
+    revisionId = Trim$(InputBox$("Conflict head revision ID to keep:", "Portable Logbook"))
+    If revisionId = "" Then Exit Sub
+
+    note = Trim$(InputBox$("Optional resolution note:", "Portable Logbook"))
+
+    arguments = "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & _
+                " --recovery-code-file " & QuoteCommandArgument(recoveryPath) & _
+                " --entry-id " & QuoteCommandArgument(entryId) & _
+                " --revision-id " & QuoteCommandArgument(revisionId)
+    If note <> "" Then
+        arguments = arguments & " --note " & QuoteCommandArgument(note)
+    End If
+
+    exitCode = RunPortableLogbookCommand( _
+        "resolve-conflict", _
+        arguments, _
+        outputText, _
+        errorText)
+
+    If exitCode = 0 Then
+        MsgBox Trim$(outputText), vbInformation, "Portable Logbook"
+    Else
+        MsgBox "Portable Logbook conflict resolution failed." & vbCrLf & vbCrLf & Trim$(errorText), _
+               vbExclamation, "Portable Logbook"
+    End If
+    Exit Sub
+
+Fail:
+    MsgBox BuildUserFacingErrorMessage( _
+        "Portable Logbook conflict resolution failed.", _
+        "PORTABLE-RESOLVE-CONFLICT-E001", _
+        Err.Description), _
+        vbExclamation, "Portable Logbook"
+End Sub
+
+Private Function RunPortableLogbookCommand(ByVal portableCommand As String, _
+                                           ByVal arguments As String, _
+                                           ByRef outputText As String, _
+                                           ByRef errorText As String) As Long
+    Dim updaterPath As String
+    Dim outputPath As String
+    Dim errorPath As String
+    Dim commandLine As String
+    Dim shellObj As Object
+    Dim suffix As String
+
+    updaterPath = ResolvePortableLogbookUpdaterPath()
+    If updaterPath = "" Then
+        Err.Raise vbObjectError + 2450, "RunPortableLogbookCommand", _
+                  "Portable Logbook actions require " & PORTABLE_LOGBOOK_UPDATER_EXE_NAME & _
+                  " beside this workbook or in the named range " & PORTABLE_LOGBOOK_UPDATER_PATH_NAME & "."
+    End If
+
+    suffix = Format$(Now, "yyyymmdd-hhnnss") & "-" & CStr(CLng(Timer * 1000))
+    outputPath = Environ$("TEMP") & "\ElectronicLogbookPortable-" & suffix & ".txt"
+    errorPath = Environ$("TEMP") & "\ElectronicLogbookPortable-" & suffix & ".err"
+    commandLine = "cmd.exe /d /s /c " & QuoteCommandArgument( _
+        QuoteCommandArgument(updaterPath) & _
+        " portable " & portableCommand & " " & arguments & _
+        " > " & QuoteCommandArgument(outputPath) & _
+        " 2> " & QuoteCommandArgument(errorPath))
+
+    Set shellObj = CreateObject("WScript.Shell")
+    RunPortableLogbookCommand = CLng(shellObj.Run(commandLine, 0, True))
+    outputText = ReadTextFileIfExists(outputPath)
+    errorText = ReadTextFileIfExists(errorPath)
+
+    DeleteFileIfExists outputPath
+    DeleteFileIfExists errorPath
+End Function
+
+Private Function ChoosePortablePrintedCopyOutputPath() As String
+    Dim selectedPath As Variant
+    Dim defaultPath As String
+
+    defaultPath = ResolveLocalPath(ThisWorkbook) & Application.PathSeparator & _
+                  "Electronic Logbook Printed Copy " & Format$(Date, "yyyy-mm-dd") & ".html"
+    selectedPath = Application.GetSaveAsFilename( _
+        InitialFileName:=defaultPath, _
+        FileFilter:="HTML File (*.html),*.html", _
+        Title:="Choose Printed Copy Location")
+    If VarType(selectedPath) = vbBoolean Then Exit Function
+
+    ChoosePortablePrintedCopyOutputPath = EnsureFileExtension(CStr(selectedPath), ".html")
+End Function
+
+Private Function IsIsoDateOnly(ByVal value As String) As Boolean
+    Dim parsed As Date
+
+    If Not value Like "####-##-##" Then Exit Function
+    On Error GoTo InvalidDate
+    parsed = DateSerial(CInt(Left$(value, 4)), CInt(Mid$(value, 6, 2)), CInt(Right$(value, 2)))
+    IsIsoDateOnly = (Format$(parsed, "yyyy-mm-dd") = value)
+    Exit Function
+
+InvalidDate:
+    IsIsoDateOnly = False
+End Function
+
+Private Function ChoosePortableRecoveryOutputPath() As String
+    Dim selectedPath As Variant
+    Dim defaultPath As String
+
+    defaultPath = ResolveLocalPath(ThisWorkbook) & Application.PathSeparator & _
+                  "Electronic Logbook Portable Recovery " & Format$(Date, "yyyy-mm-dd") & ".txt"
+    selectedPath = Application.GetSaveAsFilename( _
+        InitialFileName:=defaultPath, _
+        FileFilter:="Text File (*.txt),*.txt", _
+        Title:="Choose Portable Recovery Code Location")
+    If VarType(selectedPath) = vbBoolean Then Exit Function
+
+    ChoosePortableRecoveryOutputPath = EnsureFileExtension(CStr(selectedPath), ".txt")
+End Function
+
+Private Function ChoosePortableRecoveryCodePath() As String
+    Dim selectedPath As Variant
+
+    selectedPath = Application.GetOpenFilename( _
+        FileFilter:="Text File (*.txt),*.txt,All Files (*.*),*.*", _
+        Title:="Choose Portable Recovery Code File")
+    If VarType(selectedPath) = vbBoolean Then Exit Function
+
+    ChoosePortableRecoveryCodePath = CStr(selectedPath)
+End Function
+
+Private Function ChoosePortablePackageOutputPath() As String
+    Dim selectedPath As Variant
+    Dim defaultPath As String
+
+    defaultPath = ResolveLocalPath(ThisWorkbook) & Application.PathSeparator & _
+                  "Electronic Logbook " & Format$(Date, "yyyy-mm-dd") & ".elogbook"
+    selectedPath = Application.GetSaveAsFilename( _
+        InitialFileName:=defaultPath, _
+        FileFilter:="Portable Logbook Package (*.elogbook),*.elogbook", _
+        Title:="Choose Portable Package Location")
+    If VarType(selectedPath) = vbBoolean Then Exit Function
+
+    ChoosePortablePackageOutputPath = EnsureFileExtension(CStr(selectedPath), ".elogbook")
+End Function
+
+Private Function ChoosePortablePackageInputPath() As String
+    Dim selectedPath As Variant
+
+    selectedPath = Application.GetOpenFilename( _
+        FileFilter:="Portable Logbook Package (*.elogbook),*.elogbook", _
+        Title:="Choose Portable Package")
+    If VarType(selectedPath) = vbBoolean Then Exit Function
+
+    ChoosePortablePackageInputPath = CStr(selectedPath)
+End Function
+
+Private Function EnsureFileExtension(ByVal filePath As String, ByVal extension As String) As String
+    If LCase$(Right$(filePath, Len(extension))) = LCase$(extension) Then
+        EnsureFileExtension = filePath
+    Else
+        EnsureFileExtension = filePath & extension
+    End If
+End Function
 
 Private Function ResolvePortableLogbookUpdaterPath() As String
     Dim namedPath As String
@@ -8308,6 +8736,27 @@ Private Sub ConfigureNewEntryCommandButtons(ByVal ws As Worksheet)
         ElseIf InStr(nameText, "portablelogbookstatus") > 0 Or _
                (InStr(labelText, "portable") > 0 And InStr(labelText, "status") > 0) Then
             actionName = "ShowPortableLogbookStatus"
+        ElseIf InStr(nameText, "enableportablelogbook") > 0 Or _
+               (InStr(labelText, "enable") > 0 And InStr(labelText, "portable") > 0) Then
+            actionName = "EnablePortableLogbook"
+        ElseIf InStr(nameText, "exportportablelogbookpackage") > 0 Or _
+               (InStr(labelText, "export") > 0 And InStr(labelText, "portable") > 0) Then
+            actionName = "ExportPortableLogbookPackage"
+        ElseIf InStr(nameText, "previewportablelogbookpackageimport") > 0 Or _
+               (InStr(labelText, "preview") > 0 And InStr(labelText, "portable") > 0 And InStr(labelText, "import") > 0) Then
+            actionName = "PreviewPortableLogbookPackageImport"
+        ElseIf InStr(nameText, "importportablelogbookpackage") > 0 Or _
+               (InStr(labelText, "import") > 0 And InStr(labelText, "portable") > 0) Then
+            actionName = "ImportPortableLogbookPackage"
+        ElseIf InStr(nameText, "produceportablelogbookprintedcopy") > 0 Or _
+               (InStr(labelText, "printed") > 0 And InStr(labelText, "portable") > 0) Then
+            actionName = "ProducePortableLogbookPrintedCopy"
+        ElseIf InStr(nameText, "viewportablelogbookrevisionhistory") > 0 Or _
+               (InStr(labelText, "revision") > 0 And InStr(labelText, "portable") > 0) Then
+            actionName = "ViewPortableLogbookRevisionHistory"
+        ElseIf InStr(nameText, "resolveportablelogbookconflict") > 0 Or _
+               (InStr(labelText, "resolve") > 0 And InStr(labelText, "portable") > 0 And InStr(labelText, "conflict") > 0) Then
+            actionName = "ResolvePortableLogbookConflict"
         ElseIf InStr(nameText, "reportabug") > 0 Or InStr(labelText, "report a bug") > 0 Then
             actionName = "ReportBug"
         ElseIf InStr(nameText, "suppresswarnings") > 0 Or InStr(labelText, "suppress warnings") > 0 Then

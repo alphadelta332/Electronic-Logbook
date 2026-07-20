@@ -224,8 +224,18 @@ textarea {
 .actions,
 .exchange-box {
     display: flex;
+    align-items: center;
     gap: 10px;
     flex-wrap: wrap;
+}
+
+.recovery-code-input {
+    min-height: 42px;
+    width: min(100%, 320px);
+    border: 1px solid #b8c2d1;
+    border-radius: 6px;
+    padding: 0 12px;
+    background: #ffffff;
 }
 
 .key-notice {

@@ -21,7 +21,9 @@ public static class MobileEntryDraftDefaultPlanner
         ArgumentNullException.ThrowIfNull(currentEntries);
 
         var latestEntry = currentEntries
-            .FirstOrDefault(entry => !entry.IsDeleted && entry.Entry is not null)
+            .Where(entry => !entry.IsDeleted && entry.Entry is not null)
+            .OrderByDescending(entry => entry.Entry!.Date ?? DateOnly.MinValue)
+            .FirstOrDefault()
             ?.Entry;
         if (latestEntry is null)
         {

@@ -63,6 +63,7 @@ public static class PortableLogbookPrintedCopy
                 request.RetentionSnapshot),
             request.AuditSnapshot.CustomFieldDefinitions,
             request.AuditSnapshot.RevisionHistory,
+            request.AuditSnapshot.Conflicts,
             new PortableLogbookPrintedCopyCertificationBlock(
                 request.HolderFullName,
                 request.HolderDateOfBirth,
@@ -114,6 +115,7 @@ public static class PortableLogbookPrintedCopy
                 AppendAuditSummary(builder, pagePlan.AuditSummary);
                 AppendCertificationBlock(builder, pagePlan.CertificationBlock);
                 AppendRevisionHistory(builder, pagePlan.RevisionHistory);
+                AppendConflicts(builder, pagePlan.Conflicts);
             }
 
             AppendRecords(builder, page.Records, pagePlan.CustomFieldDefinitions);
@@ -252,7 +254,7 @@ public static class PortableLogbookPrintedCopy
         yield return "Landings night";
         yield return "IFR approaches";
         yield return "Holding";
-        yield return "RNAV";
+        yield return "RNP";
         yield return "Circling";
         yield return "Entry ID";
         yield return "Revision ID";
@@ -288,6 +290,31 @@ public static class PortableLogbookPrintedCopy
                 builder.Append(Escape(string.Join(", ", revision.VerifiedParentRevisionIds.Select(parent => parent.Value))));
                 builder.AppendLine("</td></tr>");
             }
+        }
+
+        builder.AppendLine("</tbody>");
+        builder.AppendLine("</table>");
+    }
+
+    private static void AppendConflicts(StringBuilder builder, IReadOnlyList<PortableLogbookConflict> conflicts)
+    {
+        builder.AppendLine("<h2>Unresolved conflict details</h2>");
+        if (conflicts.Count == 0)
+        {
+            builder.AppendLine("<p>No unresolved conflicts.</p>");
+            return;
+        }
+
+        builder.AppendLine("<table>");
+        builder.AppendLine("<thead><tr><th>Entry ID</th><th>Head revision IDs</th></tr></thead>");
+        builder.AppendLine("<tbody>");
+        foreach (var conflict in conflicts)
+        {
+            builder.Append("<tr><td>");
+            builder.Append(Escape(conflict.EntryId.Value));
+            builder.Append("</td><td>");
+            builder.Append(Escape(string.Join(", ", conflict.HeadRevisionIds.Select(revision => revision.Value))));
+            builder.AppendLine("</td></tr>");
         }
 
         builder.AppendLine("</tbody>");
@@ -349,6 +376,7 @@ public sealed record PortableLogbookPrintedCopyPagePlan(
     PortableLogbookPrintedCopyAuditSummary AuditSummary,
     IReadOnlyList<CustomFieldDefinition> CustomFieldDefinitions,
     IReadOnlyList<PortableLogbookEntryRevisionHistory> RevisionHistory,
+    IReadOnlyList<PortableLogbookConflict> Conflicts,
     PortableLogbookPrintedCopyCertificationBlock CertificationBlock);
 
 public sealed record PortableLogbookPrintedCopyPage(
