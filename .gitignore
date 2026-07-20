@@ -33,3 +33,5 @@ Electronic Logbook 2.*
 IMPROVEMENT_ROADMAP.md
 *.pem
 !updater/release-manifest-signing-public-key.pem
+# Local mobile app icon assets
+/mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
