@@ -136,7 +136,7 @@ function Save-SplashPng {
 
 $source = [System.Drawing.Bitmap]::FromFile((Resolve-Path -LiteralPath $sourceIcon).Path)
 try {
-    $adaptiveForegroundArtworkScale = 0.60
+    $adaptiveForegroundArtworkScale = 0.75
 
     Save-ResizedPng -Source $source -Destination (Join-Path $mobileRoot "src\ElectronicLogbook.Mobile\wwwroot\icon-192.png") -Width 192 -Height 192
     Save-ResizedPng -Source $source -Destination (Join-Path $mobileRoot "src\ElectronicLogbook.Mobile\wwwroot\icon-512.png") -Width 512 -Height 512

@@ -58,6 +58,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Generate mobile PWA icons
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File mobile/scripts/Generate-AppIcons.ps1
+
       - name: Build solution
         run: dotnet build ElectronicLogbook.Updater.sln --configuration Release
 
