@@ -24,9 +24,6 @@ jobs:
     name: Build and publish static PWA
     runs-on: windows-latest
     timeout-minutes: 15
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Check out repository

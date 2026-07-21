@@ -19,6 +19,7 @@ jobs:
   validate:
     name: Validate release candidate
     runs-on: [self-hosted, windows, excel]
+    environment: release
     timeout-minutes: 90
     outputs:
       release_version: ${{ steps.target.outputs.release_version }}
