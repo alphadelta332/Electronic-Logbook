@@ -1,0 +1,41 @@
+# Keep the default Graphify map focused on hand-authored product architecture.
+# Syntax matches .gitignore; Graphify also respects .gitignore automatically.
+
+# Graphify output and local agent state
+graphify-out/
+.codex/
+.claude/
+
+# Build, package, and dependency output
+**/bin/
+**/obj/
+**/TestResults/
+mobile/node_modules/
+mobile/artifacts/
+updater/dist/
+
+# Generated mobile runtime and publish/sync output
+mobile/android/app/src/main/assets/public/
+mobile/src/ElectronicLogbook.Mobile/wwwroot/_framework/
+mobile/src/ElectronicLogbook.Mobile/wwwroot/service-worker.published.js
+*.min.js
+
+# Tests are useful for validation, but they dominate the architecture graph and
+# tend to steer planning toward hardening instead of product gates.
+**/tests/
+*Tests.cs
+*.Tests.csproj
+
+# Binary and rendered artifacts are not useful architecture inputs.
+*.xlsm
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.zip
+*.jar
+
+# Large/generated package metadata
+mobile/package-lock.json

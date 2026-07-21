@@ -13,6 +13,8 @@ diagnostics_*.txt
 **/TestResults/
 mobile/node_modules/
 mobile/artifacts/
+mobile/android/app/src/main/assets/public/
+mobile/src/ElectronicLogbook.Mobile/wwwroot/_framework/
 mobile/android/app/src/main/res/drawable/splash.png
 mobile/android/app/src/main/res/drawable-land-*/splash.png
 mobile/android/app/src/main/res/drawable-port-*/splash.png
