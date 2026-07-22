@@ -78,6 +78,42 @@ public sealed class MobilePackageExportWorkflowTests
         Assert.Equal(result.PackageBytes, Assert.Single(jsRuntime.DownloadedPackages));
     }
 
+    [Fact]
+    public async Task ExportAsyncProducesDecryptablePackageContainingOfflineCorrection()
+    {
+        var document = CreateDocument();
+        var create = Assert.IsType<CreateEntryOperation>(Assert.Single(document.Operations));
+        var correction = new CorrectEntryOperation(
+            document.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_mobile_exported_correction"),
+            new HashSet<RevisionId> { create.RevisionId },
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-19T04:00:00Z"),
+            create.Entry with
+            {
+                Registration = "VH-EXP",
+                Details = "Offline correction exported"
+            });
+        var changedDocument = MobileLogbookDocument.AppendOperation(document, [], correction);
+        var exportedAt = DateTimeOffset.Parse("2026-07-19T04:05:06Z");
+        var key = PortableLogbookKey.FromBytes(Enumerable.Range(1, PortableLogbookPackage.KeySizeBytes).Select(value => (byte)value).ToArray());
+        var jsRuntime = new EncryptingJsRuntime(key);
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var fileStore = new BrowserFileStore(jsRuntime);
+
+        var result = await MobilePackageExportWorkflow.ExportAsync(changedDocument, keyStore, fileStore, exportedAt);
+        var read = PortableLogbookPackage.Read(result.PackageBytes, key, changedDocument.LogbookId);
+        var materialized = Assert.Single(PortableLogbookMerger.Merge(read.Document.Operations).Entries.Values);
+
+        Assert.Equal(2, read.Manifest.OperationCount);
+        Assert.Equal([create.RevisionId, correction.RevisionId], read.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal(correction.RevisionId, materialized.CurrentRevisionId);
+        Assert.Equal("VH-EXP", materialized.Entry?.Registration);
+        Assert.Equal("Offline correction exported", materialized.Entry?.Details);
+        Assert.Equal(result.PackageBytes, Assert.Single(jsRuntime.DownloadedPackages));
+    }
+
     private static PortableLogbookDocument CreateDocument()
     {
         var create = new CreateEntryOperation(

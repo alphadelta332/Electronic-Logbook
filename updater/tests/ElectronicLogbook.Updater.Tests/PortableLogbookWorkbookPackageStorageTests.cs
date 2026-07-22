@@ -386,6 +386,40 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadCurrentRowsMapsMasterWorkbookColumnAliases()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(
+                archive,
+                "A1:I2",
+                ["Date", "Type", "Reg", "Flight ID", "From", "To", "Via", "Remarks", "IfrSim"]);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A2", "2026-07-20");
+            UpsertInlineStringCell(worksheet, "B2", "A320");
+            UpsertInlineStringCell(worksheet, "C2", "VH-ALS");
+            UpsertInlineStringCell(worksheet, "D2", "QF123");
+            UpsertInlineStringCell(worksheet, "E2", "YSBK");
+            UpsertInlineStringCell(worksheet, "F2", "YMML");
+            UpsertInlineStringCell(worksheet, "G2", "DCT");
+            UpsertInlineStringCell(worksheet, "H2", "Alias row");
+            UpsertInlineStringCell(worksheet, "I2", "1.1");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
+
+        var row = Assert.Single(rows);
+        Assert.Equal("A320", row.Entry.AircraftType);
+        Assert.Equal("VH-ALS", row.Entry.Registration);
+        Assert.Equal("QF123", row.Entry.FlightNumber);
+        Assert.Equal("DCT", row.Entry.Route);
+        Assert.Equal("Alias row", row.Entry.Details);
+        Assert.Equal(1.1m, row.Entry.InstrumentSimulated);
+    }
+
+    [Fact]
     public void ReadCurrentRowsSkipsCompletelyBlankRows()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -395,6 +429,68 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
                 archive,
                 "A1:C3",
                 ["Date", "Portable Entry ID", "Portable Current Revision ID"]);
+        }
+
+        var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public void ReadCurrentRowsSkipsSummaryRowsWithoutFlightIdentity()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(
+                archive,
+                "A1:B2",
+                ["Date", "PIC"]);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "B2", "Grand Total Flying Hours");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public void ReadCurrentRowsSkipsPlaceholderRowsWithoutFlightIdentityOrTime()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(
+                archive,
+                "A1:C2",
+                ["Date", "Via", "PIC"]);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A2", "2000-01-01");
+            UpsertInlineStringCell(worksheet, "B2", "Do not delete these placeholder entries until");
+            UpsertInlineStringCell(worksheet, "C2", "0");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
+
+        Assert.Empty(rows);
+    }
+
+    [Fact]
+    public void ReadCurrentRowsSkipsTemplatePlaceholderRowsWithoutAircraftOrLoggedTime()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(
+                archive,
+                "A1:F2",
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC"]);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A2", "2000-01-01");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
         }
 
         var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
@@ -433,6 +529,48 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         Assert.Equal("log_identity", ReadInlineStringCell(backend, "A8"));
         Assert.Equal("dev_identity", ReadInlineStringCell(backend, "A9"));
         Assert.Equal(PortableLogbookDocument.CurrentSchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), ReadInlineStringCell(backend, "A10"));
+    }
+
+    [Fact]
+    public void EnsureWorkbookIdentityMetadataUsesExistingWorkbookMetadataSheetAndColumn()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var workbookXml = ReadXml(archive, "xl/workbook.xml");
+            var backendSheet = workbookXml
+                .Descendants()
+                .Single(element => element.Name.LocalName == "sheet" && (string?)element.Attribute("name") == "Backend");
+            backendSheet.SetAttributeValue("name", "Admin");
+            SetDefinedName(workbookXml, "LogbookVersion", "Admin!$C$4");
+            SetDefinedName(workbookXml, "suppressWarningsUntil", "Admin!$C$5");
+            SetDefinedName(workbookXml, "DateAfterExport", "Admin!$C$7");
+            SetDefinedName(workbookXml, "RoutesBuilt", "Admin!$C$8");
+            SetDefinedName(workbookXml, "GitHubBranch", "Admin!$C$13");
+            ReplaceXml(archive, "xl/workbook.xml", workbookXml);
+
+            var admin = ReadXml(archive, "xl/worksheets/sheet1.xml");
+            UpsertInlineStringCell(admin, "C4", TestRepo.Version);
+            ReplaceXml(archive, "xl/worksheets/sheet1.xml", admin);
+        }
+
+        var result = PortableLogbookWorkbookPackageStorage.EnsureWorkbookIdentityMetadata(
+            workbook,
+            new LogbookId("log_admin_identity"),
+            new DeviceId("dev_admin_identity"),
+            PortableLogbookDocument.CurrentSchemaVersion);
+
+        Assert.Equal(["C14", "C15", "C16"], result.CellsWritten);
+        using var readArchive = ZipFile.OpenRead(workbook);
+        var workbookAfter = ReadXml(readArchive, "xl/workbook.xml");
+        AssertDefinedName(workbookAfter, PortableLogbookWorkbookMetadata.LogbookIdName, "'Admin'!$C$14");
+        AssertDefinedName(workbookAfter, PortableLogbookWorkbookMetadata.DeviceIdName, "'Admin'!$C$15");
+        AssertDefinedName(workbookAfter, PortableLogbookWorkbookMetadata.SchemaVersionName, "'Admin'!$C$16");
+
+        var adminAfter = ReadXml(readArchive, "xl/worksheets/sheet1.xml");
+        Assert.Equal("log_admin_identity", ReadInlineStringCell(adminAfter, "C14"));
+        Assert.Equal("dev_admin_identity", ReadInlineStringCell(adminAfter, "C15"));
+        Assert.Equal(PortableLogbookDocument.CurrentSchemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture), ReadInlineStringCell(adminAfter, "C16"));
     }
 
     [Fact]
@@ -623,6 +761,16 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
                 (string?)element.Attribute("name") == name);
         Assert.Equal(expectedReference, definedName.Value);
         Assert.Equal("1", (string?)definedName.Attribute("hidden"));
+    }
+
+    private static void SetDefinedName(XDocument workbook, string name, string reference)
+    {
+        var definedName = workbook
+            .Descendants()
+            .Single(element =>
+                element.Name.LocalName == "definedName" &&
+                (string?)element.Attribute("name") == name);
+        definedName.Value = reference;
     }
 
     private static string? ReadInlineStringCell(XDocument worksheet, string cellReference) =>

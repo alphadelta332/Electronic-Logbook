@@ -274,6 +274,15 @@
                             <strong>@entry.Entry.From - @entry.Entry.To</strong>
                             <span>@FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry)) hr total</span>
                         </div>
+                        <div class="entry-details" aria-label="Flight entry details">
+                            @foreach (var detail in EntryDetails(entry.Entry))
+                            {
+                                <span>
+                                    <strong>@detail.Label</strong>
+                                    @detail.Value
+                                </span>
+                            }
+                        </div>
                         <div class="row-actions">
                             <button type="button" @onclick="() => EditEntry(entry)">Edit</button>
                             <button type="button" @onclick="() => CloneEntry(entry.Entry)">Clone</button>
@@ -675,15 +684,33 @@
                 return;
             }
 
-            await PackageKeyStore.ImportRecoveryCodeAsync(Document.LogbookId, RecoveryCodeDraft);
+            var restoreLogbookId = FindPackageKeyRestoreLogbookId();
+            await PackageKeyStore.ImportRecoveryCodeAsync(restoreLogbookId, RecoveryCodeDraft);
+            if (restoreLogbookId != Document.LogbookId)
+            {
+                Document = PortableLogbookDocument.CreateAustraliaFirst(restoreLogbookId, CustomFields, []);
+                ImportReceipts = [];
+                LastSuccessfulExportAt = null;
+                LastSuccessfulExport = null;
+                ImportCompatibility = ImportPlan is null
+                    ? null
+                    : MobilePackageImportPlan.CheckCompatibility(ImportPlan, Document.LogbookId);
+                ResetDraft();
+            }
+
             PackageKeyStatus = await PackageKeyStore.HasPackageKeyAsync(Document.LogbookId)
                 ? "Ready"
                 : "Not set";
+            if (PackageKeyStatus == "Ready")
+            {
+                await SaveStateAsync();
+            }
+
             PackageExchangeMessage = PackageKeyStatus == "Ready"
                 ? "Package key restored on this device."
                 : "Package key was not restored.";
         }
-        catch (Exception ex) when (ex is ArgumentException or JSException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or JSException)
         {
             PackageExchangeError = ex.Message;
         }
@@ -691,6 +718,21 @@
         {
             RecoveryCodeDraft = string.Empty;
         }
+    }
+
+    private LogbookId FindPackageKeyRestoreLogbookId()
+    {
+        if (ImportPlan is null || ImportCompatibility != MobilePackageImportCompatibility.WrongLogbook)
+        {
+            return Document.LogbookId;
+        }
+
+        if (Document.Operations.Count > 0 || ImportReceipts.Count > 0)
+        {
+            throw new InvalidOperationException("Cannot switch logbooks after this device copy has local entries or package receipts.");
+        }
+
+        return ImportPlan.LogbookId;
     }
 
     private async Task ExportPackageAsync()
@@ -1017,6 +1059,55 @@
 
     private static string FormatDate(DateOnly? date) => date?.ToString("dd MMM yyyy") ?? "No date";
 
+    private IEnumerable<EntryDetail> EntryDetails(PortableLogbookEntry entry)
+    {
+        yield return new("Date", FormatDate(entry.Date));
+        yield return new("Aircraft type", FormatText(entry.AircraftType));
+        yield return new("Registration", FormatText(entry.Registration));
+        yield return new("Flight number", FormatText(entry.FlightNumber));
+        yield return new("From", FormatText(entry.From));
+        yield return new("To", FormatText(entry.To));
+        yield return new("Route", FormatText(entry.Route));
+        yield return new("Remarks", FormatText(entry.Details));
+        yield return new("Multi-pilot", FormatNullableHours(entry.MultiPilot));
+        yield return new("PIC", FormatNullableHours(entry.PilotInCommand));
+        yield return new("Co-pilot", FormatNullableHours(entry.CoPilot));
+        yield return new("Dual", FormatNullableHours(entry.Dual));
+        yield return new("Instructor", FormatNullableHours(entry.Instructor));
+        yield return new("Day", FormatNullableHours(entry.Day));
+        yield return new("Night", FormatNullableHours(entry.Night));
+        yield return new("Instrument actual", FormatNullableHours(entry.InstrumentActual));
+        yield return new("Instrument sim", FormatNullableHours(entry.InstrumentSimulated));
+        yield return new("Takeoffs day", FormatNullableCount(entry.TakeoffsDay));
+        yield return new("Takeoffs night", FormatNullableCount(entry.TakeoffsNight));
+        yield return new("Landings day", FormatNullableCount(entry.LandingsDay));
+        yield return new("Landings night", FormatNullableCount(entry.LandingsNight));
+        yield return new("IFR approaches", FormatNullableCount(entry.IfrApproaches));
+        yield return new("Holding", FormatNullableCount(entry.Holding));
+        yield return new("RNP", FormatNullableCount(entry.Rnav));
+        yield return new("Circling", FormatNullableCount(entry.Circling));
+
+        foreach (var field in EntryCustomFields())
+        {
+            entry.CustomFields.TryGetValue(field.Id, out var customValue);
+            yield return new(field.Label, FormatText(customValue));
+        }
+    }
+
+    private IEnumerable<CustomFieldDefinition> EntryCustomFields() =>
+        Document.CustomFieldDefinitions.Count > 0
+            ? Document.CustomFieldDefinitions.OrderBy(field => field.Order)
+            : CustomFields;
+
+    private static string FormatText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Blank" : value.Trim();
+
+    private static string FormatNullableHours(decimal? hours) =>
+        hours is null ? "0.0" : FormatHours(hours.Value);
+
+    private static string FormatNullableCount(int? count) =>
+        count?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0";
+
     private static string FormatTimestamp(DateTimeOffset? timestamp) =>
         timestamp?.ToLocalTime().ToString("dd MMM yyyy HH:mm") ?? "Never";
 
@@ -1117,6 +1208,8 @@
 
     private static string FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim() ?? string.Empty;
+
+    private sealed record EntryDetail(string Label, string Value);
 
     private sealed class EntryDraft
     {

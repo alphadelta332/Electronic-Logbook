@@ -311,17 +311,15 @@ public static class PortableLogbookWorkbookPackageStorage
             })
             .Where(cell => !string.IsNullOrWhiteSpace(cell.Reference))
             .ToDictionary(cell => cell.Reference, cell => cell.Value, StringComparer.OrdinalIgnoreCase);
-        var fieldsByColumnName = PortableLogbookFields.RawFlightFields.ToDictionary(
-            field => field.WorkbookColumnName,
-            StringComparer.OrdinalIgnoreCase);
+        var fieldsByColumnName = BuildFieldsByWorkbookColumnName();
         var customFieldsByLabel = (customFieldDefinitions ?? [])
             .ToDictionary(field => field.Label, StringComparer.OrdinalIgnoreCase);
         var rows = new List<PortableLogbookWorkbookRow>();
 
         for (var rowNumber = startRow + 1; rowNumber <= endRow; rowNumber++)
         {
-            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
-            var customValues = new Dictionary<CustomFieldId, string?>();
+            var rawFieldValues = new Dictionary<PortableLogbookFieldDefinition, string?>();
+            var rawCustomValues = new Dictionary<CustomFieldDefinition, string?>();
             EntryId? entryId = null;
             RevisionId? currentRevisionId = null;
             var rowHasUserData = false;
@@ -356,7 +354,7 @@ public static class PortableLogbookWorkbookPackageStorage
                         rowHasUserData = true;
                     }
 
-                    values[field.Id] = ConvertWorkbookCellValue(field, cellText);
+                    rawFieldValues[field] = cellText;
                     continue;
                 }
 
@@ -367,14 +365,22 @@ public static class PortableLogbookWorkbookPackageStorage
                         rowHasUserData = true;
                     }
 
-                    customValues[customField.Id] = string.IsNullOrWhiteSpace(cellText) ? null : cellText;
+                    rawCustomValues[customField] = cellText;
                 }
             }
 
-            if (!rowHasUserData)
+            if (!rowHasUserData || !LooksLikeWorkbookFlightEntry(rawFieldValues))
             {
                 continue;
             }
+
+            var values = rawFieldValues.ToDictionary(
+                pair => pair.Key.Id,
+                pair => ConvertWorkbookCellValue(pair.Key, pair.Value),
+                StringComparer.Ordinal);
+            var customValues = rawCustomValues.ToDictionary(
+                pair => pair.Key.Id,
+                pair => string.IsNullOrWhiteSpace(pair.Value) ? null : pair.Value);
 
             rows.Add(new PortableLogbookWorkbookRow(
                 entryId,
@@ -383,6 +389,101 @@ public static class PortableLogbookWorkbookPackageStorage
         }
 
         return rows;
+    }
+
+    public static IReadOnlyList<CustomFieldDefinition> ReadWorkbookCustomFieldDefinitions(string workbookPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        using var packageStream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(packageStream, ZipArchiveMode.Read, leaveOpen: false);
+        var tableEntry = FindLogbookTableEntry(archive)
+            ?? throw new InvalidDataException("Workbook package does not contain a Logbook table.");
+        var tableDocument = ReadXmlEntry(archive, tableEntry.FullName)
+            ?? throw new InvalidDataException("Logbook table part is invalid.");
+        var columnNames = tableDocument.Root?
+            .Element(SpreadsheetNamespace + "tableColumns")
+            ?.Elements(SpreadsheetNamespace + "tableColumn")
+            .Select(column => ((string?)column.Attribute("name") ?? string.Empty).Trim())
+            .Where(name => name.StartsWith("Custom ", StringComparison.OrdinalIgnoreCase))
+            .Take(PortableLogbookCustomFieldSet.WorkbookCustomFieldCount)
+            .ToArray()
+            ?? throw new InvalidDataException("Logbook table does not contain tableColumns.");
+
+        return columnNames.Length == PortableLogbookCustomFieldSet.WorkbookCustomFieldCount
+            ? PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(columnNames)
+            : [];
+    }
+
+    private static bool LooksLikeWorkbookFlightEntry(
+        IReadOnlyDictionary<PortableLogbookFieldDefinition, string?> rawFieldValues)
+    {
+        var hasDate = rawFieldValues.Any(pair =>
+            pair.Key.Id == "date" &&
+            !string.IsNullOrWhiteSpace(pair.Value));
+        if (!hasDate)
+        {
+            return false;
+        }
+
+        var entryIdentityFields = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "aircraftType",
+            "registration",
+            "from",
+            "to"
+        };
+        var loggedTimeFields = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "multiPilot",
+            "pilotInCommand",
+            "coPilot",
+            "dual",
+            "instructor",
+            "instrumentSimulated"
+        };
+
+        return rawFieldValues.Any(pair =>
+            entryIdentityFields.Contains(pair.Key.Id) &&
+            !string.IsNullOrWhiteSpace(pair.Value)) ||
+            rawFieldValues.Any(pair =>
+                loggedTimeFields.Contains(pair.Key.Id) &&
+                decimal.TryParse(
+                    pair.Value,
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var value) &&
+                value > 0);
+    }
+
+    private static IReadOnlyDictionary<string, PortableLogbookFieldDefinition> BuildFieldsByWorkbookColumnName()
+    {
+        var fields = new Dictionary<string, PortableLogbookFieldDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in PortableLogbookFields.RawFlightFields)
+        {
+            fields.TryAdd(field.WorkbookColumnName, field);
+        }
+
+        AddFieldAlias(fields, "aircraftType", "Type");
+        AddFieldAlias(fields, "flightNumber", "Flight ID");
+        AddFieldAlias(fields, "route", "Via");
+        AddFieldAlias(fields, "details", "Remarks");
+        AddFieldAlias(fields, "instrumentActual", "IfrIf");
+        AddFieldAlias(fields, "instrumentSimulated", "IfrSim");
+        return fields;
+    }
+
+    private static void AddFieldAlias(
+        Dictionary<string, PortableLogbookFieldDefinition> fields,
+        string fieldId,
+        string workbookColumnName)
+    {
+        var field = PortableLogbookFields.ById[fieldId];
+        fields.TryAdd(workbookColumnName, field);
     }
 
     public static PortableLogbookWorkbookIdentityPackageResult EnsureWorkbookIdentityMetadata(
@@ -402,35 +503,6 @@ public static class PortableLogbookWorkbookPackageStorage
             ?? throw new InvalidDataException("Workbook package does not contain workbook relationships.");
         var root = workbook.Root
             ?? throw new InvalidDataException("Workbook XML is invalid.");
-        var backendSheet = root
-            .Descendants(SpreadsheetNamespace + "sheet")
-            .FirstOrDefault(sheet => string.Equals(
-                (string?)sheet.Attribute("name"),
-                "Backend",
-                StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidDataException("Workbook package does not contain a Backend sheet.");
-        var backendSheetName = (string?)backendSheet.Attribute("name") ?? "Backend";
-        var backendRelationshipId = (string?)backendSheet.Attribute(DocumentRelationshipsNamespace + "id");
-        if (string.IsNullOrWhiteSpace(backendRelationshipId))
-        {
-            throw new InvalidDataException("Backend sheet is missing its workbook relationship id.");
-        }
-
-        var backendRelationship = workbookRelationships
-            .Descendants(RelationshipsNamespace + "Relationship")
-            .FirstOrDefault(relationship => string.Equals(
-                (string?)relationship.Attribute("Id"),
-                backendRelationshipId,
-                StringComparison.Ordinal));
-        var backendTarget = (string?)backendRelationship?.Attribute("Target");
-        if (string.IsNullOrWhiteSpace(backendTarget))
-        {
-            throw new InvalidDataException("Backend sheet workbook relationship is missing its target.");
-        }
-
-        var backendWorksheetEntryName = ResolveRelationshipTarget("xl/workbook.xml", backendTarget);
-        var backendWorksheet = ReadXmlEntry(archive, backendWorksheetEntryName)
-            ?? throw new InvalidDataException("Backend worksheet part is invalid.");
         var definedNames = root.Element(SpreadsheetNamespace + "definedNames");
         if (definedNames is null)
         {
@@ -446,13 +518,17 @@ public static class PortableLogbookWorkbookPackageStorage
             }
         }
 
+        var metadataSheet = FindWorkbookMetadataSheet(root, workbookRelationships, definedNames)
+            ?? throw new InvalidDataException("Workbook package does not contain a metadata sheet for portable identity values.");
+        var metadataWorksheet = ReadXmlEntry(archive, metadataSheet.WorksheetEntryName)
+            ?? throw new InvalidDataException("Workbook metadata worksheet part is invalid.");
         var values = new (string Name, string Value)[]
         {
             (PortableLogbookWorkbookMetadata.LogbookIdName, logbookId.Value),
             (PortableLogbookWorkbookMetadata.DeviceIdName, deviceId.Value),
             (PortableLogbookWorkbookMetadata.SchemaVersionName, schemaVersion.ToString(System.Globalization.CultureInfo.InvariantCulture))
         };
-        var nextBackendRow = FindNextBackendMetadataRow(workbook, backendWorksheet, backendSheetName);
+        var nextMetadataRow = FindNextMetadataRow(workbook, metadataWorksheet, metadataSheet.SheetName);
         var namesAdded = new List<string>();
         var cellsWritten = new List<string>();
 
@@ -464,7 +540,7 @@ public static class PortableLogbookWorkbookPackageStorage
             var existingReferenceIsUsable = false;
             if (definedName is not null &&
                 TryParseSingleCellReference(definedName.Value, out var definedSheetName, out parsedCellReference) &&
-                string.Equals(definedSheetName, backendSheetName, StringComparison.OrdinalIgnoreCase))
+                string.Equals(definedSheetName, metadataSheet.SheetName, StringComparison.OrdinalIgnoreCase))
             {
                 existingReferenceIsUsable = true;
             }
@@ -481,9 +557,9 @@ public static class PortableLogbookWorkbookPackageStorage
                     namesAdded.Add(name);
                 }
 
-                cellReference = $"A{nextBackendRow}";
-                nextBackendRow++;
-                definedName.Value = CreateSingleCellReference(backendSheetName, cellReference);
+                cellReference = $"{metadataSheet.MetadataColumnName}{nextMetadataRow}";
+                nextMetadataRow++;
+                definedName.Value = CreateSingleCellReference(metadataSheet.SheetName, cellReference);
             }
             else
             {
@@ -491,12 +567,12 @@ public static class PortableLogbookWorkbookPackageStorage
             }
 
             definedName.SetAttributeValue("hidden", "1");
-            UpsertInlineStringCell(backendWorksheet, cellReference, value);
+            UpsertInlineStringCell(metadataWorksheet, cellReference, value);
             cellsWritten.Add(cellReference);
         }
 
         WriteXmlEntry(archive, "xl/workbook.xml", workbook);
-        WriteXmlEntry(archive, backendWorksheetEntryName, backendWorksheet);
+        WriteXmlEntry(archive, metadataSheet.WorksheetEntryName, metadataWorksheet);
 
         return new PortableLogbookWorkbookIdentityPackageResult(
             logbookId,
@@ -773,19 +849,72 @@ public static class PortableLogbookWorkbookPackageStorage
         throw new ArgumentException($"Field '{field.Id}' cannot be converted to DateOnly.");
     }
 
-    private static int FindNextBackendMetadataRow(
+    private static WorkbookMetadataSheet? FindWorkbookMetadataSheet(
+        XElement workbookRoot,
+        XDocument workbookRelationships,
+        XElement definedNames)
+    {
+        var logbookVersion = FindDefinedName(definedNames, "LogbookVersion");
+        if (logbookVersion is not null &&
+            TryParseSingleCellReference(logbookVersion.Value, out var metadataSheetName, out var metadataCellReference) &&
+            TryParseCellReference(metadataCellReference, out var metadataColumn, out _))
+        {
+            var sheet = FindSheet(workbookRoot, metadataSheetName);
+            var worksheetEntryName = FindWorksheetEntryName(workbookRelationships, sheet);
+            if (worksheetEntryName is not null)
+            {
+                return new WorkbookMetadataSheet(metadataSheetName, worksheetEntryName, ColumnName(metadataColumn));
+            }
+        }
+
+        var backendSheet = FindSheet(workbookRoot, "Backend");
+        var backendWorksheetEntryName = FindWorksheetEntryName(workbookRelationships, backendSheet);
+        return backendWorksheetEntryName is null
+            ? null
+            : new WorkbookMetadataSheet((string?)backendSheet?.Attribute("name") ?? "Backend", backendWorksheetEntryName, "A");
+    }
+
+    private static XElement? FindSheet(XElement workbookRoot, string sheetName) =>
+        workbookRoot
+            .Descendants(SpreadsheetNamespace + "sheet")
+            .FirstOrDefault(sheet => string.Equals(
+                (string?)sheet.Attribute("name"),
+                sheetName,
+                StringComparison.OrdinalIgnoreCase));
+
+    private static string? FindWorksheetEntryName(XDocument workbookRelationships, XElement? sheet)
+    {
+        var relationshipId = (string?)sheet?.Attribute(DocumentRelationshipsNamespace + "id");
+        if (string.IsNullOrWhiteSpace(relationshipId))
+        {
+            return null;
+        }
+
+        var relationship = workbookRelationships
+            .Descendants(RelationshipsNamespace + "Relationship")
+            .FirstOrDefault(candidate => string.Equals(
+                (string?)candidate.Attribute("Id"),
+                relationshipId,
+                StringComparison.Ordinal));
+        var target = (string?)relationship?.Attribute("Target");
+        return string.IsNullOrWhiteSpace(target)
+            ? null
+            : ResolveRelationshipTarget("xl/workbook.xml", target);
+    }
+
+    private static int FindNextMetadataRow(
         XDocument workbook,
-        XDocument backendWorksheet,
-        string backendSheetName)
+        XDocument metadataWorksheet,
+        string metadataSheetName)
     {
         var rowsFromDefinedNames = workbook
             .Descendants(SpreadsheetNamespace + "definedName")
             .Select(definedName => TryParseSingleCellReference(definedName.Value, out var sheetName, out var cellReference) &&
-                    string.Equals(sheetName, backendSheetName, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(sheetName, metadataSheetName, StringComparison.OrdinalIgnoreCase) &&
                     TryParseCellReference(cellReference, out _, out var row)
                 ? row
                 : 0);
-        var rowsFromWorksheetCells = backendWorksheet
+        var rowsFromWorksheetCells = metadataWorksheet
             .Descendants(SpreadsheetNamespace + "c")
             .Select(cell => TryParseCellReference((string?)cell.Attribute("r") ?? string.Empty, out _, out var row) ? row : 0);
         return rowsFromDefinedNames
@@ -793,6 +922,11 @@ public static class PortableLogbookWorkbookPackageStorage
             .DefaultIfEmpty(0)
             .Max() + 1;
     }
+
+    private sealed record WorkbookMetadataSheet(
+        string SheetName,
+        string WorksheetEntryName,
+        string MetadataColumnName);
 
     private static string CreateSingleCellReference(string sheetName, string cellReference) =>
         $"'{sheetName.Replace("'", "''", StringComparison.Ordinal)}'!${new string(cellReference.TakeWhile(char.IsLetter).ToArray()).ToUpperInvariant()}${new string(cellReference.SkipWhile(char.IsLetter).ToArray())}";
@@ -1059,9 +1193,7 @@ public static class PortableLogbookWorkbookPackageStorage
             ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
         var entryIdColumn = tableStartColumn + metadataColumnIndexes[0] - 1;
         var revisionIdColumn = tableStartColumn + metadataColumnIndexes[1] - 1;
-        var fieldsByColumnName = PortableLogbookFields.RawFlightFields.ToDictionary(
-            field => field.WorkbookColumnName,
-            StringComparer.OrdinalIgnoreCase);
+        var fieldsByColumnName = BuildFieldsByWorkbookColumnName();
         var customFieldsByLabel = customFieldDefinitions.ToDictionary(
             field => field.Label,
             StringComparer.OrdinalIgnoreCase);

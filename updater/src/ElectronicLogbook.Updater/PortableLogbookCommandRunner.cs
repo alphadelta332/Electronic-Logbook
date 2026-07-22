@@ -132,10 +132,12 @@ public static class PortableLogbookCommandRunner
             throw new UpdaterUsageException($"Recovery output file already exists: {recoveryOutputPath}");
         }
 
+        var customFieldDefinitions = PortableLogbookWorkbookPackageStorage.ReadWorkbookCustomFieldDefinitions(workbookPath);
+        var existingRows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbookPath, customFieldDefinitions);
         var setup = PortableLogbookSetup.CreateInitialSetupPlan(
-            existingEntries: [],
-            customFieldDefinitions: [],
-            createdAt: createdAt);
+            existingRows.Select(row => row.Entry),
+            customFieldDefinitions,
+            createdAt);
         var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
             setup.InitialDocument,
             setup.InitialPackageBytes,

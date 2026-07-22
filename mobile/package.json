@@ -7,7 +7,9 @@
     "publish:pwa": "dotnet publish src/ElectronicLogbook.Mobile/ElectronicLogbook.Mobile.csproj -c Release -o artifacts/pages",
     "prepare:android-assets": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Prepare-CapacitorAssets.ps1",
     "sync:android": "npm run generate:icons && npm run publish:pwa && npm run prepare:android-assets && capacitor sync android",
-    "build:android": "npm run sync:android && cd android && gradlew.bat assembleDebug"
+    "build:android": "npm run sync:android && cd android && gradlew.bat assembleDebug",
+    "test:acceptance-prep": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-MobileAcceptancePrep.ps1",
+    "test:acceptance-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Test-MobileAcceptancePackage.ps1"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.2",

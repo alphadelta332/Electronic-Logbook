@@ -308,6 +308,27 @@ textarea {
     overflow-wrap: anywhere;
 }
 
+.entry-details {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+    gap: 8px;
+    border-top: 1px solid #d7dde5;
+    padding-top: 10px;
+}
+
+.entry-details span {
+    min-width: 0;
+    color: #344154;
+    font-size: 0.82rem;
+}
+
+.entry-details strong {
+    color: #5d6978;
+    font-size: 0.74rem;
+    font-weight: 600;
+}
+
 .row-actions {
     grid-column: 1 / -1;
     display: flex;

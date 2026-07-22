@@ -38,7 +38,7 @@ public static class PortableLogbookPackage
         {
             throw new PortableLogbookPackageException(
                 PortableLogbookPackageError.InvalidDocument,
-                "Portable logbook document is invalid.");
+                $"Portable logbook document is invalid: {FormatValidationErrors(validation)}");
         }
 
         var plaintext = Compress(Encoding.UTF8.GetBytes(PortableLogbookJson.Serialize(document)));
@@ -196,11 +196,18 @@ public static class PortableLogbookPackage
         {
             throw new PortableLogbookPackageException(
                 PortableLogbookPackageError.InvalidDocument,
-                "Portable logbook document is invalid after package read.");
+                $"Portable logbook document is invalid after package read: {FormatValidationErrors(validation)}");
         }
 
         return new PortableLogbookPackageReadResult(plan.Manifest, document);
     }
+
+    private static string FormatValidationErrors(PortableLogbookValidationResult validation) =>
+        string.Join(
+            "; ",
+            validation.Errors
+                .Take(5)
+                .Select(error => $"{error.Code}: {error.Message}"));
 
     public static PortableLogbookPackageReadResult Read(
         ReadOnlySpan<byte> packageBytes,

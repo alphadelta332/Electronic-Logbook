@@ -491,6 +491,111 @@ public sealed class MobilePackageImportApplyWorkflowTests
         Assert.Equal("Training kind", Assert.Single(exported.Document.CustomFieldDefinitions).Label);
     }
 
+    [Fact]
+    public async Task ApplyIfReadyAsyncImportsWorkbookPackageRawFieldsAndFourCustomFields()
+    {
+        var logbookId = new LogbookId("log_workbook_import");
+        var deviceId = new DeviceId("dev_excel");
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"]);
+        var workbookCreate = new CreateEntryOperation(
+            logbookId,
+            new EntryId("ent_workbook_1"),
+            new RevisionId("rev_workbook_1"),
+            deviceId,
+            DateTimeOffset.Parse("2026-07-20T00:00:00Z"),
+            PortableLogbookEntry.Empty with
+            {
+                Date = new DateOnly(2026, 7, 20),
+                AircraftType = "DA40",
+                Registration = "VH-GT3",
+                FlightNumber = "ELB003",
+                From = "YSBK",
+                To = "YSCN",
+                Route = "YSBK BK H270 CN YSCN",
+                Details = "Gate 3 workbook import",
+                MultiPilot = 0.1m,
+                PilotInCommand = 1.5m,
+                CoPilot = 0.2m,
+                Dual = 0.3m,
+                Instructor = 0.4m,
+                Day = 1.2m,
+                Night = 0.3m,
+                InstrumentActual = 0.5m,
+                InstrumentSimulated = 0.6m,
+                TakeoffsDay = 1,
+                TakeoffsNight = 2,
+                LandingsDay = 1,
+                LandingsNight = 2,
+                IfrApproaches = 2,
+                Holding = 1,
+                Rnav = 1,
+                Circling = 1,
+                CustomFields = new Dictionary<CustomFieldId, string?>
+                {
+                    [new("cf_workbook_1")] = "Alpha",
+                    [new("cf_workbook_2")] = "Bravo",
+                    [new("cf_workbook_3")] = "Charlie",
+                    [new("cf_workbook_4")] = "Delta"
+                }
+            });
+        var local = PortableLogbookDocument.CreateAustraliaFirst(logbookId, customFields, []);
+        var workbookPackageDocument = PortableLogbookDocument.CreateAustraliaFirst(
+            logbookId,
+            customFields,
+            [workbookCreate]);
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(workbookPackageDocument, key);
+        var jsRuntime = RuntimeWithDecryption(packageBytes, key, logbookId);
+        var file = new BrowserFile("workbook-export.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [],
+            DateTimeOffset.Parse("2026-07-20T00:05:00Z"));
+        var materialized = Assert.Single(PortableLogbookMerger.Merge(result.Document.Operations).Entries.Values);
+
+        Assert.Equal(MobilePackageImportApplyStatus.Applied, result.Status);
+        Assert.Equal(PortableLogbookImportPlanStatus.ReadyToApply, result.Plan?.Status);
+        Assert.Equal(workbookCreate.EntryId, materialized.EntryId);
+        Assert.Equal(workbookCreate.RevisionId, materialized.CurrentRevisionId);
+        Assert.Equal(new DateOnly(2026, 7, 20), materialized.Entry?.Date);
+        Assert.Equal("DA40", materialized.Entry?.AircraftType);
+        Assert.Equal("VH-GT3", materialized.Entry?.Registration);
+        Assert.Equal("ELB003", materialized.Entry?.FlightNumber);
+        Assert.Equal("YSBK", materialized.Entry?.From);
+        Assert.Equal("YSCN", materialized.Entry?.To);
+        Assert.Equal("YSBK BK H270 CN YSCN", materialized.Entry?.Route);
+        Assert.Equal("Gate 3 workbook import", materialized.Entry?.Details);
+        Assert.Equal(0.1m, materialized.Entry?.MultiPilot);
+        Assert.Equal(1.5m, materialized.Entry?.PilotInCommand);
+        Assert.Equal(0.2m, materialized.Entry?.CoPilot);
+        Assert.Equal(0.3m, materialized.Entry?.Dual);
+        Assert.Equal(0.4m, materialized.Entry?.Instructor);
+        Assert.Equal(1.2m, materialized.Entry?.Day);
+        Assert.Equal(0.3m, materialized.Entry?.Night);
+        Assert.Equal(0.5m, materialized.Entry?.InstrumentActual);
+        Assert.Equal(0.6m, materialized.Entry?.InstrumentSimulated);
+        Assert.Equal(1, materialized.Entry?.TakeoffsDay);
+        Assert.Equal(2, materialized.Entry?.TakeoffsNight);
+        Assert.Equal(1, materialized.Entry?.LandingsDay);
+        Assert.Equal(2, materialized.Entry?.LandingsNight);
+        Assert.Equal(2, materialized.Entry?.IfrApproaches);
+        Assert.Equal(1, materialized.Entry?.Holding);
+        Assert.Equal(1, materialized.Entry?.Rnav);
+        Assert.Equal(1, materialized.Entry?.Circling);
+        Assert.Equal(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"],
+            result.Document.CustomFieldDefinitions.Select(field => field.Label));
+        Assert.Equal("Alpha", materialized.Entry?.CustomFields[new CustomFieldId("cf_workbook_1")]);
+        Assert.Equal("Bravo", materialized.Entry?.CustomFields[new CustomFieldId("cf_workbook_2")]);
+        Assert.Equal("Charlie", materialized.Entry?.CustomFields[new CustomFieldId("cf_workbook_3")]);
+        Assert.Equal("Delta", materialized.Entry?.CustomFields[new CustomFieldId("cf_workbook_4")]);
+        Assert.Single(result.ImportReceipts);
+    }
+
     private static PortableLogbookDocument CreateDocument(
         string revisionId,
         decimal pilotInCommand,

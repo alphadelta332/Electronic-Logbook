@@ -17,6 +17,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("SetupPackageKeyAsync", page, StringComparison.Ordinal);
         Assert.Contains("RestorePackageKeyAsync", page, StringComparison.Ordinal);
         Assert.Contains("PackageKeyStore.ImportRecoveryCodeAsync", page, StringComparison.Ordinal);
+        Assert.Contains("FindPackageKeyRestoreLogbookId", page, StringComparison.Ordinal);
+        Assert.Contains("Document = PortableLogbookDocument.CreateAustraliaFirst(restoreLogbookId, CustomFields, []);", page, StringComparison.Ordinal);
+        Assert.Contains("ImportCompatibility = ImportPlan is null", page, StringComparison.Ordinal);
         Assert.Contains("ApplyPackageAsync", page, StringComparison.Ordinal);
         Assert.Contains("ExportPackageAsync", page, StringComparison.Ordinal);
         Assert.Contains("ExportSupportSummaryAsync", page, StringComparison.Ordinal);
@@ -108,6 +111,18 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void HomePageOnlySwitchesLogbookForRecoveryRestoreOnEmptyDeviceCopy()
+    {
+        var page = ReadMobilePage("Home.razor");
+        var handler = ExtractMethodBody(page, "private LogbookId FindPackageKeyRestoreLogbookId");
+
+        Assert.Contains("ImportCompatibility != MobilePackageImportCompatibility.WrongLogbook", handler, StringComparison.Ordinal);
+        Assert.Contains("Document.Operations.Count > 0 || ImportReceipts.Count > 0", handler, StringComparison.Ordinal);
+        Assert.Contains("Cannot switch logbooks after this device copy has local entries or package receipts.", handler, StringComparison.Ordinal);
+        Assert.Contains("return ImportPlan.LogbookId;", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HomePageOffersFlightTimeToDayHoursShortcut()
     {
         var page = ReadMobilePage("Home.razor");
@@ -183,6 +198,20 @@ public sealed class PwaPageWiringTests
         Assert.Contains("ImportExchangePlan.Preview.NewOperationSummaries", page, StringComparison.Ordinal);
         Assert.Contains("ImportExchangePlan.Preview.DuplicateOperationSummaries", page, StringComparison.Ordinal);
         Assert.Contains("FormatImportSummary", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageShowsCurrentRecordRawAndCustomFieldDetails()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("class=\"entry-details\"", page, StringComparison.Ordinal);
+        Assert.Contains("EntryDetails(entry.Entry)", page, StringComparison.Ordinal);
+        Assert.Contains("yield return new(\"Flight number\"", page, StringComparison.Ordinal);
+        Assert.Contains("yield return new(\"Instrument actual\"", page, StringComparison.Ordinal);
+        Assert.Contains("yield return new(\"RNP\"", page, StringComparison.Ordinal);
+        Assert.Contains("foreach (var field in EntryCustomFields())", page, StringComparison.Ordinal);
+        Assert.Contains("entry.CustomFields.TryGetValue(field.Id", page, StringComparison.Ordinal);
     }
 
     private static string ReadMobilePage(string relativePath) =>

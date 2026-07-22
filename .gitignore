@@ -12,6 +12,7 @@ diagnostics_*.txt
 **/obj/
 **/TestResults/
 mobile/node_modules/
+/artifacts/
 mobile/artifacts/
 mobile/android/app/src/main/assets/public/
 mobile/src/ElectronicLogbook.Mobile/wwwroot/_framework/

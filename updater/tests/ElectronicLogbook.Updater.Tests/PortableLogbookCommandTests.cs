@@ -440,6 +440,67 @@ public sealed class PortableLogbookCommandTests : IDisposable
     }
 
     [Fact]
+    public void EnableSeedsPortableStorageFromExistingWorkbookRowsAndCustomFields()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var recovery = Path.Combine(directory, "seeded-recovery.txt");
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(
+                archive,
+                "A1:J2",
+                [
+                    "Date",
+                    "Aircraft Type",
+                    "Reg",
+                    "From",
+                    "To",
+                    "PIC",
+                    "Custom 1",
+                    "Custom 2",
+                    "Custom 3",
+                    "Custom 4"
+                ]);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A2", "2026-07-20");
+            UpsertInlineStringCell(worksheet, "B2", "C172");
+            UpsertInlineStringCell(worksheet, "C2", "VH-SEED");
+            UpsertInlineStringCell(worksheet, "D2", "YSBK");
+            UpsertInlineStringCell(worksheet, "E2", "YSCN");
+            UpsertInlineStringCell(worksheet, "F2", "1.3");
+            UpsertInlineStringCell(worksheet, "G2", "Alpha");
+            UpsertInlineStringCell(worksheet, "H2", "Bravo");
+            UpsertInlineStringCell(worksheet, "I2", "Charlie");
+            UpsertInlineStringCell(worksheet, "J2", "Delta");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var result = PortableLogbookCommandRunner.Enable(
+            workbook,
+            recovery,
+            DateTimeOffset.Parse("2026-07-20T00:00:00Z"));
+        var key = PortableLogbookKey.FromRecoveryCode(ReadRecoveryCodeFromGeneratedFile(recovery));
+
+        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbook, key);
+
+        Assert.Equal(1, result.InitialOperationCount);
+        Assert.NotNull(state);
+        Assert.Equal(4, state.Document.CustomFieldDefinitions.Count);
+        Assert.Equal(["Custom 1", "Custom 2", "Custom 3", "Custom 4"], state.Document.CustomFieldDefinitions.Select(field => field.Label));
+        var create = Assert.IsType<CreateEntryOperation>(Assert.Single(state.Document.Operations));
+        Assert.Equal(new DateOnly(2026, 7, 20), create.Entry.Date);
+        Assert.Equal("C172", create.Entry.AircraftType);
+        Assert.Equal("VH-SEED", create.Entry.Registration);
+        Assert.Equal("YSBK", create.Entry.From);
+        Assert.Equal("YSCN", create.Entry.To);
+        Assert.Equal(1.3m, create.Entry.PilotInCommand);
+        Assert.Equal("Alpha", create.Entry.CustomFields[new CustomFieldId("cf_workbook_1")]);
+        Assert.Equal("Bravo", create.Entry.CustomFields[new CustomFieldId("cf_workbook_2")]);
+        Assert.Equal("Charlie", create.Entry.CustomFields[new CustomFieldId("cf_workbook_3")]);
+        Assert.Equal("Delta", create.Entry.CustomFields[new CustomFieldId("cf_workbook_4")]);
+    }
+
+    [Fact]
     public void EnableRejectsWorkbookThatAlreadyHasPortableStorage()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -1387,6 +1448,71 @@ public sealed class PortableLogbookCommandTests : IDisposable
             Assert.Equal(incomingCreate.EntryId.Value, ReadInlineStringCell(worksheet, "H2"));
             Assert.Equal(correction.RevisionId.Value, ReadInlineStringCell(worksheet, "I2"));
         }
+    }
+
+    [Fact]
+    public void ApplyImportCorrectionUpdatesVisibleWorkbookCreatesValidatedBackupAndSurvivesReopen()
+    {
+        var workbook = CreateWorkbookWithInsertedExportedRow(
+            "gate7-base.elogbook",
+            out var recovery,
+            out var key,
+            out var enabled,
+            out var create);
+        var incomingPackage = Path.Combine(directory, "gate7-mobile-correction.elogbook");
+        var correction = new CorrectEntryOperation(
+            enabled.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_gate7_mobile_correction"),
+            new HashSet<RevisionId> { create.RevisionId },
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-19T02:05:00Z"),
+            create.Entry with
+            {
+                Registration = "VH-G7",
+                To = "YMML",
+                PilotInCommand = 1.7m
+            });
+        PortableLogbookPackageFile.Write(
+            incomingPackage,
+            PortableLogbookDocument.CreateAustraliaFirst(
+                enabled.LogbookId,
+                [],
+                [create, correction]),
+            key);
+
+        var result = PortableLogbookCommandRunner.ApplyImport(
+            workbook,
+            recovery,
+            incomingPackage,
+            DateTimeOffset.Parse("2026-07-19T02:10:00Z"));
+
+        Assert.Equal("applied", result.Status);
+        Assert.True(result.StorageUpdated);
+        Assert.True(result.ReceiptRecorded);
+        Assert.NotNull(result.BackupPath);
+        Assert.True(File.Exists(result.BackupPath));
+        using (var archive = ZipFile.OpenRead(workbook))
+        {
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            Assert.Equal("VH-G7", ReadInlineStringCell(worksheet, "C2"));
+            Assert.Equal("YMML", ReadInlineStringCell(worksheet, "E2"));
+            Assert.Equal("1.7", ReadInlineStringCell(worksheet, "F2"));
+            Assert.Equal(create.EntryId.Value, ReadInlineStringCell(worksheet, "G2"));
+            Assert.Equal(correction.RevisionId.Value, ReadInlineStringCell(worksheet, "H2"));
+        }
+
+        var backupState = PortableLogbookWorkbookPackageStorage.OpenState(result.BackupPath!, key);
+        Assert.NotNull(backupState);
+        Assert.Equal([create.RevisionId], backupState.Document.Operations.Select(operation => operation.RevisionId));
+        var reopenedState = PortableLogbookWorkbookPackageStorage.OpenState(workbook, key);
+        Assert.NotNull(reopenedState);
+        Assert.Equal([create.RevisionId, correction.RevisionId], reopenedState.Document.Operations.Select(operation => operation.RevisionId));
+        var current = Assert.Single(PortableLogbookMerger.Merge(reopenedState.Document.Operations).Entries.Values);
+        Assert.Equal(correction.RevisionId, current.CurrentRevisionId);
+        Assert.Equal("VH-G7", current.Entry?.Registration);
+        Assert.Equal("YMML", current.Entry?.To);
+        Assert.Equal(1.7m, current.Entry?.PilotInCommand);
     }
 
     [Fact]

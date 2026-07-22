@@ -189,6 +189,41 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task SaveStateAsyncPersistsOfflineMobileCorrectionAcrossReload()
+    {
+        var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
+            ?? throw new InvalidOperationException("Golden fixture did not deserialize.");
+        var create = Assert.IsType<CreateEntryOperation>(Assert.Single(document.Operations));
+        var correction = new CorrectEntryOperation(
+            document.LogbookId,
+            create.EntryId,
+            new RevisionId("rev_offline_mobile_correction"),
+            new HashSet<RevisionId> { create.RevisionId },
+            new DeviceId("dev_mobile_offline"),
+            DateTimeOffset.Parse("2026-07-19T02:15:00Z"),
+            create.Entry with
+            {
+                Registration = "VH-OFF",
+                Details = "Offline correction persisted"
+            });
+        var updated = MobileLogbookDocument.AppendOperation(document, document.CustomFieldDefinitions, correction);
+        var jsRuntime = new MemoryJsRuntime();
+        var storeBeforeReload = new BrowserLogbookStore(jsRuntime);
+
+        await storeBeforeReload.SaveStateAsync(new BrowserLogbookState(updated, [], null));
+        var storeAfterReload = new BrowserLogbookStore(jsRuntime);
+        var reloaded = await storeAfterReload.LoadStateAsync();
+
+        Assert.NotNull(reloaded);
+        Assert.Equal([create.RevisionId, correction.RevisionId], reloaded.Document.Operations.Select(operation => operation.RevisionId));
+        var materialized = Assert.Single(PortableLogbookMerger.Merge(reloaded.Document.Operations).Entries.Values);
+        Assert.Equal(correction.RevisionId, materialized.CurrentRevisionId);
+        Assert.Equal("VH-OFF", materialized.Entry?.Registration);
+        Assert.Equal("Offline correction persisted", materialized.Entry?.Details);
+        Assert.True(PortableLogbookValidator.Validate(reloaded.Document, new DateOnly(2026, 7, 19)).IsValid);
+    }
+
+    [Fact]
     public async Task SaveDocumentAsyncPreservesValidExportCheckpointForUnchangedDocument()
     {
         var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
