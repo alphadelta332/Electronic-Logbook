@@ -5114,7 +5114,7 @@ Private Function ShouldSkipRoutesPromptOnOpen(wb As Workbook) As Boolean
     End If
 
     branchValue = LCase$(Trim$(CStr(GetWorkbookNameValue(wb, "GitHubBranch", ""))))
-    If branchValue <> "" And branchValue <> "main" Then
+    If WorkbookBranchDisablesDevelopmentPrompts(branchValue) Then
         ShouldSkipRoutesPromptOnOpen = True
         Exit Function
     End If
@@ -9483,7 +9483,16 @@ Private Function WorkbookProtectionDisabledByBranch(wb As Workbook) As Boolean
     Dim branchValue As String
 
     branchValue = LCase$(Trim$(CStr(GetWorkbookNameValue(wb, "GitHubBranch", ""))))
-    WorkbookProtectionDisabledByBranch = (branchValue = "dev")
+    WorkbookProtectionDisabledByBranch = WorkbookBranchDisablesProtection(branchValue)
+End Function
+
+Private Function WorkbookBranchDisablesProtection(ByVal branchValue As String) As Boolean
+    branchValue = LCase$(Trim$(branchValue))
+    WorkbookBranchDisablesProtection = (branchValue = "dev" Or branchValue = "hotfix")
+End Function
+
+Private Function WorkbookBranchDisablesDevelopmentPrompts(ByVal branchValue As String) As Boolean
+    WorkbookBranchDisablesDevelopmentPrompts = WorkbookBranchDisablesProtection(branchValue)
 End Function
 
 Private Sub ApplyWorkbookProtection(Optional showConfirmation As Boolean = False, Optional targetWorkbook As Workbook = Nothing)

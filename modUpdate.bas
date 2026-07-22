@@ -212,7 +212,7 @@ Private Sub RunUpdate(newVersion As String)
     savePath = localPath & "\" & canonicalName
     updatedPath = savePath
     oldPath = BuildOldWorkbookPath(localPath, canonicalName)
-    releaseChannel = (LCase$(Trim$(GetGitHubBranch())) = "main")
+    releaseChannel = IsStableUpdateBranch(GetGitHubBranch())
     If Not releaseChannel Then
         diagnosticsPath = BuildUpdateDiagnosticsPath(localPath, canonicalName)
     End If
@@ -2020,6 +2020,23 @@ Private Function GetGitHubBranch() As String
     On Error GoTo 0
 End Function
 
+Private Function IsStableUpdateBranch(ByVal branchName As String) As Boolean
+    IsStableUpdateBranch = (LCase$(Trim$(branchName)) = "main")
+End Function
+
+Private Function WorkbookUpdateChannelArgument() As String
+    Dim branchName As String
+
+    branchName = LCase$(Trim$(GetGitHubBranch()))
+    If branchName = "hotfix" Then
+        WorkbookUpdateChannelArgument = "hotfix"
+    ElseIf branchName = "main" Then
+        WorkbookUpdateChannelArgument = "stable"
+    Else
+        WorkbookUpdateChannelArgument = "development"
+    End If
+End Function
+
 Private Function DownloadFile(url As String, destPath As String) As Boolean
     Dim http   As Object
     Dim stream As Object
@@ -2071,8 +2088,12 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     wizardPath = ResolveWizardExecutablePath(repository, targetVersion)
     If wizardPath = "" Then
         If reason = "" Then
-            If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-                reason = "Development updater wizard could not be found or downloaded."
+            If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+                If LCase$(Trim$(GetGitHubBranch())) = "hotfix" Then
+                    reason = "Hotfix updater wizard could not be found or downloaded."
+                Else
+                    reason = "Development updater wizard could not be found or downloaded."
+                End If
             Else
                 reason = "No wizard asset was found in release assets."
             End If
@@ -2088,8 +2109,8 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     commandLine = quotedExe & " --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
     If masterWorkbookPath <> "" Then
         commandLine = commandLine & " --master """ & masterWorkbookPath & """"
-        If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-            commandLine = commandLine & " --channel development"
+        If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+            commandLine = commandLine & " --channel " & WorkbookUpdateChannelArgument()
         End If
     End If
 
@@ -2135,8 +2156,12 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
         Exit Function
     End If
 
-    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-        tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+    If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+        If LCase$(Trim$(GetGitHubBranch())) = "hotfix" Then
+            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterHotfix"
+        Else
+            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+        End If
         If mResolvedRef <> "" Then
             tempFolder = tempFolder & "_" & SafePathSegment(Left$(mResolvedRef, 12))
         ElseIf targetVersion <> "" Then

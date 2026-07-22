@@ -186,6 +186,7 @@ public partial class MainWindow : Window
             var channelName = _context.Channel switch
             {
                 UpdateChannel.Development => "Development",
+                UpdateChannel.Hotfix => "Hotfix",
                 UpdateChannel.LocalMaster => "Local Master",
                 _ => "Local Master"
             };
@@ -193,15 +194,22 @@ public partial class MainWindow : Window
                 ? $"Update channel: {channelName} (version unavailable)"
                 : $"Update channel: {channelName} ({masterVersion})";
             LastCheckedText.Text = $"Configured: {DateTime.Now:G}";
-            AvailableVersionText.Text = _context.Channel == UpdateChannel.Development
-                ? (string.IsNullOrWhiteSpace(masterVersion)
+            AvailableVersionText.Text = _context.Channel switch
+            {
+                UpdateChannel.Development => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using development build"
-                    : $"Development version: {masterVersion}")
-                : (string.IsNullOrWhiteSpace(masterVersion)
+                    : $"Development version: {masterVersion}",
+                UpdateChannel.Hotfix => string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using hotfix build"
+                    : $"Hotfix version: {masterVersion}",
+                _ => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using local master build"
-                    : $"Local master version: {masterVersion}");
-            ReleaseSummaryText.Text = await GetDevBranchReadmeSummaryAsync(
+                    : $"Local master version: {masterVersion}"
+            };
+            var branchName = _context.Channel == UpdateChannel.Hotfix ? "hotfix" : "dev";
+            ReleaseSummaryText.Text = await GetBranchReadmeSummaryAsync(
                 _context.Repository,
+                branchName,
                 installedVersion,
                 masterVersion);
         }
@@ -257,8 +265,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task<string> GetDevBranchReadmeSummaryAsync(
+    private static async Task<string> GetBranchReadmeSummaryAsync(
         string repository,
+        string branchName,
         string? installedVersion,
         string? targetVersion)
     {
@@ -266,23 +275,23 @@ public partial class MainWindow : Window
         {
             if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
             {
-                return "Could not load dev-branch README notes: repository format is invalid.";
+                return $"Could not load {branchName}-branch README notes: repository format is invalid.";
             }
 
             using var client = new HttpClient();
             client.DefaultRequestHeaders.UserAgent.ParseAdd("ElectronicLogbook-UpdaterWizard/0.1");
-            var url = $"https://raw.githubusercontent.com/{repository}/dev/README.md";
+            var url = $"https://raw.githubusercontent.com/{repository}/{branchName}/README.md";
             var markdown = await client.GetStringAsync(url);
             if (string.IsNullOrWhiteSpace(markdown))
             {
-                return "Dev-branch README is empty.";
+                return $"{branchName}-branch README is empty.";
             }
 
             return ExtractChangelogDelta(markdown, installedVersion, targetVersion);
         }
         catch (Exception ex)
         {
-            return $"Could not load dev-branch README notes: {ex.Message}";
+            return $"Could not load {branchName}-branch README notes: {ex.Message}";
         }
     }
 
@@ -295,7 +304,7 @@ public partial class MainWindow : Window
         var changelogIndex = Normalised.IndexOf("## Changelog", StringComparison.OrdinalIgnoreCase);
         if (changelogIndex < 0)
         {
-            return "No changelog section found in dev-branch README.";
+            return "No changelog section found in branch README.";
         }
 
         var tail = Normalised[changelogIndex..];
@@ -1856,6 +1865,7 @@ public partial class MainWindow : Window
             "stable" => UpdateChannel.Stable,
             "development" => UpdateChannel.Development,
             "dev" => UpdateChannel.Development,
+            "hotfix" => UpdateChannel.Hotfix,
             "local-master" => UpdateChannel.LocalMaster,
             "localmaster" => UpdateChannel.LocalMaster,
             "local" => UpdateChannel.LocalMaster,
@@ -2046,6 +2056,7 @@ public partial class MainWindow : Window
     {
         Stable,
         Development,
+        Hotfix,
         LocalMaster
     }
 
@@ -2065,6 +2076,7 @@ public partial class MainWindow : Window
         {
             UpdateChannel.Stable => "Stable",
             UpdateChannel.Development => "Development",
+            UpdateChannel.Hotfix => "Hotfix",
             UpdateChannel.LocalMaster => "Local Master",
             _ => "Stable"
         };

@@ -7,9 +7,9 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 ---
 
 ## Changelog
-### [3.0.0] - 2026-07-15
+### [2.0.3] - 2026-07-22
 #### General
-- 
+- Stabilization patch for the workbook and updater release line.
 
 ### [2.0.2] - 2026-07-14
 #### General

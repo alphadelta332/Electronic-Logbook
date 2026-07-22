@@ -31,6 +31,12 @@ try {
         $excel = New-Object -ComObject Excel.Application
         $excel.Visible = $false
         $excel.DisplayAlerts = $false
+        $excel.EnableEvents = $false
+        try {
+            # Keep macros available for VBE compile while EnableEvents prevents
+            # Workbook_Open prompts from blocking unattended validation.
+            $excel.AutomationSecurity = 1
+        } catch {}
 
         $workbook = $excel.Workbooks.Open($tempWorkbook, $false, $false)
 
@@ -50,6 +56,9 @@ try {
         $compileAfter = $excel.VBE.CommandBars.Item("Menu Bar").Controls.Item("Debug").Controls |
             Where-Object { $_.Id -eq 578 } |
             Select-Object -First 1
+        if ($null -eq $compileAfter) {
+            throw "VBE compile command was not found after execution."
+        }
 
         $secondEnabled = [bool]$compileAfter.Enabled
         Write-Host "Disposable VBA compile pass complete." -ForegroundColor Green

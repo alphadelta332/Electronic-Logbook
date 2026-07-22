@@ -5,6 +5,7 @@
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [switch]$AllowDevBranch,
+    [switch]$AllowHotfixBranch,
     [switch]$CheckExternalLinks
 )
 
@@ -69,8 +70,13 @@ Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
     $branch = (Get-WorkbookNameText -Workbook $Workbook -Name "GitHubBranch").Trim()
     if ($branch -eq "") {
         $issues.Add("GitHubBranch is empty.")
-    } elseif ($branch -ne "main" -and -not $AllowDevBranch) {
-        $issues.Add("GitHubBranch is '$branch'. Public release workbooks should use 'main'.")
+    } else {
+        $allowedBranches = @("main")
+        if ($AllowDevBranch) { $allowedBranches += "dev" }
+        if ($AllowHotfixBranch) { $allowedBranches += "hotfix" }
+        if ($allowedBranches -notcontains $branch) {
+            $issues.Add("GitHubBranch is '$branch'. Public release workbooks should use one of: $($allowedBranches -join ', ').")
+        }
     }
 
     $workbookVersion = (Get-WorkbookNameText -Workbook $Workbook -Name "LogbookVersion").Trim()

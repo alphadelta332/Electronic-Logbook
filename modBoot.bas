@@ -79,7 +79,7 @@ Private Sub RunWizardUpdate(ByVal newVersion As String)
     Dim releaseChannel As Boolean
 
     newVersion = NormalizeVersionText(newVersion)
-    releaseChannel = (LCase$(Trim$(GetGitHubBranch())) = "main")
+    releaseChannel = IsStableUpdateBranch(GetGitHubBranch())
     sourceWorkbookPath = ResolveLocalPath(ThisWorkbook) & "\" & ThisWorkbook.Name
 
     If Not releaseChannel Then
@@ -137,15 +137,24 @@ End Sub
 
 Private Function ConfirmDevelopmentWizardLaunch(ByVal targetVersion As String) As Boolean
     Dim message As String
+    Dim branchName As String
+    Dim channelName As String
 
-    message = "This workbook is configured for the development update channel." & vbCrLf & vbCrLf & _
-              "Development updater wizard builds may be unsigned and are intended only for testing. " & _
+    branchName = LCase$(Trim$(GetGitHubBranch()))
+    If branchName = "hotfix" Then
+        channelName = "hotfix"
+    Else
+        channelName = "development"
+    End If
+
+    message = "This workbook is configured for the " & channelName & " update channel." & vbCrLf & vbCrLf & _
+              UCase$(Left$(channelName, 1)) & Mid$(channelName, 2) & " updater wizard builds may be unsigned and are intended only for testing. " & _
               "Continue only if you trust this workbook and repository checkout." & vbCrLf & vbCrLf & _
               "Target version: " & targetVersion & vbCrLf & vbCrLf & _
-              "Continue with the development updater wizard?"
+              "Continue with the " & channelName & " updater wizard?"
 
     ConfirmDevelopmentWizardLaunch = (MsgBox(message, vbYesNo + vbExclamation, _
-                                             "Development Updater Warning") = vbYes)
+                                             UCase$(Left$(channelName, 1)) & Mid$(channelName, 2) & " Updater Warning") = vbYes)
 End Function
 
 Private Function GetLocalVersion() As String
@@ -249,6 +258,23 @@ Private Function GetGitHubBranch() As String
     GetGitHubBranch = Trim(CStr(ThisWorkbook.Names("GitHubBranch").RefersToRange.Value))
     If GetGitHubBranch = "" Then GetGitHubBranch = "main"
     On Error GoTo 0
+End Function
+
+Private Function IsStableUpdateBranch(ByVal branchName As String) As Boolean
+    IsStableUpdateBranch = (LCase$(Trim$(branchName)) = "main")
+End Function
+
+Private Function WorkbookUpdateChannelArgument() As String
+    Dim branchName As String
+
+    branchName = LCase$(Trim$(GetGitHubBranch()))
+    If branchName = "hotfix" Then
+        WorkbookUpdateChannelArgument = "hotfix"
+    ElseIf branchName = "main" Then
+        WorkbookUpdateChannelArgument = "stable"
+    Else
+        WorkbookUpdateChannelArgument = "development"
+    End If
 End Function
 
 Private Function GetBranchCommitSha(branchName As String) As String
@@ -356,8 +382,8 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
     commandLine = """" & wizardPath & """ --source """ & sourceWorkbookPath & """ --repo """ & repository & """ --inplace"
     If masterWorkbookPath <> "" Then
         commandLine = commandLine & " --master """ & masterWorkbookPath & """"
-        If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-            commandLine = commandLine & " --channel development"
+        If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+            commandLine = commandLine & " --channel " & WorkbookUpdateChannelArgument()
         End If
     End If
 
@@ -402,8 +428,12 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
         Exit Function
     End If
 
-    If LCase$(Trim$(GetGitHubBranch())) <> "main" Then
-        tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+    If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+        If LCase$(Trim$(GetGitHubBranch())) = "hotfix" Then
+            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterHotfix"
+        Else
+            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
+        End If
         If mResolvedRef <> "" Then
             tempFolder = tempFolder & "_" & SafePathSegment(Left$(mResolvedRef, 12))
         ElseIf targetVersion <> "" Then

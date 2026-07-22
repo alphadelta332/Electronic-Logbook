@@ -39,3 +39,4 @@ IMPROVEMENT_ROADMAP.md
 # Local mobile app icon assets
 /mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
 docs/mobile-ui-overhaul.md
+LOCAL_DEVICE_SETUP_HANDOVER.md

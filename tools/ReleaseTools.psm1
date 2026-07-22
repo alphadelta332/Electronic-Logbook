@@ -229,21 +229,29 @@ function Set-WorkbookCustomPropertyFileValue {
         $customNs = [System.Xml.XmlNamespaceManager]::new($custom.NameTable)
         $customNs.AddNamespace("c", "http://schemas.openxmlformats.org/officeDocument/2006/custom-properties")
         $customNs.AddNamespace("vt", "http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes")
-        $property = $custom.SelectSingleNode("/c:Properties/c:property[@name='$Name']", $customNs)
+        $matchingProperties = @($custom.SelectNodes("/c:Properties/c:property[@name='$Name']", $customNs))
+        $property = $matchingProperties | Select-Object -First 1
+        foreach ($duplicateProperty in ($matchingProperties | Select-Object -Skip 1)) {
+            [void]$duplicateProperty.ParentNode.RemoveChild($duplicateProperty)
+        }
         if ($null -eq $property) {
             $property = $custom.CreateElement("property", $customNs.LookupNamespace("c"))
             $property.SetAttribute("fmtid", "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}")
-            $property.SetAttribute("pid", [string](2 + @($custom.SelectNodes("/c:Properties/c:property", $customNs)).Count))
             $property.SetAttribute("name", $Name)
             [void]$custom.DocumentElement.AppendChild($property)
         }
         $property.RemoveAll()
         $property.SetAttribute("fmtid", "{D5CDD505-2E9C-101B-9397-08002B2CF9AE}")
-        if (-not $property.HasAttribute("pid")) { $property.SetAttribute("pid", "2") }
         $property.SetAttribute("name", $Name)
         $propertyValue = $custom.CreateElement("vt", "lpwstr", $customNs.LookupNamespace("vt"))
         $propertyValue.InnerText = $Value
         [void]$property.AppendChild($propertyValue)
+
+        $nextPid = 2
+        foreach ($customProperty in @($custom.SelectNodes("/c:Properties/c:property", $customNs))) {
+            $customProperty.SetAttribute("pid", [string]$nextPid)
+            $nextPid++
+        }
         Set-PackageXml -Archive $archive -EntryName "docProps/custom.xml" -Document $custom
 
         if ($null -eq $customXml) {
@@ -285,7 +293,7 @@ function Set-LogbookWorkbookState {
         [Parameter(Mandatory)]
         [string]$WorkbookPath,
         [Parameter(Mandatory)]
-        [ValidateSet("dev", "main")]
+        [ValidateSet("dev", "hotfix", "main")]
         [string]$Branch,
         [AllowEmptyString()]
         [string]$Version

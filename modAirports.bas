@@ -182,11 +182,14 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
     Dim remarksCol As Long
     Dim fromCol As Long
     Dim toCol As Long
+    Dim viaCol As Long
     Dim hasRemarksCol As Boolean
     Dim hasFromCol As Boolean
     Dim hasToCol As Boolean
+    Dim hasViaCol As Boolean
     Dim rowIndex As Long
     Dim remarks As String
+    Dim viaText As String
     Dim endpoint As String
     Dim tokens As Variant
     Dim token As String
@@ -213,6 +216,10 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
         hasToCol = True
         toCol = tblLog.ListColumns("To").Index
     End If
+    If AirportTableColumnExists(tblLog, "Via") Then
+        hasViaCol = True
+        viaCol = tblLog.ListColumns("Via").Index
+    End If
 
     For rowIndex = 1 To tblLog.DataBodyRange.Rows.Count
         If AirportStatsLogbookRowIsSimOnly(tblLog, rowIndex) Then GoTo NextRow
@@ -231,6 +238,24 @@ Private Sub AccumulateAirportVisits(ByVal tblLog As ListObject, ByVal aliasLooku
         If hasToCol Then
             endpoint = UCase$(Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, toCol).Value)))
             If endpoint <> "" And aliasLookup.Exists(endpoint) Then rowMatches(CStr(aliasLookup(endpoint))) = True
+        End If
+
+        If hasViaCol Then
+            viaText = Trim$(CStr(tblLog.DataBodyRange.Cells(rowIndex, viaCol).Value))
+            If viaText <> "" Then
+                tokens = Split(TokeniseAirportDetails(viaText), "|")
+                For Each key In tokens
+                    token = UCase$(Trim$(CStr(key)))
+                    If token <> "" Then
+                        If Not AirportStatsIgnoreToken(token) Then
+                            If aliasLookup.Exists(token) Then
+                                icao = CStr(aliasLookup(token))
+                                If Not rowMatches.Exists(icao) Then rowMatches.Add icao, True
+                            End If
+                        End If
+                    End If
+                Next key
+            End If
         End If
 
         If hasRemarksCol Then
