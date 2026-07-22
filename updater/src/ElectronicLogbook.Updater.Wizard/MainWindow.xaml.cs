@@ -97,7 +97,10 @@ public partial class MainWindow : Window
 
         CancelButton.Content = _isUpdating ? "Cancel Update" : "Cancel";
 
-        var portableActionsEnabled = !_isUpdating && File.Exists(_context.SourcePath);
+        var portableLogbookUiVisible = IsPortableLogbookUiVisible();
+        PortableLogbookPanel.Visibility = portableLogbookUiVisible ? Visibility.Visible : Visibility.Collapsed;
+
+        var portableActionsEnabled = portableLogbookUiVisible && !_isUpdating && File.Exists(_context.SourcePath);
         PortableEnableButton.IsEnabled = portableActionsEnabled;
         PortableExportButton.IsEnabled = portableActionsEnabled;
         PortableImportButton.IsEnabled = portableActionsEnabled;
@@ -106,6 +109,8 @@ public partial class MainWindow : Window
         PortableResolveConflictButton.IsEnabled = portableActionsEnabled;
         PortableRefreshStatusButton.IsEnabled = portableActionsEnabled;
     }
+
+    private bool IsPortableLogbookUiVisible() => _context.Channel == UpdateChannel.Development;
 
     private bool CanAdvanceFromCurrentStep()
     {
@@ -149,7 +154,9 @@ public partial class MainWindow : Window
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
 
-        PortableLogbookStatusText.Text = await TryReadPortableLogbookStatusTextWithRetryAsync(_context.SourcePath);
+        PortableLogbookStatusText.Text = IsPortableLogbookUiVisible()
+            ? await TryReadPortableLogbookStatusTextWithRetryAsync(_context.SourcePath)
+            : "";
 
         var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);

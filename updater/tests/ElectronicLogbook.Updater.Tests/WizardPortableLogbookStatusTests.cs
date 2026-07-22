@@ -16,6 +16,7 @@ public sealed class WizardPortableLogbookStatusTests
             "ElectronicLogbook.Updater.Wizard",
             "MainWindow.xaml.cs")));
 
+        Assert.Contains("x:Name=\"PortableLogbookPanel\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableLogbookStatusText\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableEnableButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableExportButton\"", xaml, StringComparison.Ordinal);
@@ -26,6 +27,9 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.Contains("x:Name=\"PortableRefreshStatusButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("TryReadPortableLogbookStatusTextWithRetryAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.ReadStatus", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("IsPortableLogbookUiVisible() => _context.Channel == UpdateChannel.Development", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookPanel.Visibility = portableLogbookUiVisible ? Visibility.Visible : Visibility.Collapsed", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("portableActionsEnabled = portableLogbookUiVisible && !_isUpdating && File.Exists(_context.SourcePath)", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.Enable", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.Export", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.PreviewImport", codeBehind, StringComparison.Ordinal);

@@ -7,9 +7,12 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 ---
 
 ## Changelog
-### [2.0.3] - 2026-07-22
-#### General
-- Stabilization patch for the workbook and updater release line.
+### [2.0.3] - 2026-07-23
+#### Stats/Charts
+- Fixed airport visit statistics so visits are counted from the Logbook **From**, **To**, and **Via** route fields. This corrects under-reported visit counts after the 2.0.0+ route-field redesign.
+
+#### Updater
+- Improved Updater Wizard's handling with OneDrive/Excel.
 
 ### [2.0.2] - 2026-07-14
 #### General
