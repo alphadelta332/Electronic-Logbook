@@ -89,7 +89,7 @@ Assert-FileExists -Path $metadataPath -Description "Android APK metadata"
 
 $config = Get-Content -LiteralPath $capacitorConfigPath -Raw | ConvertFrom-Json
 Assert-Equal -Actual $config.appId -Expected "com.alphadelta.electroniclogbook" -Description "Capacitor appId"
-Assert-Equal -Actual $config.appName -Expected "Electronic Logbook" -Description "Capacitor appName"
+Assert-Equal -Actual $config.appName -Expected "LogbookOne" -Description "Capacitor appName"
 Assert-Equal -Actual $config.webDir -Expected "artifacts/capacitor" -Description "Capacitor webDir"
 Assert-Equal -Actual $config.server.androidScheme -Expected "https" -Description "Capacitor Android scheme"
 
@@ -145,7 +145,7 @@ if ($compressedAssets.Count -gt 0) {
 
 $manifestPath = Join-Path $androidAssetRoot "manifest.webmanifest"
 $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-Assert-Equal -Actual $manifest.name -Expected "Electronic Logbook" -Description "Web manifest name"
+Assert-Equal -Actual $manifest.name -Expected "LogbookOne" -Description "Web manifest name"
 Assert-Equal -Actual $manifest.display -Expected "standalone" -Description "Web manifest display mode"
 Assert-Equal -Actual $manifest.prefer_related_applications -Expected $false -Description "Web manifest related-app preference"
 Assert-Equal -Actual $manifest.start_url -Expected "./" -Description "Web manifest start URL"

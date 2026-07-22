@@ -1,6 +1,6 @@
 {
-  "name": "Electronic Logbook",
-  "short_name": "Logbook",
+  "name": "LogbookOne",
+  "short_name": "LogbookOne",
   "description": "Offline electronic pilot logbook with portable package exchange.",
   "id": "./",
   "scope": "./",

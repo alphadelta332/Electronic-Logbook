@@ -62,8 +62,8 @@ public sealed class PwaStaticAssetTests
         using var manifest = JsonDocument.Parse(ReadMobileAsset("manifest.webmanifest"));
         var root = manifest.RootElement;
 
-        Assert.Equal("Electronic Logbook", root.GetProperty("name").GetString());
-        Assert.Equal("Logbook", root.GetProperty("short_name").GetString());
+        Assert.Equal("LogbookOne", root.GetProperty("name").GetString());
+        Assert.Equal("LogbookOne", root.GetProperty("short_name").GetString());
         Assert.Contains("offline", root.GetProperty("description").GetString(), StringComparison.OrdinalIgnoreCase);
         Assert.Equal("standalone", root.GetProperty("display").GetString());
         Assert.False(root.GetProperty("prefer_related_applications").GetBoolean());

@@ -38,3 +38,4 @@ IMPROVEMENT_ROADMAP.md
 !updater/release-manifest-signing-public-key.pem
 # Local mobile app icon assets
 /mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
+docs/mobile-ui-overhaul.md

@@ -4,7 +4,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Electronic Logbook</title>
+    <title>LogbookOne</title>
     <base href="/" />
     <link rel="stylesheet" href="css/app.css" />
     <!-- If you add any scoped CSS files, uncomment the following to load them
@@ -36,7 +36,10 @@
     <script src="js/logbookStore.js"></script>
     <script src="_framework/blazor.webassembly.js"></script>
     <script>
-        if ('serviceWorker' in navigator) {
+        const isEphemeralTunnel =
+            location.hostname.endsWith(".trycloudflare.com") ||
+            location.hostname.endsWith(".loca.lt");
+        if ('serviceWorker' in navigator && !isEphemeralTunnel) {
             navigator.serviceWorker.register('service-worker.js');
         }
     </script>
