@@ -16,6 +16,7 @@ public sealed class MobilePackageExportWorkflowTests
         var jsRuntime = new RecordingJsRuntime();
         jsRuntime.Results.Enqueue(true);
         jsRuntime.Results.Enqueue(new BrowserPackageCiphertext(new byte[encryptionPlan.CompressedPlaintext.Length], new byte[16]));
+        jsRuntime.Results.Enqueue(null);
         jsRuntime.Results.Enqueue(false);
         var keyStore = new BrowserPackageKeyStore(jsRuntime);
         var fileStore = new BrowserFileStore(jsRuntime);
@@ -30,12 +31,14 @@ public sealed class MobilePackageExportWorkflowTests
             [
                 "electronicLogbookKeys.hasPackageKey",
                 "electronicLogbookKeys.encrypt",
+                "electronicLogbookFiles.nativeShareOrDownload",
                 "electronicLogbookFiles.canShare",
                 "electronicLogbookFiles.download"
             ],
             jsRuntime.Calls.Select(call => call.Identifier));
         Assert.Equal("package-key:log_mobile", jsRuntime.Calls[1].Arguments[0]);
-        Assert.Same(result.PackageBytes, jsRuntime.Calls[3].Arguments[1]);
+        Assert.Same(result.PackageBytes, jsRuntime.Calls[4].Arguments[1]);
+        Assert.Null(result.Transfer.AdbPath);
     }
 
     [Fact]
@@ -184,6 +187,7 @@ public sealed class MobilePackageExportWorkflowTests
                     (byte[])args[1]!,
                     (byte[])args[2]!,
                     (byte[])args[3]!),
+                "electronicLogbookFiles.nativeShareOrDownload" => null,
                 "electronicLogbookFiles.canShare" => false,
                 "electronicLogbookFiles.download" => CaptureDownload((byte[])args[1]!),
                 _ => throw new InvalidOperationException($"Unexpected JS call: {identifier}")

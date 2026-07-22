@@ -383,7 +383,12 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
             BrowserFileStore.ElogbookContentType,
             exportedAt,
             new string('a', 64),
-            [1, 2, 3]);
+            [1, 2, 3],
+            new BrowserFileTransferResult(
+                "log_fixture_20260719_030000.elogbook",
+                null,
+                null,
+                false));
         var store = new BrowserLogbookStore(new MemoryJsRuntime());
         await store.SaveStateAsync(new BrowserLogbookState(document, [], null));
 

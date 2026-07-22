@@ -116,19 +116,40 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
             contentType);
     }
 
-    public async ValueTask ShareOrDownloadAsync(
+    public ValueTask<BrowserFileTransferResult?> TryNativeShareOrDownloadAsync(
         string fileName,
         byte[] bytes,
         string contentType = ElogbookContentType)
     {
         ValidateExportArguments(fileName, bytes, contentType);
+
+        return jsRuntime.InvokeAsync<BrowserFileTransferResult?>(
+            "electronicLogbookFiles.nativeShareOrDownload",
+            fileName,
+            bytes,
+            contentType);
+    }
+
+    public async ValueTask<BrowserFileTransferResult> ShareOrDownloadAsync(
+        string fileName,
+        byte[] bytes,
+        string contentType = ElogbookContentType)
+    {
+        ValidateExportArguments(fileName, bytes, contentType);
+        var nativeTransfer = await TryNativeShareOrDownloadAsync(fileName, bytes, contentType).ConfigureAwait(false);
+        if (nativeTransfer is not null)
+        {
+            return nativeTransfer;
+        }
+
         if (await CanShareAsync(fileName, bytes, contentType).ConfigureAwait(false))
         {
             await ShareAsync(fileName, bytes, contentType).ConfigureAwait(false);
-            return;
+            return new BrowserFileTransferResult(fileName, null, null, true);
         }
 
         await DownloadAsync(fileName, bytes, contentType).ConfigureAwait(false);
+        return new BrowserFileTransferResult(fileName, null, null, false);
     }
 
     private static void ValidateExportArguments(string fileName, byte[] bytes, string contentType)
@@ -179,5 +200,11 @@ public sealed record BrowserFile(
     string FileName,
     string ContentType,
     byte[] Bytes);
+
+public sealed record BrowserFileTransferResult(
+    string FileName,
+    string? DevicePath,
+    string? AdbPath,
+    bool Shared);
 
 public sealed class BrowserFileStoreException(string message) : Exception(message);

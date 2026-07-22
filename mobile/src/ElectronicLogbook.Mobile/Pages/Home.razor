@@ -349,20 +349,35 @@
         }
 
         <div class="exchange-box">
-            @if (PackageKeyStatus == "Not set")
+            @if (CanRestorePackageKey)
             {
-                <button type="button" @onclick="SetupPackageKeyAsync" disabled="@IsStorageBlocked" title="Create this device's browser-held package key.">Set up key</button>
-                <input type="password" class="recovery-code-input" @bind="RecoveryCodeDraft" autocomplete="off" spellcheck="false" placeholder="Recovery code" disabled="@IsStorageBlocked" />
-                <button type="button" @onclick="RestorePackageKeyAsync" disabled="@IsStorageBlocked" title="Restore this device's package key from an existing workbook recovery code.">Restore key</button>
+                @if (PackageKeyStatus == "Not set")
+                {
+                    <button type="button" @onclick="SetupPackageKeyAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Create this device's browser-held package key.">Set up key</button>
+                }
+                <input type="password" class="recovery-code-input" @bind="RecoveryCodeDraft" autocomplete="off" spellcheck="false" placeholder="Recovery code" disabled="@(IsStorageBlocked || IsExchangeBusy)" />
+                <button type="button" @onclick="RestorePackageKeyAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Restore this device's package key from an existing workbook recovery code.">Restore key</button>
             }
-            <button type="button" @onclick="ExportSupportSummaryAsync" disabled="@IsStorageBlocked" title="Download a redacted local JSON summary for support or pilot feedback.">Support summary</button>
-            <button type="button" @onclick="PreviewPackageAsync" disabled="@IsStorageBlocked" title="Read package manifest without changing this device copy.">Preview package</button>
+            <button type="button" @onclick="ExportSupportSummaryAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Download a redacted local JSON summary for support or pilot feedback.">Support summary</button>
+            <button type="button" @onclick="PreviewPackageAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Read package manifest without changing this device copy.">Preview package</button>
             <button type="button" @onclick="ApplyPackageAsync" disabled="@IsPackageImportDisabled" title="@PackageImportTitle">Import package</button>
             <button type="button" class="primary" @onclick="ExportPackageAsync" disabled="@IsPackageExportDisabled" title="@PackageExchangeTitle">Export package</button>
         </div>
         <div class="key-notice" role="status">
             @PackageKeyNotice
         </div>
+        @if (!string.IsNullOrWhiteSpace(ImportUnavailableMessage))
+        {
+            <div class="exchange-message exchange-blocked" role="status">
+                <span>@ImportUnavailableMessage</span>
+            </div>
+        }
+        @if (IsExchangeBusy)
+        {
+            <div class="exchange-message exchange-busy" role="status" aria-live="polite">
+                <span>@ExchangeBusyMessage</span>
+            </div>
+        }
         @if (!string.IsNullOrWhiteSpace(PackageExchangeError))
         {
             <div class="validation-summary" role="alert">
@@ -470,28 +485,64 @@
 
     private string RecoveryCodeDraft { get; set; } = string.Empty;
 
+    private bool IsExchangeBusy { get; set; }
+
+    private string ExchangeBusyMessage { get; set; } = string.Empty;
+
     private static string TodayIso => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
 
     private string PackageExchangeTitle =>
-        PackageKeyStatus == "Unavailable"
+        IsExchangeBusy
+            ? "Package exchange is already in progress."
+            : PackageKeyStatus == "Unavailable"
             ? "This browser cannot hold a non-extractable package key."
             : PackageKeyStatus == "Not set"
             ? "Set up this device's package key before exporting."
             : "Export an encrypted portable logbook package.";
 
     private string PackageImportTitle =>
-        PackageKeyStatus == "Unavailable"
+        IsExchangeBusy
+            ? "Package exchange is already in progress."
+            : PackageKeyStatus == "Unavailable"
             ? "This browser cannot hold a non-extractable package key."
             : PackageKeyStatus == "Not set"
             ? "Set up this device's package key before importing encrypted packages."
+            : CanRestorePreviewedLogbook
+            ? "Restore the workbook recovery code before importing this package."
             : "Import a compatible package and apply it when it has no unresolved conflicts.";
 
     private string PackageKeyNotice => MobilePackageKeyNotice.Create(PackageKeyStatus);
 
-    private bool IsPackageExportDisabled => IsStorageBlocked || PackageKeyStatus != "Ready";
+    private string? ImportUnavailableMessage =>
+        IsStorageBlocked
+            ? "Package import is unavailable while local storage is blocked."
+            : IsExchangeBusy
+            ? null
+            : PackageKeyStatus == "Unavailable"
+            ? "Package import is unavailable because this browser cannot hold the required package key."
+            : PackageKeyStatus == "Not set"
+            ? "Package import is unavailable until this device has a package key."
+            : CanRestorePreviewedLogbook
+            ? "Package import is unavailable until the workbook recovery code is restored for the previewed package."
+            : ImportCompatibility == MobilePackageImportCompatibility.WrongLogbook
+            ? "Package import is unavailable because this package belongs to a different logbook."
+            : ImportCompatibility == MobilePackageImportCompatibility.UnsupportedSchema
+            ? "Package import is unavailable because this package uses an unsupported schema."
+            : null;
+
+    private bool CanRestorePackageKey => PackageKeyStatus == "Not set" || CanRestorePreviewedLogbook;
+
+    private bool CanRestorePreviewedLogbook =>
+        ImportPlan is not null &&
+        ImportCompatibility == MobilePackageImportCompatibility.WrongLogbook &&
+        Document.Operations.Count == 0 &&
+        ImportReceipts.Count == 0;
+
+    private bool IsPackageExportDisabled => IsStorageBlocked || IsExchangeBusy || PackageKeyStatus != "Ready";
 
     private bool IsPackageImportDisabled =>
         IsStorageBlocked ||
+        IsExchangeBusy ||
         PackageKeyStatus != "Ready" ||
         ImportCompatibility is MobilePackageImportCompatibility.WrongLogbook or MobilePackageImportCompatibility.UnsupportedSchema;
 
@@ -605,13 +656,13 @@
 
     private async Task PreviewPackageAsync()
     {
-        if (IsStorageBlocked)
+        if (IsStorageBlocked || IsExchangeBusy)
         {
             return;
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Opening package picker...");
         ImportPlan = null;
         ImportCompatibility = null;
         ImportExchangePlan = null;
@@ -633,17 +684,21 @@
         {
             PackageExchangeError = ex.Message;
         }
+        finally
+        {
+            EndExchangeAction();
+        }
     }
 
     private async Task SetupPackageKeyAsync()
     {
-        if (IsStorageBlocked)
+        if (IsStorageBlocked || IsExchangeBusy)
         {
             return;
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Creating package key...");
         try
         {
             if (!await PackageKeyStore.IsSupportedAsync())
@@ -665,17 +720,21 @@
             PackageKeyStatus = "Unavailable";
             PackageExchangeError = ex.Message;
         }
+        finally
+        {
+            EndExchangeAction();
+        }
     }
 
     private async Task RestorePackageKeyAsync()
     {
-        if (IsStorageBlocked)
+        if (IsStorageBlocked || IsExchangeBusy)
         {
             return;
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Restoring package key...");
         try
         {
             if (!await PackageKeyStore.IsSupportedAsync())
@@ -717,6 +776,7 @@
         finally
         {
             RecoveryCodeDraft = string.Empty;
+            EndExchangeAction();
         }
     }
 
@@ -743,7 +803,7 @@
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Exporting package...");
         try
         {
             var exportedAt = DateTimeOffset.UtcNow;
@@ -751,24 +811,28 @@
             LastSuccessfulExportAt = result.ExportedAt;
             LastSuccessfulExport = BrowserLogbookExportCheckpoint.Create(Document, result);
             await SaveStateAsync();
-            PackageExchangeMessage = $"Exported {result.FileName}.";
+            PackageExchangeMessage = FormatExportMessage(result);
         }
         catch (Exception ex) when (ex is MobilePackageExportPlanException or BrowserFileStoreException or JSException)
         {
             PackageExchangeError = ex.Message;
             await RefreshPackageKeyStatusAsync();
         }
+        finally
+        {
+            EndExchangeAction();
+        }
     }
 
     private async Task ExportSupportSummaryAsync()
     {
-        if (IsStorageBlocked)
+        if (IsStorageBlocked || IsExchangeBusy)
         {
             return;
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Exporting support summary...");
         try
         {
             var exportedAt = DateTimeOffset.UtcNow;
@@ -779,17 +843,22 @@
         {
             PackageExchangeError = ex.Message;
         }
+        finally
+        {
+            EndExchangeAction();
+        }
     }
 
     private async Task ApplyPackageAsync()
     {
         if (IsPackageImportDisabled)
         {
+            PackageExchangeError = ImportUnavailableMessage;
             return;
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Importing package...");
         ImportExchangePlan = null;
         try
         {
@@ -826,20 +895,26 @@
             PackageExchangeError = ex.Message;
             await RefreshPackageKeyStatusAsync();
         }
+        finally
+        {
+            EndExchangeAction();
+        }
     }
 
     private async Task ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice choice)
     {
         if (IsPackageImportDisabled)
         {
+            PackageExchangeError = ImportUnavailableMessage;
             return;
         }
 
         PackageExchangeError = null;
-        PackageExchangeMessage = null;
+        await BeginExchangeActionAsync("Resolving custom fields...");
         if (PendingImportFile is null || ImportExchangePlan is null)
         {
             PackageExchangeError = "Pick and inspect a package before resolving custom field labels.";
+            EndExchangeAction();
             return;
         }
 
@@ -871,6 +946,24 @@
             PackageExchangeError = ex.Message;
             await RefreshPackageKeyStatusAsync();
         }
+        finally
+        {
+            EndExchangeAction();
+        }
+    }
+
+    private async Task BeginExchangeActionAsync(string message)
+    {
+        IsExchangeBusy = true;
+        ExchangeBusyMessage = message;
+        PackageExchangeMessage = null;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void EndExchangeAction()
+    {
+        IsExchangeBusy = false;
+        ExchangeBusyMessage = string.Empty;
     }
 
     private void ResetDraft()
@@ -1140,6 +1233,11 @@
             MobilePackageImportApplyStatus.RequiresResolution => "Package requires resolution before import.",
             _ => "Package import finished."
         };
+
+    private static string FormatExportMessage(MobilePackageExportWorkflowResult result) =>
+        string.IsNullOrWhiteSpace(result.Transfer.AdbPath)
+            ? $"Exported {result.FileName}."
+            : $"Exported {result.FileName}. USB debugging path: {result.Transfer.AdbPath}";
 
     private static string FormatImportSummary(PortableLogbookImportChangeSummary summary)
     {

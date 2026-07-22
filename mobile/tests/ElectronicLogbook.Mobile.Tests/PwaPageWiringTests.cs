@@ -45,6 +45,56 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void HomePageOffersRecoveryRestoreForEmptyWrongLogbookPreview()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("@if (CanRestorePackageKey)", page, StringComparison.Ordinal);
+        Assert.Contains("private bool CanRestorePackageKey => PackageKeyStatus == \"Not set\" || CanRestorePreviewedLogbook;", page, StringComparison.Ordinal);
+        Assert.Contains("private bool CanRestorePreviewedLogbook =>", page, StringComparison.Ordinal);
+        Assert.Contains("ImportCompatibility == MobilePackageImportCompatibility.WrongLogbook", page, StringComparison.Ordinal);
+        Assert.Contains("Document.Operations.Count == 0", page, StringComparison.Ordinal);
+        Assert.Contains("ImportReceipts.Count == 0", page, StringComparison.Ordinal);
+        Assert.Contains("Restore the workbook recovery code before importing this package.", page, StringComparison.Ordinal);
+        Assert.Contains("Package import is unavailable until the workbook recovery code is restored for the previewed package.", page, StringComparison.Ordinal);
+        Assert.Contains("exchange-blocked", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageShowsBusyFeedbackDuringPackageExchange()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("private bool IsExchangeBusy", page, StringComparison.Ordinal);
+        Assert.Contains("private string ExchangeBusyMessage", page, StringComparison.Ordinal);
+        Assert.Contains("exchange-busy", page, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\"", page, StringComparison.Ordinal);
+        Assert.Contains("BeginExchangeActionAsync", page, StringComparison.Ordinal);
+        Assert.Contains("EndExchangeAction();", page, StringComparison.Ordinal);
+        Assert.Contains("Opening package picker...", page, StringComparison.Ordinal);
+        Assert.Contains("Creating package key...", page, StringComparison.Ordinal);
+        Assert.Contains("Restoring package key...", page, StringComparison.Ordinal);
+        Assert.Contains("Importing package...", page, StringComparison.Ordinal);
+        Assert.Contains("disabled=\"@(IsStorageBlocked || IsExchangeBusy)\"", page, StringComparison.Ordinal);
+        Assert.Contains("Package exchange is already in progress.", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageReportsWhyDisabledImportCannotRun()
+    {
+        var page = ReadMobilePage("Home.razor");
+
+        Assert.Contains("private string? ImportUnavailableMessage =>", page, StringComparison.Ordinal);
+        Assert.Contains("PackageExchangeError = ImportUnavailableMessage;", page, StringComparison.Ordinal);
+        Assert.Contains("Package import is unavailable while local storage is blocked.", page, StringComparison.Ordinal);
+        Assert.Contains("Package import is unavailable because this browser cannot hold the required package key.", page, StringComparison.Ordinal);
+        Assert.Contains("Package import is unavailable until this device has a package key.", page, StringComparison.Ordinal);
+        Assert.Contains("Package import is unavailable because this package belongs to a different logbook.", page, StringComparison.Ordinal);
+        Assert.Contains("Package import is unavailable because this package uses an unsupported schema.", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HomePageShowsSharedDraftValidationAfterDraftEditingStarts()
     {
         var page = ReadMobilePage("Home.razor");

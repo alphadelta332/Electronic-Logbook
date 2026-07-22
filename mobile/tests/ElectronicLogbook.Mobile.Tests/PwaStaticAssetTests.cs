@@ -167,6 +167,8 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("navigator.share", bridge, StringComparison.Ordinal);
         Assert.Contains("new File([new Uint8Array(bytes)]", bridge, StringComparison.Ordinal);
         Assert.Contains("files: [file]", bridge, StringComparison.Ordinal);
+        Assert.Contains("nativeShareOrDownload", bridge, StringComparison.Ordinal);
+        Assert.Contains("ElectronicLogbookNativeFiles", bridge, StringComparison.Ordinal);
         Assert.Matches(new Regex(@"canShare:[\s\S]*try\s*\{[\s\S]*navigator\.canShare[\s\S]*\}\s*catch\s*\{[\s\S]*return false", RegexOptions.Singleline), bridge);
     }
 
@@ -215,6 +217,23 @@ public sealed class PwaStaticAssetTests
         Assert.True(readIndex > sizeCheckIndex);
         Assert.Contains("reject(new Error(\"Selected file is empty.\"))", bridge, StringComparison.Ordinal);
         Assert.Contains("reject(new Error(`Selected file is larger than the ${maxElogbookBytes} byte package limit.`))", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppCssMakesDisabledAndPackageExchangeStatesVisible()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+
+        Assert.Contains("button:disabled", css, StringComparison.Ordinal);
+        Assert.Contains("input:disabled", css, StringComparison.Ordinal);
+        Assert.Contains("select:disabled", css, StringComparison.Ordinal);
+        Assert.Contains("textarea:disabled", css, StringComparison.Ordinal);
+        Assert.Contains("cursor: not-allowed", css, StringComparison.Ordinal);
+        Assert.Contains("opacity: 1", css, StringComparison.Ordinal);
+        Assert.Contains("button.primary:disabled", css, StringComparison.Ordinal);
+        Assert.Contains(".exchange-message", css, StringComparison.Ordinal);
+        Assert.Contains(".exchange-blocked", css, StringComparison.Ordinal);
+        Assert.Contains(".exchange-busy", css, StringComparison.Ordinal);
     }
 
     private static string ExtractFileBridge(string bridge)

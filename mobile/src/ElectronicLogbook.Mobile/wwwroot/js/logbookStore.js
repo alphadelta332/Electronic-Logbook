@@ -206,6 +206,18 @@
                 title: fileName
             });
         },
+        nativeShareOrDownload: async (fileName, bytes, contentType) => {
+            const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookNativeFiles;
+            if (!globalThis.Capacitor?.isNativePlatform?.() || !plugin?.saveAndShare) {
+                return null;
+            }
+
+            return await plugin.saveAndShare({
+                fileName,
+                contentType,
+                bytes: Array.from(new Uint8Array(bytes))
+            });
+        },
         download: (fileName, bytes, contentType) => {
             const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
             const url = URL.createObjectURL(blob);

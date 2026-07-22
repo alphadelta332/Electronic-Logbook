@@ -41,6 +41,27 @@ button.primary {
     color: #ffffff;
 }
 
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+    border-color: #c9d1dc;
+    background: #edf1f5;
+    color: #7a8491;
+    cursor: not-allowed;
+    opacity: 1;
+}
+
+button:disabled {
+    box-shadow: none;
+}
+
+button.primary:disabled {
+    border-color: #aeb8c4;
+    background: #b9c3cf;
+    color: #f7f9fb;
+}
+
 .layout {
     min-height: 100vh;
 }
@@ -246,6 +267,28 @@ textarea {
     background: #fff8dd;
     color: #574812;
     font-size: 0.88rem;
+}
+
+.exchange-message {
+    margin-top: 10px;
+    border: 1px solid #9fb4cf;
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #eef5ff;
+    color: #233d61;
+    font-size: 0.88rem;
+}
+
+.exchange-blocked {
+    border-color: #d6c58a;
+    background: #fff8dd;
+    color: #574812;
+}
+
+.exchange-busy {
+    border-color: #9fb4cf;
+    background: #eef5ff;
+    color: #233d61;
 }
 
 .exchange-preview {

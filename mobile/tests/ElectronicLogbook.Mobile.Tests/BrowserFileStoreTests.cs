@@ -74,32 +74,60 @@ public sealed class BrowserFileStoreTests
     public async Task ShareOrDownloadAsyncUsesWebShareWhenAvailable()
     {
         var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(null);
         jsRuntime.Results.Enqueue(true);
         var store = new BrowserFileStore(jsRuntime);
         var bytes = new byte[] { 1, 2, 3 };
 
-        await store.ShareOrDownloadAsync("logbook.elogbook", bytes);
+        var result = await store.ShareOrDownloadAsync("logbook.elogbook", bytes);
 
-        Assert.Equal(2, jsRuntime.Calls.Count);
-        Assert.Equal("electronicLogbookFiles.canShare", jsRuntime.Calls[0].Identifier);
-        Assert.Equal("electronicLogbookFiles.share", jsRuntime.Calls[1].Identifier);
-        Assert.Same(bytes, jsRuntime.Calls[1].Arguments[1]);
+        Assert.True(result.Shared);
+        Assert.Equal(3, jsRuntime.Calls.Count);
+        Assert.Equal("electronicLogbookFiles.nativeShareOrDownload", jsRuntime.Calls[0].Identifier);
+        Assert.Equal("electronicLogbookFiles.canShare", jsRuntime.Calls[1].Identifier);
+        Assert.Equal("electronicLogbookFiles.share", jsRuntime.Calls[2].Identifier);
+        Assert.Same(bytes, jsRuntime.Calls[2].Arguments[1]);
     }
 
     [Fact]
     public async Task ShareOrDownloadAsyncFallsBackToDownloadWhenWebShareIsUnavailable()
     {
         var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(null);
         jsRuntime.Results.Enqueue(false);
         var store = new BrowserFileStore(jsRuntime);
         var bytes = new byte[] { 1, 2, 3 };
 
-        await store.ShareOrDownloadAsync("logbook.elogbook", bytes);
+        var result = await store.ShareOrDownloadAsync("logbook.elogbook", bytes);
 
-        Assert.Equal(2, jsRuntime.Calls.Count);
-        Assert.Equal("electronicLogbookFiles.canShare", jsRuntime.Calls[0].Identifier);
-        Assert.Equal("electronicLogbookFiles.download", jsRuntime.Calls[1].Identifier);
-        Assert.Same(bytes, jsRuntime.Calls[1].Arguments[1]);
+        Assert.False(result.Shared);
+        Assert.Equal(3, jsRuntime.Calls.Count);
+        Assert.Equal("electronicLogbookFiles.nativeShareOrDownload", jsRuntime.Calls[0].Identifier);
+        Assert.Equal("electronicLogbookFiles.canShare", jsRuntime.Calls[1].Identifier);
+        Assert.Equal("electronicLogbookFiles.download", jsRuntime.Calls[2].Identifier);
+        Assert.Same(bytes, jsRuntime.Calls[2].Arguments[1]);
+    }
+
+    [Fact]
+    public async Task ShareOrDownloadAsyncUsesNativeTransferWhenAvailable()
+    {
+        var nativeResult = new BrowserFileTransferResult(
+            "logbook.elogbook",
+            "/storage/emulated/0/Android/data/com.alphadelta.electroniclogbook/files/exports/logbook.elogbook",
+            "/sdcard/Android/data/com.alphadelta.electroniclogbook/files/exports/logbook.elogbook",
+            true);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(nativeResult);
+        var store = new BrowserFileStore(jsRuntime);
+        var bytes = new byte[] { 1, 2, 3 };
+
+        var result = await store.ShareOrDownloadAsync("logbook.elogbook", bytes);
+
+        Assert.Equal(nativeResult, result);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookFiles.nativeShareOrDownload", call.Identifier);
+        Assert.Equal("logbook.elogbook", call.Arguments[0]);
+        Assert.Same(bytes, call.Arguments[1]);
     }
 
     [Fact]

@@ -7,7 +7,7 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 ---
 
 ## Changelog
-### [2.1.0] - 2026-07-15
+### [3.0.0] - 2026-07-15
 #### General
 - 
 

@@ -26,7 +26,7 @@ public sealed class CompatibilityPolicyTests
 
         var tags = policy.SupportedTags(
             ["v2.0.10", "v2.0.2", CompatibilityFloorTag, "v2.0.9"],
-            "2.1.0");
+            "3.0.0");
 
         Assert.Equal([CompatibilityFloorTag, "v2.0.2", "v2.0.9", "v2.0.10"], tags);
     }
