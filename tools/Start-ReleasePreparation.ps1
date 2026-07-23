@@ -77,7 +77,7 @@ function Add-ChangelogSkeleton {
 
 ### [$Version] - $ReleaseDate
 #### General
-- 
+- TBD
 
 "@
 
