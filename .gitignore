@@ -14,6 +14,7 @@ diagnostics_*.txt
 mobile/node_modules/
 /artifacts/
 mobile/artifacts/
+mobile/android/.gradle
 mobile/android/app/src/main/assets/public/
 mobile/src/ElectronicLogbook.Mobile/wwwroot/_framework/
 mobile/android/app/src/main/res/drawable/splash.png
