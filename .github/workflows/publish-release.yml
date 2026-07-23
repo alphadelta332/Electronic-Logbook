@@ -63,13 +63,21 @@ jobs:
 
           $tag = "v$version"
           $existingTag = git rev-parse -q --verify "refs/tags/$tag"
-          if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingTag)) {
+          $existingTagExitCode = $LASTEXITCODE
+          if ($existingTagExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingTag)) {
             throw "Release tag $tag already exists."
+          }
+          if ($existingTagExitCode -ne 0) {
+            $global:LASTEXITCODE = 0
           }
 
           $existingRelease = gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
+          $existingReleaseExitCode = $LASTEXITCODE
+          if ($existingReleaseExitCode -eq 0) {
             throw "GitHub release $tag already exists."
+          }
+          if ($existingReleaseExitCode -ne 0) {
+            $global:LASTEXITCODE = 0
           }
 
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
