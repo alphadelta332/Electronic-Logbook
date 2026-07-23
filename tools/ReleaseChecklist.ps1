@@ -61,7 +61,7 @@ if (-not $SkipAirportDataset) {
 
 if (-not $SkipPdf) {
     Write-Host ""
-    & (Join-Path $repoRoot "GenerateReadmePDF.ps1") -RepoPath $repoRoot
+    & (Join-Path $PSScriptRoot "GenerateReadmePDF.ps1") -RepoPath $repoRoot
 }
 
 if (-not $SkipWorkbookPrep) {

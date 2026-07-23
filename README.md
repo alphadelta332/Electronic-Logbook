@@ -13,6 +13,8 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 
 #### Updater
 - Improved Updater Wizard's handling with OneDrive/Excel.
+- Added quick button to Restore original copy.
+- General stability fixes.
 
 ### [2.0.2] - 2026-07-14
 #### General
