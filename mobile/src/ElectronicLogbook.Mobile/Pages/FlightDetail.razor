@@ -1,0 +1,183 @@
+@page "/flights/{EntryId}"
+@inject MobileLogbookSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>Flight Detail</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading flight</span>
+    </section>
+}
+else if (CurrentEntry?.Entry is null)
+{
+    @if (History?.IsDeleted == true)
+    {
+        <section class="flight-detail-page">
+            <header class="entry-header">
+                <div>
+                    <span class="eyebrow">Deleted entry</span>
+                    <h1>@History.EntryId.Value</h1>
+                </div>
+                <span class="draft-pill">Deleted</span>
+            </header>
+
+            <section class="notice-panel" role="status">
+                <MudIcon Icon="@Icons.Material.Filled.DeleteOutline" />
+                <div>
+                    <strong>Deletion history</strong>
+                    <span>This entry is no longer active, but its revisions remain in the portable audit trail.</span>
+                </div>
+            </section>
+
+            <section class="form-section">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Immutable history</span>
+                        <h2>Revisions</h2>
+                    </div>
+                </div>
+                @foreach (var revision in History.Revisions.OrderByDescending(revision => revision.CreatedAt))
+                {
+                    <div class="history-row">
+                        <div>
+                            <strong>@revision.Kind</strong>
+                            <span>@MobileLogbookSession.FormatTimestamp(revision.CreatedAt)</span>
+                        </div>
+                        <span>@revision.RevisionId.Value</span>
+                    </div>
+                }
+                <MudButton Href="/flights" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack">Logbook</MudButton>
+            </section>
+        </section>
+    }
+    else
+    {
+        <section class="empty-state">
+            <MudIcon Icon="@Icons.Material.Filled.SearchOff" />
+            <strong>Flight not found</strong>
+            <span>This entry may belong to another device copy.</span>
+            <MudButton Href="/flights" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack">Logbook</MudButton>
+        </section>
+    }
+}
+else
+{
+    <section class="flight-detail-page">
+        <header class="entry-header">
+            <div>
+                <span class="eyebrow">Entry detail</span>
+                <h1>@Session.FormatRoute(CurrentEntry.Entry)</h1>
+            </div>
+            <span class="draft-pill">@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(CurrentEntry.Entry)) hr</span>
+        </header>
+
+        <section class="detail-hero">
+            <div class="detail-primary-line">
+                <strong>@Session.FormatRegistration(CurrentEntry.Entry)</strong>
+                <strong>@Session.FormatRoute(CurrentEntry.Entry)</strong>
+                <strong>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(CurrentEntry.Entry))</strong>
+            </div>
+            <span>@MobileLogbookSession.FormatDate(CurrentEntry.Entry.Date) | @Session.FormatAircraft(CurrentEntry.Entry)</span>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Read first</span>
+                    <h2>Record fields</h2>
+                </div>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditEntry">
+                    Edit entry
+                </MudButton>
+            </div>
+            <div class="entry-details detail-grid" aria-label="Flight entry details">
+                @foreach (var detail in Session.EntryDetails(CurrentEntry.Entry))
+                {
+                    <span>
+                        <strong>@detail.Label</strong>
+                        @detail.Value
+                    </span>
+                }
+            </div>
+            <div class="row-actions">
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CloneEntry">Clone</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="DeleteEntry" Disabled="@Session.IsStorageBlocked">Delete</MudButton>
+            </div>
+        </section>
+
+        @if (History is not null)
+        {
+            <section class="form-section">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Immutable history</span>
+                        <h2>Revisions</h2>
+                    </div>
+                    @if (History.HasConflict)
+                    {
+                        <span class="draft-pill">Conflict</span>
+                    }
+                </div>
+                @foreach (var revision in History.Revisions.OrderByDescending(revision => revision.CreatedAt))
+                {
+                    <div class="history-row">
+                        <div>
+                            <strong>@revision.Kind</strong>
+                            <span>@MobileLogbookSession.FormatTimestamp(revision.CreatedAt)</span>
+                        </div>
+                        <span>@revision.RevisionId.Value</span>
+                    </div>
+                }
+            </section>
+        }
+    </section>
+}
+
+@code {
+    [Parameter]
+    public string? EntryId { get; set; }
+
+    private PortableLogbookMaterializedEntry? CurrentEntry => Session.FindCurrentEntry(EntryId);
+
+    private PortableLogbookRevisionHistoryView? History => Session.FindHistory(EntryId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedAsync();
+    }
+
+    private void EditEntry()
+    {
+        if (CurrentEntry is null)
+        {
+            return;
+        }
+
+        Navigation.NavigateTo($"/flights/{CurrentEntry.EntryId.Value}/edit");
+    }
+
+    private void CloneEntry()
+    {
+        if (CurrentEntry?.Entry is null)
+        {
+            return;
+        }
+
+        Session.CloneEntry(CurrentEntry.Entry);
+        Navigation.NavigateTo("/flights/new");
+    }
+
+    private async Task DeleteEntry()
+    {
+        if (CurrentEntry is null)
+        {
+            return;
+        }
+
+        await Session.DeleteEntryAsync(CurrentEntry);
+        Navigation.NavigateTo("/flights");
+    }
+}

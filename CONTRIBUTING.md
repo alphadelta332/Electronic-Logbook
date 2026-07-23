@@ -89,10 +89,10 @@ npm run build:android
 adb install -r android\app\build\outputs\apk\debug\app-debug.apk
 ```
 
-Debug APKs install as `com.alphadelta.electroniclogbook.dev` and are labelled
-`LogbookOne Dev`. Release builds keep `com.alphadelta.electroniclogbook`. This
+Debug APKs install as `com.alphadelta.electroniclogbook.dev` while keeping the visible
+app name `LogbookOne`. Release builds keep `com.alphadelta.electroniclogbook`. This
 side-by-side debug application ID keeps development installs away from pilot or
-release-test data.
+release-test data without cluttering the launcher label.
 
 Android only preserves installed app data across `adb install -r` when the replacement
 APK has the same package name and signing key as the installed app. If installation

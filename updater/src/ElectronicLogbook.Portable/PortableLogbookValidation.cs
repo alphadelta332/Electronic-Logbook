@@ -3,7 +3,7 @@ namespace ElectronicLogbook.Portable;
 public static class PortableLogbookValidator
 {
     public static PortableLogbookValidationResult Validate(PortableLogbookDocument document) =>
-        Validate(document, DateOnly.FromDateTime(DateTime.UtcNow));
+        Validate(document, DateOnly.FromDateTime(DateTime.Today));
 
     public static PortableLogbookValidationResult Validate(
         PortableLogbookDocument document,

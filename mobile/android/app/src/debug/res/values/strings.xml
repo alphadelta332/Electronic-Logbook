@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">LogbookOne Dev</string>
-    <string name="title_activity_main">LogbookOne Dev</string>
+    <string name="app_name">LogbookOne Gate 3</string>
+    <string name="title_activity_main">LogbookOne Gate 3</string>
     <string name="package_name">com.alphadelta.electroniclogbook.dev</string>
 </resources>

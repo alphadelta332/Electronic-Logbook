@@ -1,7 +1,9 @@
 @page "/flights/new"
+@page "/flights/{EntryId}/edit"
 @inject MobileLogbookSession Session
+@inject NavigationManager Navigation
 
-<PageTitle>New Flight</PageTitle>
+<PageTitle>@(Session.EditingEntryId is null ? "New Flight" : "Edit Flight")</PageTitle>
 
 @if (!Session.IsLoaded)
 {
@@ -13,6 +15,16 @@
 else
 {
     <section class="flight-entry-page">
+        @if (ShowSaveConfirmation)
+        {
+            <section class="save-confirmation" role="status" aria-live="assertive">
+                <span class="save-confirmation-icon">
+                    <MudIcon Icon="@Icons.Material.Filled.Check" />
+                </span>
+                <strong>@SaveConfirmationMessage</strong>
+            </section>
+        }
+
         <header class="entry-header">
             <div>
                 <span class="eyebrow">@Session.DraftModeLabel</span>
@@ -191,20 +203,61 @@ else
 }
 
 @code {
+    [Parameter]
+    public string? EntryId { get; set; }
+
     private static string TodayIso => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
+    private bool ShowSaveConfirmation { get; set; }
+    private string SaveConfirmationMessage { get; set; } = "Saved";
+    private string? LoadedEditEntryId { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedAsync();
+        LoadEditRoute();
+    }
+
+    protected override void OnParametersSet()
+    {
+        if (Session.IsLoaded)
+        {
+            LoadEditRoute();
+        }
     }
 
     private async Task SaveAsync()
     {
+        var confirmationMessage = Session.EditingEntryId is null ? "Flight added" : "Correction saved";
         await Session.SaveEntryAsync();
+        if (!Session.ShouldShowDraftErrors)
+        {
+            SaveConfirmationMessage = confirmationMessage;
+            ShowSaveConfirmation = true;
+            await Task.Delay(650);
+            Navigation.NavigateTo("/");
+        }
     }
 
     private void UseRecentRemark(ChangeEventArgs args)
     {
         Session.UseRecentRemark(args.Value?.ToString());
+    }
+
+    private void LoadEditRoute()
+    {
+        if (string.IsNullOrWhiteSpace(EntryId) || LoadedEditEntryId == EntryId)
+        {
+            return;
+        }
+
+        var entry = Session.FindCurrentEntry(EntryId);
+        if (entry is null)
+        {
+            Navigation.NavigateTo("/flights");
+            return;
+        }
+
+        Session.EditEntry(entry);
+        LoadedEditEntryId = EntryId;
     }
 }

@@ -264,6 +264,193 @@ public sealed class PwaPageWiringTests
         Assert.Contains("entry.CustomFields.TryGetValue(field.Id", page, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Gate3ShellUsesDashboardLogbookAndSettingsNavigationOnly()
+    {
+        var layout = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "Layout",
+            "MainLayout.razor")));
+
+        Assert.Contains("href=\"/\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>Dashboard</span>", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>Logbook</span>", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>Settings</span>", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("href=\"/flights/new\"", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("<span>New</span>", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("<span>Exchange</span>", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudMenu", layout, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3SettingsOwnsAppearanceChoices()
+    {
+        var layout = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "Layout",
+            "MainLayout.razor")));
+        var settings = ReadMobilePage("Settings.razor");
+        var program = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "Program.cs")));
+
+        Assert.Contains("MobileUiPreferenceState", layout, StringComparison.Ordinal);
+        Assert.Contains("UiPreferences.IsDarkMode", layout, StringComparison.Ordinal);
+        Assert.Contains("Appearance", settings, StringComparison.Ordinal);
+        Assert.Contains("ThemeButtonClass(\"System\")", settings, StringComparison.Ordinal);
+        Assert.Contains("ThemeButtonClass(\"Light\")", settings, StringComparison.Ordinal);
+        Assert.Contains("ThemeButtonClass(\"Dark\")", settings, StringComparison.Ordinal);
+        Assert.Contains("SetSystemThemeModeAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("UiPreferences.SetThemeModeAsync(\"System\")", settings, StringComparison.Ordinal);
+        Assert.Contains("builder.Services.AddScoped<MobileUiPreferenceState>()", program, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3SettingsExposesSupportSummaryExport()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+
+        Assert.Contains("@inject BrowserFileStore FileStore", settings, StringComparison.Ordinal);
+        Assert.Contains("Support summary", settings, StringComparison.Ordinal);
+        Assert.Contains("ExportSupportSummaryAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileSupportSummaryExportWorkflow.ExportAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.Document", settings, StringComparison.Ordinal);
+        Assert.Contains("SupportSummaryMessage", settings, StringComparison.Ordinal);
+        Assert.Contains("SupportSummaryError", settings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3LogbookUsesBalancedEntryRowsAndSeparateTotalsView()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+
+        Assert.Contains("@page \"/flights\"", page, StringComparison.Ordinal);
+        Assert.Contains("Entries", page, StringComparison.Ordinal);
+        Assert.Contains("Totals", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-entry-row", page, StringComparison.Ordinal);
+        Assert.Contains("Session.FormatRegistration(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.FormatRoute(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookEntryRules.LoggedTime(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("Total hours", page, StringComparison.Ordinal);
+        Assert.Contains("filter-sheet", page, StringComparison.Ordinal);
+        Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
+        Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
+        Assert.Contains("Deletion history", page, StringComparison.Ordinal);
+        Assert.Contains("Session.DeletedEntries", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3DashboardShowsLastFlightTotalHoursAndNinetyDaySnapshot()
+    {
+        var page = ReadMobilePage("Dashboard.razor");
+
+        Assert.Contains("Total hours", page, StringComparison.Ordinal);
+        Assert.Contains("Last 90 days", page, StringComparison.Ordinal);
+        Assert.Contains("dashboard-last-flight", page, StringComparison.Ordinal);
+        Assert.Contains("LastFlightTitle", page, StringComparison.Ordinal);
+        Assert.Contains("LastFlightDetail", page, StringComparison.Ordinal);
+        Assert.Contains("RecentSnapshotDetail", page, StringComparison.Ordinal);
+        Assert.Contains("TotalFlyingHours", page, StringComparison.Ordinal);
+        Assert.Contains("RecentCutoff", page, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookEntryRules.LoggedTime", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3DashboardRecordHealthGivesExplicitReasonWithoutPilotRules()
+    {
+        var page = ReadMobilePage("Dashboard.razor");
+
+        Assert.Contains("dashboard-record-health", page, StringComparison.Ordinal);
+        Assert.Contains("RecordHealthTitle", page, StringComparison.Ordinal);
+        Assert.Contains("RecordHealthReason", page, StringComparison.Ordinal);
+        Assert.Contains("Session.MergeResult.Conflicts.Count", page, StringComparison.Ordinal);
+        Assert.Contains("Last dated entry is", page, StringComparison.Ordinal);
+        Assert.Contains("within the last 90 days", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Part 61", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("CASR", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3FlightDetailIsReadFirstWithEditHistoryAndDeleteActions()
+    {
+        var page = ReadMobilePage("FlightDetail.razor");
+
+        Assert.Contains("@page \"/flights/{EntryId}\"", page, StringComparison.Ordinal);
+        Assert.Contains("Read first", page, StringComparison.Ordinal);
+        Assert.Contains("Edit entry", page, StringComparison.Ordinal);
+        Assert.Contains("Immutable history", page, StringComparison.Ordinal);
+        Assert.Contains("Session.EntryDetails(CurrentEntry.Entry)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.DeleteEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
+        Assert.Contains("History?.IsDeleted == true", page, StringComparison.Ordinal);
+        Assert.Contains("Deleted entry", page, StringComparison.Ordinal);
+        Assert.Contains("Deletion history", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo($\"/flights/{CurrentEntry.EntryId.Value}/edit\")", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightRouteMapSupportsDedicatedEditRoute()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+
+        Assert.Contains("@page \"/flights/new\"", page, StringComparison.Ordinal);
+        Assert.Contains("@page \"/flights/{EntryId}/edit\"", page, StringComparison.Ordinal);
+        Assert.Contains("public string? EntryId { get; set; }", page, StringComparison.Ordinal);
+        Assert.Contains("LoadEditRoute", page, StringComparison.Ordinal);
+        Assert.Contains("Session.FindCurrentEntry(EntryId)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.EditEntry(entry)", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightShowsReducedMotionAwareSaveConfirmationBeforeDashboardReturn()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var css = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "wwwroot",
+            "css",
+            "app.css")));
+
+        Assert.Contains("ShowSaveConfirmation", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"save-confirmation\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"assertive\"", page, StringComparison.Ordinal);
+        Assert.Contains("Icons.Material.Filled.Check", page, StringComparison.Ordinal);
+        Assert.Contains("await Task.Delay(650);", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/\");", page, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
+        Assert.Contains(".save-confirmation-icon", css, StringComparison.Ordinal);
+        Assert.Contains("animation: none;", css, StringComparison.Ordinal);
+    }
+
     private static string ReadMobilePage(string relativePath) =>
         File.ReadAllText(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,

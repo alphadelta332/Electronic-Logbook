@@ -82,6 +82,14 @@ public sealed class MobileLogbookSession(
 
     public string PackageKeyNotice => MobilePackageKeyNotice.Create(PackageKeyStatus);
 
+    public IReadOnlyList<PortableLogbookMaterializedEntry> DeletedEntries =>
+        MergeResult
+            .Entries
+            .Values
+            .Where(entry => entry.IsDeleted)
+            .OrderByDescending(entry => FindOperation(entry.CurrentRevisionId).CreatedAt)
+            .ToArray();
+
     public async Task EnsureLoadedAsync()
     {
         if (IsLoaded)
@@ -193,6 +201,91 @@ public sealed class MobileLogbookSession(
         LastActionMessage = "Correction draft opened.";
     }
 
+    public async Task DeleteEntryAsync(PortableLogbookMaterializedEntry entry)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var operation = new DeleteEntryOperation(
+            Document.LogbookId,
+            entry.EntryId,
+            RevisionId.New(),
+            new HashSet<RevisionId> { entry.CurrentRevisionId },
+            deviceId,
+            DateTimeOffset.UtcNow);
+
+        Document = MobileLogbookDocument.AppendOperation(Document, CustomFields, operation);
+        await SaveStateAsync();
+        if (EditingEntryId == entry.EntryId)
+        {
+            ResetDraft();
+        }
+
+        LastActionMessage = "Entry deleted.";
+    }
+
+    public async Task ResolveConflictAsync(PortableLogbookConflict conflict, RevisionId selectedRevisionId)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var selectedOperation = FindOperation(selectedRevisionId);
+        var selectedEntry = EntryPayload(selectedOperation);
+        PortableLogbookOperation resolution = selectedEntry is null
+            ? new DeleteEntryOperation(
+                Document.LogbookId,
+                conflict.EntryId,
+                RevisionId.New(),
+                conflict.HeadRevisionIds.ToHashSet(),
+                deviceId,
+                DateTimeOffset.UtcNow)
+            : PortableLogbookConflictResolution.CreateResolution(
+                conflict,
+                Document.LogbookId,
+                deviceId,
+                RevisionId.New(),
+                DateTimeOffset.UtcNow,
+                selectedEntry,
+                $"Kept revision {selectedRevisionId.Value} in the mobile app.");
+
+        Document = MobileLogbookDocument.AppendOperation(Document, CustomFields, resolution);
+        await SaveStateAsync();
+        LastActionMessage = "Conflict resolved.";
+    }
+
+    public PortableLogbookMaterializedEntry? FindCurrentEntry(string? entryId)
+    {
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return null;
+        }
+
+        return MergeResult.Entries.TryGetValue(new EntryId(entryId), out var entry)
+            ? entry
+            : null;
+    }
+
+    public PortableLogbookRevisionHistoryView? FindHistory(string? entryId)
+    {
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return null;
+        }
+
+        try
+        {
+            return PortableLogbookRevisionHistory.ForEntry(Document, new EntryId(entryId));
+        }
+        catch (KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
     public void MarkDraftEdited()
     {
         HasEditedDraft = true;
@@ -266,6 +359,71 @@ public sealed class MobileLogbookSession(
     public static string FormatTimestamp(DateTimeOffset? timestamp) =>
         timestamp?.ToLocalTime().ToString("dd MMM yyyy HH:mm") ?? "Never";
 
+    public string FormatRoute(PortableLogbookEntry entry)
+    {
+        var route = $"{entry.From}-{entry.To}".Trim(' ', '-');
+        return string.IsNullOrWhiteSpace(route) ? "Route pending" : route;
+    }
+
+    public string FormatAircraft(PortableLogbookEntry entry)
+    {
+        var aircraft = $"{entry.AircraftType} {entry.Registration}".Trim();
+        return string.IsNullOrWhiteSpace(aircraft) ? "Aircraft pending" : aircraft;
+    }
+
+    public string FormatRegistration(PortableLogbookEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Registration) ? "REG" : entry.Registration.Trim().ToUpperInvariant();
+
+    public PortableLogbookOperation FindOperation(RevisionId revisionId) =>
+        Document.Operations.First(operation => operation.RevisionId == revisionId);
+
+    public IEnumerable<EntryDetail> EntryDetails(PortableLogbookEntry entry)
+    {
+        yield return new("Date", FormatDate(entry.Date));
+        yield return new("Aircraft type", FormatText(entry.AircraftType));
+        yield return new("Registration", FormatText(entry.Registration));
+        yield return new("Flight number", FormatText(entry.FlightNumber));
+        yield return new("From", FormatText(entry.From));
+        yield return new("To", FormatText(entry.To));
+        yield return new("Route", FormatText(entry.Route));
+        yield return new("Remarks", FormatText(entry.Details));
+        yield return new("Multi-pilot", FormatNullableHours(entry.MultiPilot));
+        yield return new("PIC", FormatNullableHours(entry.PilotInCommand));
+        yield return new("Co-pilot", FormatNullableHours(entry.CoPilot));
+        yield return new("Dual", FormatNullableHours(entry.Dual));
+        yield return new("Instructor", FormatNullableHours(entry.Instructor));
+        yield return new("Day", FormatNullableHours(entry.Day));
+        yield return new("Night", FormatNullableHours(entry.Night));
+        yield return new("Instrument actual", FormatNullableHours(entry.InstrumentActual));
+        yield return new("Instrument sim", FormatNullableHours(entry.InstrumentSimulated));
+        yield return new("Takeoffs day", FormatNullableCount(entry.TakeoffsDay));
+        yield return new("Takeoffs night", FormatNullableCount(entry.TakeoffsNight));
+        yield return new("Landings day", FormatNullableCount(entry.LandingsDay));
+        yield return new("Landings night", FormatNullableCount(entry.LandingsNight));
+        yield return new("IFR approaches", FormatNullableCount(entry.IfrApproaches));
+        yield return new("Holding", FormatNullableCount(entry.Holding));
+        yield return new("RNP", FormatNullableCount(entry.Rnav));
+        yield return new("Circling", FormatNullableCount(entry.Circling));
+
+        foreach (var field in EntryCustomFields())
+        {
+            entry.CustomFields.TryGetValue(field.Id, out var customValue);
+            yield return new(field.Label, FormatText(customValue));
+        }
+    }
+
+    public string FormatConflictRoute(PortableLogbookOperation operation)
+    {
+        var entry = EntryPayload(operation);
+        return entry is null ? "Deleted entry" : FormatRoute(entry);
+    }
+
+    public string FormatConflictAircraft(PortableLogbookOperation operation)
+    {
+        var entry = EntryPayload(operation);
+        return entry is null ? "No active payload" : FormatAircraft(entry);
+    }
+
     private async Task RefreshPackageKeyStatusAsync()
     {
         try
@@ -307,7 +465,33 @@ public sealed class MobileLogbookSession(
 
     private MobileEntryDraftDefaults FindDraftDefaults() =>
         MobileEntryDraftDefaultPlanner.Create(CurrentEntries);
+
+    private IEnumerable<CustomFieldDefinition> EntryCustomFields() =>
+        Document.CustomFieldDefinitions.Count > 0
+            ? Document.CustomFieldDefinitions.OrderBy(field => field.Order)
+            : CustomFields;
+
+    private static PortableLogbookEntry? EntryPayload(PortableLogbookOperation operation) =>
+        operation switch
+        {
+            CreateEntryOperation create => create.Entry,
+            CorrectEntryOperation correction => correction.Entry,
+            ResolveConflictOperation resolution => resolution.Entry,
+            DeleteEntryOperation => null,
+            _ => throw new InvalidOperationException($"Unsupported operation type {operation.GetType().Name}.")
+        };
+
+    private static string FormatText(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "Blank" : value.Trim();
+
+    private static string FormatNullableHours(decimal? hours) =>
+        hours is null ? "0.0" : FormatHours(hours.Value);
+
+    private static string FormatNullableCount(int? count) =>
+        count?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0";
 }
+
+public sealed record EntryDetail(string Label, string Value);
 
 public sealed class EntryDraft
 {

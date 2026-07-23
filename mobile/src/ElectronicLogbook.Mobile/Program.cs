@@ -12,6 +12,7 @@ builder.Services.AddScoped<BrowserLogbookStore>();
 builder.Services.AddScoped<BrowserPackageKeyStore>();
 builder.Services.AddScoped<BrowserFileStore>();
 builder.Services.AddScoped<BrowserUiPreferencesStore>();
+builder.Services.AddScoped<MobileUiPreferenceState>();
 builder.Services.AddScoped<MobileLogbookSession>();
 builder.Services.AddMudServices();
 

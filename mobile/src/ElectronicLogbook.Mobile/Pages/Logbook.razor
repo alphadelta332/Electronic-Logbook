@@ -1,0 +1,259 @@
+@page "/flights"
+@inject MobileLogbookSession Session
+
+<PageTitle>Logbook</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading logbook</span>
+    </section>
+}
+else
+{
+    <section class="logbook-page">
+        <header class="entry-header">
+            <div>
+                <span class="eyebrow">Logbook</span>
+                <h1>Flight record</h1>
+            </div>
+            <span class="draft-pill">@Session.CurrentEntries.Count entry(s)</span>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(Session.LastActionMessage))
+        {
+            <section class="state-banner" role="status">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" />
+                <span>@Session.LastActionMessage</span>
+            </section>
+        }
+
+        <div class="segmented-control" role="tablist" aria-label="Logbook view">
+            <button type="button" class="@EntriesTabClass" @onclick="() => ActiveView = LogbookView.Entries">Entries</button>
+            <button type="button" class="@TotalsTabClass" @onclick="() => ActiveView = LogbookView.Totals">Totals</button>
+        </div>
+
+        @if (ActiveView == LogbookView.Entries)
+        {
+            <section class="form-section">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Entries</span>
+                        <h2>Current record</h2>
+                    </div>
+                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowFilters = !ShowFilters)">
+                        Filters
+                    </MudButton>
+                </div>
+
+                <label class="search-field">
+                    Search
+                    <input @bind="SearchText" @bind:event="oninput" placeholder="Rego, route, type, remarks" />
+                </label>
+
+                @if (ShowFilters)
+                {
+                    <section class="filter-sheet" aria-label="Logbook filters">
+                        <label>
+                            <input type="checkbox" @bind="FilterRecentOnly" />
+                            Last 90 days
+                        </label>
+                        <label>
+                            <input type="checkbox" @bind="FilterFlightsWithApproachesOnly" />
+                            Approaches logged
+                        </label>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearFilters">Clear</MudButton>
+                    </section>
+                }
+
+                @if (FilteredEntries.Count == 0)
+                {
+                    <section class="empty-state">
+                        <MudIcon Icon="@Icons.Material.Filled.Flight" />
+                        <strong>No matching flights</strong>
+                        <span>Import a package, add a flight from Dashboard, or clear search.</span>
+                    </section>
+                }
+                else
+                {
+                    <div class="flight-row-list">
+                        @foreach (var entry in FilteredEntries)
+                        {
+                            <NavLink class="flight-row logbook-entry-row" href="@($"/flights/{entry.EntryId.Value}")">
+                                <strong>@Session.FormatRegistration(entry.Entry!)</strong>
+                                <strong>@Session.FormatRoute(entry.Entry!)</strong>
+                                <strong>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!))</strong>
+                                <span>@MobileLogbookSession.FormatDate(entry.Entry!.Date)</span>
+                                <span>@Session.FormatAircraft(entry.Entry!)</span>
+                                <span>@EntryMeta(entry.Entry!)</span>
+                            </NavLink>
+                        }
+                    </div>
+                }
+            </section>
+        }
+        else
+        {
+            <section class="form-section">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Totals</span>
+                        <h2>Hours and currency</h2>
+                    </div>
+                </div>
+                <div class="totals-grid">
+                    <StatusMetric Label="Total hours" Value="@MobileLogbookSession.FormatHours(TotalHours)" Detail="logged" />
+                    <StatusMetric Label="PIC" Value="@MobileLogbookSession.FormatHours(TotalPic)" Detail="pilot in command" />
+                    <StatusMetric Label="Landings" Value="@TotalLandings.ToString()" Detail="day and night" />
+                    <StatusMetric Label="Approaches" Value="@TotalApproaches.ToString()" Detail="IFR, holding, RNP, circling" />
+                </div>
+                @if (Session.DeletedEntries.Count > 0)
+                {
+                    <section class="history-panel">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="eyebrow">Deletion history</span>
+                                <h2>Removed entries</h2>
+                            </div>
+                            <span class="draft-pill">@Session.DeletedEntries.Count deleted</span>
+                        </div>
+                        @foreach (var entry in Session.DeletedEntries)
+                        {
+                            <NavLink class="history-row" href="@($"/flights/{entry.EntryId.Value}")">
+                                <strong>@entry.EntryId.Value</strong>
+                                <span>@MobileLogbookSession.FormatTimestamp(Session.FindOperation(entry.CurrentRevisionId).CreatedAt)</span>
+                            </NavLink>
+                        }
+                    </section>
+                }
+            </section>
+        }
+
+        @if (Session.MergeResult.Conflicts.Count > 0)
+        {
+            <section class="form-section" role="alert">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Conflicts</span>
+                        <h2>Needs review</h2>
+                    </div>
+                    <span class="draft-pill">@Session.MergeResult.Conflicts.Count unresolved</span>
+                </div>
+                @foreach (var conflict in Session.MergeResult.Conflicts)
+                {
+                    <div class="history-row">
+                        <strong>@conflict.EntryId.Value</strong>
+                        <span>@string.Join(", ", conflict.HeadRevisionIds.Select(revision => revision.Value))</span>
+                    </div>
+                    <div class="flight-row-list">
+                        @foreach (var revisionId in conflict.HeadRevisionIds)
+                        {
+                            var operation = Session.FindOperation(revisionId);
+                            <article class="flight-row">
+                                <div>
+                                    <strong>@operation.Kind</strong>
+                                    <span>@revisionId.Value</span>
+                                </div>
+                                <div>
+                                    <strong>@Session.FormatConflictRoute(operation)</strong>
+                                    <span>@Session.FormatConflictAircraft(operation)</span>
+                                </div>
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => Session.ResolveConflictAsync(conflict, revisionId))" Disabled="@Session.IsStorageBlocked">
+                                    Keep
+                                </MudButton>
+                            </article>
+                        }
+                    </div>
+                }
+            </section>
+        }
+    </section>
+}
+
+@code {
+    private LogbookView ActiveView { get; set; } = LogbookView.Entries;
+    private string SearchText { get; set; } = string.Empty;
+    private bool ShowFilters { get; set; }
+    private bool FilterRecentOnly { get; set; }
+    private bool FilterFlightsWithApproachesOnly { get; set; }
+
+    private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
+    private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
+
+    private IReadOnlyList<PortableLogbookMaterializedEntry> FilteredEntries =>
+        Session.CurrentEntries
+            .Where(MatchesSearch)
+            .Where(MatchesActiveFilters)
+            .ToArray();
+
+    private decimal TotalHours =>
+        Session.CurrentEntries.Sum(entry => PortableLogbookEntryRules.LoggedTime(entry.Entry!));
+
+    private decimal TotalPic =>
+        Session.CurrentEntries.Sum(entry => entry.Entry!.PilotInCommand ?? 0);
+
+    private int TotalLandings =>
+        Session.CurrentEntries.Sum(entry => (entry.Entry!.LandingsDay ?? 0) + (entry.Entry.LandingsNight ?? 0));
+
+    private int TotalApproaches =>
+        Session.CurrentEntries.Sum(entry =>
+            (entry.Entry!.IfrApproaches ?? 0) +
+            (entry.Entry.Holding ?? 0) +
+            (entry.Entry.Rnav ?? 0) +
+            (entry.Entry.Circling ?? 0));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedAsync();
+    }
+
+    private bool MatchesSearch(PortableLogbookMaterializedEntry materialized)
+    {
+        if (string.IsNullOrWhiteSpace(SearchText) || materialized.Entry is null)
+        {
+            return true;
+        }
+
+        var entry = materialized.Entry;
+        var haystack = string.Join(" ", entry.Registration, entry.From, entry.To, entry.Route, entry.AircraftType, entry.Details);
+        return haystack.Contains(SearchText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool MatchesActiveFilters(PortableLogbookMaterializedEntry materialized)
+    {
+        if (materialized.Entry is null)
+        {
+            return false;
+        }
+
+        if (FilterRecentOnly && materialized.Entry.Date < DateOnly.FromDateTime(DateTime.Today.AddDays(-90)))
+        {
+            return false;
+        }
+
+        return !FilterFlightsWithApproachesOnly || CountApproaches(materialized.Entry) > 0;
+    }
+
+    private void ClearFilters()
+    {
+        FilterRecentOnly = false;
+        FilterFlightsWithApproachesOnly = false;
+    }
+
+    private static string EntryMeta(PortableLogbookEntry entry)
+    {
+        var landings = (entry.LandingsDay ?? 0) + (entry.LandingsNight ?? 0);
+        var approaches = CountApproaches(entry);
+        return $"{landings} ldg | {approaches} app";
+    }
+
+    private static int CountApproaches(PortableLogbookEntry entry) =>
+        (entry.IfrApproaches ?? 0) + (entry.Holding ?? 0) + (entry.Rnav ?? 0) + (entry.Circling ?? 0);
+
+    private enum LogbookView
+    {
+        Entries,
+        Totals
+    }
+}

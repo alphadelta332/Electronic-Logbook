@@ -1,0 +1,131 @@
+@page "/settings"
+@inject MobileLogbookSession Session
+@inject MobileUiPreferenceState UiPreferences
+@inject BrowserFileStore FileStore
+
+<PageTitle>Settings</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading settings</span>
+    </section>
+}
+else
+{
+    <section class="settings-page">
+        <header class="entry-header">
+            <div>
+                <span class="eyebrow">Settings</span>
+                <h1>Device copy</h1>
+            </div>
+            <span class="draft-pill">@Session.PackageKeyStatus</span>
+        </header>
+
+        <section class="notice-panel">
+            <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
+            <div>
+                <strong>Package exchange</strong>
+                <span>@Session.ExchangeStatus.BackupNotice</span>
+                <span>@Session.PackageKeyNotice</span>
+            </div>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Appearance</span>
+                    <h2>Theme</h2>
+                </div>
+                <span class="draft-pill">@UiPreferences.ThemeMode</span>
+            </div>
+            <div class="segmented-control" aria-label="Appearance">
+                <button type="button" class="@ThemeButtonClass("System")" @onclick="SetSystemThemeModeAsync">System</button>
+                <button type="button" class="@ThemeButtonClass("Light")" @onclick="SetLightThemeModeAsync">Light</button>
+                <button type="button" class="@ThemeButtonClass("Dark")" @onclick="SetDarkThemeModeAsync">Dark</button>
+            </div>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Testing controls</span>
+                    <h2>Import, export, recovery</h2>
+                </div>
+            </div>
+            <MudButton Href="/legacy#exchange" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.IosShare">
+                Open exchange workspace
+            </MudButton>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Support</span>
+                    <h2>Local summary</h2>
+                </div>
+            </div>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Summarize" OnClick="ExportSupportSummaryAsync" Disabled="@(Session.IsStorageBlocked || IsSupportSummaryBusy)">
+                Support summary
+            </MudButton>
+            @if (!string.IsNullOrWhiteSpace(SupportSummaryMessage))
+            {
+                <span class="settings-status-line">@SupportSummaryMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(SupportSummaryError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@SupportSummaryError</span>
+            }
+        </section>
+    </section>
+}
+
+@code {
+    private bool IsSupportSummaryBusy { get; set; }
+    private string? SupportSummaryMessage { get; set; }
+    private string? SupportSummaryError { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedAsync();
+        await UiPreferences.EnsureLoadedAsync();
+    }
+
+    private Task SetSystemThemeModeAsync() => UiPreferences.SetThemeModeAsync("System");
+
+    private Task SetLightThemeModeAsync() => UiPreferences.SetThemeModeAsync("Light");
+
+    private Task SetDarkThemeModeAsync() => UiPreferences.SetThemeModeAsync("Dark");
+
+    private string ThemeButtonClass(string themeMode) =>
+        UiPreferences.ThemeMode == themeMode ? "active" : string.Empty;
+
+    private async Task ExportSupportSummaryAsync()
+    {
+        if (Session.IsStorageBlocked || IsSupportSummaryBusy)
+        {
+            return;
+        }
+
+        IsSupportSummaryBusy = true;
+        SupportSummaryMessage = null;
+        SupportSummaryError = null;
+        try
+        {
+            var result = await MobileSupportSummaryExportWorkflow.ExportAsync(
+                Session.Document,
+                FileStore,
+                DateTimeOffset.UtcNow);
+            SupportSummaryMessage = $"Exported {result.FileName}.";
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or JSException)
+        {
+            SupportSummaryError = ex.Message;
+        }
+        finally
+        {
+            IsSupportSummaryBusy = false;
+        }
+    }
+}

@@ -34,10 +34,27 @@ else
         </section>
 
         <section class="status-strip" aria-label="Operational status">
+            <StatusMetric Label="Total hours" Value="@MobileLogbookSession.FormatHours(TotalFlyingHours)" Detail="logged" />
+            <StatusMetric Label="Last 90 days" Value="@RecentFlightCount.ToString()" Detail="@RecentHoursDetail" />
             <StatusMetric Label="Entries" Value="@Session.CurrentEntries.Count.ToString()" Detail="current record" />
-            <StatusMetric Label="Unexported" Value="@Session.ExchangeStatus.PendingOperationCount.ToString()" Detail="local operations" Attention="@(Session.ExchangeStatus.PendingOperationCount > 0)" />
-            <StatusMetric Label="Conflicts" Value="@Session.MergeResult.Conflicts.Count.ToString()" Detail="need review" Attention="@(Session.MergeResult.Conflicts.Count > 0)" />
             <StatusMetric Label="Package key" Value="@Session.PackageKeyStatus" Detail="device readiness" Attention="@(Session.PackageKeyStatus != "Ready")" />
+        </section>
+
+        <section class="notice-panel dashboard-last-flight" aria-label="Last flight context">
+            <MudIcon Icon="@Icons.Material.Filled.FlightTakeoff" />
+            <div>
+                <strong>@LastFlightTitle</strong>
+                <span>@LastFlightDetail</span>
+                <span>@RecentSnapshotDetail</span>
+            </div>
+        </section>
+
+        <section class="notice-panel dashboard-record-health" aria-label="Record health">
+            <MudIcon Icon="@RecordHealthIcon" />
+            <div>
+                <strong>@RecordHealthTitle</strong>
+                <span>@RecordHealthReason</span>
+            </div>
         </section>
 
         <section class="notice-panel">
@@ -55,7 +72,7 @@ else
                     <span class="eyebrow">Recent flights</span>
                     <h2>Current record</h2>
                 </div>
-                <MudButton Href="/legacy" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Full record</MudButton>
+                <MudButton Href="/flights" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Logbook</MudButton>
             </div>
 
             @if (Session.CurrentEntries.Count == 0)
@@ -73,11 +90,11 @@ else
                     {
                         <article class="flight-row">
                             <div class="route-code">
-                                <strong>@FormatRoute(entry.Entry!)</strong>
+                                <strong>@Session.FormatRoute(entry.Entry!)</strong>
                                 <span>@MobileLogbookSession.FormatDate(entry.Entry!.Date)</span>
                             </div>
                             <div>
-                                <strong>@FormatAircraft(entry.Entry!)</strong>
+                                <strong>@Session.FormatAircraft(entry.Entry!)</strong>
                                 <span>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!)) hr total</span>
                             </div>
                             <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Primary" OnClick="@(() => CloneEntry(entry.Entry!))" aria-label="Clone flight" />
@@ -95,6 +112,76 @@ else
 }
 
 @code {
+    private DateOnly RecentCutoff => DateOnly.FromDateTime(DateTime.Today.AddDays(-90));
+
+    private PortableLogbookMaterializedEntry? LastFlight => Session.CurrentEntries.FirstOrDefault();
+
+    private decimal TotalFlyingHours =>
+        Session.CurrentEntries.Sum(entry => PortableLogbookEntryRules.LoggedTime(entry.Entry!));
+
+    private IReadOnlyList<PortableLogbookMaterializedEntry> RecentEntries =>
+        Session.CurrentEntries
+            .Where(entry => entry.Entry!.Date >= RecentCutoff)
+            .ToArray();
+
+    private int RecentFlightCount => RecentEntries.Count;
+
+    private decimal RecentFlyingHours =>
+        RecentEntries.Sum(entry => PortableLogbookEntryRules.LoggedTime(entry.Entry!));
+
+    private string RecentHoursDetail =>
+        $"{MobileLogbookSession.FormatHours(RecentFlyingHours)} hr";
+
+    private string LastFlightTitle =>
+        LastFlight?.Entry is null
+            ? "No last flight yet"
+            : $"{Session.FormatRoute(LastFlight.Entry)} on {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}";
+
+    private string LastFlightDetail =>
+        LastFlight?.Entry is null
+            ? "Import a package or add a flight to build the device record."
+            : $"{Session.FormatAircraft(LastFlight.Entry)} | {MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(LastFlight.Entry))} hr";
+
+    private string RecentSnapshotDetail =>
+        Session.CurrentEntries.Count == 0
+            ? "90-day snapshot will appear after the first dated entry."
+            : $"{RecentFlightCount} flight(s), {MobileLogbookSession.FormatHours(RecentFlyingHours)} hr in the last 90 days.";
+
+    private string RecordHealthIcon =>
+        Session.MergeResult.Conflicts.Count > 0
+            ? Icons.Material.Filled.ReportProblem
+            : Icons.Material.Filled.HealthAndSafety;
+
+    private string RecordHealthTitle =>
+        Session.MergeResult.Conflicts.Count > 0
+            ? "Record needs review"
+            : RecentFlightCount > 0
+                ? "Recent activity recorded"
+                : "No recent activity on this device";
+
+    private string RecordHealthReason
+    {
+        get
+        {
+            if (Session.MergeResult.Conflicts.Count > 0)
+            {
+                return $"{Session.MergeResult.Conflicts.Count} conflict(s) need review before the device copy is clean.";
+            }
+
+            if (LastFlight?.Entry is null)
+            {
+                return "No active entries are stored locally yet.";
+            }
+
+            if (RecentFlightCount == 0)
+            {
+                return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; none are within the last 90 days.";
+            }
+
+            return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; {RecentFlightCount} entry(s) are within the last 90 days.";
+        }
+    }
+
     private string NextActionDetail =>
         Session.CurrentEntries.Count == 0
             ? "Create the first device entry or import an encrypted package from the workbook."
@@ -111,15 +198,4 @@ else
         Navigation.NavigateTo("/flights/new");
     }
 
-    private static string FormatRoute(PortableLogbookEntry entry)
-    {
-        var route = $"{entry.From} - {entry.To}".Trim(' ', '-');
-        return string.IsNullOrWhiteSpace(route) ? "Route pending" : route;
-    }
-
-    private static string FormatAircraft(PortableLogbookEntry entry)
-    {
-        var aircraft = $"{entry.AircraftType} {entry.Registration}".Trim();
-        return string.IsNullOrWhiteSpace(aircraft) ? "Aircraft pending" : aircraft;
-    }
 }
