@@ -80,9 +80,17 @@
                               MaxHeight="250"
                               VerticalScrollBarVisibility="Auto"
                               HorizontalScrollBarVisibility="Disabled">
-                    <TextBlock x:Name="ReleaseSummaryText"
-                               TextWrapping="Wrap"
-                               Text="Release notes unavailable." />
+                    <RichTextBox x:Name="ReleaseSummaryText"
+                                 IsReadOnly="True"
+                                 Focusable="False"
+                                 BorderThickness="0"
+                                 Background="Transparent"
+                                 Padding="0"
+                                 VerticalScrollBarVisibility="Disabled">
+                        <FlowDocument PagePadding="0">
+                            <Paragraph Margin="0">Release notes unavailable.</Paragraph>
+                        </FlowDocument>
+                    </RichTextBox>
                 </ScrollViewer>
             </StackPanel>
 

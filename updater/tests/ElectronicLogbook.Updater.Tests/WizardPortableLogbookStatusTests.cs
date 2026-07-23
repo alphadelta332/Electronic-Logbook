@@ -73,6 +73,31 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.DoesNotContain("Clipboard", openHandler, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void ReleaseSummaryRendersMarkdownInsteadOfRawMarkers()
+    {
+        var xaml = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml")));
+        var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml.cs")));
+
+        Assert.Contains("<RichTextBox x:Name=\"ReleaseSummaryText\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("<TextBlock x:Name=\"ReleaseSummaryText\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("ReleaseSummaryText.Text", codeBehind, StringComparison.Ordinal);
+
+        Assert.Contains("BuildReleaseSummaryDocument", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("TryCreateMarkdownHeading", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("TryCreateMarkdownListItem", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("AddMarkdownInlines", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("new Bold(new Run(boldText))", codeBehind, StringComparison.Ordinal);
+    }
+
     private static string FindRepoFile(string relativePath)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

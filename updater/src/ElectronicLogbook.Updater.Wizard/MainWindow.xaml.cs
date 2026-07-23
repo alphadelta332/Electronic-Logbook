@@ -9,6 +9,8 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Media;
 using System.Xml.Linq;
 using ElectronicLogbook.Updater;
 using ElectronicLogbook.Portable;
@@ -71,7 +73,7 @@ public partial class MainWindow : Window
             _availabilityReady = false;
             _isCheckingAvailability = false;
             FooterStatusText.Text = $"Availability check failed: {ex.Message}";
-            ReleaseSummaryText.Text = ex.Message;
+            SetReleaseSummaryMarkdown(ex.Message);
             UpdateWizardView();
             Show();
             Activate();
@@ -207,11 +209,11 @@ public partial class MainWindow : Window
                     : $"Local master version: {masterVersion}"
             };
             var branchName = _context.Channel == UpdateChannel.Hotfix ? "hotfix" : "dev";
-            ReleaseSummaryText.Text = await GetBranchReadmeSummaryAsync(
+            SetReleaseSummaryMarkdown(await GetBranchReadmeSummaryAsync(
                 _context.Repository,
                 branchName,
                 installedVersion,
-                masterVersion);
+                masterVersion));
         }
         else
         {
@@ -250,9 +252,9 @@ public partial class MainWindow : Window
             LatestVersionText.Text = $"Update channel: Stable ({tag})";
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
             AvailableVersionText.Text = $"Stable version: {tag}";
-            ReleaseSummaryText.Text = string.IsNullOrWhiteSpace(summary)
+            SetReleaseSummaryMarkdown(string.IsNullOrWhiteSpace(summary)
                 ? "No release notes summary was returned by GitHub."
-                : summary;
+                : summary);
             return true;
         }
         catch (Exception ex)
@@ -260,8 +262,136 @@ public partial class MainWindow : Window
             LatestVersionText.Text = "Update channel: Stable check failed";
             LastCheckedText.Text = $"Last checked: {DateTime.Now:G}";
             AvailableVersionText.Text = "Could not fetch release details.";
-            ReleaseSummaryText.Text = ex.Message;
+            SetReleaseSummaryMarkdown(ex.Message);
             return false;
+        }
+    }
+
+    private void SetReleaseSummaryMarkdown(string markdown)
+    {
+        ReleaseSummaryText.Document = BuildReleaseSummaryDocument(markdown);
+    }
+
+    private static FlowDocument BuildReleaseSummaryDocument(string markdown)
+    {
+        var document = new FlowDocument
+        {
+            PagePadding = new Thickness(0),
+            FontFamily = SystemFonts.MessageFontFamily,
+            FontSize = SystemFonts.MessageFontSize,
+            Foreground = Brushes.Black
+        };
+
+        var normalised = string.IsNullOrWhiteSpace(markdown)
+            ? "Release notes unavailable."
+            : markdown.Replace("\r\n", "\n").Replace('\r', '\n').Trim();
+
+        foreach (var rawLine in normalised.Split('\n'))
+        {
+            var line = rawLine.Trim();
+            if (line.Length == 0)
+            {
+                continue;
+            }
+
+            if (TryCreateMarkdownHeading(line, out var heading))
+            {
+                document.Blocks.Add(heading);
+                continue;
+            }
+
+            if (TryCreateMarkdownListItem(line, out var listItem))
+            {
+                document.Blocks.Add(listItem);
+                continue;
+            }
+
+            var paragraph = CreateParagraph(line, new Thickness(0, 0, 0, 5));
+            document.Blocks.Add(paragraph);
+        }
+
+        if (document.Blocks.Count == 0)
+        {
+            document.Blocks.Add(CreateParagraph("Release notes unavailable.", new Thickness(0)));
+        }
+
+        return document;
+    }
+
+    private static bool TryCreateMarkdownHeading(string line, out Paragraph paragraph)
+    {
+        var match = Regex.Match(line, "^(?<marks>#{1,6})\\s+(?<text>.+)$");
+        if (!match.Success)
+        {
+            paragraph = null!;
+            return false;
+        }
+
+        paragraph = CreateParagraph(match.Groups["text"].Value, new Thickness(0, 0, 0, 5));
+        paragraph.FontWeight = FontWeights.SemiBold;
+        paragraph.FontSize = match.Groups["marks"].Value.Length <= 3
+            ? SystemFonts.MessageFontSize + 1
+            : SystemFonts.MessageFontSize;
+        return true;
+    }
+
+    private static bool TryCreateMarkdownListItem(string line, out Paragraph paragraph)
+    {
+        var match = Regex.Match(line, "^[-*+]\\s+(?<text>.+)$");
+        if (!match.Success)
+        {
+            paragraph = null!;
+            return false;
+        }
+
+        paragraph = new Paragraph
+        {
+            Margin = new Thickness(12, 0, 0, 3),
+            TextIndent = -12
+        };
+        paragraph.Inlines.Add(new Run("- "));
+        AddMarkdownInlines(paragraph.Inlines, match.Groups["text"].Value);
+        return true;
+    }
+
+    private static Paragraph CreateParagraph(string text, Thickness margin)
+    {
+        var paragraph = new Paragraph
+        {
+            Margin = margin
+        };
+        AddMarkdownInlines(paragraph.Inlines, text);
+        return paragraph;
+    }
+
+    private static void AddMarkdownInlines(InlineCollection inlines, string text)
+    {
+        var remaining = text;
+        while (remaining.Length > 0)
+        {
+            var start = remaining.IndexOf("**", StringComparison.Ordinal);
+            if (start < 0)
+            {
+                inlines.Add(new Run(remaining));
+                return;
+            }
+
+            if (start > 0)
+            {
+                inlines.Add(new Run(remaining[..start]));
+            }
+
+            var boldStart = start + 2;
+            var end = remaining.IndexOf("**", boldStart, StringComparison.Ordinal);
+            if (end < 0)
+            {
+                inlines.Add(new Run(remaining[start..]));
+                return;
+            }
+
+            var boldText = remaining[boldStart..end];
+            inlines.Add(new Bold(new Run(boldText)));
+            remaining = remaining[(end + 2)..];
         }
     }
 
