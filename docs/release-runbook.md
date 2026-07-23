@@ -63,7 +63,10 @@ Set-WorkbookCustomPropertyFileValue `
 .\tools\Test-WorkbookPublicReadiness.ps1
 ```
 
-5. Commit the release preparation changes and merge them to `main` through a PR.
+5. Confirm `Test-WorkbookPublicReadiness.ps1` passes. This includes verifying
+   internal worksheets such as `Admin`, `Routes`, `Airports`, and `ChartData`
+   are `VeryHidden`.
+6. Commit the release preparation changes and merge them to `main` through a PR.
 
 ## Preflight Checklist
 
