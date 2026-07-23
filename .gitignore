@@ -11,6 +11,18 @@ diagnostics_*.txt
 **/bin/
 **/obj/
 **/TestResults/
+mobile/node_modules/
+/artifacts/
+mobile/artifacts/
+mobile/android/.gradle
+mobile/android/app/src/main/assets/public/
+mobile/src/ElectronicLogbook.Mobile/wwwroot/_framework/
+mobile/android/app/src/main/res/drawable/splash.png
+mobile/android/app/src/main/res/drawable-land-*/splash.png
+mobile/android/app/src/main/res/drawable-port-*/splash.png
+mobile/android/app/src/main/res/mipmap-*/ic_launcher.png
+mobile/android/app/src/main/res/mipmap-*/ic_launcher_foreground.png
+mobile/android/app/src/main/res/mipmap-*/ic_launcher_round.png
 updater/dist/
 PUBLIC_RELEASE_EXCEL_HANDOVER.md
 regulations.txt
@@ -21,3 +33,11 @@ Electronic Logbook - Jack 1.4.1.xlsm
 AGENTS.md
 PLAN.md
 Electronic Logbook 1.*
+Electronic Logbook 2.*
+IMPROVEMENT_ROADMAP.md
+*.pem
+!updater/release-manifest-signing-public-key.pem
+# Local mobile app icon assets
+/mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
+docs/mobile-ui-overhaul.md
+LOCAL_DEVICE_SETUP_HANDOVER.md

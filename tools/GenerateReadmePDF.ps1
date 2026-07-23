@@ -10,7 +10,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($RepoPath)) {
-    $RepoPath = if ($PSScriptRoot) { $PSScriptRoot } else { Get-Location }
+    $RepoPath = if ($PSScriptRoot) { Split-Path $PSScriptRoot -Parent } else { Get-Location }
 }
 
 $repoPath   = (Resolve-Path $RepoPath).Path

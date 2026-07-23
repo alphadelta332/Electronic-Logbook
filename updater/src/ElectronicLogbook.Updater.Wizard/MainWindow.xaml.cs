@@ -4,11 +4,15 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Windows;
+using System.Windows.Controls;
 using System.Xml.Linq;
 using ElectronicLogbook.Updater;
+using ElectronicLogbook.Portable;
+using Microsoft.Win32;
 
 namespace ElectronicLogbook.Updater.Wizard;
 
@@ -27,27 +31,6 @@ public partial class MainWindow : Window
     ];
 
     private readonly RunContext _context;
-    private readonly IReadOnlyDictionary<string, int> _phaseProgress = new Dictionary<string, int>(StringComparer.Ordinal)
-    {
-        [UpdaterPhaseIds.StartExcel] = 5,
-        [UpdaterPhaseIds.OpenSourceWorkbook] = 10,
-        [UpdaterPhaseIds.OpenMasterCopy] = 15,
-        [UpdaterPhaseIds.PrepareMasterCopy] = 20,
-        [UpdaterPhaseIds.ReadSourceValidationData] = 25,
-        [UpdaterPhaseIds.CopyLogbookData] = 40,
-        [UpdaterPhaseIds.CopyKeywordsData] = 50,
-        [UpdaterPhaseIds.CopyRoutesData] = 58,
-        [UpdaterPhaseIds.CopyBaseAirportSelections] = 64,
-        [UpdaterPhaseIds.CopyNamedPreferences] = 70,
-        [UpdaterPhaseIds.RestoreLogbookPresentation] = 76,
-        [UpdaterPhaseIds.CalculateOutputWorkbook] = 82,
-        [UpdaterPhaseIds.RefreshPivotTables] = 88,
-        [UpdaterPhaseIds.UpdateHoursOverTimeChart] = 92,
-        [UpdaterPhaseIds.ValidatePreservedData] = 96,
-        [UpdaterPhaseIds.SaveOutputWorkbook] = 99,
-        [UpdaterPhaseIds.Completed] = 100
-    };
-
     private int _stepIndex;
     private bool _isUpdating;
     private bool _isCheckingAvailability = true;
@@ -56,7 +39,9 @@ public partial class MainWindow : Window
     private string? _latestTag;
     private string? _lastOutputPath;
     private string? _lastBackupPath;
+    private string? _lastBackupExpectedVersion;
     private string? _lastReportPath;
+    private string? _lastOutputExpectedVersion;
     private string? _downloadDirectoryToCleanup;
     private CancellationTokenSource? _updateCts;
 
@@ -72,7 +57,25 @@ public partial class MainWindow : Window
 
     public void BeginAvailabilityCheck()
     {
-        _ = InitialiseAvailabilityAsync();
+        _ = InitialiseAvailabilitySafelyAsync();
+    }
+
+    private async Task InitialiseAvailabilitySafelyAsync()
+    {
+        try
+        {
+            await InitialiseAvailabilityAsync();
+        }
+        catch (Exception ex)
+        {
+            _availabilityReady = false;
+            _isCheckingAvailability = false;
+            FooterStatusText.Text = $"Availability check failed: {ex.Message}";
+            ReleaseSummaryText.Text = ex.Message;
+            UpdateWizardView();
+            Show();
+            Activate();
+        }
     }
 
     private void UpdateWizardView()
@@ -93,7 +96,21 @@ public partial class MainWindow : Window
             : (_stepIndex == 3 ? "Start" : (_stepIndex == 5 ? "Finish" : "Next"));
 
         CancelButton.Content = _isUpdating ? "Cancel Update" : "Cancel";
+
+        var portableLogbookUiVisible = IsPortableLogbookUiVisible();
+        PortableLogbookPanel.Visibility = portableLogbookUiVisible ? Visibility.Visible : Visibility.Collapsed;
+
+        var portableActionsEnabled = portableLogbookUiVisible && !_isUpdating && File.Exists(_context.SourcePath);
+        PortableEnableButton.IsEnabled = portableActionsEnabled;
+        PortableExportButton.IsEnabled = portableActionsEnabled;
+        PortableImportButton.IsEnabled = portableActionsEnabled;
+        PortablePrintedCopyButton.IsEnabled = portableActionsEnabled;
+        PortableRevisionHistoryButton.IsEnabled = portableActionsEnabled;
+        PortableResolveConflictButton.IsEnabled = portableActionsEnabled;
+        PortableRefreshStatusButton.IsEnabled = portableActionsEnabled;
     }
+
+    private bool IsPortableLogbookUiVisible() => _context.Channel == UpdateChannel.Development;
 
     private bool CanAdvanceFromCurrentStep()
     {
@@ -125,10 +142,21 @@ public partial class MainWindow : Window
         // Read the defined name directly from the XLSM package. Opening the
         // workbook in another Excel instance can trigger a hidden "file in
         // use" prompt, which is precisely what the wizard must avoid here.
+        var recovery = RecoverPendingHandoffForWizard();
+        if (recovery.Action != HandoffRecoveryAction.None)
+        {
+            FooterStatusText.Text = recovery.Message;
+            UpdateWizardView();
+        }
+
         var installedVersion = await TryReadWorkbookVersionFromPackageWithRetryAsync(_context.SourcePath);
         InstalledVersionText.Text = string.IsNullOrWhiteSpace(installedVersion)
             ? "Installed version: unknown"
             : $"Installed version: {installedVersion}";
+
+        PortableLogbookStatusText.Text = IsPortableLogbookUiVisible()
+            ? await TryReadPortableLogbookStatusTextWithRetryAsync(_context.SourcePath)
+            : "";
 
         var compatibilityPolicy = CompatibilityPolicy.LoadDefault();
         var identifiedInstalledVersion = !string.IsNullOrWhiteSpace(installedVersion);
@@ -165,6 +193,7 @@ public partial class MainWindow : Window
             var channelName = _context.Channel switch
             {
                 UpdateChannel.Development => "Development",
+                UpdateChannel.Hotfix => "Hotfix",
                 UpdateChannel.LocalMaster => "Local Master",
                 _ => "Local Master"
             };
@@ -172,15 +201,22 @@ public partial class MainWindow : Window
                 ? $"Update channel: {channelName} (version unavailable)"
                 : $"Update channel: {channelName} ({masterVersion})";
             LastCheckedText.Text = $"Configured: {DateTime.Now:G}";
-            AvailableVersionText.Text = _context.Channel == UpdateChannel.Development
-                ? (string.IsNullOrWhiteSpace(masterVersion)
+            AvailableVersionText.Text = _context.Channel switch
+            {
+                UpdateChannel.Development => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using development build"
-                    : $"Development version: {masterVersion}")
-                : (string.IsNullOrWhiteSpace(masterVersion)
+                    : $"Development version: {masterVersion}",
+                UpdateChannel.Hotfix => string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using hotfix build"
+                    : $"Hotfix version: {masterVersion}",
+                _ => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using local master build"
-                    : $"Local master version: {masterVersion}");
-            ReleaseSummaryText.Text = await GetDevBranchReadmeSummaryAsync(
+                    : $"Local master version: {masterVersion}"
+            };
+            var branchName = _context.Channel == UpdateChannel.Hotfix ? "hotfix" : "dev";
+            ReleaseSummaryText.Text = await GetBranchReadmeSummaryAsync(
                 _context.Repository,
+                branchName,
                 installedVersion,
                 masterVersion);
         }
@@ -236,8 +272,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private static async Task<string> GetDevBranchReadmeSummaryAsync(
+    private static async Task<string> GetBranchReadmeSummaryAsync(
         string repository,
+        string branchName,
         string? installedVersion,
         string? targetVersion)
     {
@@ -245,23 +282,23 @@ public partial class MainWindow : Window
         {
             if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
             {
-                return "Could not load dev-branch README notes: repository format is invalid.";
+                return $"Could not load {branchName}-branch README notes: repository format is invalid.";
             }
 
             using var client = new HttpClient();
             client.DefaultRequestHeaders.UserAgent.ParseAdd("ElectronicLogbook-UpdaterWizard/0.1");
-            var url = $"https://raw.githubusercontent.com/{repository}/dev/README.md";
+            var url = $"https://raw.githubusercontent.com/{repository}/{branchName}/README.md";
             var markdown = await client.GetStringAsync(url);
             if (string.IsNullOrWhiteSpace(markdown))
             {
-                return "Dev-branch README is empty.";
+                return $"{branchName}-branch README is empty.";
             }
 
             return ExtractChangelogDelta(markdown, installedVersion, targetVersion);
         }
         catch (Exception ex)
         {
-            return $"Could not load dev-branch README notes: {ex.Message}";
+            return $"Could not load {branchName}-branch README notes: {ex.Message}";
         }
     }
 
@@ -274,7 +311,7 @@ public partial class MainWindow : Window
         var changelogIndex = Normalised.IndexOf("## Changelog", StringComparison.OrdinalIgnoreCase);
         if (changelogIndex < 0)
         {
-            return "No changelog section found in dev-branch README.";
+            return "No changelog section found in branch README.";
         }
 
         var tail = Normalised[changelogIndex..];
@@ -394,6 +431,388 @@ public partial class MainWindow : Window
         return (tag, summary);
     }
 
+    private async void PortableRefreshStatusButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await RefreshPortableLogbookStatusAsync();
+    }
+
+    private async void PortableEnableButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseSavePath(
+            "Save portable recovery code",
+            "Text file (*.txt)|*.txt",
+            $"Electronic Logbook Portable Recovery {DateTime.Now:yyyy-MM-dd}.txt");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "Enable portable logbook",
+            () => PortableLogbookCommandRunner.Enable(_context.SourcePath, recoveryPath, DateTimeOffset.UtcNow),
+            FormatEnableResult);
+    }
+
+    private async void PortableExportButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var packagePath = ChooseSavePath(
+            "Save portable package",
+            "Portable logbook package (*.elogbook)|*.elogbook",
+            $"Electronic Logbook {DateTime.Now:yyyy-MM-dd}.elogbook");
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "Export portable package",
+            () => PortableLogbookCommandRunner.Export(_context.SourcePath, recoveryPath, packagePath, DateTimeOffset.UtcNow),
+            FormatExportResult);
+    }
+
+    private async void PortableImportButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var packagePath = ChooseOpenPath("Choose portable package", "Portable logbook package (*.elogbook)|*.elogbook");
+        if (string.IsNullOrWhiteSpace(packagePath))
+        {
+            return;
+        }
+
+        try
+        {
+            FooterStatusText.Text = "Previewing portable import...";
+            var preview = await Task.Run(() => PortableLogbookCommandRunner.PreviewImport(_context.SourcePath, recoveryPath, packagePath));
+            var previewText = FormatImportPreviewResult(preview);
+            if (!CanApplyPortableImportPreview(preview))
+            {
+                FooterStatusText.Text = "Portable import requires resolution.";
+                MessageBox.Show(
+                    this,
+                    previewText + Environment.NewLine + Environment.NewLine + "Resolve the reported conflicts before applying this package.",
+                    "Portable import preview",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+
+            var response = MessageBox.Show(
+                this,
+                previewText + Environment.NewLine + Environment.NewLine + "Apply this package to portable workbook storage?",
+                "Portable import preview",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question,
+                MessageBoxResult.No);
+            if (response != MessageBoxResult.Yes)
+            {
+                FooterStatusText.Text = "Portable import cancelled.";
+                return;
+            }
+
+            await RunPortableActionAsync(
+                "Import portable package",
+                () => PortableLogbookCommandRunner.ApplyImport(_context.SourcePath, recoveryPath, packagePath, DateTimeOffset.UtcNow),
+                FormatImportApplyResult);
+        }
+        catch (Exception ex)
+        {
+            ShowPortableActionError("Portable import failed", ex);
+        }
+    }
+
+    private static bool CanApplyPortableImportPreview(PortableLogbookImportPreviewResult preview) =>
+        preview.Status is "readyToApply" or "duplicateOnly";
+
+    private async void PortablePrintedCopyButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var outputPath = ChooseSavePath(
+            "Save printed copy",
+            "HTML file (*.html)|*.html",
+            $"Electronic Logbook Printed Copy {DateTime.Now:yyyy-MM-dd}.html");
+        if (string.IsNullOrWhiteSpace(outputPath))
+        {
+            return;
+        }
+
+        var holderName = PromptForText("Portable printed copy", "Holder full name (rendered only into this printed copy):", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(holderName))
+        {
+            return;
+        }
+
+        var holderDateText = PromptForText("Portable printed copy", "Holder date of birth (yyyy-mm-dd, rendered only into this printed copy):", allowEmpty: false);
+        if (!TryParseIsoDate(holderDateText, out var holderDateOfBirth))
+        {
+            MessageBox.Show(this, "Enter the holder date of birth as yyyy-mm-dd.", "Portable printed copy", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "Create printed copy",
+            () => PortableLogbookCommandRunner.CreatePrintedCopy(
+                _context.SourcePath,
+                recoveryPath,
+                outputPath,
+                holderName,
+                holderDateOfBirth,
+                DateOnly.FromDateTime(DateTime.Today),
+                recordsPerPage: 25),
+            FormatPrintedCopyResult);
+    }
+
+    private async void PortableRevisionHistoryButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var entryId = PromptForText("Portable revision history", "Portable entry ID:", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return;
+        }
+
+        await RunPortableActionAsync(
+            "View revision history",
+            () => PortableLogbookCommandRunner.ReadRevisionHistory(_context.SourcePath, recoveryPath, new EntryId(entryId)),
+            FormatRevisionHistoryResult);
+    }
+
+    private async void PortableResolveConflictButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        var recoveryPath = ChooseOpenPath("Choose portable recovery code", "Text file (*.txt)|*.txt|All files (*.*)|*.*");
+        if (string.IsNullOrWhiteSpace(recoveryPath))
+        {
+            return;
+        }
+
+        var entryId = PromptForText("Resolve portable conflict", "Portable entry ID:", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return;
+        }
+
+        var revisionId = PromptForText("Resolve portable conflict", "Conflict head revision ID to keep:", allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(revisionId))
+        {
+            return;
+        }
+
+        var note = PromptForText("Resolve portable conflict", "Optional resolution note:", allowEmpty: true);
+        await RunPortableActionAsync(
+            "Resolve portable conflict",
+            () => PortableLogbookCommandRunner.ResolveConflict(
+                _context.SourcePath,
+                recoveryPath,
+                new EntryId(entryId),
+                new RevisionId(revisionId),
+                string.IsNullOrWhiteSpace(note) ? null : note,
+                DateTimeOffset.UtcNow),
+            FormatResolveConflictResult);
+    }
+
+    private async Task RunPortableActionAsync<TResult>(
+        string title,
+        Func<TResult> action,
+        Func<TResult, string> formatResult)
+    {
+        try
+        {
+            FooterStatusText.Text = title + "...";
+            var result = await Task.Run(action);
+            FooterStatusText.Text = title + " complete.";
+            await RefreshPortableLogbookStatusAsync(showUnavailableInFooter: false);
+            MessageBox.Show(this, formatResult(result), title, MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            ShowPortableActionError(title + " failed", ex);
+        }
+    }
+
+    private async Task RefreshPortableLogbookStatusAsync(bool showUnavailableInFooter = true)
+    {
+        PortableLogbookStatusText.Text = await TryReadPortableLogbookStatusTextWithRetryAsync(_context.SourcePath);
+        if (showUnavailableInFooter)
+        {
+            FooterStatusText.Text = PortableLogbookStatusText.Text;
+        }
+    }
+
+    private void ShowPortableActionError(string title, Exception ex)
+    {
+        FooterStatusText.Text = title + ".";
+        MessageBox.Show(this, ex.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private string? ChooseOpenPath(string title, string filter)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            CheckFileExists = true
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    private string? ChooseSavePath(string title, string filter, string fileName)
+    {
+        var dialog = new SaveFileDialog
+        {
+            Title = title,
+            Filter = filter,
+            FileName = fileName,
+            OverwritePrompt = true
+        };
+        return dialog.ShowDialog(this) == true ? dialog.FileName : null;
+    }
+
+    private string? PromptForText(string title, string prompt, bool allowEmpty)
+    {
+        var textBox = new TextBox { MinWidth = 320, Margin = new Thickness(0, 8, 0, 0) };
+        var okButton = new Button { Content = "OK", Width = 80, IsDefault = true };
+        var cancelButton = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+        var window = new Window
+        {
+            Title = title,
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            SizeToContent = SizeToContent.WidthAndHeight
+        };
+        okButton.Click += (_, _) =>
+        {
+            if (!allowEmpty && string.IsNullOrWhiteSpace(textBox.Text))
+            {
+                return;
+            }
+
+            window.DialogResult = true;
+        };
+        var buttons = new StackPanel
+        {
+            Margin = new Thickness(0, 12, 0, 0),
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Children = { okButton, cancelButton }
+        };
+        window.Content = new StackPanel
+        {
+            Margin = new Thickness(16),
+            Children =
+            {
+                new TextBlock { Text = prompt },
+                textBox,
+                buttons
+            }
+        };
+        return window.ShowDialog() == true ? textBox.Text.Trim() : null;
+    }
+
+    private static bool TryParseIsoDate(string? value, out DateOnly date) =>
+        DateOnly.TryParseExact(
+            value,
+            "yyyy-MM-dd",
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.None,
+            out date);
+
+    private static string FormatEnableResult(PortableLogbookEnableResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable logbook enabled.",
+            $"Logbook ID: {result.LogbookId.Value}",
+            $"Device ID: {result.DeviceId.Value}",
+            $"Recovery file: {result.RecoveryOutputPath}",
+            $"Backup: {result.BackupPath}");
+
+    private static string FormatExportResult(PortableLogbookExportResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable package exported.",
+            $"Package: {result.PackageOutputPath}",
+            $"Operations: {result.OperationCount}",
+            $"Custom fields: {result.CustomFieldDefinitionCount}");
+
+    private static string FormatImportPreviewResult(PortableLogbookImportPreviewResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable import preview",
+            $"Status: {result.Status}",
+            $"New operations: {result.NewOperationCount}",
+            $"Duplicate operations: {result.DuplicateOperationCount}",
+            $"Creates: {result.CreateCount}",
+            $"Corrections: {result.CorrectionCount}",
+            $"Deletions: {result.DeletionCount}",
+            $"Entry conflicts: {result.ConflictCount}",
+            $"Custom-field conflicts: {result.CustomFieldConflictCount}");
+
+    private static string FormatImportApplyResult(PortableLogbookImportApplyResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable package import finished.",
+            $"Status: {result.Status}",
+            $"Storage updated: {result.StorageUpdated}",
+            $"Receipt recorded: {result.ReceiptRecorded}",
+            $"Backup: {result.BackupPath ?? "(none)"}",
+            $"Workbook rows requiring sync: {result.WorkbookRowCount}");
+
+    private static string FormatPrintedCopyResult(PortableLogbookPrintedCopyResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Printed copy created.",
+            $"Output: {result.OutputPath}",
+            $"Pages: {result.PageCount}",
+            $"Current records: {result.CurrentRecordCount}",
+            $"Revision history records: {result.RevisionCount}");
+
+    private static string FormatRevisionHistoryResult(PortableLogbookRevisionHistoryResult result)
+    {
+        var builder = new StringBuilder();
+        builder.AppendLine("Portable revision history");
+        builder.AppendLine($"Entry ID: {result.EntryId.Value}");
+        builder.AppendLine($"Current revision ID: {result.CurrentRevisionId?.Value ?? "(none)"}");
+        builder.AppendLine($"Deleted: {result.IsDeleted}");
+        builder.AppendLine($"Conflict: {result.HasConflict}");
+        builder.AppendLine($"Revisions: {result.RevisionCount}");
+        foreach (var revision in result.Revisions)
+        {
+            builder.AppendLine($"{revision.Kind}: {revision.RevisionId.Value} ({revision.CreatedAt:O})");
+        }
+
+        return builder.ToString().TrimEnd();
+    }
+
+    private static string FormatResolveConflictResult(PortableLogbookResolveConflictResult result) =>
+        string.Join(
+            Environment.NewLine,
+            "Portable conflict resolved.",
+            $"Entry ID: {result.EntryId.Value}",
+            $"Kept revision ID: {result.KeptRevisionId.Value}",
+            $"Resolution revision ID: {result.ResolutionRevisionId.Value}",
+            $"Remaining conflicts: {result.RemainingConflictCount}",
+            $"Backup: {result.BackupPath}");
+
     private async void RunPreflightButton_OnClick(object sender, RoutedEventArgs e)
     {
         await RunPreflightAsync();
@@ -404,44 +823,56 @@ public partial class MainWindow : Window
         _preflightPassed = false;
 
         var source = _context.SourcePath;
-        var stagedOutput = _context.UseInPlaceSwap
+        var stagedOutput = _context.MigrationOutputPath ?? (_context.UseInPlaceSwap
             ? BuildStagedOutputPath(source)
-            : _context.OutputPath;
+            : _context.OutputPath);
 
         CheckSourcePathText.Text = "[ ] Waiting for source workbook to close...";
         FooterStatusText.Text = "Waiting for source workbook to close...";
+        var recovery = RecoverPendingHandoffForWizard();
+        if (recovery.Action != HandoffRecoveryAction.None)
+        {
+            FooterStatusText.Text = recovery.Message;
+        }
         var sourceCheck = await WaitForSourceWorkbookAsync(source);
         var sourceOk = sourceCheck.IsOk;
         CheckSourcePathText.Text = sourceOk
             ? "[OK] Source workbook exists, is .xlsm, and is closed"
             : $"[FAIL] {sourceCheck.Message}";
 
+        var finalOutput = _context.UseInPlaceSwap
+            ? source
+            : _context.OutputPath;
         var outputDir = string.IsNullOrWhiteSpace(stagedOutput)
             ? string.Empty
             : (Path.GetDirectoryName(stagedOutput) ?? string.Empty);
+        var finalOutputDir = string.IsNullOrWhiteSpace(finalOutput)
+            ? string.Empty
+            : (Path.GetDirectoryName(finalOutput) ?? string.Empty);
         var outputDirExists = !string.IsNullOrWhiteSpace(outputDir) && Directory.Exists(outputDir);
-        var outputMissing = !File.Exists(stagedOutput);
-        var outputExtOk = string.Equals(Path.GetExtension(stagedOutput), ".xlsm", StringComparison.OrdinalIgnoreCase);
-        var writeAccess = false;
-        if (outputDirExists)
-        {
-            try
-            {
-                var probe = Path.Combine(outputDir, $".write-test-{Guid.NewGuid():N}.tmp");
-                await File.WriteAllTextAsync(probe, "probe");
-                File.Delete(probe);
-                writeAccess = true;
-            }
-            catch
-            {
-                writeAccess = false;
-            }
-        }
+        var finalOutputDirExists = !string.IsNullOrWhiteSpace(finalOutputDir) && Directory.Exists(finalOutputDir);
+        var outputMissing = _context.UseInPlaceSwap
+            ? !File.Exists(stagedOutput)
+            : !File.Exists(stagedOutput) && !File.Exists(finalOutput);
+        var outputExtOk =
+            string.Equals(Path.GetExtension(stagedOutput), ".xlsm", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Path.GetExtension(finalOutput), ".xlsm", StringComparison.OrdinalIgnoreCase);
+        var writeAccess = outputDirExists && await CanWriteToDirectoryAsync(outputDir);
+        var finalWriteAccess = finalOutputDirExists && await CanWriteToDirectoryAsync(finalOutputDir);
 
-        var outputOk = outputDirExists && outputMissing && outputExtOk && writeAccess;
+        var outputOk = outputDirExists &&
+            finalOutputDirExists &&
+            outputMissing &&
+            outputExtOk &&
+            writeAccess &&
+            finalWriteAccess;
         CheckOutputPathText.Text = outputOk
-            ? "[OK] Output path is writable and output file does not exist"
-            : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists";
+            ? (_context.UseInPlaceSwap
+                ? "[OK] Temporary output is writable and original workbook can be replaced"
+                : "[OK] Output path is writable and output file does not exist")
+            : (_context.UseInPlaceSwap
+                ? "[FAIL] Temporary output invalid, unwritable, wrong extension, or already exists"
+                : "[FAIL] Output path invalid, unwritable, wrong extension, or already exists");
 
         var channelOk = _context.UsesProvidedMaster
             ? File.Exists(_context.MasterPath!)
@@ -519,7 +950,7 @@ public partial class MainWindow : Window
         {
             if (OpenUpdatedCheckBox.IsEnabled && OpenUpdatedCheckBox.IsChecked == true)
             {
-                OpenLastOutputWorkbook();
+                await OpenLastOutputWorkbookAsync();
             }
 
             Close();
@@ -586,22 +1017,37 @@ public partial class MainWindow : Window
         UpdateProgressBar.IsIndeterminate = false;
         UpdateProgressBar.Value = 0;
         UpdateLogTextBox.Clear();
+        OpenUpdatedCheckBox.Content = "Open updated workbook when I click Finish";
 
-        var progressSink = new WizardProgressSink(AppendProgressEvent);
+        var progressSink = new RecordingUpdaterProgressSink(new WizardProgressSink(AppendProgressEvent));
 
         var source = _context.SourcePath;
-        var stagedOutput = _context.UseInPlaceSwap
+        var stagedOutput = _context.MigrationOutputPath ?? (_context.UseInPlaceSwap
             ? BuildStagedOutputPath(source)
-            : _context.OutputPath;
+            : _context.OutputPath);
+        var diagnosticReportPath = DetailedLoggingCheckBox.IsChecked == true
+            ? (_context.UseInPlaceSwap
+                ? Path.ChangeExtension(source, ".update-report.json")
+                : Path.ChangeExtension(_context.OutputPath, ".update-report.json"))
+            : null;
+        string? resolvedMasterForDiagnostics = null;
+        MigrationReport? report = null;
 
         try
         {
+            var recovery = RecoverPendingHandoffForWizard();
+            if (recovery.Action != HandoffRecoveryAction.None)
+            {
+                FooterStatusText.Text = recovery.Message;
+            }
+
             string resolvedMaster;
             ReleaseManifest? manifest = null;
 
             if (_context.UsesProvidedMaster)
             {
                 resolvedMaster = _context.MasterPath!;
+                resolvedMasterForDiagnostics = resolvedMaster;
                 AppendLog($"Using {_context.ChannelDisplayName} master workbook: {resolvedMaster}");
             }
             else
@@ -611,6 +1057,7 @@ public partial class MainWindow : Window
                 var release = await releaseClient.GetLatestReleaseAsync(_context.Repository, _updateCts.Token);
                 _downloadDirectoryToCleanup = release.DownloadDirectory;
                 resolvedMaster = release.MasterWorkbookPath;
+                resolvedMasterForDiagnostics = resolvedMaster;
                 manifest = release.Manifest;
                 AppendLog($"Using release {manifest.Version} ({manifest.Tag})");
             }
@@ -622,7 +1069,7 @@ public partial class MainWindow : Window
             }
 
             var migrator = new ExcelWorkbookMigrator(progressSink);
-            var report = await Task.Run(() => migrator.Migrate(new MigrationRequest(
+            report = await Task.Run(() => migrator.Migrate(new MigrationRequest(
                 source,
                 resolvedMaster,
                 stagedOutput,
@@ -630,15 +1077,19 @@ public partial class MainWindow : Window
 
             _lastOutputPath = stagedOutput;
             _lastBackupPath = null;
+            _lastBackupExpectedVersion = null;
             _lastReportPath = null;
-            if (DetailedLoggingCheckBox.IsChecked == true)
+            if (!string.IsNullOrWhiteSpace(diagnosticReportPath))
             {
-                _lastReportPath = _context.UseInPlaceSwap
-                    ? Path.ChangeExtension(source, ".update-report.json")
-                    : Path.ChangeExtension(stagedOutput, ".update-report.json");
-                await File.WriteAllTextAsync(
+                _lastReportPath = diagnosticReportPath;
+                await TryWriteDiagnosticBundleAsync(
                     _lastReportPath,
-                    JsonSerializer.Serialize(report, JsonDefaults.Indented),
+                    report,
+                    progressSink.Events,
+                    error: null,
+                    source,
+                    resolvedMasterForDiagnostics,
+                    _lastOutputPath,
                     _updateCts.Token);
                 AppendLog($"Detailed diagnostic report: {_lastReportPath}");
             }
@@ -648,43 +1099,104 @@ public partial class MainWindow : Window
                 $"{report.AirportVisitStats.SavedNonBlankVisitRows} saved, " +
                 $"{report.AirportVisitStats.LogbookRowsWithRecognisedAirports} recognised logbook rows");
 
+            if (!string.IsNullOrWhiteSpace(_context.HandoffNote))
+            {
+                AppendLog(_context.HandoffNote);
+            }
+
             if (_context.UseInPlaceSwap)
             {
                 AppendLog("finalising workbook handoff...");
                 var handoff = await Task.Run(
-                    () => WorkbookHandoff.ReplaceSourceWithUpdated(source, stagedOutput),
+                    () => WorkbookHandoff.ReplaceSourceWithUpdated(
+                        source,
+                        stagedOutput,
+                        report.OutputVersion,
+                        report.SourceVersion),
                     _updateCts.Token);
                 _lastOutputPath = handoff.FinalWorkbookPath;
                 _lastBackupPath = handoff.BackupWorkbookPath;
+                _lastBackupExpectedVersion = report.SourceVersion;
             }
+            else if (!string.IsNullOrWhiteSpace(_context.MigrationOutputPath))
+            {
+                AppendLog("copying validated workbook into OneDrive folder...");
+                WorkbookPackageValidator.ValidateStagedWorkbook(stagedOutput, report.OutputVersion);
+                File.Copy(stagedOutput, _context.OutputPath, overwrite: false);
+                WorkbookPackageValidator.ValidateWorkbookPackage(_context.OutputPath, report.OutputVersion);
+                TryDelete(stagedOutput);
+                _lastOutputPath = _context.OutputPath;
+            }
+            _lastOutputExpectedVersion = report.OutputVersion;
 
             AppendLog("Waiting for workbook file to settle...");
             var finalWorkbookReady = await WaitForFileToSettleAsync(_lastOutputPath, _updateCts.Token);
+            if (finalWorkbookReady &&
+                _context.UseInPlaceSwap &&
+                !string.IsNullOrWhiteSpace(_lastBackupPath))
+            {
+                WorkbookHandoff.CompletePostHandoffValidation(
+                    _lastOutputPath,
+                    _lastBackupPath,
+                    report.OutputVersion,
+                    report.SourceVersion);
+                AppendLog("Post-handoff validation complete; older update backups pruned.");
+            }
 
-            CompleteTitleText.Text = "Update Complete";
+            CompleteTitleText.Text = finalWorkbookReady
+                ? "Update Complete"
+                : "Update Complete With Warnings";
             CompleteSummaryText.Text = finalWorkbookReady
                 ? (_context.UseInPlaceSwap
                     ? "Update complete. The original filename now points to the updated workbook."
-                    : "The updated workbook was created and validated.")
+                    : "The updated workbook was created as a separate file and validated.")
                 : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.";
-            CompleteOutputPathText.Text = $"Updated workbook: {_lastOutputPath}";
-            CompleteBackupPathText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
-                ? string.Empty
-                : $"Backup workbook: {_lastBackupPath}";
+            CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Current workbook",
+                _lastOutputPath,
+                _lastOutputExpectedVersion,
+                "Current workbook: not available");
+            CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Retained backup",
+                _lastBackupPath,
+                _lastBackupExpectedVersion,
+                "Retained backup: not available");
+            RestoreBackupButton.IsEnabled = finalWorkbookReady &&
+                _context.UseInPlaceSwap &&
+                !string.IsNullOrWhiteSpace(_lastBackupPath);
             OpenUpdatedCheckBox.IsEnabled = finalWorkbookReady;
             OpenUpdatedCheckBox.IsChecked = finalWorkbookReady;
+            OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
+                File.Exists(_lastReportPath);
             FooterStatusText.Text = finalWorkbookReady
                 ? "Update completed."
                 : "Update completed. Wait for sync before opening.";
 
             _stepIndex = 5;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException ex)
         {
+            if (!string.IsNullOrWhiteSpace(diagnosticReportPath))
+            {
+                _lastReportPath = diagnosticReportPath;
+                await TryWriteDiagnosticBundleAsync(
+                    _lastReportPath,
+                    report,
+                    progressSink.Events,
+                    ex,
+                    source,
+                    resolvedMasterForDiagnostics,
+                    _lastOutputPath ?? stagedOutput,
+                    CancellationToken.None);
+            }
+
             CompleteTitleText.Text = "Update Cancelled";
             CompleteSummaryText.Text = "Update was cancelled before completion.";
-            CompleteOutputPathText.Text = "Updated workbook: not created";
+            CompleteOutputPathText.Text = "Current workbook: not created";
             CompleteBackupPathText.Text = string.Empty;
+            RestoreBackupButton.IsEnabled = false;
+            OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
+                File.Exists(_lastReportPath);
             OpenUpdatedCheckBox.IsEnabled = false;
             OpenUpdatedCheckBox.IsChecked = false;
             FooterStatusText.Text = "Update cancelled.";
@@ -692,10 +1204,34 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            CompleteTitleText.Text = "Update Failed";
+            if (!string.IsNullOrWhiteSpace(diagnosticReportPath))
+            {
+                _lastReportPath = diagnosticReportPath;
+                await TryWriteDiagnosticBundleAsync(
+                    _lastReportPath,
+                    report,
+                    progressSink.Events,
+                    ex,
+                    source,
+                    resolvedMasterForDiagnostics,
+                    _lastOutputPath ?? stagedOutput,
+                    CancellationToken.None);
+            }
+
+            CompleteTitleText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
+                ? "Update Failed"
+                : "Update Failed - Backup Available";
             CompleteSummaryText.Text = ex.Message;
-            CompleteOutputPathText.Text = "Updated workbook: not available";
-            CompleteBackupPathText.Text = string.Empty;
+            CompleteOutputPathText.Text = "Current workbook: not available";
+            CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Retained backup",
+                _lastBackupPath,
+                _lastBackupExpectedVersion,
+                "Retained backup: not available");
+            RestoreBackupButton.IsEnabled = _context.UseInPlaceSwap &&
+                !string.IsNullOrWhiteSpace(_lastBackupPath);
+            OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
+                File.Exists(_lastReportPath);
             OpenUpdatedCheckBox.IsEnabled = false;
             OpenUpdatedCheckBox.IsChecked = false;
             FooterStatusText.Text = "Update failed.";
@@ -743,12 +1279,16 @@ public partial class MainWindow : Window
         {
             UpdatingPhaseText.Text = progressEvent.Message;
             AppendLog(progressEvent.Message);
+            if (!string.IsNullOrWhiteSpace(progressEvent.RecoveryHint))
+            {
+                AppendLog($"Recovery: {progressEvent.RecoveryHint}");
+            }
 
             if (progressEvent.Percent.HasValue)
             {
                 UpdateProgressBar.Value = progressEvent.Percent.Value;
             }
-            else if (_phaseProgress.TryGetValue(progressEvent.PhaseId, out var phasePercent))
+            else if (UpdaterPhaseProgress.GetPercent(progressEvent.PhaseId) is { } phasePercent)
             {
                 UpdateProgressBar.Value = phasePercent;
             }
@@ -761,16 +1301,202 @@ public partial class MainWindow : Window
         UpdateLogTextBox.ScrollToEnd();
     }
 
-    private void OpenLastOutputWorkbook()
+    private async Task TryWriteDiagnosticBundleAsync(
+        string path,
+        MigrationReport? report,
+        IReadOnlyList<UpdaterProgressEvent> progressEvents,
+        Exception? error,
+        string? sourceWorkbookPath,
+        string? masterWorkbookPath,
+        string? outputWorkbookPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var applicationVersion = report?.OutputVersion ?? "unknown";
+            var bundle = DiagnosticBundleFactory.Create(
+                applicationVersion,
+                report,
+                progressEvents,
+                error,
+                sourceWorkbookPath,
+                masterWorkbookPath,
+                outputWorkbookPath);
+            await File.WriteAllTextAsync(
+                path,
+                JsonSerializer.Serialize(bundle, JsonDefaults.Indented),
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            AppendLog($"Could not write diagnostic report: {ex.Message}");
+        }
+    }
+
+    private HandoffRecoveryResult RecoverPendingHandoffForWizard()
+    {
+        HandoffRecoveryResult recovery;
+        try
+        {
+            recovery = WorkbookHandoff.RecoverIfNeeded(_context.SourcePath);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or InvalidDataException or JsonException)
+        {
+            recovery = new HandoffRecoveryResult(
+                HandoffRecoveryAction.UnrecoverableFailure,
+                $"Recovery required: an interrupted workbook handoff could not be recovered automatically. {ex.Message}",
+                Path.GetFullPath(_context.SourcePath));
+        }
+
+        if (recovery.Action != HandoffRecoveryAction.None)
+        {
+            AppendLog(recovery.Message);
+            if (!string.IsNullOrWhiteSpace(recovery.SourceWorkbookPath))
+            {
+                AppendLog($"Recovered workbook: {recovery.SourceWorkbookPath}");
+            }
+            if (!string.IsNullOrWhiteSpace(recovery.BackupWorkbookPath))
+            {
+                AppendLog($"{recovery.BackupWorkbookLabel}: {recovery.BackupWorkbookPath}");
+            }
+        }
+
+        return recovery;
+    }
+
+    private async Task OpenLastOutputWorkbookAsync()
     {
         if (string.IsNullOrWhiteSpace(_lastOutputPath) || !File.Exists(_lastOutputPath))
+        {
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(_lastOutputExpectedVersion))
+        {
+            var version = await TryReadWorkbookVersionFromPackageWithRetryAsync(_lastOutputPath);
+            if (!string.Equals(version, _lastOutputExpectedVersion, StringComparison.Ordinal))
+            {
+                MessageBox.Show(
+                    this,
+                    "The updated workbook is not ready to open yet. Wait for OneDrive to finish syncing, then open the updated workbook from the path shown on this screen.",
+                    "Workbook still syncing",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Warning);
+                return;
+            }
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = _lastOutputPath,
+            UseShellExecute = true
+        });
+    }
+
+    private static async Task<string> BuildWorkbookDisplayTextAsync(
+        string label,
+        string? workbookPath,
+        string? expectedVersion,
+        string missingText)
+    {
+        if (string.IsNullOrWhiteSpace(workbookPath) || !File.Exists(workbookPath))
+        {
+            return missingText;
+        }
+
+        var details = new List<string>();
+        var version = await TryReadWorkbookVersionFromPackageWithRetryAsync(workbookPath);
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            if (string.IsNullOrWhiteSpace(expectedVersion))
+            {
+                details.Add($"version {version}");
+            }
+            else if (string.Equals(version, expectedVersion, StringComparison.Ordinal))
+            {
+                details.Add($"validated version {version}");
+            }
+            else
+            {
+                details.Add($"version {version}; expected {expectedVersion}");
+            }
+        }
+        else if (!string.IsNullOrWhiteSpace(expectedVersion))
+        {
+            details.Add($"version unreadable; expected {expectedVersion}");
+        }
+
+        details.Add($"saved {File.GetLastWriteTime(workbookPath):G}");
+
+        return details.Count == 0
+            ? $"{label}: {workbookPath}"
+            : $"{label}: {workbookPath} ({string.Join(", ", details)})";
+    }
+
+    private async void RestoreBackupButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastOutputPath) ||
+            string.IsNullOrWhiteSpace(_lastBackupPath))
+        {
+            return;
+        }
+
+        var confirmation = MessageBox.Show(
+            this,
+            "Restore the retained backup to the original workbook filename? The current workbook at that filename will be kept for investigation.",
+            "Restore backup",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = WorkbookHandoff.RestoreBackup(
+                _lastOutputPath,
+                _lastBackupPath,
+                _lastBackupExpectedVersion);
+            _lastOutputPath = result.RestoredWorkbookPath;
+            _lastOutputExpectedVersion = result.RestoredWorkbookVersion;
+            CompleteTitleText.Text = "Backup Restored";
+            CompleteSummaryText.Text = "The retained backup was validated and restored to the original workbook filename.";
+            CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Restored workbook",
+                result.RestoredWorkbookPath,
+                result.RestoredWorkbookVersion,
+                "Restored workbook: not available");
+            CompleteBackupPathText.Text = result.FailedWorkbookPath is null
+                ? $"Retained backup: {_lastBackupPath} (validated version {result.BackupWorkbookVersion})"
+                : $"Previous failed workbook kept: {result.FailedWorkbookPath}";
+            RestoreBackupButton.IsEnabled = false;
+            OpenUpdatedCheckBox.IsEnabled = true;
+            OpenUpdatedCheckBox.IsChecked = true;
+            OpenUpdatedCheckBox.Content = "Open restored workbook when I click Finish";
+            FooterStatusText.Text = "Backup restored.";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                ex.Message,
+                "Restore failed",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            FooterStatusText.Text = "Restore failed.";
+        }
+    }
+
+    private void OpenDiagnosticReportButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(_lastReportPath) || !File.Exists(_lastReportPath))
         {
             return;
         }
 
         Process.Start(new ProcessStartInfo
         {
-            FileName = _lastOutputPath,
+            FileName = _lastReportPath,
             UseShellExecute = true
         });
     }
@@ -971,6 +1697,64 @@ public partial class MainWindow : Window
         }
     }
 
+    private static async Task<string> TryReadPortableLogbookStatusTextWithRetryAsync(string workbookPath)
+    {
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var status = await Task.Run(() => TryReadPortableLogbookStatusText(workbookPath));
+            if (!string.IsNullOrWhiteSpace(status))
+            {
+                return status;
+            }
+
+            if (attempt < 9)
+            {
+                await Task.Delay(1000);
+            }
+        }
+
+        return "Portable logbook: unavailable";
+    }
+
+    private static string? TryReadPortableLogbookStatusText(string workbookPath)
+    {
+        if (!File.Exists(workbookPath))
+        {
+            return null;
+        }
+
+        try
+        {
+            var status = PortableLogbookCommandRunner.ReadStatus(workbookPath);
+            if (!status.IsEnabled || status.Summary is null)
+            {
+                return "Portable logbook: not enabled";
+            }
+
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "Portable logbook: enabled ({0} current, {1} conflicts)",
+                status.Summary.CurrentRecordCount,
+                status.Summary.UnresolvedConflictCount);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
+        catch (InvalidDataException)
+        {
+            return "Portable logbook: storage unreadable";
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return null;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return "Portable logbook: storage unreadable";
+        }
+    }
+
     private static XDocument? ReadXmlEntry(ZipArchive archive, string entryName)
     {
         var entry = archive.GetEntry(entryName);
@@ -1056,19 +1840,29 @@ public partial class MainWindow : Window
         }
 
         source ??= GetDefaultSourcePath();
-        output ??= BuildDefaultOutputPath(source);
+        source = Path.GetFullPath(source);
+        output ??= WorkbookOutputNamer.BuildDefaultOutputPath(source);
+        output = Path.GetFullPath(output);
         master = string.IsNullOrWhiteSpace(master) ? null : Path.GetFullPath(master);
         channel ??= string.IsNullOrWhiteSpace(master)
             ? UpdateChannel.Stable
             : UpdateChannel.LocalMaster;
+        var updatePathPlan = WorkbookUpdatePathPlanner.Resolve(
+            source,
+            output,
+            useInPlaceSwap,
+            CloudStoragePath.IsLikelyCloudSynced,
+            BuildLocalMigrationOutputPath);
 
         return new RunContext(
-            SourcePath: Path.GetFullPath(source),
-            OutputPath: Path.GetFullPath(output),
+            SourcePath: source,
+            OutputPath: updatePathPlan.OutputPath,
+            MigrationOutputPath: updatePathPlan.MigrationOutputPath,
             MasterPath: master,
             Repository: repository,
             Channel: channel.Value,
-            UseInPlaceSwap: useInPlaceSwap);
+            UseInPlaceSwap: updatePathPlan.UseInPlaceSwap,
+            HandoffNote: updatePathPlan.HandoffNote);
     }
 
     private static UpdateChannel ParseUpdateChannel(string value)
@@ -1078,6 +1872,7 @@ public partial class MainWindow : Window
             "stable" => UpdateChannel.Stable,
             "development" => UpdateChannel.Development,
             "dev" => UpdateChannel.Development,
+            "hotfix" => UpdateChannel.Hotfix,
             "local-master" => UpdateChannel.LocalMaster,
             "localmaster" => UpdateChannel.LocalMaster,
             "local" => UpdateChannel.LocalMaster,
@@ -1103,18 +1898,6 @@ public partial class MainWindow : Window
         return preferred;
     }
 
-    private static string BuildDefaultOutputPath(string sourcePath)
-    {
-        var directory = Path.GetDirectoryName(sourcePath);
-        var name = Path.GetFileNameWithoutExtension(sourcePath);
-        if (string.IsNullOrWhiteSpace(directory))
-        {
-            directory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
-        }
-
-        return Path.Combine(directory, $"{name}_Updated_{DateTime.Now:yyyyMMdd-HHmmss}.xlsm");
-    }
-
     private static string BuildStagedOutputPath(string sourcePath)
     {
         var directory = Path.GetDirectoryName(sourcePath);
@@ -1126,6 +1909,49 @@ public partial class MainWindow : Window
         }
 
         return Path.Combine(directory, $"{name}_Updated_Staged_{DateTime.Now:yyyyMMdd-HHmmss}{extension}");
+    }
+
+    private static string BuildLocalMigrationOutputPath(string sourcePath)
+    {
+        var name = Path.GetFileNameWithoutExtension(sourcePath);
+        var extension = Path.GetExtension(sourcePath);
+        var directory = Path.Combine(
+            Path.GetTempPath(),
+            "ElectronicLogbookUpdater",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+
+        return Path.Combine(directory, $"{name}_Updated_Working{extension}");
+    }
+
+    private static async Task<bool> CanWriteToDirectoryAsync(string directory)
+    {
+        try
+        {
+            var probe = Path.Combine(directory, $".write-test-{Guid.NewGuid():N}.tmp");
+            await File.WriteAllTextAsync(probe, "probe");
+            File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+            // A temp cleanup failure must not hide a validated update.
+        }
     }
 
     private static bool IsWorkbookLocked(string workbookPath)
@@ -1237,16 +2063,19 @@ public partial class MainWindow : Window
     {
         Stable,
         Development,
+        Hotfix,
         LocalMaster
     }
 
     private sealed record RunContext(
         string SourcePath,
         string OutputPath,
+        string? MigrationOutputPath,
         string? MasterPath,
         string Repository,
         UpdateChannel Channel,
-        bool UseInPlaceSwap)
+        bool UseInPlaceSwap,
+        string HandoffNote)
     {
         public bool UsesProvidedMaster => !string.IsNullOrWhiteSpace(MasterPath);
 
@@ -1254,6 +2083,7 @@ public partial class MainWindow : Window
         {
             UpdateChannel.Stable => "Stable",
             UpdateChannel.Development => "Development",
+            UpdateChannel.Hotfix => "Hotfix",
             UpdateChannel.LocalMaster => "Local Master",
             _ => "Stable"
         };

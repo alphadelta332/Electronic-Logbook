@@ -18,7 +18,7 @@ public sealed record UpdaterOptions(
 
         Options:
           --master <master.xlsm>   Use a local master workbook instead of GitHub latest release.
-          --report <report.json>   Write the validation report to a specific path.
+          --report <report.json>   Write the redacted diagnostic report to a specific path.
           --repo <owner/name>      GitHub repository. Defaults to alphadelta332/Electronic-Logbook.
           --inplace                Replace source filename with updated file and keep *_Old backup.
           --no-inplace             Keep output as a separate file (the default).

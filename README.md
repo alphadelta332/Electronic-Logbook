@@ -7,6 +7,14 @@ A Microsoft Excel-based pilot logbook with automatic update delivery via GitHub.
 ---
 
 ## Changelog
+### [2.0.3] - 2026-07-23
+#### Stats/Charts
+- Fixed airport visit statistics so visits are counted from the Logbook **From**, **To**, and **Via** route fields. This corrects under-reported visit counts after the 2.0.0+ route-field redesign.
+
+#### Updater
+- Improved Updater Wizard's handling with OneDrive/Excel.
+- Added quick button to Restore original copy.
+- General stability fixes.
 
 ### [2.0.2] - 2026-07-14
 #### General
@@ -397,8 +405,8 @@ Check that the **Currency + Recency** sheet is not using an overridden date. The
 | File | Purpose |
 |---|---|
 | `Electronic_Logbook_Master.xlsm` | Master template -- distributed to users and used as the update source |
-| `modBoot.bas` | Bootstrap module that refreshes the updater code |
-| `modUpdate.bas` | VBA module for the auto-update system |
+| `modBoot.bas` | Embedded launcher that checks for updates and starts the external updater wizard |
+| `modUpdate.bas` | Legacy VBA updater retained for older supported workbooks; not embedded in release workbooks by default |
 | `version.txt` | Current version number -- checked on workbook open |
 | `README.md` | This file |
 

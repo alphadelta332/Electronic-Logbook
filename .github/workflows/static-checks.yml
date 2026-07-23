@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - dev
+      - hotfix
       - main
 
 permissions:
@@ -24,6 +25,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate release metadata
@@ -39,6 +41,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate VBA source
@@ -56,6 +59,9 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build and test updater
+      - name: Build solution
+        run: dotnet build ElectronicLogbook.Updater.sln --configuration Release
+
+      - name: Test solution
         shell: pwsh
-        run: dotnet test ElectronicLogbook.Updater.sln --configuration Release
+        run: dotnet test ElectronicLogbook.Updater.sln --configuration Release --no-build

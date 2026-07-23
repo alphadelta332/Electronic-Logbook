@@ -1,55 +1,98 @@
-name: Publish release
+name: Promote release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: "Full commit SHA already merged to main"
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: publish-release
+  group: promote-release
   cancel-in-progress: false
 
 jobs:
-  publish:
-    name: Publish GitHub release assets
-    runs-on: windows-latest
-    timeout-minutes: 25
+  validate:
+    name: Validate release candidate
+    runs-on: [self-hosted, windows, excel]
+    environment: release
+    timeout-minutes: 90
+    outputs:
+      release_version: ${{ steps.target.outputs.release_version }}
+      release_tag: ${{ steps.target.outputs.release_tag }}
+      release_commit: ${{ steps.target.outputs.release_commit }}
 
     steps:
-      - name: Check out repository
+      - name: Check out selected commit
         uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
+          ref: ${{ inputs.commit_sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Validate release metadata
+      - name: Verify promotion target
+        id: target
         shell: pwsh
+        env:
+          PROMOTE_COMMIT: ${{ inputs.commit_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          ./tools/Test-ReleaseMetadata.ps1
-          ./tools/Test-VbaSourceQuality.ps1
-          $version = (Get-Content version.txt -Raw).Trim()
-          if ($env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match version.txt ($version). Expected v$version."
-          }
-          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
-          if ($LASTEXITCODE -ne 0) {
-            throw "Tag $env:GITHUB_REF_NAME does not point to a commit on main."
+          if ($env:PROMOTE_COMMIT -notmatch "^[0-9a-fA-F]{40}$") {
+            throw "commit_sha must be a full 40-character commit SHA."
           }
 
-      - name: Build release integrity files
+          git fetch origin main --tags --force
+          $resolvedCommit = (git rev-parse "$env:PROMOTE_COMMIT^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $resolvedCommit -ne $env:PROMOTE_COMMIT.ToLowerInvariant()) {
+            throw "Could not resolve selected release commit: $env:PROMOTE_COMMIT"
+          }
+
+          git merge-base --is-ancestor $resolvedCommit origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Selected release commit $resolvedCommit is not on origin/main."
+          }
+
+          $version = (Get-Content version.txt -Raw).Trim()
+          if ($version -notmatch "^\d+\.\d+\.\d+$") {
+            throw "version.txt must contain semantic version X.Y.Z. Found: $version"
+          }
+
+          $tag = "v$version"
+          $existingTag = git rev-parse -q --verify "refs/tags/$tag"
+          if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingTag)) {
+            throw "Release tag $tag already exists."
+          }
+
+          $existingRelease = gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            throw "GitHub release $tag already exists."
+          }
+
+          "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "RELEASE_COMMIT=$resolvedCommit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "release_version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "release_tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "release_commit=$resolvedCommit" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Build release artifacts
         shell: pwsh
+        env:
+          RELEASE_MANIFEST_SIGNING_PRIVATE_KEY: ${{ secrets.RELEASE_MANIFEST_SIGNING_PRIVATE_KEY }}
         run: |
           ./updater/Publish-WizardAsset.ps1
 
-          $version = (Get-Content version.txt -Raw).Trim()
+          Remove-Item SHA256SUMS.txt, release-manifest.json, release-manifest.json.sig, release-notes.md -Force -ErrorAction SilentlyContinue
+
           $readme = Get-Content README.md -Raw
-          $releaseNotesPattern = "(?ms)^### \[$([regex]::Escape($version))\].*?(?=^### \[|\z)"
+          $releaseNotesPattern = "(?ms)^### \[$([regex]::Escape($env:RELEASE_VERSION))\].*?(?=^### \[|\z)"
           $releaseNotesMatch = [regex]::Match($readme, $releaseNotesPattern)
           if (-not $releaseNotesMatch.Success) {
-            throw "README.md changelog does not contain release notes for $version."
+            throw "README.md changelog does not contain release notes for $env:RELEASE_VERSION."
           }
           [System.IO.File]::WriteAllText(
             (Join-Path $PWD "release-notes.md"),
@@ -61,6 +104,7 @@ jobs:
             Get-Item README.pdf
             Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.exe
             Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
+            Get-Item updater/dist/wizard-signature-report.json
           )
 
           $manifestAssets = foreach ($asset in $assets) {
@@ -74,29 +118,171 @@ jobs:
           }
 
           [ordered]@{
-            version = $version
-            tag = $env:GITHUB_REF_NAME
-            commit = $env:GITHUB_SHA
+            version = $env:RELEASE_VERSION
+            tag = $env:RELEASE_TAG
+            commit = $env:RELEASE_COMMIT
             assets = @($manifestAssets)
           } | ConvertTo-Json -Depth 4 | Set-Content release-manifest.json -Encoding utf8
 
-      - name: Publish release
+          ./tools/Sign-ReleaseManifest.ps1 -ManifestPath release-manifest.json
+          foreach ($asset in @(
+            Get-Item release-manifest.json
+            Get-Item release-manifest.json.sig
+          )) {
+            $hash = (Get-FileHash $asset.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($asset.Name)" | Add-Content SHA256SUMS.txt -Encoding ascii
+          }
+
+      - name: Run release validation
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
+        run: ./tools/Invoke-Validation.ps1 -Tier Release -ArtifactsPath .
+
+      - name: Ensure validation left tracked files unchanged
+        shell: pwsh
         run: |
-          $releaseArgs = @(
-            "release"
-            "create"
-            $env:GITHUB_REF_NAME
+          $trackedChanges = git status --short --untracked-files=no
+          if ($trackedChanges) {
+            $trackedChanges | ForEach-Object { Write-Host $_ }
+            throw "Release validation left tracked working-tree changes."
+          }
+
+      - name: Write validation report
+        shell: pwsh
+        run: |
+          $artifactPaths = @(
             "Electronic_Logbook_Master.xlsm"
             "README.pdf"
             "updater/dist/ElectronicLogbook.Updater.Wizard.exe"
             "updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip"
+            "updater/dist/wizard-signature-report.json"
             "SHA256SUMS.txt"
             "release-manifest.json"
+            "release-manifest.json.sig"
+          )
+
+          $artifactHashes = foreach ($path in $artifactPaths) {
+            $item = Get-Item $path
+            [ordered]@{
+              name = $item.Name
+              path = $path
+              size = $item.Length
+              sha256 = (Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            }
+          }
+
+          [ordered]@{
+            version = $env:RELEASE_VERSION
+            tag = $env:RELEASE_TAG
+            commit = $env:RELEASE_COMMIT
+            timestampUtc = [DateTimeOffset]::UtcNow.ToString("o")
+            result = "passed"
+            checks = @(
+              @{ name = "Release metadata"; result = "passed" }
+              @{ name = "VBA source quality"; result = "passed" }
+              @{ name = ".NET updater tests"; result = "passed" }
+              @{ name = "NuGet vulnerability audit"; result = "passed" }
+              @{ name = "Workbook/source parity"; result = "passed" }
+              @{ name = "Disposable VBA compile"; result = "passed" }
+              @{ name = "Public workbook readiness"; result = "passed" }
+              @{ name = "External updater smoke test"; result = "passed" }
+              @{ name = "Compatibility matrix"; result = "passed" }
+              @{ name = "Release artifact verification"; result = "passed" }
+            )
+            workbookHashes = @(
+              $artifactHashes | Where-Object { $_.name -eq "Electronic_Logbook_Master.xlsm" }
+            )
+            artifacts = @($artifactHashes)
+          } | ConvertTo-Json -Depth 6 | Set-Content release-validation.json -Encoding utf8
+
+      - name: Upload validated release artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ steps.target.outputs.release_tag }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            Electronic_Logbook_Master.xlsm
+            README.pdf
+            updater/dist/ElectronicLogbook.Updater.Wizard.exe
+            updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
+            updater/dist/wizard-signature-report.json
+            SHA256SUMS.txt
+            release-manifest.json
+            release-manifest.json.sig
+            release-validation.json
+            release-notes.md
+
+  publish:
+    name: Publish approved release
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 15
+    environment: release
+
+    steps:
+      - name: Download validated release artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: release-${{ needs.validate.outputs.release_tag }}
+          path: .
+
+      - name: Create release app token
+        id: release-app-token
+        # Treat this token as opaque. GitHub App installation tokens may be
+        # longer stateless ghs_ JWT-format values during GitHub's rollout.
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: Electronic-Logbook
+
+      - name: Create protected tag
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
+        run: |
+          $tagObject = gh api `
+            --method POST `
+            "repos/$env:GITHUB_REPOSITORY/git/tags" `
+            -f tag="$env:RELEASE_TAG" `
+            -f message="Release $env:RELEASE_TAG" `
+            -f object="$env:RELEASE_COMMIT" `
+            -f type="commit" | ConvertFrom-Json
+
+          gh api `
+            --method POST `
+            "repos/$env:GITHUB_REPOSITORY/git/refs" `
+            -f ref="refs/tags/$env:RELEASE_TAG" `
+            -f sha="$($tagObject.sha)"
+
+      - name: Publish release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ steps.release-app-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.validate.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.release_commit }}
+        run: |
+          $releaseArgs = @(
+            "release"
+            "create"
+            $env:RELEASE_TAG
+            "Electronic_Logbook_Master.xlsm"
+            "README.pdf"
+            "ElectronicLogbook.Updater.Wizard.exe"
+            "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+            "wizard-signature-report.json"
+            "SHA256SUMS.txt"
+            "release-manifest.json"
+            "release-manifest.json.sig"
+            "release-validation.json"
+            "--target"
+            $env:RELEASE_COMMIT
             "--title"
-            $env:GITHUB_REF_NAME
+            $env:RELEASE_TAG
             "--notes-file"
             "release-notes.md"
             "--verify-tag"

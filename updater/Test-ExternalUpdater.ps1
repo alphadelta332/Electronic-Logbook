@@ -2,7 +2,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent)
+    [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
+    [string]$ReportPath,
+    [switch]$InPlace
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,8 +18,12 @@ $testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) (
 $sourcePath = Join-Path $testDirectory "Source.xlsm"
 $masterPath = Join-Path $testDirectory "Master.xlsm"
 $outputPath = Join-Path $testDirectory "Updated.xlsm"
+$modeName = if ($InPlace) { "in-place" } else { "separate-output" }
 $maxAttempts = 3
 $updaterDllPath = Join-Path $projectPath "bin\Release\net8.0-windows\ElectronicLogbook.Updater.dll"
+if ([string]::IsNullOrWhiteSpace($ReportPath)) {
+    $ReportPath = Join-Path $repoRoot "updater\TestResults\com-migration-report.json"
+}
 
 Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
@@ -26,8 +32,60 @@ function Write-Step {
     Write-Host "[Test-ExternalUpdater] $Message" -ForegroundColor Cyan
 }
 
+function Write-ComMigrationReport {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Path,
+        [Parameter(Mandatory)]
+        [string]$Status,
+        [string]$FailureMessage = "",
+        [string[]]$Checks = @()
+    )
+
+    $directory = Split-Path -Parent $Path
+    if (-not [string]::IsNullOrWhiteSpace($directory)) {
+        New-Item -ItemType Directory -Path $directory -Force | Out-Null
+    }
+
+    $report = [ordered]@{
+        schemaVersion = 1
+        testName = "ExternalUpdaterDisposableComMigration"
+        mode = $modeName
+        status = $Status
+        generatedAtUtc = [DateTimeOffset]::UtcNow.ToString("O")
+        checks = @($Checks)
+    }
+    if (-not [string]::IsNullOrWhiteSpace($FailureMessage)) {
+        $report.failureMessage = $FailureMessage
+    }
+
+    $report | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
+$coveredChecks = @(
+    "custom Logbook heading preserved",
+    "Logbook entry values and expanded rows preserved",
+    "Logbook table style preserved",
+    "Logbook totals anchor preserved",
+    "Keywords data preserved",
+    "Routes data preserved",
+    "base-airport selection preserved",
+    "named preference preserved",
+    "route-cache invalidation preserved",
+    "pivot cache refreshed",
+    "HoursByYear date grouping restored"
+)
+if ($InPlace) {
+    $coveredChecks += @(
+        "source workbook replaced by validated updated workbook",
+        "validated old-version backup retained",
+        "temporary updater output removed after handoff"
+    )
+} else {
+    $coveredChecks += "source workbook hash unchanged"
+}
 try {
-    Write-Step "Preparing disposable test workspace"
+    Write-Step "Preparing disposable $modeName test workspace"
     New-Item -ItemType Directory -Path $testDirectory | Out-Null
     Copy-Item -LiteralPath $repoMasterPath -Destination $sourcePath
     Copy-Item -LiteralPath $repoMasterPath -Destination $masterPath
@@ -94,21 +152,27 @@ try {
     $sourceHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
     $updaterSucceeded = $false
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
-        Write-Step "Running updater attempt $attempt of $maxAttempts"
+        Write-Step "Running $modeName updater attempt $attempt of $maxAttempts"
         if (Test-Path $outputPath) {
             Remove-Item -LiteralPath $outputPath -Force
         }
 
         $updaterLines = @()
+        $updaterArguments = @(
+            $updaterDllPath,
+            "--source", $sourcePath,
+            "--master", $masterPath,
+            "--output", $outputPath
+        )
+        if ($InPlace) {
+            $updaterArguments += "--inplace"
+        }
         $previousErrorActionPreference = $ErrorActionPreference
         try {
             # Native stderr is updater output, not a PowerShell failure. Capture it
             # so the retry policy below can classify transient Excel COM errors.
             $ErrorActionPreference = "Continue"
-            & dotnet $updaterDllPath `
-                --source $sourcePath `
-                --master $masterPath `
-                --output $outputPath 2>&1 | Tee-Object -Variable updaterLines
+            & dotnet @updaterArguments 2>&1 | Tee-Object -Variable updaterLines
             $exitCode = $LASTEXITCODE
         } finally {
             $ErrorActionPreference = $previousErrorActionPreference
@@ -135,12 +199,31 @@ try {
     }
 
     $afterHash = (Get-FileHash $sourcePath -Algorithm SHA256).Hash
-    if ($sourceHash -ne $afterHash) {
+    if ($InPlace) {
+        if ($sourceHash -eq $afterHash) {
+            throw "Source workbook was not replaced during the in-place external update."
+        }
+
+        $backups = @(Get-ChildItem -LiteralPath $testDirectory -Filter "Source_Old_*.xlsm")
+        if ($backups.Count -ne 1) {
+            throw "Expected exactly one retained in-place backup, found $($backups.Count)."
+        }
+
+        $backupHash = (Get-FileHash -LiteralPath $backups[0].FullName -Algorithm SHA256).Hash
+        if ($backupHash -ne $sourceHash) {
+            throw "Retained in-place backup does not match the original source workbook."
+        }
+
+        if (Test-Path -LiteralPath $outputPath) {
+            throw "Temporary in-place updater output still exists after handoff."
+        }
+    } elseif ($sourceHash -ne $afterHash) {
         throw "Source workbook changed during the external update."
     }
 
     Write-Step "Validating updated workbook content"
-    Invoke-WorkbookEdit -WorkbookPath $outputPath -ReadOnly -Operation {
+    $validatedWorkbookPath = if ($InPlace) { $sourcePath } else { $outputPath }
+    Invoke-WorkbookEdit -WorkbookPath $validatedWorkbookPath -ReadOnly -Operation {
         param($Workbook)
 
         $logbook = $Workbook.Sheets("Logbook").ListObjects("Logbook")
@@ -210,7 +293,17 @@ try {
     }
 
     Write-Step "Validation complete"
-    Write-Host "External updater disposable migration test passed." -ForegroundColor Green
+    Write-ComMigrationReport -Path $ReportPath -Status "passed" -Checks $coveredChecks
+    Write-Step "COM migration report written to $ReportPath"
+    Write-Host "External updater disposable $modeName migration test passed." -ForegroundColor Green
+} catch {
+    $failure = $_
+    try {
+        Write-ComMigrationReport -Path $ReportPath -Status "failed" -FailureMessage $failure.Exception.Message -Checks $coveredChecks
+    } catch {
+        Write-Warning "Could not write COM migration failure report: $($_.Exception.Message)"
+    }
+    $PSCmdlet.ThrowTerminatingError($failure)
 } finally {
     Write-Step "Cleaning up temporary files"
     if (Test-Path $testDirectory) {

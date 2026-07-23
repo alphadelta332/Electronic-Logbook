@@ -45,4 +45,28 @@ public sealed class IntegrityTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public async Task VerifyFileRejectsMismatchedSize()
+    {
+        var path = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(path, "unexpected size");
+            var bytes = await File.ReadAllBytesAsync(path);
+            var asset = new ReleaseAsset(
+                Path.GetFileName(path),
+                bytes.Length + 1,
+                Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant());
+
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                Integrity.VerifyFileAsync(path, asset, CancellationToken.None));
+
+            Assert.Contains("size", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
 }

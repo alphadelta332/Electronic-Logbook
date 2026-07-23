@@ -38,6 +38,40 @@
                 <TextBlock Margin="0,16,0,0" x:Name="InstalledVersionText" Text="Installed version: unknown" />
                 <TextBlock Margin="0,6,0,0" x:Name="LatestVersionText" Text="Update channel: checking..." />
                 <TextBlock Margin="0,6,0,0" x:Name="LastCheckedText" Text="Last checked: never" />
+                <StackPanel x:Name="PortableLogbookPanel">
+                    <TextBlock Margin="0,6,0,0" x:Name="PortableLogbookStatusText" Text="Portable logbook: checking..." />
+                    <TextBlock Margin="0,16,0,0" Text="Portable logbook actions" FontWeight="SemiBold" />
+                    <UniformGrid Margin="0,8,0,0" Rows="2" Columns="4">
+                        <Button Margin="0,0,8,8"
+                                x:Name="PortableEnableButton"
+                                Content="Enable"
+                                Click="PortableEnableButton_OnClick" />
+                        <Button Margin="0,0,8,8"
+                                x:Name="PortableExportButton"
+                                Content="Export Package"
+                                Click="PortableExportButton_OnClick" />
+                        <Button Margin="0,0,8,8"
+                                x:Name="PortableImportButton"
+                                Content="Import Package"
+                                Click="PortableImportButton_OnClick" />
+                        <Button Margin="0,0,0,8"
+                                x:Name="PortablePrintedCopyButton"
+                                Content="Printed Copy"
+                                Click="PortablePrintedCopyButton_OnClick" />
+                        <Button Margin="0,0,8,0"
+                                x:Name="PortableRevisionHistoryButton"
+                                Content="Revision History"
+                                Click="PortableRevisionHistoryButton_OnClick" />
+                        <Button Margin="0,0,8,0"
+                                x:Name="PortableResolveConflictButton"
+                                Content="Resolve Conflict"
+                                Click="PortableResolveConflictButton_OnClick" />
+                        <Button Margin="0,0,8,0"
+                                x:Name="PortableRefreshStatusButton"
+                                Content="Refresh Status"
+                                Click="PortableRefreshStatusButton_OnClick" />
+                    </UniformGrid>
+                </StackPanel>
             </StackPanel>
 
             <StackPanel Grid.Row="0" x:Name="AvailablePanel" Visibility="Collapsed">
@@ -69,7 +103,7 @@
             <StackPanel Grid.Row="0" x:Name="ReadyPanel" Visibility="Collapsed">
                 <TextBlock Text="Ready to Update" FontSize="20" FontWeight="SemiBold" />
                 <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="Click Start to begin the update." />
-                <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write detailed diagnostic report beside output workbook" IsChecked="False" />
+                <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write local redacted diagnostic report beside output workbook" IsChecked="False" />
             </StackPanel>
 
             <StackPanel Grid.Row="0" x:Name="UpdatingPanel" Visibility="Collapsed">
@@ -88,6 +122,23 @@
                 <TextBlock Margin="0,8,0,0" x:Name="CompleteSummaryText" TextWrapping="Wrap" />
                 <TextBlock Margin="0,12,0,0" x:Name="CompleteOutputPathText" TextWrapping="Wrap" />
                 <TextBlock Margin="0,6,0,0" x:Name="CompleteBackupPathText" TextWrapping="Wrap" />
+                <StackPanel Margin="0,12,0,0" Orientation="Horizontal">
+                    <Button Width="140"
+                            x:Name="RestoreBackupButton"
+                            Content="Restore Backup"
+                            IsEnabled="False"
+                            Click="RestoreBackupButton_OnClick" />
+                    <Button Width="160"
+                            Margin="10,0,0,0"
+                            x:Name="OpenDiagnosticReportButton"
+                            Content="Open Redacted Report"
+                            IsEnabled="False"
+                            Click="OpenDiagnosticReportButton_OnClick" />
+                </StackPanel>
+                <TextBlock Margin="0,8,0,0"
+                           x:Name="DiagnosticReportNoticeText"
+                           TextWrapping="Wrap"
+                           Text="Diagnostic reports stay on this device. Open and review the exact redacted report before sharing it." />
                 <CheckBox Margin="0,14,0,0" x:Name="OpenUpdatedCheckBox" Content="Open updated workbook when I click Finish" IsChecked="True" />
             </StackPanel>
 

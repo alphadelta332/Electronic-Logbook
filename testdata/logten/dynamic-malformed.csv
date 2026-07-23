@@ -1,0 +1,4 @@
+Date,Aircraft ID,Aircraft Type,From,To,Total Time,Simulator,PIC/P1 Crew,Day Ldg,Night Ldg,Approach 1,Approach 2,Route,Night,PIC,P1u/s,SIC,SIC/P2 Crew,Observer,Actual Inst,Flight #,Remarks,IPC/ICC,Flight Review
+not-a-date,VH-BAD,C172,YSBK,YSCN,1.0,0,Sample Pilot,1,0,,,,0,1.0,0,0,,,0,BAD-001,Invalid date should block,,
+2024-08-20,VH-UNK,UNKNOWN,YSBK,YSCN,1.0,0,Sample Pilot,1,0,,,,0,1.0,0,0,,,0,BAD-002,Unknown aircraft type should block,,
+2024-08-21,VH-HRS,C172,YSBK,YSCN,1.0,0,Sample Pilot,1,0,,,,0,0.8,0.4,0.2,,,0,BAD-003,Crew hours exceed total time,,

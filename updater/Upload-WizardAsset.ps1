@@ -6,6 +6,7 @@ param(
     [switch]$SkipBuild,
     [switch]$Sign,
     [string]$CertificateThumbprint,
+    [string]$ExpectedPublisher,
     [string]$TimestampServer = "http://timestamp.digicert.com",
     [switch]$Clobber,
     [switch]$DryRun
@@ -37,6 +38,11 @@ if ($Sign) {
         "-Sign"
         "-CertificateThumbprint"
         $CertificateThumbprint
+    )
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedPublisher)) {
+        $publishArgs += @("-ExpectedPublisher", $ExpectedPublisher)
+    }
+    $publishArgs += @(
         "-TimestampServer"
         $TimestampServer
     )
@@ -48,6 +54,7 @@ Write-Host "Preparing wizard assets for $Tag..."
 $assets = @(
     (Join-Path $AssetDirectory "ElectronicLogbook.Updater.Wizard.exe")
     (Join-Path $AssetDirectory "ElectronicLogbook.Updater.Wizard.win-x64.zip")
+    (Join-Path $AssetDirectory "wizard-signature-report.json")
 )
 
 foreach ($asset in $assets) {

@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - dev
+      - hotfix
   workflow_dispatch:
 
 permissions:
@@ -36,10 +37,10 @@ jobs:
         run: |
           $shortSha = $env:GITHUB_SHA.Substring(0, 12)
           $tag = "dev-wizard-$shortSha"
-          $title = "Development updater wizard $shortSha"
+          $title = "Branch updater wizard $shortSha"
           Set-Content -Path dev-wizard-commit.txt -Value $env:GITHUB_SHA -Encoding ascii
           $notes = @"
-          Development wizard asset for dev-channel workbook update testing.
+          Branch wizard asset for dev/hotfix workbook update testing.
 
           Commit: $env:GITHUB_SHA
           Branch: $env:GITHUB_REF_NAME
@@ -52,6 +53,7 @@ jobs:
             gh release create $tag `
               updater/dist/ElectronicLogbook.Updater.Wizard.exe `
               updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
+              updater/dist/wizard-signature-report.json `
               dev-wizard-commit.txt `
               --repo $env:GITHUB_REPOSITORY `
               --title $title `

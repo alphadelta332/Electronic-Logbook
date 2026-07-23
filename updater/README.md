@@ -9,10 +9,9 @@ finalise an in-place handoff that keeps the original filename and writes a times
 ## Preserved Data
 
 - Logbook raw entry columns from `Year` through `Circling`
-- `CurrencyExclusions`
 - Custom Logbook column headings
 - Currency detection `Keywords`
-- Airport `Base` flags matched by ICAO
+- Base airport selections from `BaseAirportsTop10`
 - Routes table and route-cache state
 - Date reset and warning-suppression preferences
 - Logbook table style, custom column formatting, totals-area formatting, and palette
@@ -48,12 +47,99 @@ dotnet run --project updater/src/ElectronicLogbook.Updater -- `
   --inplace
 ```
 
-The updater writes a JSON validation report beside the final updated workbook.
+The updater writes a redacted JSON diagnostic report beside the final updated workbook.
+
+### Portable Logbook CLI
+
+The portable-logbook commands are development/operator primitives for the workbook package
+storage used by the future wizard UI. Run them only against a closed workbook.
+
+Inspect redacted portable-storage state without the package key:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable status `
+  --workbook "C:\Path\My Logbook.xlsm"
+```
+
+Seed encrypted portable storage and write the recovery code to a separate file:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable enable `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --recovery-output "C:\Path\ElectronicLogbook-RecoveryCode.txt" `
+  --save-windows-credential
+```
+
+`portable enable` refuses already-enabled workbooks, refuses to overwrite an existing
+recovery-code file, creates a timestamped workbook backup before writing storage, and
+does not print the recovery code in JSON output. `--save-windows-credential` additionally
+stores the generated package key in Windows Credential Manager and reports the target name
+in both command output and the recovery-code file; the separate recovery-code file is still
+required.
+
+For export/import commands, use either:
+
+```powershell
+--recovery-code-file "C:\Path\ElectronicLogbook-RecoveryCode.txt"
+```
+
+or, after enabling with `--save-windows-credential`:
+
+```powershell
+--windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx"
+```
+
+Export current stored portable history to an encrypted `.elogbook` package:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable export `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx" `
+  --output "C:\Path\My Logbook.elogbook"
+```
+
+Preview an incoming package without changing workbook storage:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable import-preview `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx" `
+  --package "C:\Path\Incoming.elogbook"
+```
+
+Apply a conflict-free package to encrypted workbook storage:
+
+```powershell
+dotnet run --project updater/src/ElectronicLogbook.Updater -- `
+  portable import-apply `
+  --workbook "C:\Path\My Logbook.xlsm" `
+  --windows-credential-target "ElectronicLogbook.Portable/log_xxx/dev_xxx" `
+  --package "C:\Path\Incoming.elogbook"
+```
+
+`portable import-apply` creates a timestamped workbook backup before changing storage.
+It does not yet stamp hidden row IDs or rewrite visible worksheet rows; that remains a
+wizard/Excel integration task.
+
+Import preview/apply output includes row-level operation summaries for review. Add `--json`
+to any portable command for machine-readable output; command output never includes recovery
+codes or raw package keys.
 
 Run the disposable Excel migration test locally with:
 
 ```powershell
 .\updater\Test-ExternalUpdater.ps1
+```
+
+For a dev workbook on the `dev` update channel, run the Excel tier without the
+release-only public-readiness gate:
+
+```powershell
+.\tools\Invoke-Validation.ps1 -Tier Excel -SkipPublicReadinessCheck
 ```
 
 ## Backward Compatibility Policy
@@ -85,11 +171,13 @@ manual `Compatibility matrix` workflow on a self-hosted Windows runner labelled
 - Requires Microsoft Excel for Windows.
 - Uses Excel COM automation and must run while the source workbook is closed.
 - Does not yet provide a full visual-diff test or Normalise every possible user-customized format.
-- The executable is not currently code-signed or distributed as a release asset.
+- The wizard executable can be Authenticode-signed during packaging, but release signing is currently reported rather than release-blocking until a production code-signing identity is configured.
 
 ## Release Asset Packaging
 
-Build release-ready wizard assets with:
+The protected `Promote release` workflow builds, validates, and publishes the wizard assets
+as part of the GitHub release. For local packaging checks, build release-ready wizard assets
+with:
 
 ```powershell
 .\updater\Publish-WizardAsset.ps1
@@ -108,17 +196,16 @@ This script outputs:
 
 - `updater/dist/ElectronicLogbook.Updater.Wizard.exe`
 - `updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip`
+- `updater/dist/wizard-signature-report.json`
 
-Upload at least one of these assets to the GitHub release. The in-workbook launcher will use the `.exe` directly and can fall back to the `.zip` asset.
+The signature report records the executable SHA-256, Authenticode status, signer
+certificate details when present, and timestamp certificate details when present. Unsigned
+local builds are allowed, but the protected release workflow publishes this report as a
+release artifact so signing can be audited before it becomes release-blocking.
 
-After the release tag exists, upload the wizard assets with:
-
-```powershell
-.\updater\Upload-WizardAsset.ps1 -Tag vX.Y.Z
-```
-
-Add `-Clobber` if replacing an existing draft-release asset.
-Add `-Sign -CertificateThumbprint "THUMBPRINT"` to sign during the publish step before upload.
+The in-workbook launcher uses the `.exe` asset directly and can fall back to the `.zip`
+asset. Do not manually upload wizard assets for normal releases; rerun the protected
+promotion workflow for the exact release commit instead.
 
 ## Product Direction (Implemented)
 
@@ -149,7 +236,9 @@ The migration engine now supports a progress sink via `IUpdaterProgressSink` and
 
 Stable phase IDs for UI mapping are defined in `UpdaterPhaseIds`.
 
-Current CLI wiring uses `ConsoleUpdaterProgressSink`; the wizard subscribes to the same progress events for determinate update progress.
+Current CLI wiring records progress events and forwards them to `ConsoleUpdaterProgressSink`;
+the wizard records the same events for determinate update progress and optional redacted
+diagnostic reports.
 
 ## Wizard MVP (Now Available)
 

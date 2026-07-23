@@ -4,6 +4,9 @@ using Microsoft.CSharp.RuntimeBinder;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using ElectronicLogbook.Portable;
+using static ElectronicLogbook.Updater.WorkbookColor;
+using static ElectronicLogbook.Updater.WorkbookValue;
 
 namespace ElectronicLogbook.Updater;
 
@@ -27,7 +30,10 @@ public sealed class ExcelWorkbookMigrator
         "RoutesBuilt",
         "RoutesDefinitionVersion",
         "DateAfterExport",
-        "suppressWarningsUntil"
+        "suppressWarningsUntil",
+        PortableLogbookWorkbookMetadata.LogbookIdName,
+        PortableLogbookWorkbookMetadata.DeviceIdName,
+        PortableLogbookWorkbookMetadata.SchemaVersionName
     ];
 
     private readonly IUpdaterProgressSink? _progressSink;
@@ -49,12 +55,14 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.PhaseStarted,
                 phaseId,
                 message,
-                Percent: null,
-                DateTimeOffset.UtcNow));
+                null,
+                DateTimeOffset.UtcNow,
+                null,
+                UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
             return message;
         }
 
-        request = ValidateRequest(request);
+        request = MigrationRequestValidator.Validate(request);
         cancellationToken.ThrowIfCancellationRequested();
 
         var outputDirectory = Path.GetDirectoryName(request.OutputPath)!;
@@ -170,15 +178,25 @@ public sealed class ExcelWorkbookMigrator
                     "Airport visit stats were written before save, but Airports[Visits] is blank after save.");
             }
 
+            dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
+            var logbookRows = (int)outputLogbook.ListRows.Count;
+            CloseWorkbook(outputWorkbook);
+            outputWorkbook = null;
+            CloseWorkbook(sourceWorkbook);
+            sourceWorkbook = null;
+
+            step = SetStep(UpdaterPhaseIds.CopyPortableStorage, "copying portable logbook storage");
+            CopyPortableWorkbookStorage(request.SourcePath, request.OutputPath);
+
             _progressSink?.Report(new UpdaterProgressEvent(
                 UpdaterProgressEventTypes.UpdateCompleted,
                 UpdaterPhaseIds.Completed,
                 "migration completed",
-                Percent: 100,
-                DateTimeOffset.UtcNow));
+                100,
+                DateTimeOffset.UtcNow,
+                null,
+                UpdaterPhasePolicies.GetTimeoutSeconds(UpdaterPhaseIds.Completed)));
 
-            dynamic outputLogbook = GetTable((object)outputWorkbook, "Logbook");
-            var logbookRows = (int)outputLogbook.ListRows.Count;
             migrationSucceeded = true;
             return new MigrationReport(
                 request.SourcePath,
@@ -198,8 +216,10 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.PhaseFailed,
                 phaseId,
                 "migration cancelled",
-                Percent: null,
-                DateTimeOffset.UtcNow));
+                null,
+                DateTimeOffset.UtcNow,
+                DiagnosticBundleFactory.GetRecoveryHint(phaseId, new OperationCanceledException()),
+                UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
 
             CloseWorkbook(outputWorkbook);
             outputWorkbook = null;
@@ -213,8 +233,10 @@ public sealed class ExcelWorkbookMigrator
                 UpdaterProgressEventTypes.PhaseFailed,
                 phaseId,
                 ex.Message,
-                Percent: null,
-                DateTimeOffset.UtcNow));
+                null,
+                DateTimeOffset.UtcNow,
+                DiagnosticBundleFactory.GetRecoveryHint(phaseId, ex),
+                UpdaterPhasePolicies.GetTimeoutSeconds(phaseId)));
 
             CloseWorkbook(outputWorkbook);
             outputWorkbook = null;
@@ -231,6 +253,7 @@ public sealed class ExcelWorkbookMigrator
             if (excel is not null)
             {
                 try { excel.Calculation = XlCalculationAutomatic; } catch { }
+                try { excel.DisplayAlerts = true; } catch { }
                 try { excel.EnableEvents = true; } catch { }
                 try { excel.ScreenUpdating = true; } catch { }
                 try { excel.Quit(); } catch { }
@@ -249,34 +272,11 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static MigrationRequest ValidateRequest(MigrationRequest request)
+    internal static bool CopyPortableWorkbookStorage(string sourcePath, string outputPath)
     {
-        request = request with
-        {
-            SourcePath = Path.GetFullPath(request.SourcePath),
-            MasterPath = Path.GetFullPath(request.MasterPath),
-            OutputPath = Path.GetFullPath(request.OutputPath)
-        };
-
-        if (!File.Exists(request.SourcePath))
-        {
-            throw new FileNotFoundException("Source workbook not found.", request.SourcePath);
-        }
-        if (!File.Exists(request.MasterPath))
-        {
-            throw new FileNotFoundException("Master workbook not found.", request.MasterPath);
-        }
-        if (File.Exists(request.OutputPath))
-        {
-            throw new IOException($"Output path already exists: {request.OutputPath}");
-        }
-        if (string.Equals(request.SourcePath, request.OutputPath, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(request.MasterPath, request.OutputPath, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Output path must differ from source and master paths.");
-        }
-
-        return request;
+        var envelopeCopied = PortableLogbookWorkbookPackageStorage.CopyEnvelope(sourcePath, outputPath);
+        var identityCopied = PortableLogbookWorkbookPackageStorage.CopyWorkbookIdentityMetadata(sourcePath, outputPath);
+        return envelopeCopied || identityCopied;
     }
 
     private static void UnprotectWorkbookForMigration(object workbookObject)
@@ -337,8 +337,6 @@ public sealed class ExcelWorkbookMigrator
         var sourceDataEnd = GetColumnIndex(source, "Circling");
         var destinationDataStart = GetColumnIndex(destination, "Year");
         var destinationDataEnd = GetColumnIndex(destination, "Circling");
-        var airportLookup = BuildAirportAliasLookup(outputWorkbookObject);
-
         var sourceCustomStart = GetLogbookCustomStartColumn(source);
         var destinationCustomStart = GetLogbookCustomStartColumn(destination);
         var sourceCustomCount = GetColumnIndex(source, "SeIcusDay") - sourceCustomStart;
@@ -362,15 +360,88 @@ public sealed class ExcelWorkbookMigrator
         for (var sourceIndex = sourceDataStart; sourceIndex <= sourceDataEnd; sourceIndex++)
         {
             var name = (string)source.ListColumns.Item(sourceIndex).Name;
-            var destinationName = DestinationLogbookColumnName((object)destination, name);
-            if (destinationName is not null)
+            if (HasColumn((object)destination, name))
             {
-                CopyColumn(source, destination, name, destinationName, sourceRows);
+                CopyColumn(source, destination, name, sourceRows);
             }
         }
 
-        SplitLegacyDetailsIntoNewEntryColumns(source, destination, sourceRows, airportLookup);
-        ConvertLegacyCurrencyColumns(source, destination, sourceRows);
+        PreservePortableLogbookMetadataColumns(source, destination, sourceRows);
+    }
+
+    internal static bool ShouldPreservePortableMetadataColumns(IEnumerable<string> sourceColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(sourceColumnNames);
+        return sourceColumnNames.Any(PortableLogbookWorkbookMetadata.IsPortableMetadataColumn);
+    }
+
+    internal static PortableLogbookMetadataColumnPlan CreatePortableMetadataMigrationPlan(
+        IEnumerable<string> destinationColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(destinationColumnNames);
+        return PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(destinationColumnNames);
+    }
+
+    internal static PortableLogbookMetadataMigrationPlan CreatePortableMetadataMigrationPlan(
+        IEnumerable<string> sourceColumnNames,
+        IEnumerable<string> destinationColumnNames)
+    {
+        ArgumentNullException.ThrowIfNull(sourceColumnNames);
+        ArgumentNullException.ThrowIfNull(destinationColumnNames);
+
+        var sourceColumns = sourceColumnNames
+            .Select(columnName => columnName.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!ShouldPreservePortableMetadataColumns(sourceColumns))
+        {
+            return new PortableLogbookMetadataMigrationPlan(
+                PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(destinationColumnNames),
+                [],
+                []);
+        }
+
+        var columnPlan = CreatePortableMetadataMigrationPlan(destinationColumnNames);
+        var columnsToCopy = PortableLogbookWorkbookMetadata.HiddenLogbookColumns
+            .Where(column => sourceColumns.Contains(column.WorkbookColumnName))
+            .Select(column => column.WorkbookColumnName)
+            .ToArray();
+
+        return new PortableLogbookMetadataMigrationPlan(
+            columnPlan,
+            columnsToCopy,
+            columnPlan.ColumnsToHide);
+    }
+
+    private static void PreservePortableLogbookMetadataColumns(
+        dynamic source,
+        dynamic destination,
+        int rows)
+    {
+        var plan = CreatePortableMetadataMigrationPlan(
+            ReadTableColumnNames(source),
+            ReadTableColumnNames(destination));
+        if (!plan.ShouldPreserve)
+        {
+            return;
+        }
+
+        foreach (var column in plan.ColumnPlan.ColumnsToAdd)
+        {
+            destination.ListColumns.Add().Name = column.WorkbookColumnName;
+        }
+
+        foreach (var columnName in plan.ColumnsToCopy)
+        {
+            CopyColumn(source, destination, columnName, rows);
+        }
+
+        foreach (var columnName in plan.ColumnsToHide)
+        {
+            if (HasColumn((object)destination, columnName))
+            {
+                HideTableColumn(destination, columnName);
+            }
+        }
     }
 
     private static void CopyTableByMatchingColumns(
@@ -410,202 +481,8 @@ public sealed class ExcelWorkbookMigrator
         {
             return GetColumnIndex(table, "OPC") + 1;
         }
-        if (HasColumn((object)table, "Details"))
-        {
-            return GetColumnIndex(table, "Details") + 1;
-        }
-        if (HasColumn((object)table, "Remarks"))
-        {
-            return GetColumnIndex(table, "Remarks") + 1;
-        }
         throw new InvalidDataException($"Table {table.Name} has no recognised custom-column anchor.");
     }
-
-    private static void SplitLegacyDetailsIntoNewEntryColumns(
-        dynamic source,
-        dynamic destination,
-        int rows,
-        IReadOnlyDictionary<string, string> airportLookup)
-    {
-        if (rows <= 0 ||
-            !HasColumn((object)destination, "From") ||
-            !HasColumn((object)destination, "To") ||
-            !HasColumn((object)destination, "Via") ||
-            !HasColumn((object)destination, "Remarks"))
-        {
-            return;
-        }
-
-        if (HasColumn((object)source, "Remarks"))
-        {
-            CopyColumnIfPresent(source, destination, "From", rows);
-            CopyColumnIfPresent(source, destination, "To", rows);
-            CopyColumnIfPresent(source, destination, "Via", rows);
-            CopyColumnIfPresent(source, destination, "Remarks", rows);
-            return;
-        }
-
-        if (!HasColumn((object)source, "Details"))
-        {
-            return;
-        }
-
-        var details = ReadColumnValues(source, "Details", rows);
-        var fromValues = NewColumnArray(rows);
-        var toValues = NewColumnArray(rows);
-        var routeValues = NewColumnArray(rows);
-        var remarksValues = NewColumnArray(rows);
-        for (var row = 0; row < rows; row++)
-        {
-            var split = SplitLegacyDetailsText(StableValue(details[row]), airportLookup);
-            fromValues[row, 0] = split.From;
-            toValues[row, 0] = split.To;
-            routeValues[row, 0] = split.Route;
-            remarksValues[row, 0] = split.Remarks;
-        }
-
-        SetColumnValues(destination, "From", fromValues, rows);
-        SetColumnValues(destination, "To", toValues, rows);
-        SetColumnValues(destination, "Via", routeValues, rows);
-        SetColumnValues(destination, "Remarks", remarksValues, rows);
-    }
-
-    private static void ConvertLegacyCurrencyColumns(dynamic source, dynamic destination, int rows)
-    {
-        if (rows <= 0 ||
-            !HasColumn((object)destination, "FR") ||
-            !HasColumn((object)destination, "IPC") ||
-            !HasColumn((object)destination, "OPC"))
-        {
-            return;
-        }
-
-        var frValues = NewColumnArray(rows);
-        var ipcValues = NewColumnArray(rows);
-        var opcValues = NewColumnArray(rows);
-        var exclusionSource = ReadColumnValuesIfPresent(source, "CurrencyExclusions", rows);
-        var frSource = ReadColumnValuesIfPresent(source, "FR", rows);
-        var flightReviewSource = ReadColumnValuesIfPresent(source, "FlightReview", rows);
-        var ipcSource = ReadColumnValuesIfPresent(source, "IPC", rows);
-        var opcSource = ReadColumnValuesIfPresent(source, "OPC", rows);
-
-        for (var row = 0; row < rows; row++)
-        {
-            var excluded = ToBoolean(ReadOptionalColumnValue(exclusionSource, row));
-            if (!excluded)
-            {
-                var ipcChecked = ToCurrencyCheckValue(ReadOptionalColumnValue(ipcSource, row));
-                frValues[row, 0] =
-                    ToCurrencyCheckValue(ReadOptionalColumnValue(frSource, row)) ||
-                    ToCurrencyCheckValue(ReadOptionalColumnValue(flightReviewSource, row)) ||
-                    ipcChecked;
-                ipcValues[row, 0] = ipcChecked;
-                opcValues[row, 0] = ToCurrencyCheckValue(ReadOptionalColumnValue(opcSource, row));
-            }
-        }
-
-        SetColumnValues(destination, "FR", frValues, rows);
-        SetColumnValues(destination, "IPC", ipcValues, rows);
-        SetColumnValues(destination, "OPC", opcValues, rows);
-    }
-
-    private static void CopyColumnIfPresent(dynamic source, dynamic destination, string name, int rows)
-    {
-        if (HasColumn((object)source, name) && HasColumn((object)destination, name))
-        {
-            CopyColumn(source, destination, name, rows);
-        }
-    }
-
-    private static object?[]? ReadColumnValuesIfPresent(dynamic table, string name, int rows)
-    {
-        if (!HasColumn((object)table, name) || rows <= 0)
-        {
-            return null;
-        }
-
-        return ReadColumnValues(table, name, rows);
-    }
-
-    private static object? ReadOptionalColumnValue(object?[]? values, int zeroBasedRow)
-    {
-        if (values is null || zeroBasedRow < 0 || zeroBasedRow >= values.Length)
-        {
-            return null;
-        }
-
-        return values[zeroBasedRow];
-    }
-
-    private static Dictionary<string, string> BuildAirportAliasLookup(object workbookObject)
-    {
-        dynamic airports = GetTable(workbookObject, "Airports");
-        var rows = (int)airports.ListRows.Count;
-        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (rows <= 0)
-        {
-            return lookup;
-        }
-
-        var airportIcao = ReadColumnValues(airports, "ICAO", rows);
-        var airportTwo = ReadColumnValues(airports, "Two", rows);
-        var airportThree = ReadColumnValues(airports, "Three", rows);
-        for (var row = 0; row < rows; row++)
-        {
-            var icao = StableValue(airportIcao[row]).Trim().ToUpperInvariant();
-            if (string.IsNullOrWhiteSpace(icao))
-            {
-                continue;
-            }
-
-            lookup.TryAdd(icao, icao);
-            AddAirportAlias(lookup, StableValue(airportTwo[row]), icao);
-            AddAirportAlias(lookup, StableValue(airportThree[row]), icao);
-        }
-
-        return lookup;
-    }
-
-    private static void AddAirportAlias(
-        IDictionary<string, string> lookup,
-        string alias,
-        string icao)
-    {
-        alias = alias.Trim().ToUpperInvariant();
-        if (!string.IsNullOrWhiteSpace(alias))
-        {
-            lookup.TryAdd(alias, icao);
-        }
-    }
-
-    private static LegacyDetailsSplit SplitLegacyDetailsText(
-        string details,
-        IReadOnlyDictionary<string, string> airportLookup)
-    {
-        var matchedIcaos = new List<string>();
-        var remarkTokens = new List<string>();
-        foreach (var rawToken in TokeniseAirportDetails(details))
-        {
-            if (airportLookup.TryGetValue(rawToken.ToUpperInvariant(), out var icao))
-            {
-                matchedIcaos.Add(icao);
-            }
-            else
-            {
-                remarkTokens.Add(rawToken);
-            }
-        }
-
-        var from = matchedIcaos.Count >= 1 ? matchedIcaos[0] : "";
-        var to = matchedIcaos.Count >= 2 ? matchedIcaos[^1] : "";
-        var route = matchedIcaos.Count > 2
-            ? string.Join("-", matchedIcaos.Skip(1).Take(matchedIcaos.Count - 2))
-            : "";
-        var remarks = string.Join(" ", remarkTokens);
-        return new LegacyDetailsSplit(from, to, route, remarks);
-    }
-
-    private sealed record LegacyDetailsSplit(string From, string To, string Route, string Remarks);
 
     private static void ApplyBaseAirportSelections(object sourceWorkbook, object outputWorkbook)
     {
@@ -659,11 +536,6 @@ public sealed class ExcelWorkbookMigrator
                     selections[icao] = ToBoolean(bases[row]);
                 }
             }
-        }
-
-        foreach (var legacySelection in ReadLegacyAirportBaseSelections(workbookObject))
-        {
-            selections.TryAdd(legacySelection.Key, true);
         }
 
         return selections;
@@ -740,7 +612,7 @@ public sealed class ExcelWorkbookMigrator
 
             for (var row = 0; row < logbookRows; row++)
             {
-                if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
+                if (AirportStatsRows.IsSimOnly(row, ifrSim, hourColumns))
                 {
                     simOnlyRowsSkipped++;
                     continue;
@@ -754,10 +626,10 @@ public sealed class ExcelWorkbookMigrator
                 logbookRowsWithDetails++;
 
                 var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                foreach (string token in TokeniseAirportDetails(detailsText))
+                foreach (string token in AirportStatsText.TokeniseDetails(detailsText))
                 {
                     tokensScanned++;
-                    if (AirportStatsIgnoreToken(token, keywords))
+                    if (AirportStatsText.ShouldIgnoreToken(token, keywords))
                     {
                         tokensIgnored++;
                         continue;
@@ -987,11 +859,6 @@ public sealed class ExcelWorkbookMigrator
             }
         }
 
-        foreach (var legacySelection in ReadLegacyAirportBaseSelections(workbookObject))
-        {
-            selections.TryAdd(legacySelection.Key, true);
-        }
-
         return selections;
     }
 
@@ -1023,14 +890,14 @@ public sealed class ExcelWorkbookMigrator
 
         for (var row = 0; row < rows; row++)
         {
-            if (AirportStatsLogbookRowIsSimOnly(row, ifrSim, hourColumns))
+            if (AirportStatsRows.IsSimOnly(row, ifrSim, hourColumns))
             {
                 continue;
             }
 
             var matchedIcaos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(fromValues[row]));
-            AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(toValues[row]));
+            AirportStatsText.AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(fromValues[row]));
+            AirportStatsText.AddEndpointAirportMatch(matchedIcaos, aliasLookup, StableValue(toValues[row]));
 
             foreach (var icao in matchedIcaos)
             {
@@ -1039,56 +906,6 @@ public sealed class ExcelWorkbookMigrator
         }
 
         return counts;
-    }
-
-    private static void AddEndpointAirportMatch(
-        ISet<string> matchedIcaos,
-        IReadOnlyDictionary<string, string> aliasLookup,
-        string rawValue)
-    {
-        var token = rawValue.Trim().ToUpperInvariant();
-        if (string.IsNullOrWhiteSpace(token))
-        {
-            return;
-        }
-        if (aliasLookup.TryGetValue(token, out var icao) && !string.IsNullOrWhiteSpace(icao))
-        {
-            matchedIcaos.Add(icao);
-        }
-    }
-
-    private static Dictionary<string, string> ReadLegacyAirportBaseSelections(object workbookObject)
-    {
-        dynamic? airports = GetTableOrNull(workbookObject, "Airports");
-        var selections = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        if (airports is null ||
-            !HasColumn((object)airports, "Base") ||
-            !HasColumn((object)airports, "ICAO"))
-        {
-            return selections;
-        }
-
-        var rows = (int)airports.ListRows.Count;
-        var icaos = ReadColumnValues(airports, "ICAO", rows);
-        object?[] names = HasColumn((object)airports, "Airport")
-            ? ReadColumnValues(airports, "Airport", rows)
-            : Array.Empty<object?>();
-        var bases = ReadColumnValues(airports, "Base", rows);
-        for (var row = 0; row < rows; row++)
-        {
-            if (!ToBoolean(bases[row]))
-            {
-                continue;
-            }
-
-            var icao = StableValue(icaos[row]).Trim().ToUpperInvariant();
-            if (!string.IsNullOrWhiteSpace(icao))
-            {
-                selections[icao] = row < names.Length ? StableValue(names[row]) : "";
-            }
-        }
-
-        return selections;
     }
 
     private static string AirportIcaoForName(dynamic airports, string airportName)
@@ -1166,40 +983,6 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static bool AirportStatsLogbookRowIsSimOnly(
-        int row,
-        object?[] ifrSim,
-        IReadOnlyCollection<object?[]> hourColumns)
-    {
-        var simHours = ToDouble(ifrSim[row]);
-        var otherHours = hourColumns.Sum(column => ToDouble(column[row]));
-        return simHours > 0 && otherHours == 0;
-    }
-
-    private static IEnumerable<string> TokeniseAirportDetails(string details)
-    {
-        var normalised = details.Replace("|", "", StringComparison.Ordinal);
-        foreach (var delimiter in new[] { '-', ' ', ',', '(', ')' })
-        {
-            normalised = normalised.Replace(delimiter, '|');
-        }
-        return normalised
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    }
-
-    private static bool AirportStatsIgnoreToken(string token, IReadOnlyCollection<string> keywords)
-    {
-        var ignored = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "IPC", "OPC", "FR", "IR", "IFR", "VFR", "TEST", "CHECK", "CIRCLING", "SIM"
-        };
-        if (ignored.Contains(token))
-        {
-            return true;
-        }
-        return keywords.Any(keyword => keyword.Contains(token, StringComparison.OrdinalIgnoreCase));
-    }
-
     private static IReadOnlyCollection<string> ReadAirportStatsKeywords(object workbookObject)
     {
         try
@@ -1255,198 +1038,20 @@ public sealed class ExcelWorkbookMigrator
         object?[]? toValues = HasColumn((object)logbook, "To")
             ? ReadColumnValues(logbook, "To", rows)
             : null;
-        object?[]? remarksValues = null;
-        if (HasColumn((object)logbook, "Remarks"))
-        {
-            remarksValues = ReadColumnValues(logbook, "Remarks", rows);
-        }
-        else if (HasColumn((object)logbook, "Details"))
-        {
-            remarksValues = ReadColumnValues(logbook, "Details", rows);
-        }
+        object?[]? remarksValues = HasColumn((object)logbook, "Remarks")
+            ? ReadColumnValues(logbook, "Remarks", rows)
+            : null;
 
         for (var row = 0; row < rows; row++)
         {
-            var routeText = JoinNonBlank(
-                " ",
+            result[row] = LogbookRouteText.BuildAirportStatsSource(
                 fromValues is null ? "" : StableValue(fromValues[row]),
                 routeValues is null ? "" : StableValue(routeValues[row]),
-                toValues is null ? "" : StableValue(toValues[row]));
-            if (string.IsNullOrWhiteSpace(routeText) && remarksValues is not null)
-            {
-                routeText = StableValue(remarksValues[row]);
-            }
-            result[row] = routeText;
+                toValues is null ? "" : StableValue(toValues[row]),
+                remarksValues is null ? "" : StableValue(remarksValues[row]));
         }
 
         return result;
-    }
-
-    private static string JoinNonBlank(string separator, params string[] values)
-    {
-        return string.Join(
-            separator,
-            values.Select(value => value.Trim()).Where(value => !string.IsNullOrWhiteSpace(value)));
-    }
-
-    private static double ToDouble(object? value)
-    {
-        return value switch
-        {
-            null => 0,
-            double number => number,
-            float number => number,
-            int number => number,
-            decimal number => (double)number,
-            string text when double.TryParse(text, NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => number,
-            _ => 0
-        };
-    }
-
-    private static bool ToBoolean(object? value)
-    {
-        return value switch
-        {
-            null => false,
-            bool flag => flag,
-            double number => Math.Abs(number) > double.Epsilon,
-            float number => Math.Abs(number) > float.Epsilon,
-            int number => number != 0,
-            decimal number => number != 0,
-            string text when bool.TryParse(text.Trim(), out var flag) => flag,
-            string text when double.TryParse(text.Trim(), NumberStyles.Any, CultureInfo.InvariantCulture, out var number) => Math.Abs(number) > double.Epsilon,
-            string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
-            _ => false
-        };
-    }
-
-    private static bool ToCurrencyCheckValue(object? value)
-    {
-        return value switch
-        {
-            null => false,
-            bool flag => flag,
-            DateTime => true,
-            double number => number > 0,
-            float number => number > 0,
-            int number => number > 0,
-            decimal number => number > 0,
-            string text when bool.TryParse(text.Trim(), out var flag) => flag,
-            string text when DateTime.TryParse(
-                text.Trim(),
-                CultureInfo.CurrentCulture,
-                DateTimeStyles.None,
-                out _) => true,
-            string text when double.TryParse(
-                text.Trim(),
-                NumberStyles.Any,
-                CultureInfo.InvariantCulture,
-                out var number) => number > 0,
-            string text when string.Equals(text.Trim(), "yes", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "y", StringComparison.OrdinalIgnoreCase) => true,
-            string text when string.Equals(text.Trim(), "x", StringComparison.OrdinalIgnoreCase) => true,
-            _ => false
-        };
-    }
-
-    private static double? ToLogbookDate(object? yearValue, object? monthValue, object? dayValue)
-    {
-        var year = (int)ToDouble(yearValue);
-        var day = ResolveLogbookDay(dayValue);
-        var monthText = StableValue(monthValue).Trim();
-        var month = ResolveLogbookMonth(monthValue, monthText);
-        if (year <= 0 || day <= 0 || string.IsNullOrWhiteSpace(monthText))
-        {
-            return null;
-        }
-
-        if (month <= 0)
-        {
-            return null;
-        }
-
-        try
-        {
-            return new DateTime(year, month, day).ToOADate();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    private static int ResolveLogbookMonth(object? monthValue, string monthText)
-    {
-        var monthNumber = ToDouble(monthValue);
-        if (monthNumber >= 1 && monthNumber <= 12)
-        {
-            return (int)monthNumber;
-        }
-        if (monthNumber > 31)
-        {
-            try
-            {
-                return DateTime.FromOADate(monthNumber).Month;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-
-        if (int.TryParse(monthText, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numericMonth))
-        {
-            if (numericMonth >= 1 && numericMonth <= 12)
-            {
-                return numericMonth;
-            }
-            if (numericMonth > 31)
-            {
-                try
-                {
-                    return DateTime.FromOADate(numericMonth).Month;
-                }
-                catch
-                {
-                    return 0;
-                }
-            }
-        }
-
-        var format = CultureInfo.InvariantCulture.DateTimeFormat;
-        for (var month = 1; month <= 12; month++)
-        {
-            if (string.Equals(monthText, format.AbbreviatedMonthNames[month - 1], StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(monthText, format.MonthNames[month - 1], StringComparison.OrdinalIgnoreCase))
-            {
-                return month;
-            }
-        }
-
-        return 0;
-    }
-
-    private static int ResolveLogbookDay(object? dayValue)
-    {
-        var dayNumber = ToDouble(dayValue);
-        if (dayNumber >= 1 && dayNumber <= 31)
-        {
-            return (int)dayNumber;
-        }
-        if (dayNumber > 31)
-        {
-            try
-            {
-                return DateTime.FromOADate(dayNumber).Day;
-            }
-            catch
-            {
-                return 0;
-            }
-        }
-        return 0;
     }
 
     private static void CopyNamedPreferences(object sourceWorkbookObject, object outputWorkbookObject)
@@ -1689,61 +1294,6 @@ public sealed class ExcelWorkbookMigrator
 
     private static string? LogbookSourceFormatColumnName(dynamic source, string name)
     {
-        if (string.Equals(name, "Details", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "FlightReview", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-
-        if (string.Equals(name, "Flight ID", StringComparison.OrdinalIgnoreCase))
-        {
-            return HasColumn((object)source, "Flight ID") ? "Flight ID" : "Reg";
-        }
-        if (string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "Via", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase))
-        {
-            return HasColumn((object)source, "Details") ? "Details" : name;
-        }
-        if (string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase))
-        {
-            // Version 2.0.0 already has these checkbox fields as well as the
-            // legacy Custom 1 column. Prefer their own format so that a
-            // 2.0.0-to-newer migration does not apply Custom 1's numeric-cell
-            // presentation to the checkbox controls.
-            if (HasColumn((object)source, name))
-            {
-                return name;
-            }
-            if (HasColumn((object)source, "Custom 1"))
-            {
-                return "Custom 1";
-            }
-            return HasColumn((object)source, "Details") ? "Details" : null;
-        }
-        if (string.Equals(name, "RNP", StringComparison.OrdinalIgnoreCase))
-        {
-            if (HasColumn((object)source, "RNP"))
-            {
-                return "RNP";
-            }
-            return HasColumn((object)source, "RNAV") ? "RNAV" : null;
-        }
-        if (string.Equals(name, "CumRNP", StringComparison.OrdinalIgnoreCase))
-        {
-            if (HasColumn((object)source, "CumRNP"))
-            {
-                return "CumRNP";
-            }
-            return HasColumn((object)source, "CumRNAV") ? "CumRNAV" : null;
-        }
-
         return HasColumn((object)source, name) ? name : null;
     }
 
@@ -1858,7 +1408,7 @@ public sealed class ExcelWorkbookMigrator
         var secondaryColor = (int)table.DataBodyRange.Rows.Item(1).Cells.Item(1, 1)
             .DisplayFormat.Interior.Color;
         sumTotalsRange.Interior.Pattern = 1;
-        sumTotalsRange.Interior.Color = ColorWithLightness(secondaryColor, 0.2);
+        sumTotalsRange.Interior.Color = WithLightness(secondaryColor, 0.2);
         sumTotalsRange.Font.Color = 0xFFFFFF;
         dynamic labelCell = sumTotalsRange.Cells.Item(1, 1).Offset[0, -1];
         labelCell.HorizontalAlignment = -4152;
@@ -1992,89 +1542,6 @@ public sealed class ExcelWorkbookMigrator
         {
             cell.Font.Color = cell.DisplayFormat.Interior.Color;
         }
-    }
-
-    private static int ColorWithLightness(int sourceColor, double targetLightness)
-    {
-        var red = (sourceColor & 0xFF) / 255.0;
-        var green = ((sourceColor >> 8) & 0xFF) / 255.0;
-        var blue = ((sourceColor >> 16) & 0xFF) / 255.0;
-        var maximum = Math.Max(red, Math.Max(green, blue));
-        var minimum = Math.Min(red, Math.Min(green, blue));
-
-        if (Math.Abs(maximum - minimum) < double.Epsilon)
-        {
-            var grey = (int)Math.Round(targetLightness * 255);
-            return grey + (grey << 8) + (grey << 16);
-        }
-
-        var lightness = (maximum + minimum) / 2.0;
-        var saturation = lightness > 0.5
-            ? (maximum - minimum) / (2.0 - maximum - minimum)
-            : (maximum - minimum) / (maximum + minimum);
-
-        double hue;
-        if (Math.Abs(maximum - red) < double.Epsilon)
-        {
-            hue = (green - blue) / (maximum - minimum);
-            if (green < blue)
-            {
-                hue += 6.0;
-            }
-        }
-        else if (Math.Abs(maximum - green) < double.Epsilon)
-        {
-            hue = (blue - red) / (maximum - minimum) + 2.0;
-        }
-        else
-        {
-            hue = (red - green) / (maximum - minimum) + 4.0;
-        }
-
-        hue /= 6.0;
-        var second = targetLightness < 0.5
-            ? targetLightness * (1.0 + saturation)
-            : targetLightness + saturation - (targetLightness * saturation);
-        var first = (2.0 * targetLightness) - second;
-        var outRed = (int)Math.Round(255 * HueChannel(first, second, hue + (1.0 / 3.0)));
-        var outGreen = (int)Math.Round(255 * HueChannel(first, second, hue));
-        var outBlue = (int)Math.Round(255 * HueChannel(first, second, hue - (1.0 / 3.0)));
-        return outRed + (outGreen << 8) + (outBlue << 16);
-    }
-
-    private static double HueChannel(double first, double second, double hue)
-    {
-        if (hue < 0)
-        {
-            hue += 1.0;
-        }
-        if (hue > 1)
-        {
-            hue -= 1.0;
-        }
-
-        if (hue < 1.0 / 6.0)
-        {
-            return first + ((second - first) * 6.0 * hue);
-        }
-        if (hue < 1.0 / 2.0)
-        {
-            return second;
-        }
-        if (hue < 2.0 / 3.0)
-        {
-            return first + ((second - first) * ((2.0 / 3.0) - hue) * 6.0);
-        }
-        return first;
-    }
-
-    private static int ContrastingTextColor(int backgroundColor)
-    {
-        var red = backgroundColor & 0xFF;
-        var green = (backgroundColor >> 8) & 0xFF;
-        var blue = (backgroundColor >> 16) & 0xFF;
-        var brightness = ((red * 299) + (green * 587) + (blue * 114)) / 1000.0;
-        return brightness >= 150 ? 0 : 0xFFFFFF;
     }
 
     private static void RefreshWorkbookPivotSummaries(object workbookObject)
@@ -2515,7 +1982,7 @@ public sealed class ExcelWorkbookMigrator
             var name = (string)table.ListColumns.Item(index).Name;
             if (LogbookFingerprintColumnIsPreserved(name))
             {
-                columns.TryAdd(CanonicalLogbookFingerprintColumnName(name), name);
+                columns.TryAdd(name, name);
             }
         }
 
@@ -2532,31 +1999,10 @@ public sealed class ExcelWorkbookMigrator
     private static bool LogbookFingerprintColumnIsPreserved(string name)
     {
         return !string.Equals(name, "Details", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Flight ID", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "FlightReview", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(name, "CurrencyExclusions", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "From", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "To", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Via", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "Remarks", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "FR", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "IPC", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(name, "OPC", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string CanonicalLogbookFingerprintColumnName(string name)
-    {
-        if (string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase))
-        {
-            return "RNP";
-        }
-
-        if (string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase))
-        {
-            return "CumRNP";
-        }
-
-        return name;
+            !string.Equals(name, "RNAV", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(name, "CumRNAV", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string FingerprintTable(dynamic workbook, string tableName)
@@ -2604,13 +2050,6 @@ public sealed class ExcelWorkbookMigrator
                 {
                     selections[icao] = "TRUE";
                 }
-            }
-        }
-        else
-        {
-            foreach (var selection in ReadLegacyAirportBaseSelections((object)workbook))
-            {
-                selections[selection.Key] = "TRUE";
             }
         }
 
@@ -2670,28 +2109,6 @@ public sealed class ExcelWorkbookMigrator
             source.DataBodyRange.Columns.Item(sourceIndex).Resize[rows, 1].Value2;
     }
 
-    private static string? DestinationLogbookColumnName(object destinationTable, string sourceName)
-    {
-        if (HasColumn(destinationTable, sourceName))
-        {
-            return sourceName;
-        }
-
-        if (string.Equals(sourceName, "RNAV", StringComparison.OrdinalIgnoreCase) &&
-            HasColumn(destinationTable, "RNP"))
-        {
-            return "RNP";
-        }
-
-        if (string.Equals(sourceName, "CumRNAV", StringComparison.OrdinalIgnoreCase) &&
-            HasColumn(destinationTable, "CumRNP"))
-        {
-            return "CumRNP";
-        }
-
-        return null;
-    }
-
     private static void CopyColumnPreservingFormula(
         dynamic source,
         dynamic destination,
@@ -2733,6 +2150,23 @@ public sealed class ExcelWorkbookMigrator
             return values;
         }
         return [raw];
+    }
+
+    private static IReadOnlyList<string> ReadTableColumnNames(dynamic table)
+    {
+        var columns = new List<string>();
+        for (var index = 1; index <= (int)table.ListColumns.Count; index++)
+        {
+            columns.Add((string)table.ListColumns.Item(index).Name);
+        }
+
+        return columns;
+    }
+
+    private static void HideTableColumn(dynamic table, string columnName)
+    {
+        table.Parent.Columns.Item(table.ListColumns.Item(GetColumnIndex(table, columnName)).Range.Column)
+            .Hidden = true;
     }
 
     private static void ResizeTable(dynamic table, int rows)
@@ -2963,25 +2397,6 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    private static string StableValue(object? value)
-    {
-        return value switch
-        {
-            null => "",
-            double number => number.ToString("R", CultureInfo.InvariantCulture),
-            float number => number.ToString("R", CultureInfo.InvariantCulture),
-            DateTime date => date.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
-            bool flag => flag ? "true" : "false",
-            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
-        };
-    }
-
-    private static bool IsBlankValue(object? value)
-    {
-        return value is null ||
-            (value is string text && string.IsNullOrWhiteSpace(text));
-    }
-
     private static string Sha256(string value)
     {
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
@@ -3045,4 +2460,12 @@ public sealed class ExcelWorkbookMigrator
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out int processId);
+}
+
+public sealed record PortableLogbookMetadataMigrationPlan(
+    PortableLogbookMetadataColumnPlan ColumnPlan,
+    IReadOnlyList<string> ColumnsToCopy,
+    IReadOnlyList<string> ColumnsToHide)
+{
+    public bool ShouldPreserve => ColumnsToCopy.Count > 0;
 }

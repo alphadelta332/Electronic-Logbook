@@ -17,6 +17,8 @@ $publicDocs = @("LICENSE.md", "SECURITY.md", "CONTRIBUTING.md")
 $requiredTooling = @(
     "PrepareForRelease.ps1",
     "PrepareForTesting.ps1",
+    "tools\Start-ReleasePreparation.ps1",
+    "tools\Invoke-Validation.ps1",
     "tools\ReleaseChecklist.ps1",
     "tools\Test-VbaSourceQuality.ps1",
     "tools\Test-VbaWorkbookPairing.ps1",

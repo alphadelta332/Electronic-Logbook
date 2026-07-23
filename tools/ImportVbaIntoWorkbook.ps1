@@ -29,7 +29,7 @@ if ($IncludeModUpdate) {
 Write-Host "Importing VBA into: $WorkbookPath"
 Write-Host "Version source: version.txt = $version"
 if (-not $IncludeModUpdate) {
-    Write-Host "modUpdate.bas is not embedded by default; modBoot downloads it at runtime." -ForegroundColor Yellow
+    Write-Host "modUpdate.bas is not embedded by default; modBoot launches the external wizard directly." -ForegroundColor Yellow
 }
 
 # Excel caches removed UserForm component names until the workbook closes.

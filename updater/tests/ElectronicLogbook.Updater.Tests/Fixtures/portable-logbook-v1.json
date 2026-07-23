@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "logbookId": "log_fixture",
+  "jurisdictionProfile": "AU",
+  "jurisdictionProfileVersion": 1,
+  "customFieldDefinitions": [
+    {
+      "id": "cf_training_kind",
+      "label": "Training kind",
+      "order": 1,
+      "description": null
+    }
+  ],
+  "operations": [
+    {
+      "kind": "create",
+      "logbookId": "log_fixture",
+      "entryId": "ent_fixture",
+      "revisionId": "rev_create",
+      "parentRevisionIds": [],
+      "deviceId": "dev_excel",
+      "createdAt": "2026-07-18T00:00:00+00:00",
+      "entry": {
+        "date": "2026-07-18",
+        "aircraftType": "C172",
+        "registration": "VH-ABC",
+        "flightNumber": "AD123",
+        "from": "YSBK",
+        "to": "YSCN",
+        "route": "BK CN",
+        "details": "Training",
+        "multiPilot": null,
+        "pilotInCommand": 1.2,
+        "coPilot": null,
+        "dual": null,
+        "instructor": null,
+        "day": null,
+        "night": null,
+        "instrumentActual": null,
+        "instrumentSimulated": null,
+        "takeoffsDay": 1,
+        "takeoffsNight": null,
+        "landingsDay": 1,
+        "landingsNight": null,
+        "ifrApproaches": null,
+        "holding": null,
+        "rnav": null,
+        "circling": null,
+        "customFields": {
+          "cf_training_kind": "Training"
+        }
+      }
+    }
+  ]
+}

@@ -51,11 +51,11 @@ try {
     Write-Host "  Changed:     $changed"
     $workbook.Save()
 } finally {
-    if ($workbook -ne $null) {
+    if ($null -ne $workbook) {
         $workbook.Close($false)
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($workbook) | Out-Null
     }
-    if ($excel -ne $null) {
+    if ($null -ne $excel) {
         $excel.Quit()
         [System.Runtime.Interopservices.Marshal]::ReleaseComObject($excel) | Out-Null
     }

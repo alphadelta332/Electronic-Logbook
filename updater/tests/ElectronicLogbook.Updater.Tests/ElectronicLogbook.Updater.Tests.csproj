@@ -23,6 +23,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\ElectronicLogbook.Updater\ElectronicLogbook.Updater.csproj" />
+    <ProjectReference Include="..\..\src\ElectronicLogbook.Portable\ElectronicLogbook.Portable.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>
