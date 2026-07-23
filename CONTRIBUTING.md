@@ -15,7 +15,63 @@ Install the following tools before working on the relevant area:
 - .NET 8 SDK for the updater, portable package logic, and Blazor mobile app.
 - Node.js with npm for the Capacitor Android shell. The committed
   `mobile/package-lock.json` pins its JavaScript dependencies.
-- Android Studio and an Android SDK only when building or testing the Android package.
+- Android tooling only when building, installing, or USB-debugging the Android package
+  on a Pixel or other device. Do not leave this until mobile data: the first setup is a
+  few hundred megabytes even before Gradle and npm caches are populated.
+
+### Mobile Android and Pixel USB Setup
+
+The Blazor mobile PWA can be run in a desktop browser with only .NET and Node.js, but
+normal Android behaviour over USB debugging requires all of the following on the laptop:
+
+- Android Debug Bridge (`adb`). Install Android SDK Platform-Tools, for example:
+  `winget install --id Google.PlatformTools --exact`.
+- Java 21 JDK for the Android Gradle/Capacitor build. Temurin 21 is known to work:
+  `winget install --id EclipseAdoptium.Temurin.21.JDK --exact`.
+- Android SDK command-line tools or Android Studio with the SDK Manager.
+- Android SDK Platform 35 and Android SDK Build-Tools 35.0.0, matching
+  `mobile/android/variables.gradle`.
+- Accepted Android SDK licenses. This is a one-time legal prompt; run it while online
+  and accept only after reviewing the terms:
+  `sdkmanager --licenses`.
+- Pixel developer options enabled, USB debugging enabled, and the device authorization
+  prompt accepted after connecting the USB cable.
+
+If you use the command-line tools instead of Android Studio, a minimal setup is:
+
+```powershell
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21"
+$env:Path = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:ANDROID_HOME\cmdline-tools\latest\bin;$env:Path"
+
+sdkmanager --sdk_root="$env:ANDROID_HOME" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+sdkmanager --licenses
+```
+
+Approximate first-time download sizes, based on the current official Android package
+metadata and tool installers:
+
+| Tool or package | Approximate download |
+| --- | ---: |
+| Android SDK Command-line Tools for Windows | 156 MB |
+| Android SDK Platform-Tools / `adb` | 18 MB installed; download is in the same small range |
+| Android SDK Platform 35 | 64 MB |
+| Android SDK Build-Tools 35.0.0 for Windows | 60 MB |
+| Temurin Java 21 JDK | roughly 170-220 MB |
+| Gradle wrapper distribution on first Android build | roughly 150-170 MB |
+| npm dependencies from `mobile/package-lock.json` | varies by cache, usually tens of MB |
+
+Plan for roughly 600-750 MB on a clean laptop to reach `adb install` readiness without
+Android Studio. Installing full Android Studio is larger and should be done on Wi-Fi.
+
+For a plugged-in Pixel, verify the device before trying to install:
+
+```powershell
+adb devices
+```
+
+The device must show `device`, not `unauthorized`. If it is unauthorized, unlock the
+Pixel and accept the USB debugging prompt.
 
 Restore the dependencies from the repository root and mobile directory:
 
@@ -25,9 +81,47 @@ Set-Location mobile
 npm ci
 ```
 
+Build, sync, and install the Android debug app with:
+
+```powershell
+Set-Location mobile
+npm run build:android
+adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+```
+
+Debug APKs install as `com.alphadelta.electroniclogbook.dev` and are labelled
+`LogbookOne Dev`. Release builds keep `com.alphadelta.electroniclogbook`. This
+side-by-side debug application ID keeps development installs away from pilot or
+release-test data.
+
+Android only preserves installed app data across `adb install -r` when the replacement
+APK has the same package name and signing key as the installed app. If installation
+fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the device already has that package
+installed with a different signature. Export or otherwise preserve any important local
+logbook data before uninstalling. A normal uninstall clears the app's private WebView
+and IndexedDB data; after that, the debug APK can be installed cleanly.
+
+For a quick browser-only Pixel check without building an APK, run the Blazor dev server
+on the laptop, connect the authorized Pixel, and reverse the port:
+
+```powershell
+dotnet run --project mobile\src\ElectronicLogbook.Mobile\ElectronicLogbook.Mobile.csproj --urls http://localhost:5000
+adb reverse tcp:5000 tcp:5000
+```
+
+Then open `http://127.0.0.1:5000/` in Chrome on the Pixel.
+
 Return to the repository root before running the PowerShell validation scripts. No
 Python environment or `requirements.txt` is needed: .NET dependencies are declared in
 the project files and mobile dependencies are declared in `mobile/package.json`.
+
+### Mobile Generated Assets
+
+Keep `img/icon.png` as the tracked source icon. Do not commit
+`mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-192.png` or
+`mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-512.png`; they are generated by
+`mobile/scripts/Generate-AppIcons.ps1` during the mobile build/sync workflow and should
+remain local generated assets.
 
 ### Safe Local Checks
 
