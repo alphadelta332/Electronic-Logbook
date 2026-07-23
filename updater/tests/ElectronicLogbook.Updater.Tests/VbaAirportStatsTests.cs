@@ -15,12 +15,48 @@ public sealed class VbaAirportStatsTests
         Assert.Contains("If Not rowMatches.Exists(icao) Then rowMatches.Add icao, True", body, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void ExternalUpdaterAirportVisitStatsUsesSameRouteInputsAsWorkbookVba()
+    {
+        var source = ReadRepoSource("updater", "src", "ElectronicLogbook.Updater", "ExcelWorkbookMigrator.cs");
+        var body = ExtractCSharpMethodBody(source, "ReadLogbookRouteSourceValues");
+
+        Assert.Contains("HasColumn((object)logbook, \"From\")", body, StringComparison.Ordinal);
+        Assert.Contains("HasColumn((object)logbook, \"Via\")", body, StringComparison.Ordinal);
+        Assert.Contains("HasColumn((object)logbook, \"To\")", body, StringComparison.Ordinal);
+        Assert.Contains("HasColumn((object)logbook, \"Remarks\")", body, StringComparison.Ordinal);
+        Assert.Contains("LogbookRouteText.BuildAirportStatsSource", body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UpdateFlowRefreshesAirportStatsBeforePivotSummaries()
+    {
+        var source = ReadRepoSource("updater", "src", "ElectronicLogbook.Updater", "ExcelWorkbookMigrator.cs");
+        var migrationIndex = source.IndexOf(
+            "refreshing airport visit stats",
+            StringComparison.Ordinal);
+        var pivotIndex = source.IndexOf(
+            "refreshing pivot tables",
+            StringComparison.Ordinal);
+
+        Assert.True(migrationIndex >= 0, "Migration flow should refresh airport visit stats.");
+        Assert.True(pivotIndex >= 0, "Migration flow should refresh pivot summaries.");
+        Assert.True(
+            migrationIndex < pivotIndex,
+            "Airport visit stats must be refreshed before pivot/chart summaries so saved presentation state uses current visits.");
+    }
+
     private static string ReadModAirportsSource()
+    {
+        return ReadRepoSource("modAirports.bas");
+    }
+
+    private static string ReadRepoSource(params string[] relativePathParts)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, "modAirports.bas");
+            var candidate = Path.Combine([directory.FullName, .. relativePathParts]);
             if (File.Exists(candidate))
             {
                 return File.ReadAllText(candidate);
@@ -29,7 +65,8 @@ public sealed class VbaAirportStatsTests
             directory = directory.Parent;
         }
 
-        throw new FileNotFoundException("Could not find modAirports.bas from the test output directory.");
+        throw new FileNotFoundException(
+            $"Could not find '{Path.Combine(relativePathParts)}' from the test output directory.");
     }
 
     private static string ExtractVbaProcedureBody(string source, string procedureName, string terminator)
@@ -67,5 +104,39 @@ public sealed class VbaAirportStatsTests
         }
 
         return source.Substring(procedureIndex, terminatorIndex - procedureIndex + terminator.Length);
+    }
+
+    private static string ExtractCSharpMethodBody(string source, string methodName)
+    {
+        var methodIndex = source.IndexOf($"private static string[] {methodName}(", StringComparison.Ordinal);
+        if (methodIndex < 0)
+        {
+            throw new InvalidOperationException($"Could not find C# method '{methodName}'.");
+        }
+
+        var openBraceIndex = source.IndexOf('{', methodIndex);
+        if (openBraceIndex < 0)
+        {
+            throw new InvalidOperationException($"Could not find body for C# method '{methodName}'.");
+        }
+
+        var depth = 0;
+        for (var index = openBraceIndex; index < source.Length; index++)
+        {
+            if (source[index] == '{')
+            {
+                depth++;
+            }
+            else if (source[index] == '}')
+            {
+                depth--;
+                if (depth == 0)
+                {
+                    return source.Substring(openBraceIndex, index - openBraceIndex + 1);
+                }
+            }
+        }
+
+        throw new InvalidOperationException($"Could not find end of C# method '{methodName}'.");
     }
 }
