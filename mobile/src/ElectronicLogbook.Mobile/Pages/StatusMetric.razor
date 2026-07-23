@@ -1,0 +1,19 @@
+<article class="status-metric @(Attention ? "status-metric-attention" : null)">
+    <span>@Label</span>
+    <strong>@Value</strong>
+    <small>@Detail</small>
+</article>
+
+@code {
+    [Parameter]
+    public string Label { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Value { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Detail { get; set; } = string.Empty;
+
+    [Parameter]
+    public bool Attention { get; set; }
+}

@@ -39,6 +39,8 @@ IMPROVEMENT_ROADMAP.md
 !updater/release-manifest-signing-public-key.pem
 # Local mobile app icon assets
 /mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
+!/mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-192.png
+!/mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-512.png
 docs/mobile-ui-overhaul.md
 LOCAL_DEVICE_SETUP_HANDOVER.md
 /.codex-remote-attachments

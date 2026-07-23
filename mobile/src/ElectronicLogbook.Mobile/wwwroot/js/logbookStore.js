@@ -69,6 +69,12 @@
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key))
     };
 
+    window.electronicLogbookUiPreferences = {
+        load: (key) => localStorage.getItem(key),
+        save: (key, value) => localStorage.setItem(key, value),
+        isSystemDark: () => globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false
+    };
+
     window.electronicLogbookKeys = {
         isSupported: () => Boolean(globalThis.crypto?.subtle && globalThis.indexedDB),
         hasPackageKey: async (keyName) => Boolean(

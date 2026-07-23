@@ -1,0 +1,125 @@
+@page "/"
+@inject MobileLogbookSession Session
+@inject NavigationManager Navigation
+
+<PageTitle>LogbookOne</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading device copy</span>
+    </section>
+}
+else
+{
+    <section class="dashboard-page">
+        @if (!string.IsNullOrWhiteSpace(Session.StorageError))
+        {
+            <section class="state-banner state-banner-error" role="alert">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" />
+                <span>@Session.StorageError</span>
+            </section>
+        }
+
+        <section class="hero-panel">
+            <div>
+                <span class="eyebrow">Next action</span>
+                <h1>Add today's flight</h1>
+                <p>@NextActionDetail</p>
+            </div>
+            <MudButton Href="/flights/new" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add">
+                Add flight
+            </MudButton>
+        </section>
+
+        <section class="status-strip" aria-label="Operational status">
+            <StatusMetric Label="Entries" Value="@Session.CurrentEntries.Count.ToString()" Detail="current record" />
+            <StatusMetric Label="Unexported" Value="@Session.ExchangeStatus.PendingOperationCount.ToString()" Detail="local operations" Attention="@(Session.ExchangeStatus.PendingOperationCount > 0)" />
+            <StatusMetric Label="Conflicts" Value="@Session.MergeResult.Conflicts.Count.ToString()" Detail="need review" Attention="@(Session.MergeResult.Conflicts.Count > 0)" />
+            <StatusMetric Label="Package key" Value="@Session.PackageKeyStatus" Detail="device readiness" Attention="@(Session.PackageKeyStatus != "Ready")" />
+        </section>
+
+        <section class="notice-panel">
+            <MudIcon Icon="@Icons.Material.Filled.HealthAndSafety" />
+            <div>
+                <strong>Package health</strong>
+                <span>@Session.ExchangeStatus.BackupNotice</span>
+                <span>@Session.PackageKeyNotice</span>
+            </div>
+        </section>
+
+        <section class="dashboard-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Recent flights</span>
+                    <h2>Current record</h2>
+                </div>
+                <MudButton Href="/legacy" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Full record</MudButton>
+            </div>
+
+            @if (Session.CurrentEntries.Count == 0)
+            {
+                <section class="empty-state">
+                    <MudIcon Icon="@Icons.Material.Filled.Flight" />
+                    <strong>No flights on this device yet</strong>
+                    <span>Import a package or start with a new local entry.</span>
+                </section>
+            }
+            else
+            {
+                <div class="flight-row-list">
+                    @foreach (var entry in Session.CurrentEntries.Take(5))
+                    {
+                        <article class="flight-row">
+                            <div class="route-code">
+                                <strong>@FormatRoute(entry.Entry!)</strong>
+                                <span>@MobileLogbookSession.FormatDate(entry.Entry!.Date)</span>
+                            </div>
+                            <div>
+                                <strong>@FormatAircraft(entry.Entry!)</strong>
+                                <span>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!)) hr total</span>
+                            </div>
+                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Primary" OnClick="@(() => CloneEntry(entry.Entry!))" aria-label="Clone flight" />
+                        </article>
+                    }
+                </div>
+            }
+        </section>
+
+        <section class="exchange-summary">
+            <span>Last import: @MobileLogbookSession.FormatTimestamp(Session.ExchangeStatus.LastSuccessfulImportAt)</span>
+            <span>Last export: @MobileLogbookSession.FormatTimestamp(Session.ExchangeStatus.LastSuccessfulExportAt)</span>
+        </section>
+    </section>
+}
+
+@code {
+    private string NextActionDetail =>
+        Session.CurrentEntries.Count == 0
+            ? "Create the first device entry or import an encrypted package from the workbook."
+            : $"{Session.CurrentEntries.Count} flight(s) available on this device.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedAsync();
+    }
+
+    private void CloneEntry(PortableLogbookEntry entry)
+    {
+        Session.CloneEntry(entry);
+        Navigation.NavigateTo("/flights/new");
+    }
+
+    private static string FormatRoute(PortableLogbookEntry entry)
+    {
+        var route = $"{entry.From} - {entry.To}".Trim(' ', '-');
+        return string.IsNullOrWhiteSpace(route) ? "Route pending" : route;
+    }
+
+    private static string FormatAircraft(PortableLogbookEntry entry)
+    {
+        var aircraft = $"{entry.AircraftType} {entry.Registration}".Trim();
+        return string.IsNullOrWhiteSpace(aircraft) ? "Aircraft pending" : aircraft;
+    }
+}

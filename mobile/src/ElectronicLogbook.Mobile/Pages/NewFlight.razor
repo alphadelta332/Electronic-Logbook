@@ -1,0 +1,210 @@
+@page "/flights/new"
+@inject MobileLogbookSession Session
+
+<PageTitle>New Flight</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading flight draft</span>
+    </section>
+}
+else
+{
+    <section class="flight-entry-page">
+        <header class="entry-header">
+            <div>
+                <span class="eyebrow">@Session.DraftModeLabel</span>
+                <h1>@Session.Draft.Date.ToString("dd MMM yyyy")</h1>
+            </div>
+            <span class="draft-pill">@(Session.HasEditedDraft ? "Draft edited" : "Ready")</span>
+        </header>
+
+        @if (!string.IsNullOrWhiteSpace(Session.LastActionMessage))
+        {
+            <section class="state-banner" role="status">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" />
+                <span>@Session.LastActionMessage</span>
+            </section>
+        }
+
+        @if (Session.ShouldShowDraftErrors)
+        {
+            <section class="state-banner state-banner-error" role="alert" aria-live="polite">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" />
+                <div>
+                    @foreach (var error in Session.DraftErrors)
+                    {
+                        <span>@error</span>
+                    }
+                </div>
+            </section>
+        }
+        else if (Session.DraftWarnings.Count > 0)
+        {
+            <section class="state-banner state-banner-warning" role="status">
+                <MudIcon Icon="@Icons.Material.Filled.WarningAmber" />
+                <div>
+                    @foreach (var warning in Session.DraftWarnings)
+                    {
+                        <span>@warning</span>
+                    }
+                </div>
+            </section>
+        }
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Flight and route</span>
+                    <h2>Identity</h2>
+                </div>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Route" OnClick="Session.UseDirectRoute" Disabled="@Session.IsStorageBlocked">
+                    Direct
+                </MudButton>
+            </div>
+            <div class="field-grid">
+                <label>Date <input type="date" max="@TodayIso" @bind="Session.Draft.Date" /></label>
+                <label>Aircraft type <input @bind="Session.Draft.AircraftType" list="aircraft-types" autocapitalize="characters" spellcheck="false" /></label>
+                <label>Registration <input @bind="Session.Draft.Registration" list="registrations" autocapitalize="characters" spellcheck="false" /></label>
+                <label>Flight number <input @bind="Session.Draft.FlightNumber" list="flight-numbers" autocapitalize="characters" spellcheck="false" /></label>
+                <label>From <input @bind="Session.Draft.From" list="airports" autocapitalize="characters" spellcheck="false" /></label>
+                <label>To <input @bind="Session.Draft.To" list="airports" autocapitalize="characters" spellcheck="false" /></label>
+                <label class="field-span">Route <input @bind="Session.Draft.Route" list="routes" autocapitalize="characters" spellcheck="false" /></label>
+            </div>
+        </section>
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Times</span>
+                    <h2>Operating capacity</h2>
+                </div>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Session.UseFlightTimeAsDay" Disabled="@Session.IsStorageBlocked">
+                    Use as day
+                </MudButton>
+            </div>
+            <div class="field-grid numeric-grid">
+                <label>PIC <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.PilotInCommand" /></label>
+                <label>Multi-pilot <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.MultiPilot" /></label>
+                <label>Co-pilot <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.CoPilot" /></label>
+                <label>Dual <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.Dual" /></label>
+                <label>Instructor <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.Instructor" /></label>
+                <label>Day <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.Day" /></label>
+                <label>Night <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.Night" /></label>
+                <label>Instrument actual <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.InstrumentActual" /></label>
+                <label>Instrument sim <input type="number" step="0.1" min="0" inputmode="decimal" @bind="Session.Draft.InstrumentSimulated" /></label>
+            </div>
+        </section>
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Currency</span>
+                    <h2>Take-offs, landings, approaches</h2>
+                </div>
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Session.MatchTakeoffsToLandings" Disabled="@Session.IsStorageBlocked">
+                    Match takeoffs
+                </MudButton>
+            </div>
+            <div class="field-grid numeric-grid">
+                <label>Takeoffs day <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.TakeoffsDay" /></label>
+                <label>Takeoffs night <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.TakeoffsNight" /></label>
+                <label>Landings day <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.LandingsDay" /></label>
+                <label>Landings night <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.LandingsNight" /></label>
+                <label>IFR approaches <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.IfrApproaches" /></label>
+                <label>Holding <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.Holding" /></label>
+                <label>RNP <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.Rnav" /></label>
+                <label>Circling <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.Circling" /></label>
+            </div>
+        </section>
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Remarks</span>
+                    <h2>Notes and custom fields</h2>
+                </div>
+            </div>
+            <label class="field-wide">Remarks <textarea @bind="Session.Draft.Remarks"></textarea></label>
+            <select class="recent-select" @onchange="UseRecentRemark" disabled="@Session.IsStorageBlocked">
+                <option value="">Recent remarks</option>
+                @foreach (var value in Session.RecentValues(entry => entry.Details))
+                {
+                    <option value="@value">@value</option>
+                }
+            </select>
+            <div class="field-grid custom-field-grid">
+                @foreach (var field in MobileLogbookSession.CustomFields)
+                {
+                    <label>@field.Label <input @bind="Session.Draft.CustomValues[field.Id]" /></label>
+                }
+            </div>
+        </section>
+
+        <datalist id="aircraft-types">
+            @foreach (var value in Session.RecentValues(entry => entry.AircraftType))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="registrations">
+            @foreach (var value in Session.RecentValues(entry => entry.Registration))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="airports">
+            @foreach (var value in Session.RecentAirportValues())
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="flight-numbers">
+            @foreach (var value in Session.RecentValues(entry => entry.FlightNumber))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+        <datalist id="routes">
+            @foreach (var value in Session.RecentValues(entry => entry.Route))
+            {
+                <option value="@value"></option>
+            }
+        </datalist>
+
+        <aside class="persistent-action-bar">
+            <div class="entry-totals" aria-label="Draft totals">
+                <span><strong>@MobileLogbookSession.FormatHours(Session.Draft.LoggedTime)</strong> hr</span>
+                <span><strong>@Session.Draft.TotalLandings</strong> ldg</span>
+                <span><strong>@Session.Draft.TotalApproaches</strong> app</span>
+            </div>
+            <div class="action-buttons">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="Session.ResetDraft" Disabled="@Session.IsStorageBlocked" aria-label="Clear draft" />
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@Session.IsStorageBlocked" StartIcon="@Icons.Material.Filled.Done">
+                    @Session.SaveLabel
+                </MudButton>
+            </div>
+        </aside>
+    </section>
+}
+
+@code {
+    private static string TodayIso => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await Session.SaveEntryAsync();
+    }
+
+    private void UseRecentRemark(ChangeEventArgs args)
+    {
+        Session.UseRecentRemark(args.Value?.ToString());
+    }
+}

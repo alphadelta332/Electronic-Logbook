@@ -1,14 +1,76 @@
 @inherits LayoutComponentBase
+@inject BrowserUiPreferencesStore PreferencesStore
 
-<div class="layout">
-    <header class="topbar">
-        <div>
+<MudThemeProvider Theme="@Theme" IsDarkMode="@IsDarkMode" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<div class="app-shell">
+    <header class="app-topbar">
+        <MudIcon Icon="@Icons.Material.Filled.FlightTakeoff" Size="Size.Medium" />
+        <div class="brand-lockup">
             <strong>LogbookOne</strong>
-            <span>Portable</span>
+            <span>Portable operations</span>
         </div>
-        <span class="offline-pill">Offline ready</span>
+        <MudMenu Dense="true" Icon="@Icons.Material.Filled.Contrast" AriaLabel="Appearance">
+            <MudMenuItem OnClick="SetSystemThemeModeAsync">System</MudMenuItem>
+            <MudMenuItem OnClick="SetLightThemeModeAsync">Light</MudMenuItem>
+            <MudMenuItem OnClick="SetDarkThemeModeAsync">Dark</MudMenuItem>
+        </MudMenu>
     </header>
-    <main>
+
+    <main class="app-main">
         @Body
     </main>
+
+    <nav class="bottom-nav" aria-label="Primary">
+        <NavLink href="/" Match="NavLinkMatch.All">
+            <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
+            <span>Today</span>
+        </NavLink>
+        <NavLink href="/flights/new">
+            <MudIcon Icon="@Icons.Material.Filled.AddCircle" />
+            <span>New</span>
+        </NavLink>
+        <NavLink href="/legacy">
+            <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
+            <span>Record</span>
+        </NavLink>
+        <NavLink href="/legacy#exchange">
+            <MudIcon Icon="@Icons.Material.Filled.IosShare" />
+            <span>Exchange</span>
+        </NavLink>
+    </nav>
 </div>
+
+@code {
+    private readonly MudTheme Theme = MobileTheme.Create();
+    private string ThemeMode { get; set; } = "System";
+    private bool SystemIsDark { get; set; }
+    private bool IsDarkMode => ThemeMode == "Dark" || (ThemeMode == "System" && SystemIsDark);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var preferences = await PreferencesStore.LoadAsync();
+        ThemeMode = preferences.ThemeMode;
+        SystemIsDark = await PreferencesStore.IsSystemDarkAsync();
+    }
+
+    private Task SetSystemThemeModeAsync() => SetThemeModeAsync("System");
+
+    private Task SetLightThemeModeAsync() => SetThemeModeAsync("Light");
+
+    private Task SetDarkThemeModeAsync() => SetThemeModeAsync("Dark");
+
+    private async Task SetThemeModeAsync(string themeMode)
+    {
+        ThemeMode = themeMode;
+        if (themeMode == "System")
+        {
+            SystemIsDark = await PreferencesStore.IsSystemDarkAsync();
+        }
+
+        await PreferencesStore.SaveAsync(new MobileUiPreferences(themeMode));
+    }
+}
