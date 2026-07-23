@@ -111,6 +111,43 @@ The release is complete only when all are true:
   - `release-manifest.json.sig`
   - `release-validation.json`
 
+## Patching An Existing Release Asset
+
+Prefer a new patch release for normal fixes. Use an in-place asset patch only
+when the version number must remain unchanged and the existing tag/release has
+not moved.
+
+When patching a release asset, replace every integrity file that describes that
+asset. For the public workbook this means:
+
+- `Electronic_Logbook_Master.xlsm`
+- `SHA256SUMS.txt`
+- `release-manifest.json`
+- `release-manifest.json.sig`
+- `release-validation.json`
+
+Generate the replacement integrity files from a complete artifact folder:
+
+```powershell
+.\tools\New-ReleaseArtifactIntegrity.ps1 `
+  -ArtifactsPath "<folder-with-release-assets>" `
+  -Version 2.0.3 `
+  -Commit "<main-commit-containing-the-fixed-asset>"
+```
+
+Then upload the replacement assets with:
+
+```powershell
+gh release upload v2.0.3 `
+  Electronic_Logbook_Master.xlsm `
+  release-manifest.json `
+  release-manifest.json.sig `
+  SHA256SUMS.txt `
+  release-validation.json `
+  --repo alphadelta332/Electronic-Logbook `
+  --clobber
+```
+
 ## Runner Recovery
 
 If the workflow waits on:
