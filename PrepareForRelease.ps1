@@ -51,6 +51,6 @@ Write-Host "Master workbook state set to branch 'main' and version '$version'." 
 Write-Host "Release protection mode persists while GitHubBranch is 'main'." -ForegroundColor Green
 Write-Host "Working copy branch set to 'main' when configured; its LogbookVersion is left unchanged." -ForegroundColor Green
 Write-Host "Next steps:"
-Write-Host "  1. Run GenerateReadmePDF.ps1 if README.md changed"
+Write-Host "  1. Run .\tools\GenerateReadmePDF.ps1 if README.md changed"
 Write-Host "  2. Commit release files on dev"
 Write-Host "  3. Open a PR from dev to main"

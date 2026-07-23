@@ -5,6 +5,7 @@
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [switch]$AllowDevBranch,
+    [switch]$AllowHotfixBranch,
     [switch]$CheckExternalLinks
 )
 
@@ -18,6 +19,13 @@ $version = Get-ReleaseVersion -RepoRoot $repoRoot
 $workbookPath = $config.MasterWorkbook
 
 $issues = New-Object System.Collections.Generic.List[string]
+$requiredHiddenWorksheets = @(
+    "New Entry Unused Layout",
+    "Admin",
+    "Routes",
+    "Airports",
+    "ChartData"
+)
 
 function Get-WorkbookNameText {
     param(
@@ -58,6 +66,20 @@ function Get-WorkbookPackageEntryText {
     }
 }
 
+function Get-WorksheetVisibilityText {
+    param(
+        [Parameter(Mandatory)]
+        $Worksheet
+    )
+
+    switch ([int]$Worksheet.Visible) {
+        -1 { return "Visible" }
+        0 { return "Hidden" }
+        2 { return "VeryHidden" }
+        default { return "Visible=$($Worksheet.Visible)" }
+    }
+}
+
 Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
     param($Workbook)
 
@@ -69,8 +91,13 @@ Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
     $branch = (Get-WorkbookNameText -Workbook $Workbook -Name "GitHubBranch").Trim()
     if ($branch -eq "") {
         $issues.Add("GitHubBranch is empty.")
-    } elseif ($branch -ne "main" -and -not $AllowDevBranch) {
-        $issues.Add("GitHubBranch is '$branch'. Public release workbooks should use 'main'.")
+    } else {
+        $allowedBranches = @("main")
+        if ($AllowDevBranch) { $allowedBranches += "dev" }
+        if ($AllowHotfixBranch) { $allowedBranches += "hotfix" }
+        if ($allowedBranches -notcontains $branch) {
+            $issues.Add("GitHubBranch is '$branch'. Public release workbooks should use one of: $($allowedBranches -join ', ').")
+        }
     }
 
     $workbookVersion = (Get-WorkbookNameText -Workbook $Workbook -Name "LogbookVersion").Trim()
@@ -103,9 +130,23 @@ Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
         }
     }
 
+    $worksheetByName = @{}
     foreach ($worksheet in @($Workbook.Worksheets)) {
+        $worksheetByName[[string]$worksheet.Name] = $worksheet
         if ($worksheet.Visible -ne -1) {
             Write-Host "Hidden sheet present: $($worksheet.Name)" -ForegroundColor Yellow
+        }
+    }
+
+    foreach ($worksheetName in $requiredHiddenWorksheets) {
+        if (-not $worksheetByName.ContainsKey($worksheetName)) {
+            $issues.Add("Required internal worksheet '$worksheetName' is missing.")
+            continue
+        }
+
+        $worksheet = $worksheetByName[$worksheetName]
+        if ($worksheet.Visible -ne 2) {
+            $issues.Add("Internal worksheet '$worksheetName' is $(Get-WorksheetVisibilityText -Worksheet $worksheet). It must be VeryHidden before publishing.")
         }
     }
 }

@@ -2,7 +2,7 @@ namespace ElectronicLogbook.Updater.Tests;
 
 public sealed class CompatibilityPolicyTests
 {
-    private const string CompatibilityFloor = "2.0.0";
+    private const string CompatibilityFloor = "2.0.2";
     private const string CompatibilityFloorTag = "v" + CompatibilityFloor;
 
     [Fact]
@@ -13,7 +13,7 @@ public sealed class CompatibilityPolicyTests
         var currentTag = "v" + currentVersion;
 
         var tags = policy.SupportedTags(
-            ["v1.4.2", "v1.9.9", CompatibilityFloorTag, currentTag],
+            ["v1.4.2", "v1.9.9", "v2.0.0", "v2.0.1", CompatibilityFloorTag, currentTag],
             currentVersion);
 
         Assert.Equal([CompatibilityFloorTag], tags);
@@ -54,9 +54,10 @@ public sealed class CompatibilityPolicyTests
     [Theory]
     [InlineData("1.4.2", false)]
     [InlineData("1.9.9", false)]
-    [InlineData("2.0.0", true)]
-    [InlineData("v2.0.0", true)]
-    [InlineData("2.0.1", true)]
+    [InlineData("2.0.0", false)]
+    [InlineData("v2.0.1", false)]
+    [InlineData("2.0.2", true)]
+    [InlineData("v2.0.2", true)]
     public void IsVersionSupportedAppliesFloor(string version, bool expected)
     {
         var policy = new CompatibilityPolicy(CompatibilityFloor, "git-tags");

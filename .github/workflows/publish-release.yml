@@ -10,14 +10,99 @@ on:
 
 permissions:
   contents: write
+  actions: read
 
 concurrency:
   group: promote-release
   cancel-in-progress: false
 
 jobs:
+  preflight:
+    name: Preflight release target
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify release target
+        shell: pwsh
+        env:
+          PROMOTE_COMMIT: ${{ inputs.commit_sha }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:PROMOTE_COMMIT -notmatch "^[0-9a-fA-F]{40}$") {
+            throw "commit_sha must be a full 40-character commit SHA."
+          }
+
+          git fetch origin main --tags --force
+          $resolvedCommit = (git rev-parse "$env:PROMOTE_COMMIT^{commit}").Trim()
+          if ($LASTEXITCODE -ne 0 -or $resolvedCommit -ne $env:PROMOTE_COMMIT.ToLowerInvariant()) {
+            throw "Could not resolve selected release commit: $env:PROMOTE_COMMIT"
+          }
+
+          git merge-base --is-ancestor $resolvedCommit origin/main
+          if ($LASTEXITCODE -ne 0) {
+            throw "Selected release commit $resolvedCommit is not on origin/main."
+          }
+
+          $version = (git show "$resolvedCommit`:version.txt").Trim()
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch "^\d+\.\d+\.\d+$") {
+            throw "version.txt at $resolvedCommit must contain semantic version X.Y.Z. Found: $version"
+          }
+
+          $readme = git show "$resolvedCommit`:README.md"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read README.md at $resolvedCommit."
+          }
+          $headingPattern = "(?m)^### \[$([regex]::Escape($version))\] - \d{4}-\d{2}-\d{2}$"
+          $headings = @([regex]::Matches(($readme -join "`n"), $headingPattern))
+          if ($headings.Count -ne 1) {
+            throw "README.md at $resolvedCommit must contain exactly one changelog heading for $version. Found $($headings.Count)."
+          }
+
+          $tag = "v$version"
+          git ls-remote --exit-code --tags origin $tag *> $null
+          $tagExitCode = $LASTEXITCODE
+          if ($tagExitCode -eq 0) {
+            throw "Release tag $tag already exists."
+          }
+          if ($tagExitCode -ne 2) {
+            throw "Could not inspect remote tag $tag."
+          }
+          $global:LASTEXITCODE = 0
+
+          gh release view $tag 2>$null
+          $releaseExitCode = $LASTEXITCODE
+          if ($releaseExitCode -eq 0) {
+            throw "GitHub release $tag already exists."
+          }
+          $global:LASTEXITCODE = 0
+
+          $runners = gh api "repos/$env:GITHUB_REPOSITORY/actions/runners" --paginate | ConvertFrom-Json
+          $matchingRunners = @($runners.runners | Where-Object {
+            $labels = @($_.labels | ForEach-Object { ([string]$_.name).ToLowerInvariant() })
+            $_.status -eq "online" -and
+              $labels -contains "self-hosted" -and
+              $labels -contains "windows" -and
+              $labels -contains "excel"
+          })
+          if ($matchingRunners.Count -eq 0) {
+            throw "No online runner found with labels: self-hosted, windows, excel."
+          }
+
+          $matchingRunners | ForEach-Object {
+            Write-Host "Runner online: $($_.name) (busy=$($_.busy))"
+          }
+
   validate:
     name: Validate release candidate
+    needs: preflight
     runs-on: [self-hosted, windows, excel]
     environment: release
     timeout-minutes: 90
@@ -63,13 +148,21 @@ jobs:
 
           $tag = "v$version"
           $existingTag = git rev-parse -q --verify "refs/tags/$tag"
-          if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingTag)) {
+          $existingTagExitCode = $LASTEXITCODE
+          if ($existingTagExitCode -eq 0 -and -not [string]::IsNullOrWhiteSpace($existingTag)) {
             throw "Release tag $tag already exists."
+          }
+          if ($existingTagExitCode -ne 0) {
+            $global:LASTEXITCODE = 0
           }
 
           $existingRelease = gh release view $tag 2>$null
-          if ($LASTEXITCODE -eq 0) {
+          $existingReleaseExitCode = $LASTEXITCODE
+          if ($existingReleaseExitCode -eq 0) {
             throw "GitHub release $tag already exists."
+          }
+          if ($existingReleaseExitCode -ne 0) {
+            $global:LASTEXITCODE = 0
           }
 
           "RELEASE_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -87,6 +180,9 @@ jobs:
           ./updater/Publish-WizardAsset.ps1
 
           Remove-Item SHA256SUMS.txt, release-manifest.json, release-manifest.json.sig, release-notes.md -Force -ErrorAction SilentlyContinue
+          Copy-Item updater/dist/ElectronicLogbook.Updater.Wizard.exe .
+          Copy-Item updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip .
+          Copy-Item updater/dist/wizard-signature-report.json .
 
           $readme = Get-Content README.md -Raw
           $releaseNotesPattern = "(?ms)^### \[$([regex]::Escape($env:RELEASE_VERSION))\].*?(?=^### \[|\z)"
@@ -102,9 +198,9 @@ jobs:
           $assets = @(
             Get-Item Electronic_Logbook_Master.xlsm
             Get-Item README.pdf
-            Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.exe
-            Get-Item updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
-            Get-Item updater/dist/wizard-signature-report.json
+            Get-Item ElectronicLogbook.Updater.Wizard.exe
+            Get-Item ElectronicLogbook.Updater.Wizard.win-x64.zip
+            Get-Item wizard-signature-report.json
           )
 
           $manifestAssets = foreach ($asset in $assets) {
@@ -152,9 +248,9 @@ jobs:
           $artifactPaths = @(
             "Electronic_Logbook_Master.xlsm"
             "README.pdf"
-            "updater/dist/ElectronicLogbook.Updater.Wizard.exe"
-            "updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip"
-            "updater/dist/wizard-signature-report.json"
+            "ElectronicLogbook.Updater.Wizard.exe"
+            "ElectronicLogbook.Updater.Wizard.win-x64.zip"
+            "wizard-signature-report.json"
             "SHA256SUMS.txt"
             "release-manifest.json"
             "release-manifest.json.sig"
@@ -203,9 +299,9 @@ jobs:
           path: |
             Electronic_Logbook_Master.xlsm
             README.pdf
-            updater/dist/ElectronicLogbook.Updater.Wizard.exe
-            updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip
-            updater/dist/wizard-signature-report.json
+            ElectronicLogbook.Updater.Wizard.exe
+            ElectronicLogbook.Updater.Wizard.win-x64.zip
+            wizard-signature-report.json
             SHA256SUMS.txt
             release-manifest.json
             release-manifest.json.sig

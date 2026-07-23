@@ -514,7 +514,8 @@ try {
         $unsupportedOutput = ($unsupportedLines | Out-String)
 
         Assert-Condition -Condition ($unsupportedExitCode -ne 0) -Message "Updater unexpectedly accepted unsupported v1.4.2 source."
-        Assert-Condition -Condition ($unsupportedOutput -match "2\.0\.0") -Message "Unsupported-version error did not describe the v2.0.0 floor."
+        $minimumVersionPattern = [regex]::Escape([string]$policy.minimumSupportedVersion)
+        Assert-Condition -Condition ($unsupportedOutput -match $minimumVersionPattern) -Message "Unsupported-version error did not describe the v$($policy.minimumSupportedVersion) floor."
         Assert-Condition -Condition (-not (Test-Path -LiteralPath $unsupportedOutputPath)) -Message "Unsupported migration left an output workbook."
         $unsupportedAfterHash = (Get-FileHash -LiteralPath $unsupportedSourcePath -Algorithm SHA256).Hash
         Assert-Condition -Condition ($unsupportedSourceHash -eq $unsupportedAfterHash) -Message "Unsupported source workbook changed during rejection."
