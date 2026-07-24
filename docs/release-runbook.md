@@ -1,7 +1,7 @@
 # Release Runbook
 
 This is the canonical release procedure for Electronic Logbook. Use it instead
-of reconstructing release steps from `AI_HANDOVER.md`.
+of reconstructing release steps from `AGENTS.md`.
 
 ## Release Shape
 

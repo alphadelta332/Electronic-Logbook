@@ -1,6 +1,5 @@
 ~$*
 /.claude
-AI_HANDOVER.md
 AI-Handover.md
 release.local.json
 *.local.json
@@ -39,7 +38,6 @@ IMPROVEMENT_ROADMAP.md
 !updater/release-manifest-signing-public-key.pem
 # Generated mobile app icon assets. Keep img/icon.png tracked as the source.
 /mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
-docs/mobile-ui-overhaul.md
 LOCAL_DEVICE_SETUP_HANDOVER.md
 /.codex-remote-attachments
-docs/mobile-pixel8-bug-triage.md
+TODO.md

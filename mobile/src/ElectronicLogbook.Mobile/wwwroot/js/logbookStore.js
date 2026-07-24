@@ -69,11 +69,29 @@
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key))
     };
 
+    function normalizeThemeMode(value) {
+        return value === "Light" || value === "Dark" || value === "System" ? value : "System";
+    }
+
+    function applyTheme(value) {
+        const themeMode = normalizeThemeMode(value);
+        const themeName = themeMode.toLowerCase();
+        document.documentElement.setAttribute("data-elb-theme", themeName);
+        document.documentElement.style.colorScheme = themeName === "system" ? "light dark" : themeName;
+    }
+
     window.electronicLogbookUiPreferences = {
         load: (key) => localStorage.getItem(key),
-        save: (key, value) => localStorage.setItem(key, value),
+        save: (key, value) => {
+            const themeMode = normalizeThemeMode(value);
+            localStorage.setItem(key, themeMode);
+            applyTheme(themeMode);
+        },
+        applyTheme: (value) => applyTheme(value),
         isSystemDark: () => globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false
     };
+
+    applyTheme(localStorage.getItem("electronic-logbook.ui-preferences"));
 
     window.electronicLogbookNavigation = {
         handleAndroidBack: () => {

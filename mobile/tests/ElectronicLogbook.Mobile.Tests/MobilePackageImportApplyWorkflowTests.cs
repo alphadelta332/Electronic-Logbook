@@ -166,7 +166,7 @@ public sealed class MobilePackageImportApplyWorkflowTests
         var jsRuntime = new ThrowingJsRuntime("Package key is not available.");
         var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
 
-        var error = await Assert.ThrowsAsync<JSException>(async () =>
+        var error = await Assert.ThrowsAsync<MobilePackageImportWorkflowException>(async () =>
             await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
                 local,
                 file,
@@ -174,7 +174,8 @@ public sealed class MobilePackageImportApplyWorkflowTests
                 [existingReceipt],
                 DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
 
-        Assert.Contains("Package key is not available", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Package could not be decrypted with the browser key stored on this device.", error.Message, StringComparison.Ordinal);
+        Assert.Contains("restore the workbook recovery code", error.Message, StringComparison.Ordinal);
         Assert.Single(local.Operations);
         Assert.Single(jsRuntime.Calls);
         Assert.Equal("electronicLogbookKeys.decrypt", jsRuntime.Calls[0].Identifier);

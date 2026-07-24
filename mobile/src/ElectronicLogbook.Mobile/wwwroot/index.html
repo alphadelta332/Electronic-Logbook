@@ -43,7 +43,8 @@
         const isEphemeralTunnel =
             location.hostname.endsWith(".trycloudflare.com") ||
             location.hostname.endsWith(".loca.lt");
-        if ('serviceWorker' in navigator && !isEphemeralTunnel) {
+        const isCapacitorNative = document.documentElement.classList.contains("capacitor-native");
+        if ('serviceWorker' in navigator && !isEphemeralTunnel && !isCapacitorNative) {
             navigator.serviceWorker.register('service-worker.js');
         }
     </script>

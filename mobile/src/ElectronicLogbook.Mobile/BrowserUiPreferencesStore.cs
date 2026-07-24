@@ -15,6 +15,9 @@ public sealed class BrowserUiPreferencesStore(IJSRuntime js)
     public ValueTask SaveAsync(MobileUiPreferences preferences) =>
         js.InvokeVoidAsync("electronicLogbookUiPreferences.save", StorageKey, preferences.ThemeMode);
 
+    public ValueTask ApplyThemeAsync(MobileUiPreferences preferences) =>
+        js.InvokeVoidAsync("electronicLogbookUiPreferences.applyTheme", preferences.ThemeMode);
+
     public ValueTask<bool> IsSystemDarkAsync() =>
         js.InvokeAsync<bool>("electronicLogbookUiPreferences.isSystemDark");
 }

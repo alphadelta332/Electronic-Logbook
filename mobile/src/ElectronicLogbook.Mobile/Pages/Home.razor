@@ -349,14 +349,14 @@
         }
 
         <div class="exchange-box">
+            @if (CanSetupPackageKey)
+            {
+                <button type="button" @onclick="SetupPackageKeyAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Create this device's browser-held package key.">Set up key</button>
+            }
             @if (CanRestorePackageKey)
             {
-                @if (PackageKeyStatus == "Not set")
-                {
-                    <button type="button" @onclick="SetupPackageKeyAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Create this device's browser-held package key.">Set up key</button>
-                }
                 <input type="password" class="recovery-code-input" @bind="RecoveryCodeDraft" autocomplete="off" spellcheck="false" placeholder="Recovery code" disabled="@(IsStorageBlocked || IsExchangeBusy)" />
-                <button type="button" @onclick="RestorePackageKeyAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Restore this device's package key from an existing workbook recovery code.">Restore key</button>
+                <button type="button" @onclick="RestorePackageKeyAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Replace this device's package key with the workbook recovery code.">Restore key</button>
             }
             <button type="button" @onclick="ExportSupportSummaryAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Download a redacted local JSON summary for support or pilot feedback.">Support summary</button>
             <button type="button" @onclick="PreviewPackageAsync" disabled="@(IsStorageBlocked || IsExchangeBusy)" title="Read package manifest without changing this device copy.">Preview package</button>
@@ -530,7 +530,9 @@
             ? "Package import is unavailable because this package uses an unsupported schema."
             : null;
 
-    private bool CanRestorePackageKey => PackageKeyStatus == "Not set" || CanRestorePreviewedLogbook;
+    private bool CanSetupPackageKey => PackageKeyStatus == "Not set";
+
+    private bool CanRestorePackageKey => PackageKeyStatus is "Not set" or "Ready";
 
     private bool CanRestorePreviewedLogbook =>
         ImportPlan is not null &&
@@ -734,6 +736,8 @@
         }
 
         PackageExchangeError = null;
+        var restored = false;
+        var verifiedSelectedPackage = false;
         await BeginExchangeActionAsync("Restoring package key...");
         try
         {
@@ -745,6 +749,24 @@
 
             var restoreLogbookId = FindPackageKeyRestoreLogbookId();
             await PackageKeyStore.ImportRecoveryCodeAsync(restoreLogbookId, RecoveryCodeDraft);
+            if (PendingImportFile is not null)
+            {
+                try
+                {
+                    var validationDocument = PortableLogbookDocument.CreateAustraliaFirst(restoreLogbookId, CustomFields, []);
+                    _ = await MobilePackageImportWorkflow.ReadAsync(validationDocument, PendingImportFile, PackageKeyStore);
+                    verifiedSelectedPackage = true;
+                }
+                catch (MobilePackageImportWorkflowException ex)
+                {
+                    await PackageKeyStore.DeletePackageKeyAsync(restoreLogbookId);
+                    throw new InvalidOperationException(
+                        "Recovery code does not decrypt the selected package. Confirm the recovery code and .elogbook file came from the same workbook export.",
+                        ex);
+                }
+            }
+
+            restored = true;
             if (restoreLogbookId != Document.LogbookId)
             {
                 Document = PortableLogbookDocument.CreateAustraliaFirst(restoreLogbookId, CustomFields, []);
@@ -765,7 +787,9 @@
                 await SaveStateAsync();
             }
 
-            PackageExchangeMessage = PackageKeyStatus == "Ready"
+            PackageExchangeMessage = PackageKeyStatus == "Ready" && verifiedSelectedPackage
+                ? "Package key restored and verified against the selected package."
+                : PackageKeyStatus == "Ready"
                 ? "Package key restored on this device."
                 : "Package key was not restored.";
         }
@@ -775,16 +799,30 @@
         }
         finally
         {
-            RecoveryCodeDraft = string.Empty;
+            if (restored)
+            {
+                RecoveryCodeDraft = string.Empty;
+            }
+
             EndExchangeAction();
         }
     }
 
     private LogbookId FindPackageKeyRestoreLogbookId()
     {
-        if (ImportPlan is null || ImportCompatibility != MobilePackageImportCompatibility.WrongLogbook)
+        if (ImportPlan is null)
         {
+            if (Document.Operations.Count == 0 && ImportReceipts.Count == 0)
+            {
+                throw new InvalidOperationException("Preview the package first, then restore the workbook recovery code for that package.");
+            }
+
             return Document.LogbookId;
+        }
+
+        if (ImportCompatibility != MobilePackageImportCompatibility.WrongLogbook)
+        {
+            return ImportPlan.LogbookId;
         }
 
         if (Document.Operations.Count > 0 || ImportReceipts.Count > 0)
@@ -890,7 +928,14 @@
             PackageExchangeMessage = FormatApplyStatus(result.Status);
             ResetDraft();
         }
-        catch (Exception ex) when (ex is BrowserFileStoreException or PortableLogbookPackageException or MobilePackageImportWorkflowException or PortableLogbookImportException or JSException)
+        catch (MobilePackageImportWorkflowException ex)
+        {
+            PackageExchangeError = PendingImportFile is not null
+                ? "Import could not decrypt the selected package with the key stored on this device. Preview the package, restore the matching workbook recovery code, and confirm the restore message says it was verified against the selected package before importing."
+                : ex.Message;
+            await RefreshPackageKeyStatusAsync();
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or PortableLogbookPackageException or PortableLogbookImportException or JSException)
         {
             PackageExchangeError = ex.Message;
             await RefreshPackageKeyStatusAsync();

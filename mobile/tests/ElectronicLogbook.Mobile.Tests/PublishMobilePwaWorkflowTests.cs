@@ -40,6 +40,36 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.DoesNotContain("database", workflow, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void AndroidDebugInstallWorkflowPreservesDeviceDataByDefault()
+    {
+        var packageJson = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "package.json")));
+        var installScript = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "scripts",
+            "Install-AndroidDebugBuild.ps1")));
+
+        Assert.Contains("install:android:debug", packageJson, StringComparison.Ordinal);
+        Assert.Contains("Install-AndroidDebugBuild.ps1", packageJson, StringComparison.Ordinal);
+        Assert.Contains("\"install\", \"-r\"", installScript, StringComparison.Ordinal);
+        Assert.Contains("deliberately does not clear, uninstall, or reset", installScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("pm clear", installScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("adb uninstall", installScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("force-stop", installScript, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReadWorkflow() =>
         File.ReadAllText(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,

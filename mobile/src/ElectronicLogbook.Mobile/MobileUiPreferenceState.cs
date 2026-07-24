@@ -15,6 +15,7 @@ public sealed class MobileUiPreferenceState(BrowserUiPreferencesStore store)
         var preferences = await store.LoadAsync();
         ThemeMode = preferences.ThemeMode;
         SystemIsDark = await store.IsSystemDarkAsync();
+        await store.ApplyThemeAsync(preferences);
         Changed?.Invoke();
     }
 
@@ -28,6 +29,7 @@ public sealed class MobileUiPreferenceState(BrowserUiPreferencesStore store)
         }
 
         await store.SaveAsync(preferences);
+        await store.ApplyThemeAsync(preferences);
         Changed?.Invoke();
     }
 }

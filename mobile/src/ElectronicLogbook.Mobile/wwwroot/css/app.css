@@ -1,5 +1,5 @@
 :root {
-    color-scheme: light dark;
+    color-scheme: light;
     font-family: "Inter", "Segoe UI", Arial, sans-serif;
     background: #f7faf7;
     color: #102018;
@@ -16,6 +16,8 @@
     --app-attention: #9a6a00;
     --app-warning: #b85c00;
     --app-error: #b42318;
+    --app-surface-raised: var(--app-surface);
+    --app-shadow: 0 8px 24px color-mix(in srgb, #000000 14%, transparent);
 }
 
 html.capacitor-native {
@@ -23,8 +25,28 @@ html.capacitor-native {
     --native-safe-bottom: 18px;
 }
 
+html[data-elb-theme="dark"] {
+    color-scheme: dark;
+    --app-bg: #07130f;
+    --app-surface: #0f211b;
+    --app-surface-alt: #162c24;
+    --app-text: #f3f7f4;
+    --app-text-muted: #91a69b;
+    --app-border: #24443a;
+    --app-primary: #37d47d;
+    --app-primary-text: #04110b;
+    --app-attention: #f1c75b;
+    --app-warning: #f59e42;
+    --app-error: #f87171;
+}
+
+html[data-elb-theme="system"] {
+    color-scheme: light dark;
+}
+
 @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-elb-theme]),
+    html[data-elb-theme="system"] {
         --app-bg: #07130f;
         --app-surface: #0f211b;
         --app-surface-alt: #162c24;
@@ -336,7 +358,7 @@ textarea {
 .logbook-row-date,
 .logbook-row-route > strong,
 .logbook-row-hours > strong {
-    color: #ffffff;
+    color: var(--app-text);
     font-size: 18px;
 }
 

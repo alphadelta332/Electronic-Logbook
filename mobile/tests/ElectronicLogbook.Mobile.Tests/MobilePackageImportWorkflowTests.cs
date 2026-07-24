@@ -55,6 +55,28 @@ public sealed class MobilePackageImportWorkflowTests
         Assert.Empty(jsRuntime.Calls);
     }
 
+    [Fact]
+    public async Task ReadAsyncExplainsBrowserKeyMismatchWhenDecryptFails()
+    {
+        var local = CreateDocument("rev_local");
+        var incoming = CreateDocument("rev_incoming");
+        var packageBytes = PortableLogbookPackage.Write(incoming, FixedKey());
+        var jsRuntime = new ThrowingJsRuntime(
+            "OperationError at Object.decrypt (https://localhost/js/logbookStore.js:165:55)");
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var error = await Assert.ThrowsAsync<MobilePackageImportWorkflowException>(async () =>
+            await MobilePackageImportWorkflow.ReadAsync(local, file, keyStore));
+
+        Assert.Contains("Package could not be decrypted with the browser key stored on this device.", error.Message, StringComparison.Ordinal);
+        Assert.Contains("restore the workbook recovery code", error.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("logbookStore.js", error.Message, StringComparison.Ordinal);
+        Assert.IsType<JSException>(error.InnerException);
+        Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.decrypt", jsRuntime.Calls[0].Identifier);
+    }
+
     private static PortableLogbookDocument CreateDocument(string revisionId)
     {
         var create = new CreateEntryOperation(
@@ -102,6 +124,26 @@ public sealed class MobilePackageImportWorkflowTests
             Calls.Add(new JsCall(identifier, args ?? []));
             var result = Results.Count > 0 ? Results.Dequeue() : default;
             return new ValueTask<TValue>((TValue)result!);
+        }
+    }
+
+    private sealed class ThrowingJsRuntime(string message) : IJSRuntime
+    {
+        public List<JsCall> Calls { get; } = [];
+
+        public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
+        {
+            return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+        }
+
+        public ValueTask<TValue> InvokeAsync<TValue>(
+            string identifier,
+            CancellationToken cancellationToken,
+            object?[]? args)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Calls.Add(new JsCall(identifier, args ?? []));
+            throw new JSException(message);
         }
     }
 

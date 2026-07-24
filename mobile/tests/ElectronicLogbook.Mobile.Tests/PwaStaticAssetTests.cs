@@ -57,6 +57,17 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void NativeCapacitorShellDoesNotRegisterServiceWorker()
+    {
+        var index = ReadMobileAsset("index.html");
+
+        Assert.Contains("document.documentElement.classList.add(\"capacitor-native\")", index, StringComparison.Ordinal);
+        Assert.Contains("const isCapacitorNative = document.documentElement.classList.contains(\"capacitor-native\");", index, StringComparison.Ordinal);
+        Assert.Contains("!isEphemeralTunnel && !isCapacitorNative", index, StringComparison.Ordinal);
+        Assert.Contains("navigator.serviceWorker.register('service-worker.js')", index, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WebManifestIsInstallableWithoutRelatedNativeApplications()
     {
         using var manifest = JsonDocument.Parse(ReadMobileAsset("manifest.webmanifest"));

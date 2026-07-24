@@ -45,12 +45,14 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void HomePageOffersRecoveryRestoreForEmptyWrongLogbookPreview()
+    public void HomePageAlwaysOffersRecoveryRestoreWhenBrowserKeysAreAvailable()
     {
         var page = ReadMobilePage("Home.razor");
 
         Assert.Contains("@if (CanRestorePackageKey)", page, StringComparison.Ordinal);
-        Assert.Contains("private bool CanRestorePackageKey => PackageKeyStatus == \"Not set\" || CanRestorePreviewedLogbook;", page, StringComparison.Ordinal);
+        Assert.Contains("private bool CanRestorePackageKey => PackageKeyStatus is \"Not set\" or \"Ready\";", page, StringComparison.Ordinal);
+        Assert.Contains("Replace this device's package key with the workbook recovery code.", page, StringComparison.Ordinal);
+        Assert.Contains("private bool CanSetupPackageKey => PackageKeyStatus == \"Not set\";", page, StringComparison.Ordinal);
         Assert.Contains("private bool CanRestorePreviewedLogbook =>", page, StringComparison.Ordinal);
         Assert.Contains("ImportCompatibility == MobilePackageImportCompatibility.WrongLogbook", page, StringComparison.Ordinal);
         Assert.Contains("Document.Operations.Count == 0", page, StringComparison.Ordinal);
@@ -151,12 +153,21 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void HomePageClearsRecoveryCodeDraftAfterRestoreAttempt()
+    public void HomePageKeepsRecoveryCodeDraftUnlessRestoreSucceeds()
     {
         var page = ReadMobilePage("Home.razor");
         var handler = ExtractMethodBody(page, "private async Task RestorePackageKeyAsync");
 
+        Assert.Contains("var restored = false;", handler, StringComparison.Ordinal);
+        Assert.Contains("PendingImportFile is not null", handler, StringComparison.Ordinal);
+        Assert.Contains("MobilePackageImportWorkflow.ReadAsync(validationDocument, PendingImportFile, PackageKeyStore)", handler, StringComparison.Ordinal);
+        Assert.Contains("verifiedSelectedPackage = true;", handler, StringComparison.Ordinal);
+        Assert.Contains("Package key restored and verified against the selected package.", handler, StringComparison.Ordinal);
+        Assert.Contains("PackageKeyStore.DeletePackageKeyAsync(restoreLogbookId)", handler, StringComparison.Ordinal);
+        Assert.Contains("Recovery code does not decrypt the selected package.", handler, StringComparison.Ordinal);
+        Assert.Contains("restored = true;", handler, StringComparison.Ordinal);
         Assert.Contains("finally", handler, StringComparison.Ordinal);
+        Assert.Contains("if (restored)", handler, StringComparison.Ordinal);
         Assert.Contains("RecoveryCodeDraft = string.Empty;", handler, StringComparison.Ordinal);
     }
 
@@ -166,10 +177,23 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Home.razor");
         var handler = ExtractMethodBody(page, "private LogbookId FindPackageKeyRestoreLogbookId");
 
+        Assert.Contains("if (ImportPlan is null)", handler, StringComparison.Ordinal);
+        Assert.Contains("Preview the package first, then restore the workbook recovery code for that package.", handler, StringComparison.Ordinal);
         Assert.Contains("ImportCompatibility != MobilePackageImportCompatibility.WrongLogbook", handler, StringComparison.Ordinal);
+        Assert.Contains("return ImportPlan.LogbookId;", handler, StringComparison.Ordinal);
         Assert.Contains("Document.Operations.Count > 0 || ImportReceipts.Count > 0", handler, StringComparison.Ordinal);
         Assert.Contains("Cannot switch logbooks after this device copy has local entries or package receipts.", handler, StringComparison.Ordinal);
-        Assert.Contains("return ImportPlan.LogbookId;", handler, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HomePageExplainsImportStageDecryptFailure()
+    {
+        var page = ReadMobilePage("Home.razor");
+        var handler = ExtractMethodBody(page, "private async Task ApplyPackageAsync");
+
+        Assert.Contains("catch (MobilePackageImportWorkflowException ex)", handler, StringComparison.Ordinal);
+        Assert.Contains("Import could not decrypt the selected package with the key stored on this device.", handler, StringComparison.Ordinal);
+        Assert.Contains("confirm the restore message says it was verified against the selected package", handler, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -316,6 +340,50 @@ public sealed class PwaPageWiringTests
             "src",
             "ElectronicLogbook.Mobile",
             "Program.cs")));
+        var preferenceStore = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "BrowserUiPreferencesStore.cs")));
+        var preferenceState = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "MobileUiPreferenceState.cs")));
+        var css = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "wwwroot",
+            "css",
+            "app.css")));
+        var script = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "wwwroot",
+            "js",
+            "logbookStore.js")));
 
         Assert.Contains("MobileUiPreferenceState", layout, StringComparison.Ordinal);
         Assert.Contains("UiPreferences.IsDarkMode", layout, StringComparison.Ordinal);
@@ -326,6 +394,13 @@ public sealed class PwaPageWiringTests
         Assert.Contains("SetSystemThemeModeAsync", settings, StringComparison.Ordinal);
         Assert.Contains("UiPreferences.SetThemeModeAsync(\"System\")", settings, StringComparison.Ordinal);
         Assert.Contains("builder.Services.AddScoped<MobileUiPreferenceState>()", program, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookUiPreferences.applyTheme", preferenceStore, StringComparison.Ordinal);
+        Assert.Contains("await store.ApplyThemeAsync(preferences);", preferenceState, StringComparison.Ordinal);
+        Assert.Contains("data-elb-theme", script, StringComparison.Ordinal);
+        Assert.Contains("html[data-elb-theme=\"dark\"]", css, StringComparison.Ordinal);
+        Assert.Contains("html[data-elb-theme=\"system\"]", css, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-text);", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("color: #ffffff;\r\n    font-size: 18px;", css, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -1,4 +1,5 @@
 using ElectronicLogbook.Portable;
+using Microsoft.JSInterop;
 
 namespace ElectronicLogbook.Mobile;
 
@@ -22,14 +23,26 @@ public static class MobilePackageImportWorkflow
         }
 
         var decryptionPlan = PortableLogbookPackage.CreateDecryptionPlan(file.Bytes, localDocument.LogbookId);
-        var compressedPlaintext = await keyStore
-            .DecryptAsync(
-                localDocument.LogbookId,
-                decryptionPlan.Nonce,
-                decryptionPlan.Ciphertext,
-                decryptionPlan.Tag,
-                decryptionPlan.ManifestBytes)
-            .ConfigureAwait(false);
+        byte[] compressedPlaintext;
+        try
+        {
+            compressedPlaintext = await keyStore
+                .DecryptAsync(
+                    localDocument.LogbookId,
+                    decryptionPlan.Nonce,
+                    decryptionPlan.Ciphertext,
+                    decryptionPlan.Tag,
+                    decryptionPlan.ManifestBytes)
+                .ConfigureAwait(false);
+        }
+        catch (JSException ex)
+        {
+            throw new MobilePackageImportWorkflowException(
+                "Package could not be decrypted with the browser key stored on this device. " +
+                "If browser storage was reset or this is a replacement install, preview the package, " +
+                "restore the workbook recovery code, then import the package again.",
+                ex);
+        }
         var package = PortableLogbookPackage.ReadDecrypted(decryptionPlan, compressedPlaintext, localDocument.LogbookId);
 
         return new MobilePackageImportWorkflowResult(importPlan, package.Manifest, package.Document);
@@ -41,4 +54,15 @@ public sealed record MobilePackageImportWorkflowResult(
     PortableLogbookPackageManifest Manifest,
     PortableLogbookDocument Document);
 
-public sealed class MobilePackageImportWorkflowException(string message) : Exception(message);
+public sealed class MobilePackageImportWorkflowException : Exception
+{
+    public MobilePackageImportWorkflowException(string message)
+        : base(message)
+    {
+    }
+
+    public MobilePackageImportWorkflowException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
+}

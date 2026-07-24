@@ -81,12 +81,11 @@ Set-Location mobile
 npm ci
 ```
 
-Build, sync, and install the Android debug app with:
+Build, sync, and install the Android debug app with the data-preserving installer:
 
 ```powershell
 Set-Location mobile
-npm run build:android
-adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+npm run install:android:debug
 ```
 
 Debug APKs install as `com.alphadelta.electroniclogbook.dev` while keeping the visible
@@ -94,12 +93,13 @@ app name `LogbookOne`. Release builds keep `com.alphadelta.electroniclogbook`. T
 side-by-side debug application ID keeps development installs away from pilot or
 release-test data without cluttering the launcher label.
 
-Android only preserves installed app data across `adb install -r` when the replacement
-APK has the same package name and signing key as the installed app. If installation
-fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the device already has that package
-installed with a different signature. Export or otherwise preserve any important local
-logbook data before uninstalling. A normal uninstall clears the app's private WebView
-and IndexedDB data; after that, the debug APK can be installed cleanly.
+The installer uses `adb install -r` and deliberately does not clear, uninstall, or reset
+the package. Android only preserves installed app data across `adb install -r` when the
+replacement APK has the same package name and signing key as the installed app. If
+installation fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`, the device already has
+that package installed with a different signature. Export and verify any important local
+logbook data before using a separate reset procedure. A normal uninstall clears the
+app's private WebView and IndexedDB data.
 
 For a quick browser-only Pixel check without building an APK, run the Blazor dev server
 on the laptop, connect the authorized Pixel, and reverse the port:
