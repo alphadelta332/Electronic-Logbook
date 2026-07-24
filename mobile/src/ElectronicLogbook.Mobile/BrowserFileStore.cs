@@ -10,7 +10,7 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
     public const int MaxElogbookBytes = 64 * 1024 * 1024;
     public const string JsonContentType = "application/json";
     public const string JsonExtension = ".json";
-    public const int MaxJsonDownloadBytes = 1024 * 1024;
+    public const int MaxJsonDownloadBytes = MaxElogbookBytes;
 
     public ValueTask<BrowserFile?> PickAsync(string accept = ".elogbook") =>
         jsRuntime.InvokeAsync<BrowserFile?>("electronicLogbookFiles.pick", accept);

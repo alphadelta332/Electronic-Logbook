@@ -343,6 +343,19 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate3SettingsExposesDeviceStateExportForDevelopmentRecovery()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+
+        Assert.Contains("Export device state", settings, StringComparison.Ordinal);
+        Assert.Contains("ExportDeviceStateAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileDeviceStateExportWorkflow.ExportAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("new BrowserLogbookState", settings, StringComparison.Ordinal);
+        Assert.Contains("DeviceStateExportMessage", settings, StringComparison.Ordinal);
+        Assert.Contains("DeviceStateExportError", settings, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3LogbookUsesBalancedEntryRowsAndSeparateTotalsView()
     {
         var page = ReadMobilePage("Logbook.razor");
@@ -351,15 +364,60 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Entries", page, StringComparison.Ordinal);
         Assert.Contains("Totals", page, StringComparison.Ordinal);
         Assert.Contains("logbook-entry-row", page, StringComparison.Ordinal);
-        Assert.Contains("Session.FormatRegistration(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-date", page, StringComparison.Ordinal);
+        Assert.Contains("FormatRowDate(entry.Entry!.Date)", page, StringComparison.Ordinal);
+        Assert.Contains("dd MMM yy", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-route", page, StringComparison.Ordinal);
         Assert.Contains("Session.FormatRoute(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("EntryRemarks(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("entry.Details?.Trim() ?? string.Empty", page, StringComparison.Ordinal);
+        Assert.Contains("StripGeneratedCrewSuffix", page, StringComparison.Ordinal);
+        Assert.Contains("IsGeneratedCrewText(remarks)", page, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(part, \"Crew: -\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
+        Assert.Contains("part.StartsWith(\"PIC:\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
+        Assert.Contains("part.StartsWith(\"Crew:\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-hours", page, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookEntryRules.LoggedTime(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("SimLabel(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("InstrumentSimulated.GetValueOrDefault() > 0 ? \"Sim\" : string.Empty", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.FormatRegistration(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.FormatAircraft(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("EntryMeta", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ldg |", page, StringComparison.Ordinal);
         Assert.Contains("Total hours", page, StringComparison.Ordinal);
         Assert.Contains("filter-sheet", page, StringComparison.Ordinal);
         Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
         Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeletedEntries", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NormalMobileUiHidesUnsupportedTakeoffFields()
+    {
+        var newFlight = ReadMobilePage("NewFlight.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+
+        Assert.DoesNotContain("Takeoffs day", newFlight, StringComparison.Ordinal);
+        Assert.DoesNotContain("Takeoffs night", newFlight, StringComparison.Ordinal);
+        Assert.DoesNotContain("Match takeoffs", newFlight, StringComparison.Ordinal);
+        Assert.DoesNotContain("MatchTakeoffsToLandings", newFlight, StringComparison.Ordinal);
+        Assert.DoesNotContain("Takeoffs day", session, StringComparison.Ordinal);
+        Assert.DoesNotContain("Takeoffs night", session, StringComparison.Ordinal);
+        Assert.Contains("ClearUnsupportedWorkbookFields", session, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidBackButtonDelegatesToInAppNavigationBeforeExit()
+    {
+        var activity = ReadProjectFile("mobile", "android", "app", "src", "main", "java", "com", "alphadelta", "electroniclogbook", "MainActivity.java");
+        var bridge = ReadMobileAsset("js", "logbookStore.js");
+
+        Assert.Contains("public void onBackPressed()", activity, StringComparison.Ordinal);
+        Assert.Contains("handleAndroidBack", activity, StringComparison.Ordinal);
+        Assert.Contains("window.electronicLogbookNavigation", bridge, StringComparison.Ordinal);
+        Assert.Contains("history.back()", bridge, StringComparison.Ordinal);
+        Assert.Contains("path === \"/\"", bridge, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -463,6 +521,46 @@ public sealed class PwaPageWiringTests
             "ElectronicLogbook.Mobile",
             "Pages",
             relativePath)));
+
+    private static string ReadMobileSource(string relativePath) =>
+        File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            relativePath)));
+
+    private static string ReadMobileAsset(params string[] relativePath) =>
+        File.ReadAllText(Path.GetFullPath(Path.Combine(
+            [
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                "src",
+                "ElectronicLogbook.Mobile",
+                "wwwroot",
+                ..relativePath
+            ])));
+
+    private static string ReadProjectFile(params string[] relativePath) =>
+        File.ReadAllText(Path.GetFullPath(Path.Combine(
+            [
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                ..relativePath
+            ])));
 
     private static int CountOccurrences(string value, string pattern)
     {

@@ -43,6 +43,14 @@ html.capacitor-native {
     box-sizing: border-box;
 }
 
+html,
+body,
+#app {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
 body {
     margin: 0;
     min-width: 320px;
@@ -59,11 +67,17 @@ textarea {
 }
 
 .app-shell {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100dvh;
     min-height: 100vh;
+    overflow: hidden;
     background: var(--app-bg);
 }
 
 .app-topbar {
+    flex: 0 0 auto;
     position: sticky;
     top: 0;
     z-index: 20;
@@ -98,9 +112,16 @@ textarea {
 }
 
 .app-main {
+    flex: 1 1 auto;
     width: min(920px, 100%);
+    min-height: 0;
     margin: 0 auto;
     padding: 16px 16px calc(92px + var(--native-safe-bottom));
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
+    -webkit-overflow-scrolling: touch;
 }
 
 .bottom-nav {
@@ -307,17 +328,40 @@ textarea {
 }
 
 .logbook-entry-row {
-    grid-template-columns: minmax(64px, 0.85fr) minmax(96px, 1.2fr) minmax(52px, 0.7fr);
+    grid-template-columns: minmax(92px, 0.95fr) minmax(104px, 1.2fr) minmax(54px, 0.6fr);
     color: var(--app-text);
     text-decoration: none;
 }
 
-.logbook-entry-row strong {
+.logbook-row-date,
+.logbook-row-route > strong,
+.logbook-row-hours > strong {
+    color: #ffffff;
     font-size: 18px;
 }
 
-.logbook-entry-row > strong:nth-child(3),
-.logbook-entry-row > span:nth-child(6) {
+.logbook-row-date {
+    white-space: nowrap;
+}
+
+.logbook-row-route > span,
+.logbook-row-hours > span {
+    color: var(--app-text-muted);
+}
+
+.logbook-row-route,
+.logbook-row-hours {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+}
+
+.logbook-row-route {
+    text-align: center;
+}
+
+.logbook-row-hours {
+    justify-items: end;
     text-align: right;
 }
 
@@ -516,8 +560,7 @@ textarea {
 }
 
 .segmented-control {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: flex;
     gap: 4px;
     border: 1px solid var(--app-border);
     border-radius: 10px;
@@ -526,6 +569,8 @@ textarea {
 }
 
 .segmented-control button {
+    flex: 1 1 0;
+    min-width: 0;
     min-height: 44px;
     border: 0;
     border-radius: 8px;

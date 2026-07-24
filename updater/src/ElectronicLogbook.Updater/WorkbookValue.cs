@@ -58,7 +58,7 @@ internal static class WorkbookValue
 
     public static double? ToLogbookDate(object? yearValue, object? monthValue, object? dayValue)
     {
-        var year = (int)ToDouble(yearValue);
+        var year = ResolveLogbookYear(yearValue);
         var day = ResolveLogbookDay(dayValue);
         var monthText = StableValue(monthValue).Trim();
         var month = ResolveLogbookMonth(monthValue, monthText);
@@ -82,8 +82,23 @@ internal static class WorkbookValue
         }
     }
 
+    private static int ResolveLogbookYear(object? yearValue)
+    {
+        if (yearValue is DateTime date)
+        {
+            return date.Year;
+        }
+
+        return (int)ToDouble(yearValue);
+    }
+
     private static int ResolveLogbookMonth(object? monthValue, string monthText)
     {
+        if (monthValue is DateTime date)
+        {
+            return date.Month;
+        }
+
         var monthNumber = ToDouble(monthValue);
         if (monthNumber >= 1 && monthNumber <= 12)
         {
@@ -135,6 +150,11 @@ internal static class WorkbookValue
 
     private static int ResolveLogbookDay(object? dayValue)
     {
+        if (dayValue is DateTime date)
+        {
+            return date.Day;
+        }
+
         var dayNumber = ToDouble(dayValue);
         if (dayNumber >= 1 && dayNumber <= 31)
         {

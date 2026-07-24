@@ -159,7 +159,8 @@ public static class PortableLogbookCommandRunner
             PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValues(
                 workbookPath,
                 setup.WorkbookRows,
-                setup.InitialDocument.CustomFieldDefinitions);
+                setup.InitialDocument.CustomFieldDefinitions,
+                writeVisiblePayloadCells: false);
             PortableLogbookWorkbookPackageStorage.EnsureWorkbookIdentityMetadata(
                 workbookPath,
                 setup.LogbookId,
@@ -244,7 +245,8 @@ public static class PortableLogbookCommandRunner
         PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValues(
             workbookPath,
             export.WorkbookRows,
-            export.Document.CustomFieldDefinitions);
+            export.Document.CustomFieldDefinitions,
+            writeVisiblePayloadCells: false);
         PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, export.StorageEnvelope);
 
         return new PortableLogbookExportResult(

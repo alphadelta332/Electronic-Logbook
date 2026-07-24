@@ -190,7 +190,8 @@ public static class PortableLogbookWorkbookPackageStorage
     public static PortableLogbookWorkbookMetadataWriteResult WriteHiddenMetadataColumnValues(
         string workbookPath,
         IEnumerable<PortableLogbookWorkbookRow> rows,
-        IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null)
+        IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null,
+        bool writeVisiblePayloadCells = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
         ArgumentNullException.ThrowIfNull(rows);
@@ -260,7 +261,8 @@ public static class PortableLogbookWorkbookPackageStorage
             plan.WorkbookColumnNames,
             metadataColumnIndexes,
             workbookRows,
-            customFieldDefinitions ?? []);
+            customFieldDefinitions ?? [],
+            writeVisiblePayloadCells);
 
         return new PortableLogbookWorkbookMetadataWriteResult(
             Path.GetFullPath(workbookPath),
@@ -314,12 +316,14 @@ public static class PortableLogbookWorkbookPackageStorage
         var fieldsByColumnName = BuildFieldsByWorkbookColumnName();
         var customFieldsByLabel = (customFieldDefinitions ?? [])
             .ToDictionary(field => field.Label, StringComparer.OrdinalIgnoreCase);
+        var usesRealWorkbookSchema = columnNames.Any(IsRealWorkbookSchemaColumn);
         var rows = new List<PortableLogbookWorkbookRow>();
 
         for (var rowNumber = startRow + 1; rowNumber <= endRow; rowNumber++)
         {
             var rawFieldValues = new Dictionary<PortableLogbookFieldDefinition, string?>();
             var rawCustomValues = new Dictionary<CustomFieldDefinition, string?>();
+            var rawWorkbookValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
             EntryId? entryId = null;
             RevisionId? currentRevisionId = null;
             var rowHasUserData = false;
@@ -329,6 +333,7 @@ public static class PortableLogbookWorkbookPackageStorage
                 var columnName = columnNames[index].Trim();
                 var cellReference = $"{ColumnName(startColumn + index)}{rowNumber}";
                 cells.TryGetValue(cellReference, out var cellText);
+                rawWorkbookValues[columnName] = cellText;
                 if (string.Equals(
                     columnName,
                     PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
@@ -354,6 +359,11 @@ public static class PortableLogbookWorkbookPackageStorage
                         rowHasUserData = true;
                     }
 
+                    if (ShouldIgnoreDirectWorkbookField(field, columnName, cellText, usesRealWorkbookSchema))
+                    {
+                        continue;
+                    }
+
                     rawFieldValues[field] = cellText;
                     continue;
                 }
@@ -369,15 +379,30 @@ public static class PortableLogbookWorkbookPackageStorage
                 }
             }
 
-            if (!rowHasUserData || !LooksLikeWorkbookFlightEntry(rawFieldValues))
+            if (!rowHasUserData || !LooksLikeWorkbookFlightEntry(rawFieldValues, rawWorkbookValues, usesRealWorkbookSchema))
             {
                 continue;
             }
 
-            var values = rawFieldValues.ToDictionary(
-                pair => pair.Key.Id,
-                pair => ConvertWorkbookCellValue(pair.Key, pair.Value),
-                StringComparer.Ordinal);
+            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var pair in rawFieldValues)
+            {
+                try
+                {
+                    values[pair.Key.Id] = ConvertWorkbookCellValue(pair.Key, pair.Value);
+                }
+                catch (Exception ex) when (ex is FormatException or OverflowException)
+                {
+                    throw new InvalidDataException(
+                        $"Unable to read Logbook row {rowNumber}, column '{pair.Key.WorkbookColumnName}' as {pair.Key.Kind}. Value: '{pair.Value}'.",
+                        ex);
+                }
+            }
+
+            if (usesRealWorkbookSchema)
+            {
+                ApplyRealWorkbookDerivedValues(values, rawWorkbookValues);
+            }
             var customValues = rawCustomValues.ToDictionary(
                 pair => pair.Key.Id,
                 pair => string.IsNullOrWhiteSpace(pair.Value) ? null : pair.Value);
@@ -420,7 +445,9 @@ public static class PortableLogbookWorkbookPackageStorage
     }
 
     private static bool LooksLikeWorkbookFlightEntry(
-        IReadOnlyDictionary<PortableLogbookFieldDefinition, string?> rawFieldValues)
+        IReadOnlyDictionary<PortableLogbookFieldDefinition, string?> rawFieldValues,
+        IReadOnlyDictionary<string, string?> rawWorkbookValues,
+        bool usesRealWorkbookSchema)
     {
         var hasDate = rawFieldValues.Any(pair =>
             pair.Key.Id == "date" &&
@@ -447,18 +474,208 @@ public static class PortableLogbookWorkbookPackageStorage
             "instrumentSimulated"
         };
 
-        return rawFieldValues.Any(pair =>
+        var hasEntryIdentity = rawFieldValues.Any(pair =>
             entryIdentityFields.Contains(pair.Key.Id) &&
-            !string.IsNullOrWhiteSpace(pair.Value)) ||
-            rawFieldValues.Any(pair =>
-                loggedTimeFields.Contains(pair.Key.Id) &&
-                decimal.TryParse(
-                    pair.Value,
-                    System.Globalization.NumberStyles.Number,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out var value) &&
-                value > 0);
+            !string.IsNullOrWhiteSpace(pair.Value));
+        var hasLoggedTime = rawFieldValues.Any(pair =>
+            loggedTimeFields.Contains(pair.Key.Id) &&
+            decimal.TryParse(
+                pair.Value,
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var value) &&
+            value > 0) ||
+            usesRealWorkbookSchema &&
+            SumWorkbookDecimal(
+                rawWorkbookValues,
+                "SeIcusDay",
+                "SeIcusNight",
+                "SeDualDay",
+                "SeDualNight",
+                "SeCommandDay",
+                "SeCommandNight",
+                "MeIcusDay",
+                "MeIcusNight",
+                "MeDualDay",
+                "MeDualNight",
+                "MeCommandDay",
+                "MeCommandNight",
+                "CopilotDay",
+                "CopilotNight",
+                "TotalHours") > 0;
+
+        return hasEntryIdentity && hasLoggedTime;
     }
+
+    private static bool ShouldIgnoreDirectWorkbookField(
+        PortableLogbookFieldDefinition field,
+        string columnName,
+        string? cellText,
+        bool usesRealWorkbookSchema) =>
+        usesRealWorkbookSchema &&
+        ((field.Id == "pilotInCommand" &&
+            string.Equals(columnName, "PIC", StringComparison.OrdinalIgnoreCase) &&
+            !CanParseWorkbookDecimal(cellText)) ||
+        (field.Id == "day" &&
+            string.Equals(columnName, "Day", StringComparison.OrdinalIgnoreCase)) ||
+        (field.Id == "instrumentSimulated" &&
+            string.Equals(columnName, "IfrSim", StringComparison.OrdinalIgnoreCase)));
+
+    private static bool IsRealWorkbookSchemaColumn(string columnName) =>
+        string.Equals(columnName, "SeCommandDay", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(columnName, "MeCommandDay", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(columnName, "Other Pilot or Crew", StringComparison.OrdinalIgnoreCase);
+
+    private static void ApplyRealWorkbookDerivedValues(
+        IDictionary<string, object?> values,
+        IReadOnlyDictionary<string, string?> rawWorkbookValues)
+    {
+        var command = SumWorkbookDecimal(
+            rawWorkbookValues,
+            "SeCommandDay",
+            "SeCommandNight",
+            "MeCommandDay",
+            "MeCommandNight");
+        var icus = SumWorkbookDecimal(rawWorkbookValues, "SeIcusDay", "SeIcusNight", "MeIcusDay", "MeIcusNight");
+        var coPilot = SumWorkbookDecimal(rawWorkbookValues, "CopilotDay", "CopilotNight");
+        var dual = SumWorkbookDecimal(rawWorkbookValues, "SeDualDay", "SeDualNight", "MeDualDay", "MeDualNight");
+        SetDecimalIfPositive(
+            values,
+            "pilotInCommand",
+            command);
+        SetDecimalIfPositive(values, "multiPilot", icus);
+        SetDecimalIfPositive(values, "coPilot", coPilot);
+        SetDecimalIfPositive(values, "dual", dual);
+        SetDecimalIfPositive(
+            values,
+            "day",
+            SumWorkbookDecimal(
+                rawWorkbookValues,
+                "SeIcusDay",
+                "SeDualDay",
+                "SeCommandDay",
+                "MeIcusDay",
+                "MeDualDay",
+                "MeCommandDay",
+                "CopilotDay"));
+        SetDecimalIfPositive(
+            values,
+            "night",
+            SumWorkbookDecimal(
+                rawWorkbookValues,
+                "SeIcusNight",
+                "SeDualNight",
+                "SeCommandNight",
+                "MeIcusNight",
+                "MeDualNight",
+                "MeCommandNight",
+                "CopilotNight"));
+        SetCountIfPositive(values, "ifrApproaches", SumWorkbookCount(rawWorkbookValues, "TotalApps"));
+
+        if (command + icus + coPilot + dual <= 0)
+        {
+            SetDecimalIfPositive(values, "pilotInCommand", SumWorkbookDecimal(rawWorkbookValues, "TotalHours"));
+        }
+
+        NormalizeInstrumentAndFlightTime(values);
+
+        if (string.IsNullOrWhiteSpace(GetValueString(values, "to")))
+        {
+            var from = GetValueString(values, "from");
+            if (!string.IsNullOrWhiteSpace(from))
+            {
+                values["to"] = from;
+            }
+        }
+
+        if (values.TryGetValue("details", out var details) && details is string text)
+        {
+            values["details"] = text.Trim();
+        }
+    }
+
+    private static void NormalizeInstrumentAndFlightTime(IDictionary<string, object?> values)
+    {
+        var flightTime =
+            GetDecimalValue(values, "multiPilot") +
+            GetDecimalValue(values, "pilotInCommand") +
+            GetDecimalValue(values, "coPilot") +
+            GetDecimalValue(values, "dual") +
+            GetDecimalValue(values, "instructor");
+        var actualInstrument = GetDecimalValue(values, "instrumentActual");
+        if (actualInstrument <= flightTime)
+        {
+            return;
+        }
+
+        if (flightTime <= 0)
+        {
+            values["pilotInCommand"] = actualInstrument;
+            return;
+        }
+
+        values["instrumentActual"] = flightTime;
+    }
+
+    private static void SetDecimalIfPositive(IDictionary<string, object?> values, string fieldId, decimal value)
+    {
+        if (value > 0)
+        {
+            values[fieldId] = value;
+        }
+    }
+
+    private static void SetCountIfPositive(IDictionary<string, object?> values, string fieldId, int value)
+    {
+        if (value > 0)
+        {
+            values[fieldId] = value;
+        }
+    }
+
+    private static decimal SumWorkbookDecimal(IReadOnlyDictionary<string, string?> values, params string[] columnNames) =>
+        columnNames.Sum(columnName => TryReadWorkbookDecimal(values, columnName, out var value) ? value : 0);
+
+    private static int SumWorkbookCount(IReadOnlyDictionary<string, string?> values, params string[] columnNames) =>
+        Convert.ToInt32(
+            SumWorkbookDecimal(values, columnNames),
+            System.Globalization.CultureInfo.InvariantCulture);
+
+    private static bool TryReadWorkbookDecimal(
+        IReadOnlyDictionary<string, string?> values,
+        string columnName,
+        out decimal value)
+    {
+        value = 0;
+        return values.TryGetValue(columnName, out var text) &&
+            decimal.TryParse(
+                text,
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out value);
+    }
+
+    private static bool CanParseWorkbookDecimal(string? value) =>
+        decimal.TryParse(
+            value,
+            System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out _);
+
+    private static string? GetWorkbookText(IReadOnlyDictionary<string, string?> values, string columnName) =>
+        values.TryGetValue(columnName, out var value) && !string.IsNullOrWhiteSpace(value)
+            ? value.Trim()
+            : null;
+
+    private static string? GetValueString(IDictionary<string, object?> values, string fieldId) =>
+        values.TryGetValue(fieldId, out var value) && value is not null
+            ? value.ToString()
+            : null;
+
+    private static decimal GetDecimalValue(IDictionary<string, object?> values, string fieldId) =>
+        values.TryGetValue(fieldId, out var value) && value is not null
+            ? Convert.ToDecimal(value, System.Globalization.CultureInfo.InvariantCulture)
+            : 0;
 
     private static IReadOnlyDictionary<string, PortableLogbookFieldDefinition> BuildFieldsByWorkbookColumnName()
     {
@@ -1187,16 +1404,21 @@ public static class PortableLogbookWorkbookPackageStorage
         IReadOnlyList<string> columnNames,
         IReadOnlyList<int> metadataColumnIndexes,
         IReadOnlyList<PortableLogbookWorkbookRow> rows,
-        IEnumerable<CustomFieldDefinition> customFieldDefinitions)
+        IEnumerable<CustomFieldDefinition> customFieldDefinitions,
+        bool writeVisiblePayloadCells = true)
     {
         var worksheet = ReadXmlEntry(archive, worksheetEntryName)
             ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
         var entryIdColumn = tableStartColumn + metadataColumnIndexes[0] - 1;
         var revisionIdColumn = tableStartColumn + metadataColumnIndexes[1] - 1;
-        var fieldsByColumnName = BuildFieldsByWorkbookColumnName();
-        var customFieldsByLabel = customFieldDefinitions.ToDictionary(
-            field => field.Label,
-            StringComparer.OrdinalIgnoreCase);
+        var fieldsByColumnName = writeVisiblePayloadCells
+            ? BuildFieldsByWorkbookColumnName()
+            : new Dictionary<string, PortableLogbookFieldDefinition>(StringComparer.OrdinalIgnoreCase);
+        var customFieldsByLabel = writeVisiblePayloadCells
+            ? customFieldDefinitions.ToDictionary(
+                field => field.Label,
+                StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, CustomFieldDefinition>(StringComparer.OrdinalIgnoreCase);
         UpsertInlineStringCell(
             worksheet,
             $"{ColumnName(entryIdColumn)}{tableStartRow}",
@@ -1210,14 +1432,18 @@ public static class PortableLogbookWorkbookPackageStorage
         for (var index = 0; index < rows.Count; index++)
         {
             var rowNumber = tableStartRow + 1 + index;
-            WriteWorkbookRowPayloadCells(
-                worksheet,
-                tableStartColumn,
-                rowNumber,
-                columnNames,
-                fieldsByColumnName,
-                customFieldsByLabel,
-                rows[index].Entry);
+            if (writeVisiblePayloadCells)
+            {
+                WriteWorkbookRowPayloadCells(
+                    worksheet,
+                    tableStartColumn,
+                    rowNumber,
+                    columnNames,
+                    fieldsByColumnName,
+                    customFieldsByLabel,
+                    rows[index].Entry);
+            }
+
             UpsertInlineStringCell(worksheet, $"{ColumnName(entryIdColumn)}{rowNumber}", rows[index].EntryId?.Value ?? string.Empty);
             UpsertInlineStringCell(
                 worksheet,
@@ -1227,7 +1453,11 @@ public static class PortableLogbookWorkbookPackageStorage
 
         for (var rowNumber = lastDataRow + 1; rowNumber <= tableEndRow; rowNumber++)
         {
-            RemoveWorkbookRowPayloadCells(worksheet, tableStartColumn, rowNumber, columnNames, fieldsByColumnName, customFieldsByLabel);
+            if (writeVisiblePayloadCells)
+            {
+                RemoveWorkbookRowPayloadCells(worksheet, tableStartColumn, rowNumber, columnNames, fieldsByColumnName, customFieldsByLabel);
+            }
+
             RemoveCell(worksheet, $"{ColumnName(entryIdColumn)}{rowNumber}");
             RemoveCell(worksheet, $"{ColumnName(revisionIdColumn)}{rowNumber}");
         }

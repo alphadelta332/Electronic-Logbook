@@ -11,4 +11,20 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
     }
+
+    @Override
+    public void onBackPressed() {
+        if (getBridge() == null || getBridge().getWebView() == null) {
+            super.onBackPressed();
+            return;
+        }
+
+        getBridge().getWebView().evaluateJavascript(
+            "window.electronicLogbookNavigation?.handleAndroidBack?.() === true",
+            handled -> {
+                if (!"true".equals(handled)) {
+                    MainActivity.super.onBackPressed();
+                }
+            });
+    }
 }

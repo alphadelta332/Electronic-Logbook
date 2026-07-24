@@ -6,7 +6,7 @@ namespace ElectronicLogbook.Mobile;
 
 public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
 {
-    private const int CurrentStoreVersion = 1;
+    internal const int CurrentStoreVersion = 1;
     private const string DocumentKey = "portable-document";
 
     public async ValueTask<PortableLogbookDocument?> LoadDocumentAsync()

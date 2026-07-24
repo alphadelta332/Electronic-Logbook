@@ -236,11 +236,55 @@ public sealed class PwaStaticAssetTests
         Assert.Contains(".exchange-busy", css, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AppCssLetsSegmentedControlsMatchRenderedButtonCount()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+        var segmentedControl = ExtractCssRule(css, ".segmented-control");
+
+        Assert.Contains("display: flex", segmentedControl, StringComparison.Ordinal);
+        Assert.DoesNotContain("grid-template-columns", segmentedControl, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex(@"\.segmented-control button\s*\{[\s\S]*flex:\s*1 1 0", RegexOptions.Singleline),
+            css);
+    }
+
+    [Fact]
+    public void AppCssKeepsMobileShellNavigationAnchoredToViewport()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+        var appShell = ExtractCssRule(css, ".app-shell");
+        var appMain = ExtractCssRule(css, ".app-main");
+        var bottomNav = ExtractCssRule(css, ".bottom-nav");
+
+        Assert.Matches(new Regex(@"html,\s*body,\s*#app\s*\{[\s\S]*height:\s*100%", RegexOptions.Singleline), css);
+        Assert.Matches(new Regex(@"html,\s*body,\s*#app\s*\{[\s\S]*overflow:\s*hidden", RegexOptions.Singleline), css);
+        Assert.Contains("display: flex", appShell, StringComparison.Ordinal);
+        Assert.Contains("height: 100dvh", appShell, StringComparison.Ordinal);
+        Assert.Contains("overflow: hidden", appShell, StringComparison.Ordinal);
+        Assert.Contains("flex: 1 1 auto", appMain, StringComparison.Ordinal);
+        Assert.Contains("min-height: 0", appMain, StringComparison.Ordinal);
+        Assert.Contains("overflow-x: hidden", appMain, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto", appMain, StringComparison.Ordinal);
+        Assert.Contains("overscroll-behavior-y: contain", appMain, StringComparison.Ordinal);
+        Assert.Contains("position: fixed", bottomNav, StringComparison.Ordinal);
+        Assert.Contains("bottom: 0", bottomNav, StringComparison.Ordinal);
+    }
+
     private static string ExtractFileBridge(string bridge)
     {
         var start = bridge.IndexOf("window.electronicLogbookFiles", StringComparison.Ordinal);
         Assert.True(start >= 0);
         return bridge[start..];
+    }
+
+    private static string ExtractCssRule(string css, string selector)
+    {
+        var start = css.IndexOf($"{selector} {{", StringComparison.Ordinal);
+        Assert.True(start >= 0);
+        var end = css.IndexOf('}', start);
+        Assert.True(end > start);
+        return css[start..(end + 1)];
     }
 
     private static string ReadMobileAsset(string relativePath) =>

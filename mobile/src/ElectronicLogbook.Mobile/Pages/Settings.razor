@@ -57,6 +57,17 @@ else
             <MudButton Href="/legacy#exchange" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.IosShare">
                 Open exchange workspace
             </MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ExportDeviceStateAsync" Disabled="@(Session.IsStorageBlocked || IsDeviceStateExportBusy)">
+                Export device state
+            </MudButton>
+            @if (!string.IsNullOrWhiteSpace(DeviceStateExportMessage))
+            {
+                <span class="settings-status-line">@DeviceStateExportMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(DeviceStateExportError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@DeviceStateExportError</span>
+            }
         </section>
 
         <section class="form-section">
@@ -83,8 +94,11 @@ else
 
 @code {
     private bool IsSupportSummaryBusy { get; set; }
+    private bool IsDeviceStateExportBusy { get; set; }
     private string? SupportSummaryMessage { get; set; }
     private string? SupportSummaryError { get; set; }
+    private string? DeviceStateExportMessage { get; set; }
+    private string? DeviceStateExportError { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -126,6 +140,38 @@ else
         finally
         {
             IsSupportSummaryBusy = false;
+        }
+    }
+
+    private async Task ExportDeviceStateAsync()
+    {
+        if (Session.IsStorageBlocked || IsDeviceStateExportBusy)
+        {
+            return;
+        }
+
+        IsDeviceStateExportBusy = true;
+        DeviceStateExportMessage = null;
+        DeviceStateExportError = null;
+        try
+        {
+            var result = await MobileDeviceStateExportWorkflow.ExportAsync(
+                new BrowserLogbookState(
+                    Session.Document,
+                    Session.ImportReceipts,
+                    Session.LastSuccessfulExportAt,
+                    Session.LastSuccessfulExport),
+                FileStore,
+                DateTimeOffset.UtcNow);
+            DeviceStateExportMessage = $"Exported {result.FileName}.";
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or JSException)
+        {
+            DeviceStateExportError = ex.Message;
+        }
+        finally
+        {
+            IsDeviceStateExportBusy = false;
         }
     }
 }

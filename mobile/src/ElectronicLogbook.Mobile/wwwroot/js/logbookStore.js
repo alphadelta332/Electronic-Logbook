@@ -75,6 +75,23 @@
         isSystemDark: () => globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false
     };
 
+    window.electronicLogbookNavigation = {
+        handleAndroidBack: () => {
+            const path = location.pathname.replace(/\/+$/, "") || "/";
+            if (path === "/") {
+                return false;
+            }
+
+            if (history.length > 1) {
+                history.back();
+            } else {
+                location.assign("/");
+            }
+
+            return true;
+        }
+    };
+
     window.electronicLogbookKeys = {
         isSupported: () => Boolean(globalThis.crypto?.subtle && globalThis.indexedDB),
         hasPackageKey: async (keyName) => Boolean(

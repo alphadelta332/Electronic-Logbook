@@ -420,6 +420,52 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadCurrentRowsKeepsWorkbookRemarksSeparateFromCrewColumns()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(
+                archive,
+                "A1:K2",
+                [
+                    "Date",
+                    "Type",
+                    "Reg",
+                    "From",
+                    "To",
+                    "Remarks",
+                    "PIC",
+                    "Other Pilot or Crew",
+                    "SeCommandDay",
+                    "Portable Entry ID",
+                    "Portable Current Revision ID"
+                ]);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A2", "2026-07-20");
+            UpsertInlineStringCell(worksheet, "B2", "A320");
+            UpsertInlineStringCell(worksheet, "C2", "VH-ALS");
+            UpsertInlineStringCell(worksheet, "D2", "YSBK");
+            UpsertInlineStringCell(worksheet, "E2", "YMML");
+            UpsertInlineStringCell(worksheet, "F2", "x3 CCTS PIPS");
+            UpsertInlineStringCell(worksheet, "G2", "Self");
+            UpsertInlineStringCell(worksheet, "H2", "Training captain");
+            UpsertInlineStringCell(worksheet, "I2", "1.2");
+            UpsertInlineStringCell(worksheet, "J2", "ent_crew");
+            UpsertInlineStringCell(worksheet, "K2", "rev_crew");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
+
+        var row = Assert.Single(rows);
+        Assert.Equal("x3 CCTS PIPS", row.Entry.Details);
+        Assert.Equal(1.2m, row.Entry.PilotInCommand);
+        Assert.DoesNotContain("PIC:", row.Entry.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("Crew:", row.Entry.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReadCurrentRowsSkipsCompletelyBlankRows()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);

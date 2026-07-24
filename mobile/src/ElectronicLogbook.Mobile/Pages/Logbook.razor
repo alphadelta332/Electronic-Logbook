@@ -21,7 +21,7 @@ else
             <span class="draft-pill">@Session.CurrentEntries.Count entry(s)</span>
         </header>
 
-        @if (!string.IsNullOrWhiteSpace(Session.LastActionMessage))
+        @if (Session.ShouldShowLastActionMessage(MobileActionMessageSurface.Logbook))
         {
             <section class="state-banner" role="status">
                 <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" />
@@ -81,12 +81,15 @@ else
                         @foreach (var entry in FilteredEntries)
                         {
                             <NavLink class="flight-row logbook-entry-row" href="@($"/flights/{entry.EntryId.Value}")">
-                                <strong>@Session.FormatRegistration(entry.Entry!)</strong>
-                                <strong>@Session.FormatRoute(entry.Entry!)</strong>
-                                <strong>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!))</strong>
-                                <span>@MobileLogbookSession.FormatDate(entry.Entry!.Date)</span>
-                                <span>@Session.FormatAircraft(entry.Entry!)</span>
-                                <span>@EntryMeta(entry.Entry!)</span>
+                                <strong class="logbook-row-date">@FormatRowDate(entry.Entry!.Date)</strong>
+                                <span class="logbook-row-route">
+                                    <strong>@Session.FormatRoute(entry.Entry!)</strong>
+                                    <span>@EntryRemarks(entry.Entry!)</span>
+                                </span>
+                                <span class="logbook-row-hours">
+                                    <strong>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!))</strong>
+                                    <span>@SimLabel(entry.Entry!)</span>
+                                </span>
                             </NavLink>
                         }
                     </div>
@@ -241,12 +244,46 @@ else
         FilterFlightsWithApproachesOnly = false;
     }
 
-    private static string EntryMeta(PortableLogbookEntry entry)
+    private static string EntryRemarks(PortableLogbookEntry entry) =>
+        StripGeneratedCrewSuffix(entry.Details?.Trim() ?? string.Empty);
+
+    private static string StripGeneratedCrewSuffix(string remarks)
     {
-        var landings = (entry.LandingsDay ?? 0) + (entry.LandingsNight ?? 0);
-        var approaches = CountApproaches(entry);
-        return $"{landings} ldg | {approaches} app";
+        if (IsGeneratedCrewText(remarks))
+        {
+            return string.Empty;
+        }
+
+        var suffixStart = remarks.LastIndexOf(" (", StringComparison.Ordinal);
+        if (suffixStart < 0 || !remarks.EndsWith(')'))
+        {
+            return remarks;
+        }
+
+        var suffix = remarks[(suffixStart + 2)..^1];
+        return IsGeneratedCrewText(suffix)
+            ? remarks[..suffixStart]
+            : remarks;
     }
+
+    private static bool IsGeneratedCrewText(string value)
+    {
+        var parts = value
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !string.Equals(part, "Crew: -", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        return parts.Length > 0 &&
+            parts.All(part =>
+                part.StartsWith("PIC:", StringComparison.OrdinalIgnoreCase) ||
+                part.StartsWith("Crew:", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FormatRowDate(DateOnly? date) =>
+        date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
+
+    private static string SimLabel(PortableLogbookEntry entry) =>
+        entry.InstrumentSimulated.GetValueOrDefault() > 0 ? "Sim" : string.Empty;
 
     private static int CountApproaches(PortableLogbookEntry entry) =>
         (entry.IfrApproaches ?? 0) + (entry.Holding ?? 0) + (entry.Rnav ?? 0) + (entry.Circling ?? 0);

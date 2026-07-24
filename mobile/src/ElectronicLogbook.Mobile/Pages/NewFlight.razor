@@ -33,7 +33,7 @@ else
             <span class="draft-pill">@(Session.HasEditedDraft ? "Draft edited" : "Ready")</span>
         </header>
 
-        @if (!string.IsNullOrWhiteSpace(Session.LastActionMessage))
+        @if (Session.ShouldShowLastActionMessage(MobileActionMessageSurface.Draft))
         {
             <section class="state-banner" role="status">
                 <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" />
@@ -114,15 +114,10 @@ else
             <div class="section-title-row">
                 <div>
                     <span class="eyebrow">Currency</span>
-                    <h2>Take-offs, landings, approaches</h2>
+                    <h2>Landings and approaches</h2>
                 </div>
-                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="Session.MatchTakeoffsToLandings" Disabled="@Session.IsStorageBlocked">
-                    Match takeoffs
-                </MudButton>
             </div>
             <div class="field-grid numeric-grid">
-                <label>Takeoffs day <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.TakeoffsDay" /></label>
-                <label>Takeoffs night <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.TakeoffsNight" /></label>
                 <label>Landings day <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.LandingsDay" /></label>
                 <label>Landings night <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.LandingsNight" /></label>
                 <label>IFR approaches <input type="number" min="0" inputmode="numeric" @bind="Session.Draft.IfrApproaches" /></label>

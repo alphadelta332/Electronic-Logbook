@@ -37,10 +37,16 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Null(session.EditingEntryId);
         Assert.Equal(DateOnly.FromDateTime(DateTime.Today), session.Draft.Date);
         Assert.Equal("VH-EDIT", session.Draft.Registration);
+        Assert.Null(session.Draft.TakeoffsDay);
+        Assert.Null(session.Draft.TakeoffsNight);
+        Assert.Equal("Draft started from recent flight.", session.LastActionMessage);
+        Assert.True(session.ShouldShowLastActionMessage(MobileActionMessageSurface.Draft));
+        Assert.False(session.ShouldShowLastActionMessage(MobileActionMessageSurface.Logbook));
         await session.SaveEntryAsync();
 
         Assert.Equal(2, session.CurrentEntries.Count);
         Assert.Equal(3, session.Document.Operations.Count);
+        Assert.True(session.ShouldShowLastActionMessage(MobileActionMessageSurface.Logbook));
 
         await session.DeleteEntryAsync(edited);
 

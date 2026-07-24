@@ -46,6 +46,13 @@ public sealed class MobileLogbookSession(
 
     public string? LastActionMessage { get; private set; }
 
+    private MobileActionMessageScope LastActionMessageScope { get; set; } = MobileActionMessageScope.Global;
+
+    public bool ShouldShowLastActionMessage(MobileActionMessageSurface surface) =>
+        !string.IsNullOrWhiteSpace(LastActionMessage) &&
+        (LastActionMessageScope == MobileActionMessageScope.Global ||
+            surface == MobileActionMessageSurface.Draft);
+
     public PortableLogbookMergeResult MergeResult =>
         PortableLogbookMerger.Merge(Document.Operations);
 
@@ -130,7 +137,7 @@ public sealed class MobileLogbookSession(
         }
 
         HasAttemptedSubmit = true;
-        LastActionMessage = null;
+        ClearLastActionMessage();
         if (DraftErrors.Count > 0)
         {
             return;
@@ -155,7 +162,7 @@ public sealed class MobileLogbookSession(
 
         Document = MobileLogbookDocument.AppendOperation(Document, CustomFields, operation);
         await SaveStateAsync();
-        LastActionMessage = EditingEntryId is null ? "Flight added." : "Correction saved.";
+        SetLastActionMessage(EditingEntryId is null ? "Flight added." : "Correction saved.");
         ResetDraft();
     }
 
@@ -181,9 +188,10 @@ public sealed class MobileLogbookSession(
         }
 
         Draft = EntryDraft.FromEntry(entry, preserveDate: false);
+        Draft.ClearUnsupportedWorkbookFields();
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
-        LastActionMessage = "Draft started from recent flight.";
+        SetLastActionMessage("Draft started from recent flight.", MobileActionMessageScope.Draft);
     }
 
     public void EditEntry(PortableLogbookMaterializedEntry entry)
@@ -198,7 +206,7 @@ public sealed class MobileLogbookSession(
         EditingRevisionId = entry.CurrentRevisionId;
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
-        LastActionMessage = "Correction draft opened.";
+        SetLastActionMessage("Correction draft opened.", MobileActionMessageScope.Draft);
     }
 
     public async Task DeleteEntryAsync(PortableLogbookMaterializedEntry entry)
@@ -223,7 +231,7 @@ public sealed class MobileLogbookSession(
             ResetDraft();
         }
 
-        LastActionMessage = "Entry deleted.";
+        SetLastActionMessage("Entry deleted.");
     }
 
     public async Task ResolveConflictAsync(PortableLogbookConflict conflict, RevisionId selectedRevisionId)
@@ -254,7 +262,21 @@ public sealed class MobileLogbookSession(
 
         Document = MobileLogbookDocument.AppendOperation(Document, CustomFields, resolution);
         await SaveStateAsync();
-        LastActionMessage = "Conflict resolved.";
+        SetLastActionMessage("Conflict resolved.");
+    }
+
+    private void SetLastActionMessage(
+        string message,
+        MobileActionMessageScope scope = MobileActionMessageScope.Global)
+    {
+        LastActionMessage = message;
+        LastActionMessageScope = scope;
+    }
+
+    private void ClearLastActionMessage()
+    {
+        LastActionMessage = null;
+        LastActionMessageScope = MobileActionMessageScope.Global;
     }
 
     public PortableLogbookMaterializedEntry? FindCurrentEntry(string? entryId)
@@ -300,18 +322,6 @@ public sealed class MobileLogbookSession(
 
         Draft.Day = Draft.FlightTime;
         Draft.Night = 0;
-        MarkDraftEdited();
-    }
-
-    public void MatchTakeoffsToLandings()
-    {
-        if (IsStorageBlocked)
-        {
-            return;
-        }
-
-        Draft.TakeoffsDay = Draft.LandingsDay;
-        Draft.TakeoffsNight = Draft.LandingsNight;
         MarkDraftEdited();
     }
 
@@ -396,8 +406,6 @@ public sealed class MobileLogbookSession(
         yield return new("Night", FormatNullableHours(entry.Night));
         yield return new("Instrument actual", FormatNullableHours(entry.InstrumentActual));
         yield return new("Instrument sim", FormatNullableHours(entry.InstrumentSimulated));
-        yield return new("Takeoffs day", FormatNullableCount(entry.TakeoffsDay));
-        yield return new("Takeoffs night", FormatNullableCount(entry.TakeoffsNight));
         yield return new("Landings day", FormatNullableCount(entry.LandingsDay));
         yield return new("Landings night", FormatNullableCount(entry.LandingsNight));
         yield return new("IFR approaches", FormatNullableCount(entry.IfrApproaches));
@@ -527,8 +535,6 @@ public sealed class EntryDraft
 
     public decimal LoggedTime => FlightTime + InstrumentSimulated;
 
-    public int TotalTakeoffs => TakeoffsDay.GetValueOrDefault() + TakeoffsNight.GetValueOrDefault();
-
     public int TotalLandings => LandingsDay.GetValueOrDefault() + LandingsNight.GetValueOrDefault();
 
     public int TotalApproaches =>
@@ -595,6 +601,12 @@ public sealed class EntryDraft
         return draft;
     }
 
+    public void ClearUnsupportedWorkbookFields()
+    {
+        TakeoffsDay = null;
+        TakeoffsNight = null;
+    }
+
     public PortableLogbookEntry ToEntry(IEnumerable<CustomFieldDefinition> fields)
     {
         IReadOnlyDictionary<CustomFieldId, string?> customValues = fields
@@ -632,4 +644,16 @@ public sealed class EntryDraft
             CustomFields = customValues
         };
     }
+}
+
+public enum MobileActionMessageSurface
+{
+    Draft,
+    Logbook
+}
+
+internal enum MobileActionMessageScope
+{
+    Global,
+    Draft
 }

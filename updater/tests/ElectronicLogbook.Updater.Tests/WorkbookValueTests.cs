@@ -64,6 +64,19 @@ public sealed class WorkbookValueTests
         Assert.Equal(expected, WorkbookValue.ToLogbookDate(year, month, day));
     }
 
+    [Fact]
+    public void ToLogbookDateAcceptsTypedWorkbookDateValues()
+    {
+        var expected = new DateTime(2026, 1, 17).ToOADate();
+
+        Assert.Equal(
+            expected,
+            WorkbookValue.ToLogbookDate(
+                new DateTime(2026, 1, 1),
+                new DateTime(2026, 1, 1),
+                new DateTime(2026, 1, 17)));
+    }
+
     [Theory]
     [InlineData(0, "Jan", 17)]
     [InlineData(2026, "", 17)]
