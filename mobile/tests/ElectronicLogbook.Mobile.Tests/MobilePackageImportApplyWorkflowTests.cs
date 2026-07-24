@@ -11,6 +11,84 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobilePackageImportApplyWorkflowTests
 {
     [Fact]
+    public async Task ApplyIfReadyAsyncV2AppliesWorkbookFaithfulPackageAndRecordsReceipt()
+    {
+        var local = CreateDocumentV2("rev_local", 1.0m);
+        var incoming = CreateDocumentV2("rev_local", 1.0m, CreateCorrectionV2("rev_incoming", "rev_local", 1.4m));
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var jsRuntime = RuntimeWithDecryptionV2(packageBytes, key, local.LogbookId);
+        var file = new BrowserFile("workbook-v2.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [],
+            DateTimeOffset.Parse("2026-07-19T00:01:00Z"));
+        var materialized = Assert.Single(PortableLogbookWorkbookProjection.MergeV2(result.Document.Operations).Entries.Values);
+
+        Assert.Equal(MobilePackageImportApplyStatus.Applied, result.Status);
+        Assert.Equal(PortableLogbookImportPlanStatus.ReadyToApply, result.Plan?.Status);
+        Assert.Equal(2, result.Document.Operations.Count);
+        Assert.Equal(new RevisionId("rev_incoming"), materialized.CurrentRevisionId);
+        Assert.Equal(1.4m, materialized.Entry?.SeCommandDay);
+        var receipt = Assert.Single(result.ImportReceipts);
+        Assert.Equal(incoming.Operations.Count, receipt.OperationCount);
+        Assert.Same(receipt, result.Receipt);
+    }
+
+    [Fact]
+    public async Task ApplyIfReadyAsyncV2RecordsDuplicateOperationsWithoutChangingDocument()
+    {
+        var local = CreateDocumentV2("rev_local", 1.0m);
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(local, key);
+        var jsRuntime = RuntimeWithDecryptionV2(packageBytes, key, local.LogbookId);
+        var file = new BrowserFile("workbook-v2.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [],
+            DateTimeOffset.Parse("2026-07-19T00:01:00Z"));
+
+        Assert.Equal(MobilePackageImportApplyStatus.DuplicateOperationsRecorded, result.Status);
+        Assert.Same(local, result.Document);
+        Assert.Equal(PortableLogbookImportPlanStatus.DuplicateOnly, result.Plan?.Status);
+        Assert.Single(result.ImportReceipts);
+    }
+
+    [Fact]
+    public async Task ApplyIfReadyAsyncV2RejectsV1PackageBeforeDecryptingOrRecordingReceipt()
+    {
+        var local = CreateDocumentV2("rev_local", 1.0m);
+        var v1PackageBytes = PortableLogbookPackage.Write(CreateDocument("rev_v1", 1.2m), FixedKey());
+        var existingReceipt = new PortableLogbookPackageReceipt(
+            "ABC123",
+            local.LogbookId,
+            local.Operations.Count,
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-18T00:01:00Z"));
+        var jsRuntime = new RecordingJsRuntime();
+        var file = new BrowserFile("old-mobile.elogbook", BrowserFileStore.ElogbookContentType, v1PackageBytes);
+
+        var error = await Assert.ThrowsAsync<MobilePackageImportWorkflowException>(async () =>
+            await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+                local,
+                file,
+                new BrowserPackageKeyStore(jsRuntime),
+                [existingReceipt],
+                DateTimeOffset.Parse("2026-07-19T00:01:00Z")));
+
+        Assert.Contains("UnsupportedSchema", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Re-import the authoritative workbook", error.Message, StringComparison.Ordinal);
+        Assert.Single(local.Operations);
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
     public async Task ApplyIfReadyAsyncAppliesConflictFreePackageAndRecordsReceipt()
     {
         var local = CreateDocument("rev_local", 1.0m);
@@ -609,8 +687,30 @@ public sealed class MobilePackageImportApplyWorkflowTests
             new PortableLogbookOperation[] { create }.Concat(additionalOperations));
     }
 
+    private static PortableLogbookDocumentV2 CreateDocumentV2(
+        string revisionId,
+        decimal seCommandDay,
+        params PortableLogbookOperationV2[] additionalOperations)
+    {
+        var create = CreateOperationV2(revisionId, seCommandDay);
+        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            new PortableLogbookOperationV2[] { create }.Concat(additionalOperations));
+    }
+
     private static CreateEntryOperation CreateOperation(string revisionId, decimal pilotInCommand) =>
         CreateOperation(revisionId, pilotInCommand, null, null);
+
+    private static PortableLogbookOperationV2 CreateOperationV2(string revisionId, decimal seCommandDay) =>
+        PortableLogbookOperationV2.Create(
+            new LogbookId("log_mobile"),
+            new EntryId("ent_00000000000000000000000000000001"),
+            new RevisionId(revisionId),
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            EntryV2(seCommandDay));
 
     private static CreateEntryOperation CreateOperation(
         string revisionId,
@@ -638,6 +738,19 @@ public sealed class MobilePackageImportApplyWorkflowTests
             DateTimeOffset.Parse("2026-07-18T00:05:00Z"),
             Entry(pilotInCommand));
 
+    private static PortableLogbookOperationV2 CreateCorrectionV2(
+        string revisionId,
+        string parentRevisionId,
+        decimal seCommandDay) =>
+        PortableLogbookOperationV2.Correct(
+            new LogbookId("log_mobile"),
+            new EntryId("ent_00000000000000000000000000000001"),
+            new RevisionId(revisionId),
+            [new RevisionId(parentRevisionId)],
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-18T00:05:00Z"),
+            EntryV2(seCommandDay));
+
     private static PortableLogbookEntry Entry(decimal pilotInCommand) =>
         Entry(pilotInCommand, null, null);
 
@@ -658,12 +771,46 @@ public sealed class MobilePackageImportApplyWorkflowTests
                 : new Dictionary<CustomFieldId, string?>()
         };
 
+    private static PortableLogbookWorkbookEntry EntryV2(decimal seCommandDay) =>
+        PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 7,
+            Day = 18,
+            Type = "C172",
+            Reg = "VH-ABC",
+            From = "YSBK",
+            To = "YSCN",
+            Pic = "Pilot",
+            SeCommandDay = seCommandDay
+        };
+
     private static RecordingJsRuntime RuntimeWithDecryption(
         byte[] packageBytes,
         byte[] key,
         LogbookId logbookId)
     {
         var decryptionPlan = PortableLogbookPackage.CreateDecryptionPlan(packageBytes, logbookId);
+        var compressedPlaintext = new byte[decryptionPlan.Ciphertext.Length];
+        using var aes = new AesGcm(key, decryptionPlan.Tag.Length);
+        aes.Decrypt(
+            decryptionPlan.Nonce,
+            decryptionPlan.Ciphertext,
+            decryptionPlan.Tag,
+            compressedPlaintext,
+            decryptionPlan.ManifestBytes);
+
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(compressedPlaintext);
+        return jsRuntime;
+    }
+
+    private static RecordingJsRuntime RuntimeWithDecryptionV2(
+        byte[] packageBytes,
+        byte[] key,
+        LogbookId logbookId)
+    {
+        var decryptionPlan = PortableLogbookPackage.CreateDecryptionPlanV2(packageBytes, logbookId);
         var compressedPlaintext = new byte[decryptionPlan.Ciphertext.Length];
         using var aes = new AesGcm(key, decryptionPlan.Tag.Length);
         aes.Decrypt(

@@ -33,7 +33,7 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         Assert.True(ExcelWorkbookMigrator.ShouldPreservePortableMetadataColumns([
             "Year",
             "Reg",
-            "Portable Entry ID",
+            "EntryID",
             "Circling"
         ]));
     }
@@ -44,10 +44,10 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(["Year", "Reg", "Circling"]);
 
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToAdd.Select(column => column.WorkbookColumnName));
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToHide);
     }
 
@@ -56,7 +56,7 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
     {
         var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan([
             "Year",
-            "Portable Entry ID",
+            "EntryID",
             "Reg",
             "Portable Current Revision ID",
             "Circling"
@@ -65,7 +65,7 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         Assert.False(plan.RequiresMutation);
         Assert.Empty(plan.ColumnsToAdd);
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToHide);
     }
 
@@ -75,7 +75,7 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(
             [
                 "Year",
-                "Portable Entry ID",
+                "EntryID",
                 "Reg",
                 "Portable Current Revision ID",
                 "Circling"
@@ -84,13 +84,13 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
 
         Assert.True(plan.ShouldPreserve);
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnPlan.ColumnsToAdd.Select(column => column.WorkbookColumnName));
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToCopy);
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToHide);
     }
 
@@ -102,7 +102,7 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
             [
                 "Year",
                 "Reg",
-                "Portable Entry ID",
+                "EntryID",
                 "Portable Current Revision ID",
                 "Circling"
             ]);

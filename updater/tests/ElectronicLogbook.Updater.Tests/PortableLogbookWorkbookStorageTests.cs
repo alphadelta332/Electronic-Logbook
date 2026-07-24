@@ -26,6 +26,27 @@ public sealed class PortableLogbookWorkbookStorageTests
     }
 
     [Fact]
+    public void StorageEnvelopeRoundTripsV2EncryptedWorkbookFaithfulHistory()
+    {
+        var document = CreateDocumentV2();
+        var key = PortableLogbookKey.Generate();
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, packageBytes, []);
+        var json = PortableLogbookWorkbookStorage.Serialize(envelope);
+        var roundTripped = PortableLogbookWorkbookStorage.Deserialize(json);
+        var state = PortableLogbookWorkbookStorage.OpenEnvelopeV2(roundTripped, key);
+
+        Assert.Equal(document.LogbookId, roundTripped.LogbookId);
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, roundTripped.SchemaVersion);
+        Assert.Equal(document.CurrencyOverrideDates, state.Document.CurrencyOverrideDates);
+        var operation = Assert.Single(state.Document.Operations);
+        Assert.Equal(1.2m, operation.Entry?.SeCommandDay);
+        Assert.Equal(0.4m, operation.Entry?.IfrIf);
+        Assert.Equal(2, operation.Entry?.Ils);
+    }
+
+    [Fact]
     public void OpenEnvelopeDecryptsHistoryAndPreservesReceipts()
     {
         var document = CreateDocument();
@@ -201,6 +222,40 @@ public sealed class PortableLogbookWorkbookStorageTests
             });
 
         return PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+    }
+
+    private static PortableLogbookDocumentV2 CreateDocumentV2()
+    {
+        var logbookId = new LogbookId("log_storage_v2");
+        var customFieldId = new CustomFieldId("cf_workbook_1");
+        var create = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_1"),
+            new RevisionId("rev_1"),
+            new DeviceId("dev_excel"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                Year = 2026,
+                Month = 7,
+                Day = 18,
+                Type = "DA40",
+                Reg = "VH-SECRET",
+                From = "YSBK",
+                To = "YSCN",
+                Remarks = "Training details",
+                FlightReview = true,
+                CustomFields = new Dictionary<CustomFieldId, string?> { [customFieldId] = "Alpha" },
+                SeCommandDay = 1.2m,
+                IfrIf = 0.4m,
+                Ils = 2
+            });
+
+        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            [new CustomFieldDefinition(customFieldId, "Custom 1", 1)],
+            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 6, 1), null, null),
+            [create]);
     }
 
     private static PortableLogbookEntry Entry(string registration) =>

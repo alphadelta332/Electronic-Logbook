@@ -12,7 +12,7 @@ public static class PortableLogbookWorkbookMetadata
 
     public static IReadOnlyList<PortableLogbookMetadataColumnDefinition> HiddenLogbookColumns { get; } =
     [
-        new("PortableEntryId", "Portable Entry ID", PortableLogbookMetadataColumnKind.EntryId),
+        new("EntryId", PortableLogbookWorkbookFieldCatalog.EntryIdColumnName, PortableLogbookMetadataColumnKind.EntryId),
         new("PortableCurrentRevisionId", "Portable Current Revision ID", PortableLogbookMetadataColumnKind.CurrentRevisionId)
     ];
 

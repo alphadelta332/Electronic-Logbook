@@ -12,7 +12,7 @@ public sealed class PortableLogbookWorkbookMetadataTests
             .Select(field => field.WorkbookColumnName)
             .ToHashSet(StringComparer.Ordinal);
 
-        Assert.Equal(["Portable Entry ID", "Portable Current Revision ID"], metadataColumns.Select(column => column.WorkbookColumnName));
+        Assert.Equal(["EntryID", "Portable Current Revision ID"], metadataColumns.Select(column => column.WorkbookColumnName));
         Assert.All(metadataColumns, column => Assert.DoesNotContain(column.WorkbookColumnName, rawWorkbookColumnNames));
     }
 
@@ -34,7 +34,7 @@ public sealed class PortableLogbookWorkbookMetadataTests
         {
             "Date",
             "Reg",
-            "Portable Entry ID",
+            "EntryID",
             "Portable Current Revision ID",
             "Circling"
         };
@@ -42,13 +42,13 @@ public sealed class PortableLogbookWorkbookMetadataTests
         var filtered = PortableLogbookWorkbookMetadata.FilterUserExportColumns(columns);
 
         Assert.Equal(["Date", "Reg", "Circling"], filtered);
-        Assert.True(PortableLogbookWorkbookMetadata.IsPortableMetadataColumn("portable entry id"));
+        Assert.True(PortableLogbookWorkbookMetadata.IsPortableMetadataColumn("EntryID"));
     }
 
     [Fact]
     public void FilterUserExportColumnsOmitsPortableMetadataColumnsWithHeaderWhitespace()
     {
-        var columns = new[] { "Date", " Portable Entry ID ", "Reg" };
+        var columns = new[] { "Date", " EntryID ", "Reg" };
 
         var filtered = PortableLogbookWorkbookMetadata.FilterUserExportColumns(columns);
 
@@ -64,13 +64,13 @@ public sealed class PortableLogbookWorkbookMetadataTests
 
         Assert.True(plan.RequiresMutation);
         Assert.Equal(
-            ["Date", "Reg", "Circling", "Portable Entry ID", "Portable Current Revision ID"],
+            ["Date", "Reg", "Circling", "EntryID", "Portable Current Revision ID"],
             plan.WorkbookColumnNames);
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToAdd.Select(column => column.WorkbookColumnName));
         Assert.Equal(
-            ["Portable Entry ID", "Portable Current Revision ID"],
+            ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToHide);
     }
 
@@ -78,22 +78,22 @@ public sealed class PortableLogbookWorkbookMetadataTests
     public void CreateHiddenColumnPlanDoesNotDuplicateExistingMetadataColumns()
     {
         var plan = PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(
-            ["Date", "Portable Entry ID", "Reg", "portable current revision id"]);
+            ["Date", "EntryID", "Reg", "portable current revision id"]);
 
         Assert.False(plan.RequiresMutation);
-        Assert.Equal(["Date", "Portable Entry ID", "Reg", "portable current revision id"], plan.WorkbookColumnNames);
+        Assert.Equal(["Date", "EntryID", "Reg", "portable current revision id"], plan.WorkbookColumnNames);
         Assert.Empty(plan.ColumnsToAdd);
-        Assert.Equal(["Portable Entry ID", "Portable Current Revision ID"], plan.ColumnsToHide);
+        Assert.Equal(["EntryID", "Portable Current Revision ID"], plan.ColumnsToHide);
     }
 
     [Fact]
     public void CreateHiddenColumnPlanDoesNotDuplicateWhitespacePaddedExistingMetadataColumns()
     {
         var plan = PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(
-            ["Date", " Portable Entry ID ", "Reg", " Portable Current Revision ID "]);
+            ["Date", " EntryID ", "Reg", " Portable Current Revision ID "]);
 
         Assert.False(plan.RequiresMutation);
-        Assert.Equal(["Date", " Portable Entry ID ", "Reg", " Portable Current Revision ID "], plan.WorkbookColumnNames);
+        Assert.Equal(["Date", " EntryID ", "Reg", " Portable Current Revision ID "], plan.WorkbookColumnNames);
         Assert.Empty(plan.ColumnsToAdd);
     }
 
@@ -101,11 +101,11 @@ public sealed class PortableLogbookWorkbookMetadataTests
     public void CreateHiddenColumnPlanAddsOnlyMissingMetadataColumns()
     {
         var plan = PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(
-            ["Date", "Reg", "Portable Entry ID"]);
+            ["Date", "Reg", "EntryID"]);
 
         Assert.True(plan.RequiresMutation);
         Assert.Equal(
-            ["Date", "Reg", "Portable Entry ID", "Portable Current Revision ID"],
+            ["Date", "Reg", "EntryID", "Portable Current Revision ID"],
             plan.WorkbookColumnNames);
         var column = Assert.Single(plan.ColumnsToAdd);
         Assert.Equal("Portable Current Revision ID", column.WorkbookColumnName);

@@ -8,6 +8,41 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobileLogbookSessionJourneyTests
 {
     [Fact]
+    public async Task WorkbookFaithfulJourneySavesCanonicalV2EntryAndReloadsFromBrowserStorage()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        Assert.Empty(session.DocumentV2.Operations);
+
+        await session.SaveWorkbookEntryAsync();
+
+        var added = Assert.Single(session.CurrentEntriesV2);
+        var operation = Assert.Single(session.DocumentV2.Operations);
+        Assert.StartsWith("ent_", operation.EntryId.Value, StringComparison.Ordinal);
+        Assert.Equal(36, operation.EntryId.Value.Length);
+        Assert.NotNull(added.Entry);
+        Assert.Equal("C172", added.Entry.Type);
+        Assert.Equal("VH-WBV", added.Entry.Reg);
+        Assert.Equal("Alex", added.Entry.Pic);
+        Assert.Equal(1.1m, added.Entry.SeCommandDay);
+        Assert.Equal(0.4m, added.Entry.IfrIf);
+        Assert.Equal(2, added.Entry.Ils);
+        Assert.Equal("Flight added.", session.LastActionMessage);
+        Assert.Equal(1, jsRuntime.SaveCount);
+
+        var reloaded = CreateSession(jsRuntime);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        var reloadedEntry = Assert.Single(reloaded.CurrentEntriesV2);
+        Assert.Equal(operation.EntryId, reloadedEntry.EntryId);
+        Assert.Equal("VH-WBV", reloadedEntry.Entry?.Reg);
+        Assert.Equal("Ready", reloaded.PackageKeyStatus);
+    }
+
+    [Fact]
     public async Task Gate3EntryJourneyAddsEditsClonesDeletesAndReloadsFromBrowserStorage()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -116,6 +151,25 @@ public sealed class MobileLogbookSessionJourneyTests
         draft.Day = hours;
         draft.TakeoffsDay = 1;
         draft.LandingsDay = 1;
+    }
+
+    private static void FillWorkbookDraft(MobileWorkbookEntryDraft draft)
+    {
+        draft.Date = new DateOnly(2026, 7, 24);
+        draft.Type = "C172";
+        draft.Reg = "VH-WBV";
+        draft.FlightId = "AD332";
+        draft.Pic = "Alex";
+        draft.OtherPilotOrCrew = "Jamie";
+        draft.From = "YSBK";
+        draft.To = "YSCN";
+        draft.Via = "YWOL";
+        draft.Remarks = "Workbook faithful";
+        draft.FlightReview = true;
+        draft.SeCommandDay = 1.1m;
+        draft.IfrIf = 0.4m;
+        draft.LandingsDay = 1;
+        draft.Ils = 2;
     }
 
     private static CreateEntryOperation CreateOperation(string revisionId, string registration, decimal hours)

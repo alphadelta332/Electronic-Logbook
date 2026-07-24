@@ -32,6 +32,21 @@ public static class MobilePackageImportPlan
             ? MobilePackageImportCompatibility.Compatible
             : MobilePackageImportCompatibility.UnsupportedSchema;
     }
+
+    public static MobilePackageImportCompatibility CheckCompatibilityV2(
+        MobilePackageImportPlanResult plan,
+        LogbookId localLogbookId)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (plan.LogbookId != localLogbookId)
+        {
+            return MobilePackageImportCompatibility.WrongLogbook;
+        }
+
+        return plan.SchemaVersion == PortableLogbookDocumentV2.CurrentSchemaVersion
+            ? MobilePackageImportCompatibility.Compatible
+            : MobilePackageImportCompatibility.UnsupportedSchema;
+    }
 }
 
 public sealed record MobilePackageImportPlanResult(

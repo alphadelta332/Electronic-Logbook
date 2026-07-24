@@ -24,6 +24,24 @@ public static class PortableLogbookWorkbookStorage
             importReceipts.ToArray());
     }
 
+    public static PortableLogbookWorkbookStorageEnvelope CreateEnvelope(
+        PortableLogbookDocumentV2 document,
+        byte[] encryptedHistoryPackage,
+        IEnumerable<PortableLogbookPackageReceipt> importReceipts)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(encryptedHistoryPackage);
+        ArgumentNullException.ThrowIfNull(importReceipts);
+
+        return new PortableLogbookWorkbookStorageEnvelope(
+            CurrentStorageVersion,
+            document.LogbookId,
+            document.SchemaVersion,
+            Convert.ToBase64String(encryptedHistoryPackage),
+            PortableLogbookSummary.Create(document),
+            importReceipts.ToArray());
+    }
+
     public static string Serialize(PortableLogbookWorkbookStorageEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
@@ -105,6 +123,33 @@ public static class PortableLogbookWorkbookStorage
 
         return new PortableLogbookWorkbookStorageState(read.Document, envelope.ImportReceipts);
     }
+
+    public static PortableLogbookWorkbookStorageStateV2 OpenEnvelopeV2(
+        PortableLogbookWorkbookStorageEnvelope envelope,
+        PortableLogbookKey key)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(key);
+
+        var encryptedHistoryPackage = GetEncryptedHistoryPackage(envelope);
+        var read = PortableLogbookPackage.ReadV2(encryptedHistoryPackage, key, envelope.LogbookId);
+        if (read.Document.SchemaVersion != envelope.SchemaVersion)
+        {
+            throw new PortableLogbookWorkbookStorageException(
+                PortableLogbookWorkbookStorageError.EnvelopeDocumentMismatch,
+                "Workbook storage schema version does not match the encrypted history package.");
+        }
+
+        var expectedSummary = PortableLogbookSummary.Create(read.Document);
+        if (expectedSummary != envelope.Summary)
+        {
+            throw new PortableLogbookWorkbookStorageException(
+                PortableLogbookWorkbookStorageError.EnvelopeSummaryMismatch,
+                "Workbook storage summary does not match the encrypted history package.");
+        }
+
+        return new PortableLogbookWorkbookStorageStateV2(read.Document, envelope.ImportReceipts);
+    }
 }
 
 public sealed record PortableLogbookWorkbookStorageEnvelope(
@@ -117,6 +162,10 @@ public sealed record PortableLogbookWorkbookStorageEnvelope(
 
 public sealed record PortableLogbookWorkbookStorageState(
     PortableLogbookDocument Document,
+    IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts);
+
+public sealed record PortableLogbookWorkbookStorageStateV2(
+    PortableLogbookDocumentV2 Document,
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts);
 
 public sealed class PortableLogbookWorkbookStorageException : Exception

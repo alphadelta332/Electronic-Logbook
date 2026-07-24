@@ -63,6 +63,17 @@ public static class PortableLogbookWorkbookPackageStorage
             : PortableLogbookWorkbookStorage.OpenEnvelope(envelope, key);
     }
 
+    public static PortableLogbookWorkbookStorageStateV2? OpenStateV2(string workbookPath, PortableLogbookKey key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(key);
+
+        var envelope = ReadEnvelope(workbookPath);
+        return envelope is null
+            ? null
+            : PortableLogbookWorkbookStorage.OpenEnvelopeV2(envelope, key);
+    }
+
     public static bool CopyEnvelope(string sourceWorkbookPath, string destinationWorkbookPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceWorkbookPath);
@@ -270,6 +281,89 @@ public static class PortableLogbookWorkbookPackageStorage
             absoluteMetadataColumnIndexes);
     }
 
+    public static PortableLogbookWorkbookMetadataWriteResult WriteHiddenMetadataColumnValuesV2(
+        string workbookPath,
+        IEnumerable<PortableLogbookWorkbookRowV2> rows,
+        IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null,
+        bool writeVisiblePayloadCells = true)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(rows);
+
+        var workbookRows = rows.ToArray();
+        using var archive = ZipFile.Open(workbookPath, ZipArchiveMode.Update);
+        var tableEntry = FindLogbookTableEntry(archive)
+            ?? throw new InvalidDataException("Workbook package does not contain a Logbook table.");
+        var tableDocument = ReadXmlEntry(archive, tableEntry.FullName)
+            ?? throw new InvalidDataException("Logbook table part is invalid.");
+        var root = tableDocument.Root
+            ?? throw new InvalidDataException("Logbook table XML is invalid.");
+        var tableColumns = root.Element(SpreadsheetNamespace + "tableColumns")
+            ?? throw new InvalidDataException("Logbook table does not contain tableColumns.");
+        var existingColumnNames = tableColumns
+            .Elements(SpreadsheetNamespace + "tableColumn")
+            .Select(column => (string?)column.Attribute("name") ?? string.Empty)
+            .ToArray();
+        var plan = PortableLogbookWorkbookMetadata.CreateHiddenColumnPlan(existingColumnNames);
+        if (plan.RequiresMutation)
+        {
+            ApplyHiddenColumnPlanToTable(root, tableColumns, plan);
+        }
+
+        if (!TryParseTableReference((string?)root.Attribute("ref"), out var startColumn, out var startRow, out _, out var endRow))
+        {
+            throw new InvalidDataException("Logbook table reference is invalid.");
+        }
+
+        var requiredEndRow = startRow + workbookRows.Length;
+        if (requiredEndRow > endRow &&
+            TryResizeTableReference((string?)root.Attribute("ref"), plan.WorkbookColumnNames.Count, requiredEndRow, out var resizedRef))
+        {
+            root.SetAttributeValue("ref", resizedRef);
+            root.Element(SpreadsheetNamespace + "autoFilter")?.SetAttributeValue("ref", resizedRef);
+            endRow = requiredEndRow;
+        }
+
+        WriteXmlEntry(archive, tableEntry.FullName, tableDocument);
+
+        var worksheetEntryName = FindWorksheetEntryForTable(archive, tableEntry.FullName)
+            ?? throw new InvalidDataException("Workbook package does not contain the Logbook worksheet.");
+        var metadataColumnIndexes = PortableLogbookWorkbookMetadata.HiddenLogbookColumns
+            .Select(column => plan.WorkbookColumnNames
+                .Select((name, index) => new { name, index })
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.name.Trim(),
+                    column.WorkbookColumnName,
+                    StringComparison.OrdinalIgnoreCase))
+                ?.index + 1 ?? 0)
+            .ToArray();
+        if (metadataColumnIndexes.Any(index => index <= 0))
+        {
+            throw new InvalidDataException("Logbook table does not contain portable metadata columns.");
+        }
+
+        var absoluteMetadataColumnIndexes = metadataColumnIndexes
+            .Select(index => startColumn + index - 1)
+            .ToArray();
+        HideWorksheetColumns(archive, worksheetEntryName, absoluteMetadataColumnIndexes);
+        WriteHiddenMetadataWorksheetCellsV2(
+            archive,
+            worksheetEntryName,
+            startColumn,
+            startRow,
+            endRow,
+            plan.WorkbookColumnNames,
+            metadataColumnIndexes,
+            workbookRows,
+            customFieldDefinitions ?? [],
+            writeVisiblePayloadCells);
+
+        return new PortableLogbookWorkbookMetadataWriteResult(
+            Path.GetFullPath(workbookPath),
+            workbookRows.Length,
+            absoluteMetadataColumnIndexes);
+    }
+
     public static IReadOnlyList<PortableLogbookWorkbookRow> ReadCurrentRows(
         string workbookPath,
         IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null)
@@ -416,6 +510,126 @@ public static class PortableLogbookWorkbookPackageStorage
         return rows;
     }
 
+    public static IReadOnlyList<PortableLogbookWorkbookRowV2> ReadCurrentRowsV2(
+        string workbookPath,
+        IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        using var packageStream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(packageStream, ZipArchiveMode.Read, leaveOpen: false);
+        var tableEntry = FindLogbookTableEntry(archive)
+            ?? throw new InvalidDataException("Workbook package does not contain a Logbook table.");
+        var tableDocument = ReadXmlEntry(archive, tableEntry.FullName)
+            ?? throw new InvalidDataException("Logbook table part is invalid.");
+        var tableRoot = tableDocument.Root
+            ?? throw new InvalidDataException("Logbook table XML is invalid.");
+        if (!TryParseTableReference((string?)tableRoot.Attribute("ref"), out var startColumn, out var startRow, out _, out var endRow))
+        {
+            throw new InvalidDataException("Logbook table reference is invalid.");
+        }
+
+        var columnNames = tableRoot
+            .Element(SpreadsheetNamespace + "tableColumns")
+            ?.Elements(SpreadsheetNamespace + "tableColumn")
+            .Select(column => (string?)column.Attribute("name") ?? string.Empty)
+            .ToArray()
+            ?? throw new InvalidDataException("Logbook table does not contain tableColumns.");
+        var worksheetEntryName = FindWorksheetEntryForTable(archive, tableEntry.FullName)
+            ?? throw new InvalidDataException("Workbook package does not contain the Logbook worksheet.");
+        var worksheet = ReadXmlEntry(archive, worksheetEntryName)
+            ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
+        var sharedStrings = ReadSharedStrings(archive);
+        var cells = worksheet
+            .Descendants(SpreadsheetNamespace + "c")
+            .Select(cell => new
+            {
+                Reference = (string?)cell.Attribute("r") ?? string.Empty,
+                Value = ReadCellText(cell, sharedStrings)
+            })
+            .Where(cell => !string.IsNullOrWhiteSpace(cell.Reference))
+            .ToDictionary(cell => cell.Reference, cell => cell.Value, StringComparer.OrdinalIgnoreCase);
+        var fieldsByColumnName = PortableLogbookWorkbookFieldCatalog.ByWorkbookColumnName;
+        var customFieldsByLabel = (customFieldDefinitions ?? [])
+            .ToDictionary(field => field.Label, StringComparer.OrdinalIgnoreCase);
+        var rows = new List<PortableLogbookWorkbookRowV2>();
+
+        for (var rowNumber = startRow + 1; rowNumber <= endRow; rowNumber++)
+        {
+            var values = new Dictionary<string, object?>(StringComparer.Ordinal);
+            var customValues = new Dictionary<string, object?>(StringComparer.Ordinal);
+            EntryId? entryId = null;
+            RevisionId? currentRevisionId = null;
+            var rowHasUserData = false;
+
+            for (var index = 0; index < columnNames.Length; index++)
+            {
+                var columnName = columnNames[index].Trim();
+                var cellReference = $"{ColumnName(startColumn + index)}{rowNumber}";
+                cells.TryGetValue(cellReference, out var cellText);
+                if (string.Equals(
+                    columnName,
+                    PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    entryId = string.IsNullOrWhiteSpace(cellText) ? null : new EntryId(cellText.Trim());
+                    continue;
+                }
+
+                if (string.Equals(
+                    columnName,
+                    PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    currentRevisionId = string.IsNullOrWhiteSpace(cellText) ? null : new RevisionId(cellText.Trim());
+                    continue;
+                }
+
+                if (fieldsByColumnName.TryGetValue(columnName, out var field))
+                {
+                    if (!string.IsNullOrWhiteSpace(cellText))
+                    {
+                        rowHasUserData = true;
+                    }
+
+                    values[field.Id] = ConvertWorkbookCellValue(field, cellText);
+                    continue;
+                }
+
+                if (customFieldsByLabel.TryGetValue(columnName, out var customField))
+                {
+                    if (!string.IsNullOrWhiteSpace(cellText))
+                    {
+                        rowHasUserData = true;
+                    }
+
+                    customValues[$"custom{customField.Order}"] = string.IsNullOrWhiteSpace(cellText) ? null : cellText;
+                }
+            }
+
+            if (!rowHasUserData || !LooksLikeWorkbookFlightEntryV2(values))
+            {
+                continue;
+            }
+
+            foreach (var pair in customValues)
+            {
+                values[pair.Key] = pair.Value;
+            }
+
+            rows.Add(new PortableLogbookWorkbookRowV2(
+                entryId,
+                currentRevisionId,
+                PortableLogbookWorkbookEntryFields.FromFieldValues(values, (customFieldDefinitions ?? []).ToArray())));
+        }
+
+        return rows;
+    }
+
     public static IReadOnlyList<CustomFieldDefinition> ReadWorkbookCustomFieldDefinitions(string workbookPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
@@ -506,6 +720,54 @@ public static class PortableLogbookWorkbookPackageStorage
 
         return hasEntryIdentity && hasLoggedTime;
     }
+
+    private static bool LooksLikeWorkbookFlightEntryV2(IReadOnlyDictionary<string, object?> values)
+    {
+        var hasDate =
+            values.TryGetValue("dateYear", out var year) && year is not null &&
+            values.TryGetValue("dateMonth", out var month) && month is not null &&
+            values.TryGetValue("dateDay", out var day) && day is not null;
+        if (!hasDate)
+        {
+            return false;
+        }
+
+        var hasEntryIdentity =
+            HasTextValue(values, "type") ||
+            HasTextValue(values, "reg") ||
+            HasTextValue(values, "from") ||
+            HasTextValue(values, "to");
+        var loggedTimeFieldIds = new[]
+        {
+            "seIcusDay",
+            "seIcusNight",
+            "seDualDay",
+            "seDualNight",
+            "seCommandDay",
+            "seCommandNight",
+            "meIcusDay",
+            "meIcusNight",
+            "meDualDay",
+            "meDualNight",
+            "meCommandDay",
+            "meCommandNight",
+            "copilotDay",
+            "copilotNight",
+            "ifrIf",
+            "ifrSim"
+        };
+        var hasLoggedTime = loggedTimeFieldIds.Any(fieldId =>
+            values.TryGetValue(fieldId, out var value) &&
+            value is decimal decimalValue &&
+            decimalValue > 0);
+
+        return hasEntryIdentity && hasLoggedTime;
+    }
+
+    private static bool HasTextValue(IReadOnlyDictionary<string, object?> values, string fieldId) =>
+        values.TryGetValue(fieldId, out var value) &&
+        value is string text &&
+        !string.IsNullOrWhiteSpace(text);
 
     private static bool ShouldIgnoreDirectWorkbookField(
         PortableLogbookFieldDefinition field,
@@ -1043,6 +1305,55 @@ public static class PortableLogbookWorkbookPackageStorage
         };
     }
 
+    private static object? ConvertWorkbookCellValue(PortableLogbookWorkbookFieldDefinition field, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var text = value.Trim();
+        return field.Kind switch
+        {
+            PortableLogbookWorkbookFieldKind.Boolean => ParseWorkbookBoolean(text),
+            PortableLogbookWorkbookFieldKind.DecimalHours => decimal.Parse(
+                text,
+                System.Globalization.NumberStyles.Number,
+                System.Globalization.CultureInfo.InvariantCulture),
+            PortableLogbookWorkbookFieldKind.Count => Convert.ToInt32(
+                decimal.Parse(
+                    text,
+                    System.Globalization.NumberStyles.Number,
+                    System.Globalization.CultureInfo.InvariantCulture),
+                System.Globalization.CultureInfo.InvariantCulture),
+            _ => text
+        };
+    }
+
+    private static bool ParseWorkbookBoolean(string text)
+    {
+        if (bool.TryParse(text, out var boolean))
+        {
+            return boolean;
+        }
+
+        if (string.Equals(text, "Y", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "Yes", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "1", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(text, "N", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "No", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "0", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        throw new FormatException($"Workbook boolean value '{text}' is not recognised.");
+    }
+
     private static DateOnly ConvertWorkbookDateCellValue(PortableLogbookFieldDefinition field, string value)
     {
         if (DateOnly.TryParse(
@@ -1465,6 +1776,76 @@ public static class PortableLogbookWorkbookPackageStorage
         WriteXmlEntry(archive, worksheetEntryName, worksheet);
     }
 
+    private static void WriteHiddenMetadataWorksheetCellsV2(
+        ZipArchive archive,
+        string worksheetEntryName,
+        int tableStartColumn,
+        int tableStartRow,
+        int tableEndRow,
+        IReadOnlyList<string> columnNames,
+        IReadOnlyList<int> metadataColumnIndexes,
+        IReadOnlyList<PortableLogbookWorkbookRowV2> rows,
+        IEnumerable<CustomFieldDefinition> customFieldDefinitions,
+        bool writeVisiblePayloadCells = true)
+    {
+        var worksheet = ReadXmlEntry(archive, worksheetEntryName)
+            ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
+        var entryIdColumn = tableStartColumn + metadataColumnIndexes[0] - 1;
+        var revisionIdColumn = tableStartColumn + metadataColumnIndexes[1] - 1;
+        var fieldsByColumnName = writeVisiblePayloadCells
+            ? PortableLogbookWorkbookFieldCatalog.ByWorkbookColumnName
+            : new Dictionary<string, PortableLogbookWorkbookFieldDefinition>(StringComparer.OrdinalIgnoreCase);
+        var customFieldsByLabel = writeVisiblePayloadCells
+            ? customFieldDefinitions.ToDictionary(
+                field => field.Label,
+                StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, CustomFieldDefinition>(StringComparer.OrdinalIgnoreCase);
+        UpsertInlineStringCell(
+            worksheet,
+            $"{ColumnName(entryIdColumn)}{tableStartRow}",
+            PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName);
+        UpsertInlineStringCell(
+            worksheet,
+            $"{ColumnName(revisionIdColumn)}{tableStartRow}",
+            PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName);
+
+        var lastDataRow = tableStartRow + rows.Count;
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var rowNumber = tableStartRow + 1 + index;
+            if (writeVisiblePayloadCells)
+            {
+                WriteWorkbookRowPayloadCellsV2(
+                    worksheet,
+                    tableStartColumn,
+                    rowNumber,
+                    columnNames,
+                    fieldsByColumnName,
+                    customFieldsByLabel,
+                    rows[index].Entry);
+            }
+
+            UpsertInlineStringCell(worksheet, $"{ColumnName(entryIdColumn)}{rowNumber}", rows[index].EntryId?.Value ?? string.Empty);
+            UpsertInlineStringCell(
+                worksheet,
+                $"{ColumnName(revisionIdColumn)}{rowNumber}",
+                rows[index].CurrentRevisionId?.Value ?? string.Empty);
+        }
+
+        for (var rowNumber = lastDataRow + 1; rowNumber <= tableEndRow; rowNumber++)
+        {
+            if (writeVisiblePayloadCells)
+            {
+                RemoveWorkbookRowPayloadCellsV2(worksheet, tableStartColumn, rowNumber, columnNames, fieldsByColumnName, customFieldsByLabel);
+            }
+
+            RemoveCell(worksheet, $"{ColumnName(entryIdColumn)}{rowNumber}");
+            RemoveCell(worksheet, $"{ColumnName(revisionIdColumn)}{rowNumber}");
+        }
+
+        WriteXmlEntry(archive, worksheetEntryName, worksheet);
+    }
+
     private static void WriteWorkbookRowPayloadCells(
         XDocument worksheet,
         int tableStartColumn,
@@ -1491,12 +1872,56 @@ public static class PortableLogbookWorkbookPackageStorage
         }
     }
 
+    private static void WriteWorkbookRowPayloadCellsV2(
+        XDocument worksheet,
+        int tableStartColumn,
+        int rowNumber,
+        IReadOnlyList<string> columnNames,
+        IReadOnlyDictionary<string, PortableLogbookWorkbookFieldDefinition> fieldsByColumnName,
+        IReadOnlyDictionary<string, CustomFieldDefinition> customFieldsByLabel,
+        PortableLogbookWorkbookEntry entry)
+    {
+        var values = PortableLogbookWorkbookEntryFields.ToFieldValues(entry);
+        for (var index = 0; index < columnNames.Count; index++)
+        {
+            var columnName = columnNames[index].Trim();
+            var reference = $"{ColumnName(tableStartColumn + index)}{rowNumber}";
+            if (fieldsByColumnName.TryGetValue(columnName, out var field))
+            {
+                WriteOrRemoveInlineStringCell(worksheet, reference, FormatWorkbookCellValue(values[field.Id]));
+            }
+            else if (customFieldsByLabel.TryGetValue(columnName, out var customField))
+            {
+                entry.CustomFields.TryGetValue(customField.Id, out var customValue);
+                WriteOrRemoveInlineStringCell(worksheet, reference, customValue);
+            }
+        }
+    }
+
     private static void RemoveWorkbookRowPayloadCells(
         XDocument worksheet,
         int tableStartColumn,
         int rowNumber,
         IReadOnlyList<string> columnNames,
         IReadOnlyDictionary<string, PortableLogbookFieldDefinition> fieldsByColumnName,
+        IReadOnlyDictionary<string, CustomFieldDefinition> customFieldsByLabel)
+    {
+        for (var index = 0; index < columnNames.Count; index++)
+        {
+            var columnName = columnNames[index].Trim();
+            if (fieldsByColumnName.ContainsKey(columnName) || customFieldsByLabel.ContainsKey(columnName))
+            {
+                RemoveCell(worksheet, $"{ColumnName(tableStartColumn + index)}{rowNumber}");
+            }
+        }
+    }
+
+    private static void RemoveWorkbookRowPayloadCellsV2(
+        XDocument worksheet,
+        int tableStartColumn,
+        int rowNumber,
+        IReadOnlyList<string> columnNames,
+        IReadOnlyDictionary<string, PortableLogbookWorkbookFieldDefinition> fieldsByColumnName,
         IReadOnlyDictionary<string, CustomFieldDefinition> customFieldsByLabel)
     {
         for (var index = 0; index < columnNames.Count; index++)

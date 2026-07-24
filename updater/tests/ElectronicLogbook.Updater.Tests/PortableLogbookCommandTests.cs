@@ -414,7 +414,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
         var tableDocument = System.Xml.Linq.XDocument.Load(tableStream);
         Assert.Contains(
             tableDocument.Descendants().Where(element => element.Name.LocalName == "tableColumn"),
-            column => (string?)column.Attribute("name") == "Portable Entry ID");
+            column => (string?)column.Attribute("name") == "EntryID");
         Assert.Contains(
             tableDocument.Descendants().Where(element => element.Name.LocalName == "tableColumn"),
             column => (string?)column.Attribute("name") == "Portable Current Revision ID");
@@ -600,7 +600,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:H2",
-                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "EntryID", "Portable Current Revision ID"]);
             var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
             UpsertInlineStringCell(worksheet, "A2", "2026-07-19");
             UpsertInlineStringCell(worksheet, "B2", "C172");
@@ -694,7 +694,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:H1",
-                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "EntryID", "Portable Current Revision ID"]);
             var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
             for (var column = 'A'; column <= 'H'; column++)
             {
@@ -742,7 +742,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:H3",
-                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "EntryID", "Portable Current Revision ID"]);
         }
 
         var first = new CreateEntryOperation(
@@ -815,7 +815,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:H3",
-                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "EntryID", "Portable Current Revision ID"]);
         }
 
         var first = new CreateEntryOperation(
@@ -847,7 +847,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:H4",
-                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "EntryID", "Portable Current Revision ID"]);
             var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
             MoveWorksheetRowValues(worksheet, 3, 4, 'A', 'H');
             ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
@@ -1377,7 +1377,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
                     "To",
                     "PIC",
                     "Training kind",
-                    "Portable Entry ID",
+                    "EntryID",
                     "Portable Current Revision ID"
                 ]);
         }
@@ -2462,7 +2462,7 @@ public sealed class PortableLogbookCommandTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:H2",
-                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "Aircraft Type", "Reg", "From", "To", "PIC", "EntryID", "Portable Current Revision ID"]);
             var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
             UpsertInlineStringCell(worksheet, "A2", "2026-07-19");
             UpsertInlineStringCell(worksheet, "B2", "C172");

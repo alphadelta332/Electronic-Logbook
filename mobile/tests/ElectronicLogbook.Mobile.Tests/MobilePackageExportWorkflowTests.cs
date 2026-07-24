@@ -8,6 +8,28 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobilePackageExportWorkflowTests
 {
     [Fact]
+    public async Task ExportAsyncProducesDecryptableWorkbookFaithfulPackage()
+    {
+        var document = CreateDocumentV2();
+        var exportedAt = DateTimeOffset.Parse("2026-07-19T04:05:06Z");
+        var key = PortableLogbookKey.FromBytes(Enumerable.Range(1, PortableLogbookPackage.KeySizeBytes).Select(value => (byte)value).ToArray());
+        var jsRuntime = new EncryptingJsRuntime(key);
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var fileStore = new BrowserFileStore(jsRuntime);
+
+        var result = await MobilePackageExportWorkflow.ExportAsync(document, keyStore, fileStore, exportedAt);
+        var read = PortableLogbookPackage.ReadV2(result.PackageBytes, key, document.LogbookId);
+
+        Assert.Equal(exportedAt, read.Manifest.CreatedAt);
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, read.Manifest.SchemaVersion);
+        Assert.Equal(document.LogbookId, read.Document.LogbookId);
+        Assert.Equal(document.CurrencyOverrideDates, read.Document.CurrencyOverrideDates);
+        Assert.Equal(document.Operations.Select(operation => operation.RevisionId), read.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal("VH-ABC", Assert.Single(read.Document.Operations).Entry?.Reg);
+        Assert.Equal(result.PackageBytes, Assert.Single(jsRuntime.DownloadedPackages));
+    }
+
+    [Fact]
     public async Task ExportAsyncEncryptsPackageWithBrowserKeyAndFallsBackToDownload()
     {
         var document = CreateDocument();
@@ -135,6 +157,36 @@ public sealed class MobilePackageExportWorkflowTests
                 PilotInCommand = 1.2m
             });
         return PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+    }
+
+    private static PortableLogbookDocumentV2 CreateDocumentV2()
+    {
+        var create = PortableLogbookOperationV2.Create(
+            new LogbookId("log_mobile"),
+            new EntryId("ent_00000000000000000000000000000001"),
+            new RevisionId("rev_1"),
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                Year = 2026,
+                Month = 7,
+                Day = 18,
+                Type = "C172",
+                Reg = "VH-ABC",
+                From = "YSBK",
+                To = "YSCN",
+                Pic = "Pilot",
+                SeCommandDay = 1.2m
+            });
+        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            new PortableLogbookCurrencyOverrideDates(
+                new DateOnly(2026, 6, 1),
+                new DateOnly(2026, 6, 2),
+                new DateOnly(2026, 6, 3)),
+            [create]);
     }
 
     private sealed class RecordingJsRuntime : IJSRuntime

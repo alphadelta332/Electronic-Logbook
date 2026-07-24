@@ -28,6 +28,18 @@ public static class PortableLogbookPackage
         return Assemble(plan, ciphertext, tag);
     }
 
+    public static byte[] Write(PortableLogbookDocumentV2 document, ReadOnlySpan<byte> key)
+    {
+        ValidateKey(key);
+        var plan = CreateEncryptionPlan(document, DateTimeOffset.UtcNow);
+        var ciphertext = new byte[plan.CompressedPlaintext.Length];
+        var tag = new byte[TagSizeBytes];
+        using var aes = new AesGcm(key, TagSizeBytes);
+        aes.Encrypt(plan.Nonce, plan.CompressedPlaintext, ciphertext, tag, plan.ManifestBytes);
+
+        return Assemble(plan, ciphertext, tag);
+    }
+
     public static PortableLogbookPackageEncryptionPlan CreateEncryptionPlan(
         PortableLogbookDocument document,
         DateTimeOffset createdAt)
@@ -42,6 +54,43 @@ public static class PortableLogbookPackage
         }
 
         var plaintext = Compress(Encoding.UTF8.GetBytes(PortableLogbookJson.Serialize(document)));
+        var manifest = new PortableLogbookPackageManifest(
+            FormatVersion,
+            document.LogbookId,
+            document.SchemaVersion,
+            document.JurisdictionProfile,
+            document.JurisdictionProfileVersion,
+            document.CustomFieldDefinitions.Count,
+            document.Operations.Count,
+            createdAt,
+            "gzip",
+            "AES-256-GCM");
+        var manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, PortableLogbookJson.SerializerOptions);
+        if (manifestBytes.Length > MaxManifestBytes)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.ManifestTooLarge,
+                "Package manifest is too large.");
+        }
+
+        var nonce = RandomNumberGenerator.GetBytes(NonceSizeBytes);
+        return new PortableLogbookPackageEncryptionPlan(manifest, manifestBytes, nonce, plaintext);
+    }
+
+    public static PortableLogbookPackageEncryptionPlan CreateEncryptionPlan(
+        PortableLogbookDocumentV2 document,
+        DateTimeOffset createdAt)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        var validation = PortableLogbookValidatorV2.Validate(document);
+        if (!validation.IsValid)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.InvalidDocument,
+                $"Portable logbook document is invalid: {FormatValidationErrors(validation)}");
+        }
+
+        var plaintext = Compress(Encoding.UTF8.GetBytes(PortableLogbookJson.SerializeV2(document)));
         var manifest = new PortableLogbookPackageManifest(
             FormatVersion,
             document.LogbookId,
@@ -103,6 +152,12 @@ public static class PortableLogbookPackage
         return Write(document, key.ToBytes());
     }
 
+    public static byte[] Write(PortableLogbookDocumentV2 document, PortableLogbookKey key)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return Write(document, key.ToBytes());
+    }
+
     public static PortableLogbookPackageManifest ReadManifest(
         ReadOnlySpan<byte> packageBytes,
         PortableLogbookPackageReadOptions? options = null)
@@ -149,6 +204,32 @@ public static class PortableLogbookPackage
         return ReadDecrypted(plan, compressedPlaintext, expectedLogbookId);
     }
 
+    public static PortableLogbookPackageReadResultV2 ReadV2(
+        ReadOnlySpan<byte> packageBytes,
+        ReadOnlySpan<byte> key,
+        LogbookId? expectedLogbookId = null,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        ValidateKey(key);
+        var plan = CreateDecryptionPlanV2(packageBytes, expectedLogbookId, options);
+        var compressedPlaintext = new byte[plan.Ciphertext.Length];
+
+        try
+        {
+            using var aes = new AesGcm(key, TagSizeBytes);
+            aes.Decrypt(plan.Nonce, plan.Ciphertext, plan.Tag, compressedPlaintext, plan.ManifestBytes);
+        }
+        catch (CryptographicException ex)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.AuthenticationFailed,
+                "Package authentication failed.",
+                ex);
+        }
+
+        return ReadDecryptedV2(plan, compressedPlaintext, expectedLogbookId);
+    }
+
     public static PortableLogbookPackageDecryptionPlan CreateDecryptionPlan(
         ReadOnlySpan<byte> packageBytes,
         LogbookId? expectedLogbookId = null,
@@ -158,6 +239,25 @@ public static class PortableLogbookPackage
         var (manifest, offset, manifestBytes) = ReadManifestAndPayloadOffset(packageBytes, options);
 
         ValidateManifest(manifest, expectedLogbookId);
+
+        var nonce = packageBytes.Slice(offset, NonceSizeBytes).ToArray();
+        offset += NonceSizeBytes;
+        var tag = packageBytes.Slice(offset, TagSizeBytes).ToArray();
+        offset += TagSizeBytes;
+        var ciphertext = packageBytes[offset..].ToArray();
+
+        return new PortableLogbookPackageDecryptionPlan(manifest, manifestBytes, nonce, tag, ciphertext);
+    }
+
+    public static PortableLogbookPackageDecryptionPlan CreateDecryptionPlanV2(
+        ReadOnlySpan<byte> packageBytes,
+        LogbookId? expectedLogbookId = null,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        options ??= PortableLogbookPackageReadOptions.Default;
+        var (manifest, offset, manifestBytes) = ReadManifestAndPayloadOffset(packageBytes, options);
+
+        ValidateManifestV2(manifest, expectedLogbookId);
 
         var nonce = packageBytes.Slice(offset, NonceSizeBytes).ToArray();
         offset += NonceSizeBytes;
@@ -202,6 +302,40 @@ public static class PortableLogbookPackage
         return new PortableLogbookPackageReadResult(plan.Manifest, document);
     }
 
+    public static PortableLogbookPackageReadResultV2 ReadDecryptedV2(
+        PortableLogbookPackageDecryptionPlan plan,
+        ReadOnlySpan<byte> compressedPlaintext,
+        LogbookId? expectedLogbookId = null)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        var documentJson = Encoding.UTF8.GetString(Decompress(compressedPlaintext.ToArray()));
+        PortableLogbookDocumentV2 document;
+        try
+        {
+            document = PortableLogbookJson.DeserializeV2(documentJson)
+                ?? throw new PortableLogbookPackageException(PortableLogbookPackageError.InvalidPayload, "Package payload is invalid.");
+        }
+        catch (JsonException ex)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.InvalidPayload,
+                "Package payload is invalid.",
+                ex);
+        }
+
+        ValidateManifestAgainstDocument(plan.Manifest, document, expectedLogbookId);
+
+        var validation = PortableLogbookValidatorV2.Validate(document);
+        if (!validation.IsValid)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.InvalidDocument,
+                $"Portable logbook document is invalid after package read: {FormatValidationErrors(validation)}");
+        }
+
+        return new PortableLogbookPackageReadResultV2(plan.Manifest, document);
+    }
+
     private static string FormatValidationErrors(PortableLogbookValidationResult validation) =>
         string.Join(
             "; ",
@@ -217,6 +351,16 @@ public static class PortableLogbookPackage
     {
         ArgumentNullException.ThrowIfNull(key);
         return Read(packageBytes, key.ToBytes(), expectedLogbookId, options);
+    }
+
+    public static PortableLogbookPackageReadResultV2 ReadV2(
+        ReadOnlySpan<byte> packageBytes,
+        PortableLogbookKey key,
+        LogbookId? expectedLogbookId = null,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        return ReadV2(packageBytes, key.ToBytes(), expectedLogbookId, options);
     }
 
     private static void ValidateKey(ReadOnlySpan<byte> key)
@@ -309,6 +453,20 @@ public static class PortableLogbookPackage
         ValidateExpectedLogbook(manifest, expectedLogbookId);
     }
 
+    private static void ValidateManifestV2(PortableLogbookPackageManifest manifest, LogbookId? expectedLogbookId)
+    {
+        ValidateManifestForInspection(manifest);
+
+        if (manifest.SchemaVersion != PortableLogbookDocumentV2.CurrentSchemaVersion)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.UnsupportedSchemaVersion,
+                $"Package schema version {manifest.SchemaVersion} is not supported. Re-import the authoritative workbook to create a workbook-faithful mobile package.");
+        }
+
+        ValidateExpectedLogbook(manifest, expectedLogbookId);
+    }
+
     private static void ValidateManifestForInspection(PortableLogbookPackageManifest manifest)
     {
         if (manifest.FormatVersion != FormatVersion)
@@ -346,6 +504,31 @@ public static class PortableLogbookPackage
     private static void ValidateManifestAgainstDocument(
         PortableLogbookPackageManifest manifest,
         PortableLogbookDocument document,
+        LogbookId? expectedLogbookId)
+    {
+        if (manifest.LogbookId != document.LogbookId ||
+            manifest.SchemaVersion != document.SchemaVersion ||
+            manifest.JurisdictionProfile != document.JurisdictionProfile ||
+            manifest.JurisdictionProfileVersion != document.JurisdictionProfileVersion ||
+            manifest.CustomFieldCount != document.CustomFieldDefinitions.Count ||
+            manifest.OperationCount != document.Operations.Count)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.ManifestPayloadMismatch,
+                "Package manifest does not match the encrypted payload.");
+        }
+
+        if (expectedLogbookId is not null && document.LogbookId != expectedLogbookId.Value)
+        {
+            throw new PortableLogbookPackageException(
+                PortableLogbookPackageError.WrongLogbook,
+                "Package payload belongs to a different logbook.");
+        }
+    }
+
+    private static void ValidateManifestAgainstDocument(
+        PortableLogbookPackageManifest manifest,
+        PortableLogbookDocumentV2 document,
         LogbookId? expectedLogbookId)
     {
         if (manifest.LogbookId != document.LogbookId ||
@@ -427,6 +610,10 @@ public sealed record PortableLogbookPackageDecryptionPlan(
 public sealed record PortableLogbookPackageReadResult(
     PortableLogbookPackageManifest Manifest,
     PortableLogbookDocument Document);
+
+public sealed record PortableLogbookPackageReadResultV2(
+    PortableLogbookPackageManifest Manifest,
+    PortableLogbookDocumentV2 Document);
 
 public sealed record PortableLogbookPackageReadOptions(int MaxPackageBytes)
 {

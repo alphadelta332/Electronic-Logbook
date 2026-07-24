@@ -48,4 +48,10 @@ public static class PortableLogbookJson
 
     public static PortableLogbookDocument? Deserialize(string json) =>
         JsonSerializer.Deserialize<PortableLogbookDocument>(json, SerializerOptions);
+
+    public static string SerializeV2(PortableLogbookDocumentV2 document) =>
+        JsonSerializer.Serialize(document, SerializerOptions);
+
+    public static PortableLogbookDocumentV2? DeserializeV2(string json) =>
+        JsonSerializer.Deserialize<PortableLogbookDocumentV2>(json, SerializerOptions);
 }

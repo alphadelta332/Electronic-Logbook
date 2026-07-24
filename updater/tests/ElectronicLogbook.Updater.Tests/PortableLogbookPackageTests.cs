@@ -24,6 +24,45 @@ public sealed class PortableLogbookPackageTests
     }
 
     [Fact]
+    public void WriteReadV2RoundTripsEncryptedWorkbookFaithfulPortableDocument()
+    {
+        var document = CreateDocumentV2();
+        var key = FixedKey(1);
+
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        var result = PortableLogbookPackage.ReadV2(packageBytes, key, document.LogbookId);
+
+        Assert.Equal(document.LogbookId, result.Manifest.LogbookId);
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, result.Manifest.SchemaVersion);
+        Assert.Equal(document.Operations.Count, result.Manifest.OperationCount);
+        Assert.Equal(document.CurrencyOverrideDates, result.Document.CurrencyOverrideDates);
+        var operation = Assert.Single(result.Document.Operations);
+        Assert.NotNull(operation.Entry);
+        Assert.Equal(2026, operation.Entry.Year);
+        Assert.Equal("DA40", operation.Entry.Type);
+        Assert.True(operation.Entry.FlightReview);
+        Assert.False(operation.Entry.InstrumentProficiencyCheck);
+        Assert.Equal("Alpha", operation.Entry.CustomFields[new CustomFieldId("cf_workbook_1")]);
+        Assert.Equal(1.2m, operation.Entry.SeCommandDay);
+        Assert.Equal(0.4m, operation.Entry.IfrIf);
+        Assert.Equal(2, operation.Entry.Ils);
+        Assert.Equal(1, operation.Entry.DgaCdi);
+    }
+
+    [Fact]
+    public void ReadV2RejectsV1PackageWithReimportMessage()
+    {
+        var document = CreateDocument();
+        var packageBytes = PortableLogbookPackage.Write(document, FixedKey(1));
+
+        var exception = Assert.Throws<PortableLogbookPackageException>(
+            () => PortableLogbookPackage.ReadV2(packageBytes, FixedKey(1), document.LogbookId));
+
+        Assert.Equal(PortableLogbookPackageError.UnsupportedSchemaVersion, exception.Error);
+        Assert.Contains("Re-import the authoritative workbook", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EncryptionPlanCanBeAssembledWithExternalAesGcmOutput()
     {
         var document = CreateDocument();
@@ -363,6 +402,48 @@ public sealed class PortableLogbookPackageTests
             create.LogbookId,
             [new CustomFieldDefinition(fieldId, "Training kind", 1)],
             [create]);
+    }
+
+    private static PortableLogbookDocumentV2 CreateDocumentV2()
+    {
+        var logbookId = new LogbookId("log_test");
+        var customFieldId = new CustomFieldId("cf_workbook_1");
+        var operation = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_1"),
+            new RevisionId("rev_create"),
+            new DeviceId("dev_excel"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                Year = 2026,
+                Month = 7,
+                Day = 18,
+                Type = "DA40",
+                Reg = "VH-ABC",
+                FlightId = "ELB24",
+                Pic = "A Delta",
+                OtherPilotOrCrew = "B Example",
+                From = "YSBK",
+                To = "YSCN",
+                Via = "BK CN",
+                Remarks = "Training",
+                FlightReview = true,
+                InstrumentProficiencyCheck = false,
+                OperatorProficiencyCheck = true,
+                CustomFields = new Dictionary<CustomFieldId, string?> { [customFieldId] = "Alpha" },
+                SeCommandDay = 1.2m,
+                IfrIf = 0.4m,
+                LandingsDay = 1,
+                Ils = 2,
+                DgaCdi = 1
+            });
+
+        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            [new CustomFieldDefinition(customFieldId, "Custom 1", 1)],
+            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 6, 1), new DateOnly(2026, 6, 2), null),
+            [operation]);
     }
 
     private static CreateEntryOperation CreateOperation(IReadOnlyDictionary<CustomFieldId, string?>? customFields = null) =>

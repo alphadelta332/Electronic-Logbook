@@ -89,6 +89,63 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task SaveAndLoadStateV2RoundTripsWorkbookFaithfulDocumentAcrossReload()
+    {
+        var document = CreateV2Document();
+        var receipt = new PortableLogbookPackageReceipt(
+            "ABC123",
+            document.LogbookId,
+            document.Operations.Count,
+            DateTimeOffset.Parse("2026-07-24T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-24T00:01:00Z"));
+        var checkpoint = CreateCheckpoint(document);
+        var jsRuntime = new MemoryJsRuntime();
+        var storeBeforeReload = new BrowserLogbookStore(jsRuntime);
+
+        await storeBeforeReload.SaveStateAsync(new BrowserLogbookStateV2(
+            document,
+            [receipt],
+            checkpoint.ExportedAt,
+            checkpoint));
+        var storeAfterReload = new BrowserLogbookStore(jsRuntime);
+        var reloaded = await storeAfterReload.LoadStateV2Async();
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, reloaded.Document.SchemaVersion);
+        Assert.Equal(document.CurrencyOverrideDates, reloaded.Document.CurrencyOverrideDates);
+        Assert.Equal([receipt], reloaded.ImportReceipts);
+        Assert.Equal(checkpoint, reloaded.LastSuccessfulExport);
+        var operation = Assert.Single(reloaded.Document.Operations);
+        Assert.Equal(new EntryId("ent_v2"), operation.EntryId);
+        Assert.NotNull(operation.Entry);
+        Assert.Equal("DA40", operation.Entry.Type);
+        Assert.Equal("VH-VTQ", operation.Entry.Reg);
+        Assert.Equal(1.2m, operation.Entry.SeCommandDay);
+        Assert.Equal(2, operation.Entry.Ils);
+        Assert.True(PortableLogbookValidatorV2.Validate(reloaded.Document, new DateOnly(2026, 7, 24)).IsValid);
+    }
+
+    [Fact]
+    public async Task LoadStateV2RejectsLegacyV1BrowserStateWithoutOverwritingState()
+    {
+        var originalJson = JsonSerializer.Serialize(
+            new BrowserLogbookStoredDocument(
+                1,
+                PortableLogbookDocument.CurrentSchemaVersion,
+                ReadGoldenFixture()),
+            PortableLogbookJson.SerializerOptions);
+        var jsRuntime = new MemoryJsRuntime { StoredJson = originalJson };
+        var store = new BrowserLogbookStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<BrowserLogbookStoreException>(async () =>
+            await store.LoadStateV2Async());
+
+        Assert.Contains("Re-import the authoritative workbook", error.Message, StringComparison.Ordinal);
+        Assert.Equal(originalJson, jsRuntime.StoredJson);
+        Assert.False(jsRuntime.SaveWasCalled);
+    }
+
+    [Fact]
     public async Task SaveAndLoadStateRoundTripsValidExportCheckpoint()
     {
         var document = PortableLogbookJson.Deserialize(ReadGoldenFixture())
@@ -636,6 +693,53 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
             document.Operations.Count,
             document.Operations.Max(operation => operation.CreatedAt),
             new string('a', 64));
+
+    private static BrowserLogbookExportCheckpoint CreateCheckpoint(PortableLogbookDocumentV2 document) =>
+        new(
+            DateTimeOffset.Parse("2026-07-24T03:00:00Z"),
+            document.SchemaVersion,
+            document.LogbookId,
+            document.Operations.Count,
+            document.Operations.Max(operation => operation.CreatedAt),
+            new string('b', 64));
+
+    private static PortableLogbookDocumentV2 CreateV2Document()
+    {
+        var logbookId = new LogbookId("log_v2");
+        var customFieldId = new CustomFieldId("cf_workbook_1");
+        var entry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 7,
+            Day = 24,
+            Type = "DA40",
+            Reg = "VH-VTQ",
+            FlightId = "ELB24",
+            Pic = "A Delta",
+            From = "YSBK",
+            To = "YSCN",
+            Via = "BK CN",
+            Remarks = "Workbook-faithful mobile reload",
+            FlightReview = true,
+            CustomFields = new Dictionary<CustomFieldId, string?> { [customFieldId] = "Training" },
+            SeCommandDay = 1.2m,
+            LandingsDay = 1,
+            Ils = 2
+        };
+        var operation = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_v2"),
+            new RevisionId("rev_v2_create"),
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-24T00:00:00Z"),
+            entry);
+
+        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            [new CustomFieldDefinition(customFieldId, "Custom 1", 1)],
+            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 1), null, null),
+            [operation]);
+    }
 
     private static string Normalize(string value) =>
         value.Replace("\r\n", "\n", StringComparison.Ordinal).Trim();

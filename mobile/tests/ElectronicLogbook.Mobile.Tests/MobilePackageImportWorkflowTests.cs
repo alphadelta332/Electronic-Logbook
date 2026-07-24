@@ -8,6 +8,54 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobilePackageImportWorkflowTests
 {
     [Fact]
+    public async Task ReadV2AsyncDecryptsWorkbookFaithfulPackageWithBrowserKey()
+    {
+        var local = CreateDocumentV2("rev_local");
+        var incoming = CreateDocumentV2("rev_incoming");
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var decryptionPlan = PortableLogbookPackage.CreateDecryptionPlanV2(packageBytes, local.LogbookId);
+        var compressedPlaintext = new byte[decryptionPlan.Ciphertext.Length];
+        using var aes = new AesGcm(key, decryptionPlan.Tag.Length);
+        aes.Decrypt(
+            decryptionPlan.Nonce,
+            decryptionPlan.Ciphertext,
+            decryptionPlan.Tag,
+            compressedPlaintext,
+            decryptionPlan.ManifestBytes);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(compressedPlaintext);
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportWorkflow.ReadV2Async(local, file, keyStore);
+
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, result.Manifest.SchemaVersion);
+        Assert.Equal(incoming.Operations.Single().RevisionId, result.Document.Operations.Single().RevisionId);
+        Assert.Equal(incoming.Operations.Count, result.ImportPlan.OperationCount);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.decrypt", call.Identifier);
+        Assert.Equal("package-key:log_mobile", call.Arguments[0]);
+    }
+
+    [Fact]
+    public async Task ReadV2AsyncRejectsV1PackageBeforeDecrypting()
+    {
+        var local = CreateDocumentV2("rev_local");
+        var v1PackageBytes = PortableLogbookPackage.Write(CreateDocument("rev_v1"), FixedKey());
+        var jsRuntime = new RecordingJsRuntime();
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var file = new BrowserFile("backup.elogbook", BrowserFileStore.ElogbookContentType, v1PackageBytes);
+
+        var error = await Assert.ThrowsAsync<MobilePackageImportWorkflowException>(async () =>
+            await MobilePackageImportWorkflow.ReadV2Async(local, file, keyStore));
+
+        Assert.Contains("UnsupportedSchema", error.Message, StringComparison.Ordinal);
+        Assert.Contains("Re-import the authoritative workbook", error.Message, StringComparison.Ordinal);
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
     public async Task ReadAsyncDecryptsPackageWithBrowserKeyWithoutMutatingLocalDocument()
     {
         var local = CreateDocument("rev_local");
@@ -95,6 +143,33 @@ public sealed class MobilePackageImportWorkflowTests
                 PilotInCommand = 1.2m
             });
         return PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+    }
+
+    private static PortableLogbookDocumentV2 CreateDocumentV2(string revisionId)
+    {
+        var create = PortableLogbookOperationV2.Create(
+            new LogbookId("log_mobile"),
+            new EntryId("ent_00000000000000000000000000000001"),
+            new RevisionId(revisionId),
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                Year = 2026,
+                Month = 7,
+                Day = 18,
+                Type = "C172",
+                Reg = "VH-ABC",
+                From = "YSBK",
+                To = "YSCN",
+                Pic = "Pilot",
+                SeCommandDay = 1.2m
+            });
+        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [create]);
     }
 
     private static byte[] FixedKey()

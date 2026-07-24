@@ -144,6 +144,27 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void OpenStateV2DecryptsStoredWorkbookFaithfulHistoryPackage()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var key = PortableLogbookKey.Generate();
+        var envelope = CreateEnvelopeV2("log_open_v2", key);
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbook, envelope);
+
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbook, key);
+
+        Assert.NotNull(state);
+        Assert.Equal(envelope.LogbookId, state.Document.LogbookId);
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, state.Document.SchemaVersion);
+        var operation = Assert.Single(state.Document.Operations);
+        Assert.Equal("DA40", operation.Entry?.Type);
+        Assert.Equal(1.2m, operation.Entry?.SeCommandDay);
+        Assert.Equal(0.4m, operation.Entry?.IfrIf);
+        Assert.Equal(2, operation.Entry?.Ils);
+        Assert.Empty(state.ImportReceipts);
+    }
+
+    [Fact]
     public void OpenStateRejectsWrongKeyWithoutReturningStoredState()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -163,7 +184,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
 
         var result = PortableLogbookWorkbookPackageStorage.EnsureHiddenMetadataColumns(workbook);
 
-        Assert.Equal(["Portable Entry ID", "Portable Current Revision ID"], result.ColumnsAdded);
+        Assert.Equal(["EntryID", "Portable Current Revision ID"], result.ColumnsAdded);
         Assert.Equal([2, 3], result.HiddenColumnIndexes);
         using var archive = ZipFile.OpenRead(workbook);
         var table = ReadXml(archive, "xl/tables/table1.xml");
@@ -172,13 +193,13 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
             .Single(element => element.Name.LocalName == "tableColumns");
         Assert.Equal("3", (string?)tableColumns.Attribute("count"));
         Assert.Equal(
-            ["Column1", "Portable Entry ID", "Portable Current Revision ID"],
+            ["Column1", "EntryID", "Portable Current Revision ID"],
             tableColumns.Elements().Select(column => (string?)column.Attribute("name")));
         Assert.Equal("A1:C2", (string?)table.Root.Attribute("ref"));
         Assert.Equal("A1:C2", (string?)table.Root.Elements().Single(element => element.Name.LocalName == "autoFilter").Attribute("ref")?.Value);
 
         var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
-        Assert.Equal("Portable Entry ID", ReadInlineStringCell(worksheet, "B1"));
+        Assert.Equal("EntryID", ReadInlineStringCell(worksheet, "B1"));
         Assert.Equal("Portable Current Revision ID", ReadInlineStringCell(worksheet, "C1"));
         var hiddenColumns = worksheet
             .Descendants()
@@ -224,7 +245,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         Assert.Equal("A1:C2", (string?)table.Root.Elements().Single(element => element.Name.LocalName == "autoFilter").Attribute("ref")?.Value);
 
         var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
-        Assert.Equal("Portable Entry ID", ReadInlineStringCell(worksheet, "B1"));
+        Assert.Equal("EntryID", ReadInlineStringCell(worksheet, "B1"));
         Assert.Equal("Portable Current Revision ID", ReadInlineStringCell(worksheet, "C1"));
         Assert.Equal("ent_1", ReadInlineStringCell(worksheet, "B2"));
         Assert.Equal("rev_1", ReadInlineStringCell(worksheet, "C2"));
@@ -277,7 +298,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
                     "PIC",
                     "Landings Day",
                     "Role",
-                    "Portable Entry ID",
+                    "EntryID",
                     "Portable Current Revision ID"
                 ]);
         }
@@ -311,6 +332,39 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void WriteReadCurrentRowsV2RoundTripsEveryWorkbookFaithfulField()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"]);
+        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames
+            .Concat([
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName
+            ])
+            .ToArray();
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AT2", columns);
+        }
+
+        var entry = CompleteWorkbookEntry();
+        var writeResult = PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbook,
+            [new PortableLogbookWorkbookRowV2(new EntryId("ent_v2_all"), new RevisionId("rev_v2_all"), entry)],
+            customFields);
+        var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(workbook, customFields);
+
+        Assert.Equal([45, 46], writeResult.AbsoluteMetadataColumnIndexes);
+        var row = Assert.Single(rows);
+        Assert.Equal(new EntryId("ent_v2_all"), row.EntryId);
+        Assert.Equal(new RevisionId("rev_v2_all"), row.CurrentRevisionId);
+        Assert.Equal(
+            PortableLogbookWorkbookEntryFields.ToFieldValues(entry),
+            PortableLogbookWorkbookEntryFields.ToFieldValues(row.Entry));
+    }
+
+    [Fact]
     public void WriteHiddenMetadataColumnValuesUsesAbsoluteWorksheetColumnsWhenTableDoesNotStartInColumnA()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -331,7 +385,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         var tableAfter = ReadXml(readArchive, "xl/tables/table1.xml");
         Assert.Equal("C5:E6", (string?)tableAfter.Root!.Attribute("ref"));
         var worksheet = ReadXml(readArchive, "xl/worksheets/sheet2.xml");
-        Assert.Equal("Portable Entry ID", ReadInlineStringCell(worksheet, "D5"));
+        Assert.Equal("EntryID", ReadInlineStringCell(worksheet, "D5"));
         Assert.Equal("Portable Current Revision ID", ReadInlineStringCell(worksheet, "E5"));
         Assert.Equal("ent_offset", ReadInlineStringCell(worksheet, "D6"));
         Assert.Equal("rev_offset", ReadInlineStringCell(worksheet, "E6"));
@@ -359,7 +413,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
                     "PIC",
                     "Landings Day",
                     "Role",
-                    "Portable Entry ID",
+                    "EntryID",
                     "Portable Current Revision ID"
                 ]);
             var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
@@ -438,7 +492,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
                     "PIC",
                     "Other Pilot or Crew",
                     "SeCommandDay",
-                    "Portable Entry ID",
+                    "EntryID",
                     "Portable Current Revision ID"
                 ]);
             var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
@@ -474,7 +528,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
             ReplaceLogbookTable(
                 archive,
                 "A1:C3",
-                ["Date", "Portable Entry ID", "Portable Current Revision ID"]);
+                ["Date", "EntryID", "Portable Current Revision ID"]);
         }
 
         var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbook);
@@ -721,6 +775,93 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
             PortableLogbookPackage.Write(document, key),
             []);
     }
+
+    private static PortableLogbookWorkbookStorageEnvelope CreateEnvelopeV2(string logbookId, PortableLogbookKey key)
+    {
+        var customFieldId = new CustomFieldId("cf_workbook_1");
+        var create = PortableLogbookOperationV2.Create(
+            new LogbookId(logbookId),
+            new EntryId("ent_1"),
+            new RevisionId("rev_1"),
+            new DeviceId("dev_excel"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                Year = 2026,
+                Month = 7,
+                Day = 18,
+                Type = "DA40",
+                Reg = "VH-ABC",
+                From = "YSBK",
+                To = "YSBK",
+                FlightReview = true,
+                CustomFields = new Dictionary<CustomFieldId, string?> { [customFieldId] = "Alpha" },
+                SeCommandDay = 1.2m,
+                IfrIf = 0.4m,
+                Ils = 2
+            });
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            create.LogbookId,
+            [new CustomFieldDefinition(customFieldId, "Custom 1", 1)],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [create]);
+        return PortableLogbookWorkbookStorage.CreateEnvelope(
+            document,
+            PortableLogbookPackage.Write(document, key),
+            []);
+    }
+
+    private static PortableLogbookWorkbookEntry CompleteWorkbookEntry() =>
+        PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 7,
+            Day = 24,
+            Type = "DA40",
+            Reg = "VH-V2A",
+            FlightId = "ELB024",
+            Pic = "A Delta",
+            OtherPilotOrCrew = "B Example",
+            From = "YSBK",
+            To = "YSCN",
+            Via = "BK CN",
+            Remarks = "Workbook faithful row",
+            FlightReview = true,
+            InstrumentProficiencyCheck = false,
+            OperatorProficiencyCheck = true,
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [new("cf_workbook_1")] = "Alpha",
+                [new("cf_workbook_2")] = "Bravo",
+                [new("cf_workbook_3")] = "Charlie",
+                [new("cf_workbook_4")] = "Delta"
+            },
+            SeIcusDay = 0.1m,
+            SeIcusNight = 0.2m,
+            SeDualDay = 0.3m,
+            SeDualNight = 0.4m,
+            SeCommandDay = 0.5m,
+            SeCommandNight = 0.6m,
+            MeIcusDay = 0.7m,
+            MeIcusNight = 0.8m,
+            MeDualDay = 0.9m,
+            MeDualNight = 1.0m,
+            MeCommandDay = 1.1m,
+            MeCommandNight = 1.2m,
+            CopilotDay = 1.3m,
+            CopilotNight = 1.4m,
+            IfrIf = 1.5m,
+            IfrSim = 1.6m,
+            LandingsDay = 2,
+            LandingsNight = 3,
+            Ils = 4,
+            Vor = 5,
+            Rnp = 6,
+            Ndb = 7,
+            DgaCdi = 8,
+            DgaAzi = 9,
+            Circling = 10
+        };
 
     private static PortableLogbookWorkbookRow WorkbookRow(string entryId, string revisionId) =>
         new(

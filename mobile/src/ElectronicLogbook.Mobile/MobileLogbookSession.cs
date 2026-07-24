@@ -20,6 +20,13 @@ public sealed class MobileLogbookSession(
     public PortableLogbookDocument Document { get; private set; } =
         PortableLogbookDocument.CreateAustraliaFirst(new LogbookId("log_mobile_preview"), CustomFields, []);
 
+    public PortableLogbookDocumentV2 DocumentV2 { get; private set; } =
+        PortableLogbookDocumentV2.CreateAustraliaFirst(
+            new LogbookId("log_mobile_preview"),
+            CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+
     public IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts { get; private set; } = [];
 
     public DateTimeOffset? LastSuccessfulExportAt { get; private set; }
@@ -27,6 +34,9 @@ public sealed class MobileLogbookSession(
     public BrowserLogbookExportCheckpoint? LastSuccessfulExport { get; private set; }
 
     public EntryDraft Draft { get; private set; } = EntryDraft.Create();
+
+    public MobileWorkbookEntryDraft WorkbookDraft { get; private set; } =
+        MobileWorkbookEntryDraft.Create(CustomFields);
 
     public bool HasAttemptedSubmit { get; private set; }
 
@@ -56,8 +66,19 @@ public sealed class MobileLogbookSession(
     public PortableLogbookMergeResult MergeResult =>
         PortableLogbookMerger.Merge(Document.Operations);
 
+    public PortableLogbookMergeResultV2 MergeResultV2 =>
+        PortableLogbookWorkbookProjection.MergeV2(DocumentV2.Operations);
+
     public IReadOnlyList<PortableLogbookMaterializedEntry> CurrentEntries =>
         MergeResult
+            .Entries
+            .Values
+            .Where(entry => !entry.IsDeleted && entry.Entry is not null)
+            .OrderByDescending(entry => entry.Entry!.Date)
+            .ToArray();
+
+    public IReadOnlyList<PortableLogbookMaterializedEntryV2> CurrentEntriesV2 =>
+        MergeResultV2
             .Entries
             .Values
             .Where(entry => !entry.IsDeleted && entry.Entry is not null)
@@ -129,6 +150,38 @@ public sealed class MobileLogbookSession(
         }
     }
 
+    public async Task EnsureLoadedWorkbookAsync()
+    {
+        if (IsLoaded)
+        {
+            return;
+        }
+
+        try
+        {
+            var state = await logbookStore.LoadStateV2Async();
+            if (state is not null)
+            {
+                DocumentV2 = state.Document;
+                ImportReceipts = state.ImportReceipts;
+                LastSuccessfulExportAt = state.LastSuccessfulExportAt;
+                LastSuccessfulExport = state.LastSuccessfulExport;
+            }
+
+            await RefreshPackageKeyStatusAsync(DocumentV2.LogbookId);
+            ResetWorkbookDraft();
+        }
+        catch (BrowserLogbookStoreException ex)
+        {
+            StorageError = ex.Message + " Re-import the authoritative workbook to create a workbook-faithful mobile logbook.";
+            IsStorageBlocked = true;
+        }
+        finally
+        {
+            IsLoaded = true;
+        }
+    }
+
     public async Task SaveEntryAsync()
     {
         if (IsStorageBlocked)
@@ -166,6 +219,30 @@ public sealed class MobileLogbookSession(
         ResetDraft();
     }
 
+    public async Task SaveWorkbookEntryAsync()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        HasAttemptedSubmit = true;
+        ClearLastActionMessage();
+
+        var operation = PortableLogbookOperationV2.Create(
+            DocumentV2.LogbookId,
+            EntryId.New(),
+            RevisionId.New(),
+            deviceId,
+            DateTimeOffset.UtcNow,
+            WorkbookDraft.ToEntry(WorkbookCustomFields()));
+
+        DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
+        await SaveStateV2Async();
+        SetLastActionMessage("Flight added.");
+        ResetWorkbookDraft();
+    }
+
     public void ResetDraft()
     {
         if (IsStorageBlocked)
@@ -174,6 +251,20 @@ public sealed class MobileLogbookSession(
         }
 
         Draft = EntryDraft.Create(FindDraftDefaults());
+        HasAttemptedSubmit = false;
+        HasEditedDraft = false;
+        EditingEntryId = null;
+        EditingRevisionId = null;
+    }
+
+    public void ResetWorkbookDraft()
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        WorkbookDraft = MobileWorkbookEntryDraft.Create(WorkbookCustomFields());
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
         EditingEntryId = null;
@@ -452,8 +543,31 @@ public sealed class MobileLogbookSession(
         }
     }
 
+    private async Task RefreshPackageKeyStatusAsync(LogbookId logbookId)
+    {
+        try
+        {
+            if (!await packageKeyStore.IsSupportedAsync())
+            {
+                PackageKeyStatus = "Unavailable";
+                return;
+            }
+
+            PackageKeyStatus = await packageKeyStore.HasPackageKeyAsync(logbookId)
+                ? "Ready"
+                : "Not set";
+        }
+        catch (JSException)
+        {
+            PackageKeyStatus = "Unavailable";
+        }
+    }
+
     private ValueTask SaveStateAsync() =>
         logbookStore.SaveStateAsync(new BrowserLogbookState(Document, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport));
+
+    private ValueTask SaveStateV2Async() =>
+        logbookStore.SaveStateAsync(new BrowserLogbookStateV2(DocumentV2, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport));
 
     private string[] ValidateDraft()
     {
@@ -477,6 +591,11 @@ public sealed class MobileLogbookSession(
     private IEnumerable<CustomFieldDefinition> EntryCustomFields() =>
         Document.CustomFieldDefinitions.Count > 0
             ? Document.CustomFieldDefinitions.OrderBy(field => field.Order)
+            : CustomFields;
+
+    private IEnumerable<CustomFieldDefinition> WorkbookCustomFields() =>
+        DocumentV2.CustomFieldDefinitions.Count > 0
+            ? DocumentV2.CustomFieldDefinitions.OrderBy(field => field.Order)
             : CustomFields;
 
     private static PortableLogbookEntry? EntryPayload(PortableLogbookOperation operation) =>

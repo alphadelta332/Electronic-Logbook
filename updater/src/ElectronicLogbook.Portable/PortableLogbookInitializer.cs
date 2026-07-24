@@ -46,5 +46,21 @@ public sealed class PortableLogbookIdFactory
 
     public EntryId NewEntryId() => newEntryId();
 
+    public EntryId NewEntryIdExcluding(IReadOnlySet<EntryId> existingEntryIds)
+    {
+        ArgumentNullException.ThrowIfNull(existingEntryIds);
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            var candidate = NewEntryId();
+            if (!existingEntryIds.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        throw new InvalidOperationException("Unable to allocate a unique portable logbook entry ID.");
+    }
+
     public RevisionId NewRevisionId() => newRevisionId();
 }

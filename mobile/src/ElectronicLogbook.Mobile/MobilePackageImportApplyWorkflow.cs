@@ -4,6 +4,45 @@ namespace ElectronicLogbook.Mobile;
 
 public static class MobilePackageImportApplyWorkflow
 {
+    public static async ValueTask<MobilePackageImportApplyWorkflowResultV2> ApplyIfReadyAsync(
+        PortableLogbookDocumentV2 localDocument,
+        BrowserFile file,
+        BrowserPackageKeyStore keyStore,
+        IEnumerable<PortableLogbookPackageReceipt> existingReceipts,
+        DateTimeOffset importedAt)
+    {
+        ArgumentNullException.ThrowIfNull(localDocument);
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(keyStore);
+        ArgumentNullException.ThrowIfNull(existingReceipts);
+
+        var receipts = existingReceipts.ToArray();
+        BrowserFileStore.ValidateElogbookFile(file);
+        if (PortableLogbookImportLedger.HasSeenPackage(receipts, file.Bytes))
+        {
+            return new MobilePackageImportApplyWorkflowResultV2(
+                MobilePackageImportApplyStatus.PackageReplay,
+                localDocument,
+                receipts,
+                null,
+                null);
+        }
+
+        var read = await MobilePackageImportWorkflow.ReadV2Async(localDocument, file, keyStore).ConfigureAwait(false);
+        var plan = PortableLogbookExchange.PlanImport(localDocument, read.Document);
+        if (plan.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
+        {
+            return new MobilePackageImportApplyWorkflowResultV2(
+                MobilePackageImportApplyStatus.RequiresResolution,
+                localDocument,
+                receipts,
+                plan,
+                null);
+        }
+
+        return ApplyReadyPlan(localDocument, file.Bytes, read.Manifest, read.Document, receipts, plan, importedAt);
+    }
+
     public static async ValueTask<MobilePackageImportApplyWorkflowResult> ApplyIfReadyAsync(
         PortableLogbookDocument localDocument,
         BrowserFile file,
@@ -127,6 +166,40 @@ public static class MobilePackageImportApplyWorkflow
             plan,
             receipt);
     }
+
+    private static MobilePackageImportApplyWorkflowResultV2 ApplyReadyPlan(
+        PortableLogbookDocumentV2 localDocument,
+        byte[] packageBytes,
+        PortableLogbookPackageManifest manifest,
+        PortableLogbookDocumentV2 readDocument,
+        IReadOnlyList<PortableLogbookPackageReceipt> receipts,
+        PortableLogbookImportPlanV2 plan,
+        DateTimeOffset importedAt)
+    {
+        var importedDocument = plan.Status switch
+        {
+            PortableLogbookImportPlanStatus.DuplicateOnly => localDocument,
+            PortableLogbookImportPlanStatus.RequiresConflictResolution => PortableLogbookDocumentV2.CreateAustraliaFirst(
+                localDocument.LogbookId,
+                plan.Preview.CustomFieldDefinitions.Definitions,
+                localDocument.CurrencyOverrideDates,
+                localDocument.Operations.Concat(plan.Preview.NewOperations)),
+            _ => PortableLogbookExchange.ApplyImport(localDocument, readDocument)
+        };
+        var receipt = PortableLogbookImportLedger.CreateReceipt(packageBytes, manifest, importedAt);
+        var updatedReceipts = receipts.Concat([receipt]).ToArray();
+        return new MobilePackageImportApplyWorkflowResultV2(
+            plan.Status switch
+            {
+                PortableLogbookImportPlanStatus.DuplicateOnly => MobilePackageImportApplyStatus.DuplicateOperationsRecorded,
+                PortableLogbookImportPlanStatus.RequiresConflictResolution => MobilePackageImportApplyStatus.AppliedWithConflicts,
+                _ => MobilePackageImportApplyStatus.Applied
+            },
+            importedDocument,
+            updatedReceipts,
+            plan,
+            receipt);
+    }
 }
 
 public sealed record MobilePackageImportApplyWorkflowResult(
@@ -134,6 +207,13 @@ public sealed record MobilePackageImportApplyWorkflowResult(
     PortableLogbookDocument Document,
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
     PortableLogbookImportPlan? Plan,
+    PortableLogbookPackageReceipt? Receipt);
+
+public sealed record MobilePackageImportApplyWorkflowResultV2(
+    MobilePackageImportApplyStatus Status,
+    PortableLogbookDocumentV2 Document,
+    IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
+    PortableLogbookImportPlanV2? Plan,
     PortableLogbookPackageReceipt? Receipt);
 
 public enum MobilePackageImportApplyStatus
