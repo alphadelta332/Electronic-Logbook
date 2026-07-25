@@ -18,7 +18,7 @@ else
                 <span class="eyebrow">Logbook</span>
                 <h1>Flight record</h1>
             </div>
-            <span class="draft-pill">@Session.CurrentEntries.Count entry(s)</span>
+            <span class="draft-pill">@Session.CurrentEntriesV2.Count entry(s)</span>
         </header>
 
         @if (Session.ShouldShowLastActionMessage(MobileActionMessageSurface.Logbook))
@@ -87,7 +87,7 @@ else
                                     <span>@EntryRemarks(entry.Entry!)</span>
                                 </span>
                                 <span class="logbook-row-hours">
-                                    <strong>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!))</strong>
+                                    <strong>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(entry.Entry!))</strong>
                                     <span>@SimLabel(entry.Entry!)</span>
                                 </span>
                             </NavLink>
@@ -107,11 +107,11 @@ else
                 </div>
                 <div class="totals-grid">
                     <StatusMetric Label="Total hours" Value="@MobileLogbookSession.FormatHours(TotalHours)" Detail="logged" />
-                    <StatusMetric Label="PIC" Value="@MobileLogbookSession.FormatHours(TotalPic)" Detail="pilot in command" />
+                    <StatusMetric Label="Command" Value="@MobileLogbookSession.FormatHours(TotalCommand)" Detail="SE and ME command" />
                     <StatusMetric Label="Landings" Value="@TotalLandings.ToString()" Detail="day and night" />
-                    <StatusMetric Label="Approaches" Value="@TotalApproaches.ToString()" Detail="IFR, holding, RNP, circling" />
+                    <StatusMetric Label="Approaches" Value="@TotalApproaches.ToString()" Detail="ILS, VOR, RNP, NDB, DGA, circling" />
                 </div>
-                @if (Session.DeletedEntries.Count > 0)
+                @if (Session.DeletedEntriesV2.Count > 0)
                 {
                     <section class="history-panel">
                         <div class="section-title-row">
@@ -119,13 +119,13 @@ else
                                 <span class="eyebrow">Deletion history</span>
                                 <h2>Removed entries</h2>
                             </div>
-                            <span class="draft-pill">@Session.DeletedEntries.Count deleted</span>
+                            <span class="draft-pill">@Session.DeletedEntriesV2.Count deleted</span>
                         </div>
-                        @foreach (var entry in Session.DeletedEntries)
+                        @foreach (var entry in Session.DeletedEntriesV2)
                         {
                             <NavLink class="history-row" href="@($"/flights/{entry.EntryId.Value}")">
                                 <strong>@entry.EntryId.Value</strong>
-                                <span>@MobileLogbookSession.FormatTimestamp(Session.FindOperation(entry.CurrentRevisionId).CreatedAt)</span>
+                                <span>@MobileLogbookSession.FormatTimestamp(Session.FindOperationV2(entry.CurrentRevisionId).CreatedAt)</span>
                             </NavLink>
                         }
                     </section>
@@ -133,7 +133,7 @@ else
             </section>
         }
 
-        @if (Session.MergeResult.Conflicts.Count > 0)
+        @if (Session.MergeResultV2.Conflicts.Count > 0)
         {
             <section class="form-section" role="alert">
                 <div class="section-title-row">
@@ -141,9 +141,9 @@ else
                         <span class="eyebrow">Conflicts</span>
                         <h2>Needs review</h2>
                     </div>
-                    <span class="draft-pill">@Session.MergeResult.Conflicts.Count unresolved</span>
+                    <span class="draft-pill">@Session.MergeResultV2.Conflicts.Count unresolved</span>
                 </div>
-                @foreach (var conflict in Session.MergeResult.Conflicts)
+                @foreach (var conflict in Session.MergeResultV2.Conflicts)
                 {
                     <div class="history-row">
                         <strong>@conflict.EntryId.Value</strong>
@@ -152,17 +152,17 @@ else
                     <div class="flight-row-list">
                         @foreach (var revisionId in conflict.HeadRevisionIds)
                         {
-                            var operation = Session.FindOperation(revisionId);
+                            var operation = Session.FindOperationV2(revisionId);
                             <article class="flight-row">
                                 <div>
                                     <strong>@operation.Kind</strong>
                                     <span>@revisionId.Value</span>
                                 </div>
                                 <div>
-                                    <strong>@Session.FormatConflictRoute(operation)</strong>
-                                    <span>@Session.FormatConflictAircraft(operation)</span>
+                                    <strong>@(operation.Entry is null ? "Deleted entry" : Session.FormatRoute(operation.Entry))</strong>
+                                    <span>@(operation.Entry is null ? "No active payload" : Session.FormatAircraft(operation.Entry))</span>
                                 </div>
-                                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => Session.ResolveConflictAsync(conflict, revisionId))" Disabled="@Session.IsStorageBlocked">
+                                <MudButton Variant="Variant.Outlined" Size="Size.Small" OnClick="@(() => Session.ResolveWorkbookConflictAsync(conflict, revisionId))" Disabled="@Session.IsStorageBlocked">
                                     Keep
                                 </MudButton>
                             </article>
@@ -184,34 +184,34 @@ else
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
 
-    private IReadOnlyList<PortableLogbookMaterializedEntry> FilteredEntries =>
-        Session.CurrentEntries
+    private IReadOnlyList<PortableLogbookMaterializedEntryV2> FilteredEntries =>
+        Session.CurrentEntriesV2
             .Where(MatchesSearch)
             .Where(MatchesActiveFilters)
             .ToArray();
 
     private decimal TotalHours =>
-        Session.CurrentEntries.Sum(entry => PortableLogbookEntryRules.LoggedTime(entry.Entry!));
+        Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
 
-    private decimal TotalPic =>
-        Session.CurrentEntries.Sum(entry => entry.Entry!.PilotInCommand ?? 0);
+    private decimal TotalCommand =>
+        Session.CurrentEntriesV2.Sum(entry =>
+            (entry.Entry!.SeCommandDay ?? 0) +
+            (entry.Entry.SeCommandNight ?? 0) +
+            (entry.Entry.MeCommandDay ?? 0) +
+            (entry.Entry.MeCommandNight ?? 0));
 
     private int TotalLandings =>
-        Session.CurrentEntries.Sum(entry => (entry.Entry!.LandingsDay ?? 0) + (entry.Entry.LandingsNight ?? 0));
+        Session.CurrentEntriesV2.Sum(entry => (entry.Entry!.LandingsDay ?? 0) + (entry.Entry.LandingsNight ?? 0));
 
     private int TotalApproaches =>
-        Session.CurrentEntries.Sum(entry =>
-            (entry.Entry!.IfrApproaches ?? 0) +
-            (entry.Entry.Holding ?? 0) +
-            (entry.Entry.Rnav ?? 0) +
-            (entry.Entry.Circling ?? 0));
+        Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookApproaches(entry.Entry!));
 
     protected override async Task OnInitializedAsync()
     {
-        await Session.EnsureLoadedAsync();
+        await Session.EnsureLoadedWorkbookAsync();
     }
 
-    private bool MatchesSearch(PortableLogbookMaterializedEntry materialized)
+    private bool MatchesSearch(PortableLogbookMaterializedEntryV2 materialized)
     {
         if (string.IsNullOrWhiteSpace(SearchText) || materialized.Entry is null)
         {
@@ -219,11 +219,11 @@ else
         }
 
         var entry = materialized.Entry;
-        var haystack = string.Join(" ", entry.Registration, entry.From, entry.To, entry.Route, entry.AircraftType, entry.Details);
+        var haystack = string.Join(" ", entry.Reg, entry.From, entry.To, entry.Via, entry.Type, entry.Remarks);
         return haystack.Contains(SearchText, StringComparison.OrdinalIgnoreCase);
     }
 
-    private bool MatchesActiveFilters(PortableLogbookMaterializedEntry materialized)
+    private bool MatchesActiveFilters(PortableLogbookMaterializedEntryV2 materialized)
     {
         if (materialized.Entry is null)
         {
@@ -244,8 +244,8 @@ else
         FilterFlightsWithApproachesOnly = false;
     }
 
-    private static string EntryRemarks(PortableLogbookEntry entry) =>
-        StripGeneratedCrewSuffix(entry.Details?.Trim() ?? string.Empty);
+    private static string EntryRemarks(PortableLogbookWorkbookEntry entry) =>
+        entry.Remarks?.Trim() ?? string.Empty;
 
     private static string StripGeneratedCrewSuffix(string remarks)
     {
@@ -282,11 +282,11 @@ else
     private static string FormatRowDate(DateOnly? date) =>
         date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
 
-    private static string SimLabel(PortableLogbookEntry entry) =>
-        entry.InstrumentSimulated.GetValueOrDefault() > 0 ? "Sim" : string.Empty;
+    private static string SimLabel(PortableLogbookWorkbookEntry entry) =>
+        entry.IfrSim.GetValueOrDefault() > 0 ? "Sim" : string.Empty;
 
-    private static int CountApproaches(PortableLogbookEntry entry) =>
-        (entry.IfrApproaches ?? 0) + (entry.Holding ?? 0) + (entry.Rnav ?? 0) + (entry.Circling ?? 0);
+    private static int CountApproaches(PortableLogbookWorkbookEntry entry) =>
+        MobileLogbookSession.WorkbookApproaches(entry);
 
     private enum LogbookView
     {

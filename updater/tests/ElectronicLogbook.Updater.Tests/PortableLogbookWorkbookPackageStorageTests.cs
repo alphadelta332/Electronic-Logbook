@@ -356,12 +356,35 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         var rows = PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(workbook, customFields);
 
         Assert.Equal([45, 46], writeResult.AbsoluteMetadataColumnIndexes);
+        using (var readArchive = ZipFile.OpenRead(workbook))
+        {
+            var worksheet = ReadXml(readArchive, "xl/worksheets/sheet2.xml");
+            Assert.Equal("ent_v2_all", ReadInlineStringCell(worksheet, "AS2"));
+            Assert.Equal("rev_v2_all", ReadInlineStringCell(worksheet, "AT2"));
+        }
+
         var row = Assert.Single(rows);
         Assert.Equal(new EntryId("ent_v2_all"), row.EntryId);
         Assert.Equal(new RevisionId("rev_v2_all"), row.CurrentRevisionId);
         Assert.Equal(
             PortableLogbookWorkbookEntryFields.ToFieldValues(entry),
             PortableLogbookWorkbookEntryFields.ToFieldValues(row.Entry));
+        var fieldIds = PortableLogbookWorkbookEntryFields.ToFieldValues(row.Entry).Keys.ToArray();
+        Assert.DoesNotContain(fieldIds, fieldId => fieldId is
+            "aircraftType" or
+            "registration" or
+            "flightNumber" or
+            "multiPilot" or
+            "pilotInCommand" or
+            "coPilot" or
+            "dual" or
+            "instructor" or
+            "day" or
+            "night" or
+            "takeoffsDay" or
+            "takeoffsNight" or
+            "ifrApproaches" or
+            "holding");
     }
 
     [Fact]

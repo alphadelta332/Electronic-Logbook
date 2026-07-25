@@ -102,7 +102,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await Session.EnsureLoadedAsync();
+        await Session.EnsureLoadedWorkbookAsync();
         await UiPreferences.EnsureLoadedAsync();
     }
 
@@ -128,7 +128,7 @@ else
         try
         {
             var result = await MobileSupportSummaryExportWorkflow.ExportAsync(
-                Session.Document,
+                Session.DocumentV2,
                 FileStore,
                 DateTimeOffset.UtcNow);
             SupportSummaryMessage = $"Exported {result.FileName}.";
@@ -156,8 +156,8 @@ else
         try
         {
             var result = await MobileDeviceStateExportWorkflow.ExportAsync(
-                new BrowserLogbookState(
-                    Session.Document,
+                new BrowserLogbookStateV2(
+                    Session.DocumentV2,
                     Session.ImportReceipts,
                     Session.LastSuccessfulExportAt,
                     Session.LastSuccessfulExport),

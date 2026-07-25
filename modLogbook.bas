@@ -1,6 +1,19 @@
 Attribute VB_Name = "modLogbook"
 Option Explicit
 
+Private Type PortableGuidBytes
+    Data1 As Long
+    Data2 As Integer
+    Data3 As Integer
+    Data4(0 To 7) As Byte
+End Type
+
+#If VBA7 Then
+Private Declare PtrSafe Function CoCreateGuid Lib "ole32" (ByRef guid As PortableGuidBytes) As Long
+#Else
+Private Declare Function CoCreateGuid Lib "ole32" (ByRef guid As PortableGuidBytes) As Long
+#End If
+
 Public Const ROUTE_DEFINITION_VERSION As Long = 3
 Private mProtectionDisabledForSession As Boolean
 Private Const NEW_ENTRY_ACTIVE_SHEET As String = "New Entry"
@@ -638,6 +651,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
         Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
         entryWasWritten = True
+        AssignEntryIdToLogbookRowIfPresent newRow.Range, tbl
         TraceAddToLogbookLayout "After ListRows.Add", tbl
 
     '--- Copy Year, Month, Day
@@ -3750,6 +3764,7 @@ Private Sub AppendMappedLogTenRows(ByVal tbl As ListObject, ByVal rowsToImport A
     For importIndex = 1 To rowsToImport.Count
         Set mapped = rowsToImport(importIndex)
         Set targetRow = tbl.DataBodyRange.Rows(originalRowCount + importIndex)
+        AssignEntryIdToLogbookRowIfPresent targetRow, tbl
         WriteMappedLogTenRow targetRow, tbl, mapped
     Next importIndex
 End Sub
@@ -3801,6 +3816,7 @@ Private Sub AppendMappedLogTenRow(ByVal tbl As ListObject, ByVal mapped As Objec
 
     Set templateRow = tbl.DataBodyRange.Rows(1)
     Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)
+    AssignEntryIdToLogbookRowIfPresent newRow.Range, tbl
 
     If tbl.ListRows.Count > 1 Then
         iPrevRow = tbl.ListRows.Count - 1
@@ -3864,6 +3880,45 @@ Private Sub WriteMappedValueToColumnIfPresent(ByVal rowRange As Range, _
         WriteMappedValueToColumn rowRange, tbl, columnName, value
     End If
 End Sub
+
+Private Sub AssignEntryIdToLogbookRowIfPresent(ByVal rowRange As Range, ByVal tbl As ListObject)
+    Dim entryIdCell As Range
+
+    If rowRange Is Nothing Then Exit Sub
+    If tbl Is Nothing Then Exit Sub
+    If Not ListColumnExists(tbl, "EntryID") Then Exit Sub
+
+    Set entryIdCell = rowRange.Cells(1, tbl.ListColumns("EntryID").Index)
+    If Trim$(CStr(entryIdCell.Value)) <> "" Then Exit Sub
+
+    entryIdCell.Value = NewPortableEntryId()
+End Sub
+
+Private Function NewPortableEntryId() As String
+    Dim guid As PortableGuidBytes
+    Dim resultCode As Long
+    Dim guidText As String
+
+    resultCode = CoCreateGuid(guid)
+    If resultCode <> 0 Then
+        Err.Raise vbObjectError + 2460, "NewPortableEntryId", _
+                  "Could not allocate a portable logbook entry ID."
+    End If
+
+    guidText = Right$("00000000" & Hex$(guid.Data1), 8) & _
+               Right$("0000" & Hex$(guid.Data2), 4) & _
+               Right$("0000" & Hex$(guid.Data3), 4) & _
+               Right$("00" & Hex$(guid.Data4(0)), 2) & _
+               Right$("00" & Hex$(guid.Data4(1)), 2) & _
+               Right$("00" & Hex$(guid.Data4(2)), 2) & _
+               Right$("00" & Hex$(guid.Data4(3)), 2) & _
+               Right$("00" & Hex$(guid.Data4(4)), 2) & _
+               Right$("00" & Hex$(guid.Data4(5)), 2) & _
+               Right$("00" & Hex$(guid.Data4(6)), 2) & _
+               Right$("00" & Hex$(guid.Data4(7)), 2)
+
+    NewPortableEntryId = "ent_" & LCase$(guidText)
+End Function
 
 Private Function BuildExistingLogTenDuplicateKeys(ByVal tbl As ListObject) As Object
     Dim result As Object

@@ -12,6 +12,7 @@ namespace ElectronicLogbook.Updater;
 
 public sealed class ExcelWorkbookMigrator
 {
+    internal const string LegacyPortableEntryIdColumnName = "Portable Entry ID";
     private const int AutomationSecurityForceDisable = 3;
     private const int XlCalculationManual = -4135;
     private const int XlCalculationAutomatic = -4105;
@@ -372,7 +373,9 @@ public sealed class ExcelWorkbookMigrator
     internal static bool ShouldPreservePortableMetadataColumns(IEnumerable<string> sourceColumnNames)
     {
         ArgumentNullException.ThrowIfNull(sourceColumnNames);
-        return sourceColumnNames.Any(PortableLogbookWorkbookMetadata.IsPortableMetadataColumn);
+        return sourceColumnNames.Any(columnName =>
+            PortableLogbookWorkbookMetadata.IsPortableMetadataColumn(columnName) ||
+            string.Equals(columnName.Trim(), LegacyPortableEntryIdColumnName, StringComparison.OrdinalIgnoreCase));
     }
 
     internal static PortableLogbookMetadataColumnPlan CreatePortableMetadataMigrationPlan(
@@ -402,7 +405,9 @@ public sealed class ExcelWorkbookMigrator
 
         var columnPlan = CreatePortableMetadataMigrationPlan(destinationColumnNames);
         var columnsToCopy = PortableLogbookWorkbookMetadata.HiddenLogbookColumns
-            .Where(column => sourceColumns.Contains(column.WorkbookColumnName))
+            .Where(column => sourceColumns.Contains(column.WorkbookColumnName) ||
+                (column.Kind == PortableLogbookMetadataColumnKind.EntryId &&
+                    sourceColumns.Contains(LegacyPortableEntryIdColumnName)))
             .Select(column => column.WorkbookColumnName)
             .ToArray();
 
@@ -432,7 +437,8 @@ public sealed class ExcelWorkbookMigrator
 
         foreach (var columnName in plan.ColumnsToCopy)
         {
-            CopyColumn(source, destination, columnName, rows);
+            var sourceColumnName = ResolvePortableMetadataSourceColumn(source, columnName, rows);
+            CopyColumn(source, destination, sourceColumnName, columnName, rows);
         }
 
         foreach (var columnName in plan.ColumnsToHide)
@@ -442,6 +448,56 @@ public sealed class ExcelWorkbookMigrator
                 HideTableColumn(destination, columnName);
             }
         }
+    }
+
+    internal static void ValidatePortableEntryIdMigrationValues(
+        IReadOnlyList<object?> entryIdValues,
+        IReadOnlyList<object?> legacyEntryIdValues)
+    {
+        ArgumentNullException.ThrowIfNull(entryIdValues);
+        ArgumentNullException.ThrowIfNull(legacyEntryIdValues);
+
+        var rows = Math.Max(entryIdValues.Count, legacyEntryIdValues.Count);
+        for (var index = 0; index < rows; index++)
+        {
+            var entryId = index < entryIdValues.Count ? StableValue(entryIdValues[index]).Trim() : "";
+            var legacyEntryId = index < legacyEntryIdValues.Count ? StableValue(legacyEntryIdValues[index]).Trim() : "";
+            if (entryId.Length == 0 && legacyEntryId.Length == 0)
+            {
+                throw new InvalidDataException(
+                    $"Portable Entry ID migration conflict at Logbook row {index + 1}: EntryID and Portable Entry ID are both blank.");
+            }
+
+            if (!string.Equals(entryId, legacyEntryId, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    $"Portable Entry ID migration conflict at Logbook row {index + 1}: EntryID '{entryId}' does not match Portable Entry ID '{legacyEntryId}'.");
+            }
+        }
+    }
+
+    private static string ResolvePortableMetadataSourceColumn(dynamic source, string destinationColumnName, int rows)
+    {
+        if (!string.Equals(
+            destinationColumnName,
+            PortableLogbookWorkbookFieldCatalog.EntryIdColumnName,
+            StringComparison.OrdinalIgnoreCase))
+        {
+            return destinationColumnName;
+        }
+
+        var hasEntryId = HasColumn((object)source, PortableLogbookWorkbookFieldCatalog.EntryIdColumnName);
+        var hasLegacyEntryId = HasColumn((object)source, LegacyPortableEntryIdColumnName);
+        if (hasEntryId && hasLegacyEntryId)
+        {
+            ValidatePortableEntryIdMigrationValues(
+                ReadColumnValues(source, PortableLogbookWorkbookFieldCatalog.EntryIdColumnName, rows),
+                ReadColumnValues(source, LegacyPortableEntryIdColumnName, rows));
+        }
+
+        return hasEntryId
+            ? PortableLogbookWorkbookFieldCatalog.EntryIdColumnName
+            : LegacyPortableEntryIdColumnName;
     }
 
     private static void CopyTableByMatchingColumns(

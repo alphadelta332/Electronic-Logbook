@@ -27,6 +27,29 @@ public static class MobileDeviceStateExportWorkflow
         return new MobileDeviceStateExportWorkflowResult(fileName);
     }
 
+    public static async ValueTask<MobileDeviceStateExportWorkflowResult> ExportAsync(
+        BrowserLogbookStateV2 state,
+        BrowserFileStore fileStore,
+        DateTimeOffset exportedAt)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(fileStore);
+
+        var stored = new BrowserLogbookStoredDocument(
+            BrowserLogbookStore.CurrentStoreVersion,
+            state.Document.SchemaVersion,
+            ElectronicLogbook.Portable.PortableLogbookJson.SerializeV2(state.Document),
+            state.ImportReceipts,
+            state.LastSuccessfulExportAt,
+            state.LastSuccessfulExport);
+        var json = JsonSerializer.Serialize(stored, ElectronicLogbook.Portable.PortableLogbookJson.SerializerOptions);
+        var fileName = $"electronic-logbook-device-state-{SafeFileNameToken(state.Document.LogbookId.Value)}-{exportedAt:yyyyMMddTHHmmssZ}.json";
+
+        await fileStore.DownloadJsonAsync(fileName, json).ConfigureAwait(false);
+
+        return new MobileDeviceStateExportWorkflowResult(fileName);
+    }
+
     private static string SafeFileNameToken(string value)
     {
         var token = new string(value

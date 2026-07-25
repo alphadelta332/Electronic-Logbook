@@ -115,6 +115,23 @@ public sealed class PortableLogbookWorkbookProjectionV2Tests
     }
 
     [Fact]
+    public void ReconcileV2CorrectsKnownRowsWithoutAllocatingReplacementEntryId()
+    {
+        var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
+
+        var result = Reconcile(
+            [known],
+            [new PortableLogbookWorkbookRowV2(known.EntryId, known.CurrentRevisionId, Entry("VH-XYZ"))],
+            EntryIdThrowingFactory("rev_correct"));
+
+        var correction = Assert.Single(result.Operations);
+        Assert.Equal(PortableOperationKind.Correction, correction.Kind);
+        Assert.Equal(known.EntryId, correction.EntryId);
+        Assert.Equal(new RevisionId("rev_correct"), correction.RevisionId);
+        Assert.Equal(1, result.CorrectionCount);
+    }
+
+    [Fact]
     public void ReconcileV2DeletesKnownRowsMissingFromWorkbookProjection()
     {
         var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
@@ -129,6 +146,23 @@ public sealed class PortableLogbookWorkbookProjectionV2Tests
         Assert.Equal(known.EntryId, deletion.EntryId);
         Assert.Equal(known.CurrentRevisionId, Assert.Single(deletion.ParentRevisionIds));
         Assert.Null(deletion.Entry);
+        Assert.Equal(1, result.DeletionCount);
+    }
+
+    [Fact]
+    public void ReconcileV2DeletesKnownRowsWithoutAllocatingReplacementEntryId()
+    {
+        var known = KnownEntry("ent_1", "rev_1", Entry("VH-ABC"));
+
+        var result = Reconcile(
+            [known],
+            [],
+            EntryIdThrowingFactory("rev_delete"));
+
+        var deletion = Assert.Single(result.Operations);
+        Assert.Equal(PortableOperationKind.Deletion, deletion.Kind);
+        Assert.Equal(known.EntryId, deletion.EntryId);
+        Assert.Equal(new RevisionId("rev_delete"), deletion.RevisionId);
         Assert.Equal(1, result.DeletionCount);
     }
 
@@ -198,4 +232,9 @@ public sealed class PortableLogbookWorkbookProjectionV2Tests
             Pic = "A Delta",
             SeCommandDay = 1.2m
         };
+
+    private static PortableLogbookIdFactory EntryIdThrowingFactory(string revisionId) =>
+        new(
+            () => throw new InvalidOperationException("EntryID allocation was not expected."),
+            () => new RevisionId(revisionId));
 }

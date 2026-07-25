@@ -36,7 +36,7 @@ else
         <section class="status-strip" aria-label="Operational status">
             <StatusMetric Label="Total hours" Value="@MobileLogbookSession.FormatHours(TotalFlyingHours)" Detail="logged" />
             <StatusMetric Label="Last 90 days" Value="@RecentFlightCount.ToString()" Detail="@RecentHoursDetail" />
-            <StatusMetric Label="Entries" Value="@Session.CurrentEntries.Count.ToString()" Detail="current record" />
+            <StatusMetric Label="Entries" Value="@Session.CurrentEntriesV2.Count.ToString()" Detail="current record" />
             <StatusMetric Label="Package key" Value="@Session.PackageKeyStatus" Detail="device readiness" Attention="@(Session.PackageKeyStatus != "Ready")" />
         </section>
 
@@ -75,7 +75,7 @@ else
                 <MudButton Href="/flights" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Logbook</MudButton>
             </div>
 
-            @if (Session.CurrentEntries.Count == 0)
+            @if (Session.CurrentEntriesV2.Count == 0)
             {
                 <section class="empty-state">
                     <MudIcon Icon="@Icons.Material.Filled.Flight" />
@@ -86,7 +86,7 @@ else
             else
             {
                 <div class="flight-row-list">
-                    @foreach (var entry in Session.CurrentEntries.Take(5))
+                    @foreach (var entry in Session.CurrentEntriesV2.Take(5))
                     {
                         <article class="flight-row">
                             <div class="route-code">
@@ -95,7 +95,7 @@ else
                             </div>
                             <div>
                                 <strong>@Session.FormatAircraft(entry.Entry!)</strong>
-                                <span>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(entry.Entry!)) hr total</span>
+                                <span>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(entry.Entry!)) hr total</span>
                             </div>
                             <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Primary" OnClick="@(() => CloneEntry(entry.Entry!))" aria-label="Clone flight" />
                         </article>
@@ -114,20 +114,20 @@ else
 @code {
     private DateOnly RecentCutoff => DateOnly.FromDateTime(DateTime.Today.AddDays(-90));
 
-    private PortableLogbookMaterializedEntry? LastFlight => Session.CurrentEntries.FirstOrDefault();
+    private PortableLogbookMaterializedEntryV2? LastFlight => Session.CurrentEntriesV2.FirstOrDefault();
 
     private decimal TotalFlyingHours =>
-        Session.CurrentEntries.Sum(entry => PortableLogbookEntryRules.LoggedTime(entry.Entry!));
+        Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
 
-    private IReadOnlyList<PortableLogbookMaterializedEntry> RecentEntries =>
-        Session.CurrentEntries
+    private IReadOnlyList<PortableLogbookMaterializedEntryV2> RecentEntries =>
+        Session.CurrentEntriesV2
             .Where(entry => entry.Entry!.Date >= RecentCutoff)
             .ToArray();
 
     private int RecentFlightCount => RecentEntries.Count;
 
     private decimal RecentFlyingHours =>
-        RecentEntries.Sum(entry => PortableLogbookEntryRules.LoggedTime(entry.Entry!));
+        RecentEntries.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
 
     private string RecentHoursDetail =>
         $"{MobileLogbookSession.FormatHours(RecentFlyingHours)} hr";
@@ -140,20 +140,20 @@ else
     private string LastFlightDetail =>
         LastFlight?.Entry is null
             ? "Import a package or add a flight to build the device record."
-            : $"{Session.FormatAircraft(LastFlight.Entry)} | {MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(LastFlight.Entry))} hr";
+            : $"{Session.FormatAircraft(LastFlight.Entry)} | {MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(LastFlight.Entry))} hr";
 
     private string RecentSnapshotDetail =>
-        Session.CurrentEntries.Count == 0
+        Session.CurrentEntriesV2.Count == 0
             ? "90-day snapshot will appear after the first dated entry."
             : $"{RecentFlightCount} flight(s), {MobileLogbookSession.FormatHours(RecentFlyingHours)} hr in the last 90 days.";
 
     private string RecordHealthIcon =>
-        Session.MergeResult.Conflicts.Count > 0
+        Session.MergeResultV2.Conflicts.Count > 0
             ? Icons.Material.Filled.ReportProblem
             : Icons.Material.Filled.HealthAndSafety;
 
     private string RecordHealthTitle =>
-        Session.MergeResult.Conflicts.Count > 0
+        Session.MergeResultV2.Conflicts.Count > 0
             ? "Record needs review"
             : RecentFlightCount > 0
                 ? "Recent activity recorded"
@@ -163,9 +163,9 @@ else
     {
         get
         {
-            if (Session.MergeResult.Conflicts.Count > 0)
+            if (Session.MergeResultV2.Conflicts.Count > 0)
             {
-                return $"{Session.MergeResult.Conflicts.Count} conflict(s) need review before the device copy is clean.";
+                return $"{Session.MergeResultV2.Conflicts.Count} conflict(s) need review before the device copy is clean.";
             }
 
             if (LastFlight?.Entry is null)
@@ -183,18 +183,18 @@ else
     }
 
     private string NextActionDetail =>
-        Session.CurrentEntries.Count == 0
+        Session.CurrentEntriesV2.Count == 0
             ? "Create the first device entry or import an encrypted package from the workbook."
-            : $"{Session.CurrentEntries.Count} flight(s) available on this device.";
+            : $"{Session.CurrentEntriesV2.Count} flight(s) available on this device.";
 
     protected override async Task OnInitializedAsync()
     {
-        await Session.EnsureLoadedAsync();
+        await Session.EnsureLoadedWorkbookAsync();
     }
 
-    private void CloneEntry(PortableLogbookEntry entry)
+    private void CloneEntry(PortableLogbookWorkbookEntry entry)
     {
-        Session.CloneEntry(entry);
+        Session.CloneWorkbookEntry(entry);
         Navigation.NavigateTo("/flights/new");
     }
 

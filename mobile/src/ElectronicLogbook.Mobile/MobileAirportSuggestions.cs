@@ -15,6 +15,15 @@ public static class MobileAirportSuggestions
         return MobileRecentValues.CreateMany(currentEntries, ValuesForEntry, limit);
     }
 
+    public static IReadOnlyList<string> Create(
+        IEnumerable<PortableLogbookMaterializedEntryV2> currentEntries,
+        int limit = 12)
+    {
+        ArgumentNullException.ThrowIfNull(currentEntries);
+
+        return MobileRecentValues.CreateMany(currentEntries, ValuesForEntry, limit);
+    }
+
     private static IEnumerable<string?> ValuesForEntry(PortableLogbookEntry entry)
     {
         yield return AirportSuggestion(entry.From);
@@ -26,6 +35,25 @@ public static class MobileAirportSuggestions
         }
 
         foreach (var token in entry.Route.Split(RouteSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (IsAirportLikeToken(token))
+            {
+                yield return token.ToUpperInvariant();
+            }
+        }
+    }
+
+    private static IEnumerable<string?> ValuesForEntry(PortableLogbookWorkbookEntry entry)
+    {
+        yield return AirportSuggestion(entry.From);
+        yield return AirportSuggestion(entry.To);
+
+        if (string.IsNullOrWhiteSpace(entry.Via))
+        {
+            yield break;
+        }
+
+        foreach (var token in entry.Via.Split(RouteSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             if (IsAirportLikeToken(token))
             {

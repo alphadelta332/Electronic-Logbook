@@ -31,8 +31,6 @@ Electronic Logbook - Jack 1.4.1.xlsm
 /.codex
 AGENTS.md
 PLAN.md
-Electronic Logbook 1.*
-Electronic Logbook 2.*
 IMPROVEMENT_ROADMAP.md
 *.pem
 !updater/release-manifest-signing-public-key.pem
@@ -41,3 +39,4 @@ IMPROVEMENT_ROADMAP.md
 LOCAL_DEVICE_SETUP_HANDOVER.md
 /.codex-remote-attachments
 TODO.md
+/old-workbooks

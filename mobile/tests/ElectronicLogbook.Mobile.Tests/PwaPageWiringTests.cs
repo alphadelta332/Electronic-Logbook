@@ -425,7 +425,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Export device state", settings, StringComparison.Ordinal);
         Assert.Contains("ExportDeviceStateAsync", settings, StringComparison.Ordinal);
         Assert.Contains("MobileDeviceStateExportWorkflow.ExportAsync", settings, StringComparison.Ordinal);
-        Assert.Contains("new BrowserLogbookState", settings, StringComparison.Ordinal);
+        Assert.Contains("new BrowserLogbookStateV2", settings, StringComparison.Ordinal);
         Assert.Contains("DeviceStateExportMessage", settings, StringComparison.Ordinal);
         Assert.Contains("DeviceStateExportError", settings, StringComparison.Ordinal);
     }
@@ -445,16 +445,12 @@ public sealed class PwaPageWiringTests
         Assert.Contains("logbook-row-route", page, StringComparison.Ordinal);
         Assert.Contains("Session.FormatRoute(entry.Entry!)", page, StringComparison.Ordinal);
         Assert.Contains("EntryRemarks(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.Contains("entry.Details?.Trim() ?? string.Empty", page, StringComparison.Ordinal);
-        Assert.Contains("StripGeneratedCrewSuffix", page, StringComparison.Ordinal);
-        Assert.Contains("IsGeneratedCrewText(remarks)", page, StringComparison.Ordinal);
-        Assert.Contains("string.Equals(part, \"Crew: -\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
-        Assert.Contains("part.StartsWith(\"PIC:\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
-        Assert.Contains("part.StartsWith(\"Crew:\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
+        Assert.Contains("entry.Remarks?.Trim() ?? string.Empty", page, StringComparison.Ordinal);
+        Assert.Contains("CurrentEntriesV2", page, StringComparison.Ordinal);
         Assert.Contains("logbook-row-hours", page, StringComparison.Ordinal);
-        Assert.Contains("PortableLogbookEntryRules.LoggedTime(entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookSession.WorkbookLoggedTime(entry.Entry!)", page, StringComparison.Ordinal);
         Assert.Contains("SimLabel(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.Contains("InstrumentSimulated.GetValueOrDefault() > 0 ? \"Sim\" : string.Empty", page, StringComparison.Ordinal);
+        Assert.Contains("IfrSim.GetValueOrDefault() > 0 ? \"Sim\" : string.Empty", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Session.FormatRegistration(entry.Entry!)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Session.FormatAircraft(entry.Entry!)", page, StringComparison.Ordinal);
         Assert.DoesNotContain("EntryMeta", page, StringComparison.Ordinal);
@@ -464,7 +460,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
         Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
-        Assert.Contains("Session.DeletedEntries", page, StringComparison.Ordinal);
+        Assert.Contains("Session.DeletedEntriesV2", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -508,7 +504,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("RecentSnapshotDetail", page, StringComparison.Ordinal);
         Assert.Contains("TotalFlyingHours", page, StringComparison.Ordinal);
         Assert.Contains("RecentCutoff", page, StringComparison.Ordinal);
-        Assert.Contains("PortableLogbookEntryRules.LoggedTime", page, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookSession.WorkbookLoggedTime", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -519,7 +515,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("dashboard-record-health", page, StringComparison.Ordinal);
         Assert.Contains("RecordHealthTitle", page, StringComparison.Ordinal);
         Assert.Contains("RecordHealthReason", page, StringComparison.Ordinal);
-        Assert.Contains("Session.MergeResult.Conflicts.Count", page, StringComparison.Ordinal);
+        Assert.Contains("Session.MergeResultV2.Conflicts.Count", page, StringComparison.Ordinal);
         Assert.Contains("Last dated entry is", page, StringComparison.Ordinal);
         Assert.Contains("within the last 90 days", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Part 61", page, StringComparison.Ordinal);
@@ -536,7 +532,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Edit entry", page, StringComparison.Ordinal);
         Assert.Contains("Immutable history", page, StringComparison.Ordinal);
         Assert.Contains("Session.EntryDetails(CurrentEntry.Entry)", page, StringComparison.Ordinal);
-        Assert.Contains("Session.DeleteEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.DeleteWorkbookEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
         Assert.Contains("History?.IsDeleted == true", page, StringComparison.Ordinal);
         Assert.Contains("Deleted entry", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
@@ -552,8 +548,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@page \"/flights/{EntryId}/edit\"", page, StringComparison.Ordinal);
         Assert.Contains("public string? EntryId { get; set; }", page, StringComparison.Ordinal);
         Assert.Contains("LoadEditRoute", page, StringComparison.Ordinal);
-        Assert.Contains("Session.FindCurrentEntry(EntryId)", page, StringComparison.Ordinal);
-        Assert.Contains("Session.EditEntry(entry)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.FindCurrentEntryV2(EntryId)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.EditWorkbookEntry(entry)", page, StringComparison.Ordinal);
     }
 
     [Fact]

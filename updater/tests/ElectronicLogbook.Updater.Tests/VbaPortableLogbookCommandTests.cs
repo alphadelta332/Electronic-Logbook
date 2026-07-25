@@ -130,6 +130,64 @@ public sealed class VbaPortableLogbookCommandTests
         Assert.Contains("targetRange.Value2 = outputValues", formattedBody, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void WorkbookNewEntryAssignsEntryIdBeforeFirstWorkbookSave()
+    {
+        var source = ReadModLogbookSource();
+        var addToLogbookBody = ExtractVbaProcedureBody(source, "AddToLogbook", "End Sub");
+
+        var addRowIndex = addToLogbookBody.IndexOf(
+            "Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)",
+            StringComparison.Ordinal);
+        var assignEntryIdIndex = addToLogbookBody.IndexOf(
+            "AssignEntryIdToLogbookRowIfPresent newRow.Range, tbl",
+            StringComparison.Ordinal);
+        var saveIndex = addToLogbookBody.IndexOf("ThisWorkbook.Save", StringComparison.Ordinal);
+
+        Assert.True(addRowIndex >= 0, "The New Entry append path should add a Logbook table row.");
+        Assert.True(assignEntryIdIndex > addRowIndex, "The New Entry append path should assign EntryID after row allocation.");
+        Assert.True(saveIndex > assignEntryIdIndex, "The New Entry append path should assign EntryID before workbook save.");
+    }
+
+    [Fact]
+    public void LogTenAppendAssignsEntryIdBeforeWorkbookPersistence()
+    {
+        var source = ReadModLogbookSource();
+        var importBody = ExtractVbaProcedureBody(source, "ImportFromLogTenFile", "End Function");
+        var appendRowsBody = ExtractVbaProcedureBody(source, "AppendMappedLogTenRows", "End Sub");
+        var appendRowBody = ExtractVbaProcedureBody(source, "AppendMappedLogTenRow", "End Sub");
+
+        var appendCallIndex = importBody.IndexOf("AppendMappedLogTenRows tbl, rowsToImport", StringComparison.Ordinal);
+        var saveIndex = importBody.IndexOf("ThisWorkbook.Save", StringComparison.Ordinal);
+        Assert.True(appendCallIndex >= 0, "The LogTen import path should append mapped rows.");
+        Assert.True(saveIndex > appendCallIndex, "The LogTen import path should append rows before workbook save.");
+
+        var batchTargetIndex = appendRowsBody.IndexOf(
+            "Set targetRow = tbl.DataBodyRange.Rows(originalRowCount + importIndex)",
+            StringComparison.Ordinal);
+        var batchAssignIndex = appendRowsBody.IndexOf(
+            "AssignEntryIdToLogbookRowIfPresent targetRow, tbl",
+            StringComparison.Ordinal);
+        var batchWriteIndex = appendRowsBody.IndexOf("WriteMappedLogTenRow targetRow, tbl, mapped", StringComparison.Ordinal);
+
+        Assert.True(batchAssignIndex > batchTargetIndex, "The LogTen batch append path should assign EntryID after selecting the appended row.");
+        Assert.True(batchWriteIndex > batchAssignIndex, "The LogTen batch append path should assign EntryID before mapped row data is committed.");
+
+        var singleAddIndex = appendRowBody.IndexOf("Set newRow = tbl.ListRows.Add(AlwaysInsert:=True)", StringComparison.Ordinal);
+        var singleAssignIndex = appendRowBody.IndexOf(
+            "AssignEntryIdToLogbookRowIfPresent newRow.Range, tbl",
+            StringComparison.Ordinal);
+        Assert.True(singleAssignIndex > singleAddIndex, "The single-row LogTen append helper should assign EntryID after row allocation.");
+
+        var helperBody = ExtractVbaProcedureBody(source, "AssignEntryIdToLogbookRowIfPresent", "End Sub");
+        Assert.Contains("If Not ListColumnExists(tbl, \"EntryID\") Then Exit Sub", helperBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("Portable Entry ID", helperBody, StringComparison.Ordinal);
+        Assert.Contains("entryIdCell.Value = NewPortableEntryId()", helperBody, StringComparison.Ordinal);
+        Assert.Contains("CoCreateGuid(guid)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Scriptlet.TypeLib", source, StringComparison.Ordinal);
+        Assert.Contains("NewPortableEntryId = \"ent_\" & LCase$(guidText)", source, StringComparison.Ordinal);
+    }
+
     private static string ReadModLogbookSource()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -150,24 +208,36 @@ public sealed class VbaPortableLogbookCommandTests
     private static string ExtractVbaProcedureBody(string source, string procedureName, string terminator)
     {
         var procedureIndex = source.IndexOf(
-            $"Private Sub {procedureName}",
+            $"Private Sub {procedureName}(",
             StringComparison.Ordinal);
         if (procedureIndex < 0)
         {
             procedureIndex = source.IndexOf(
-                $"Private Function {procedureName}",
+                $"Private Function {procedureName}(",
                 StringComparison.Ordinal);
         }
         if (procedureIndex < 0)
         {
             procedureIndex = source.IndexOf(
-                $"Public Sub {procedureName}",
+                $"Public Sub {procedureName}(",
                 StringComparison.Ordinal);
         }
         if (procedureIndex < 0)
         {
             procedureIndex = source.IndexOf(
-                $"Public Function {procedureName}",
+                $"Public Function {procedureName}(",
+                StringComparison.Ordinal);
+        }
+        if (procedureIndex < 0)
+        {
+            procedureIndex = source.IndexOf(
+                $"Sub {procedureName}(",
+                StringComparison.Ordinal);
+        }
+        if (procedureIndex < 0)
+        {
+            procedureIndex = source.IndexOf(
+                $"Function {procedureName}(",
                 StringComparison.Ordinal);
         }
         if (procedureIndex < 0)

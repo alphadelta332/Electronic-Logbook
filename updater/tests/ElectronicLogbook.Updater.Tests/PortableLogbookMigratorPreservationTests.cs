@@ -36,6 +36,12 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
             "EntryID",
             "Circling"
         ]));
+        Assert.True(ExcelWorkbookMigrator.ShouldPreservePortableMetadataColumns([
+            "Year",
+            "Reg",
+            "Portable Entry ID",
+            "Circling"
+        ]));
     }
 
     [Fact]
@@ -92,6 +98,58 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         Assert.Equal(
             ["EntryID", "Portable Current Revision ID"],
             plan.ColumnsToHide);
+    }
+
+    [Fact]
+    public void MigratorCopiesSoleLegacyPortableEntryIdIntoCanonicalEntryId()
+    {
+        var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(
+            [
+                "Year",
+                "Portable Entry ID",
+                "Reg",
+                "Portable Current Revision ID",
+                "Circling"
+            ],
+            ["Year", "Reg", "Circling"]);
+
+        Assert.True(plan.ShouldPreserve);
+        Assert.Equal(
+            ["EntryID", "Portable Current Revision ID"],
+            plan.ColumnPlan.ColumnsToAdd.Select(column => column.WorkbookColumnName));
+        Assert.Equal(
+            ["EntryID", "Portable Current Revision ID"],
+            plan.ColumnsToCopy);
+        Assert.Equal(
+            ["EntryID", "Portable Current Revision ID"],
+            plan.ColumnsToHide);
+    }
+
+    [Fact]
+    public void MigratorRejectsDisagreeingCanonicalAndLegacyEntryIds()
+    {
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            ExcelWorkbookMigrator.ValidatePortableEntryIdMigrationValues(
+                ["ent_existing"],
+                ["ent_legacy"]));
+        var blankConflict = Assert.Throws<InvalidDataException>(() =>
+            ExcelWorkbookMigrator.ValidatePortableEntryIdMigrationValues(
+                [""],
+                ["ent_legacy"]));
+        var bothBlankConflict = Assert.Throws<InvalidDataException>(() =>
+            ExcelWorkbookMigrator.ValidatePortableEntryIdMigrationValues(
+                [""],
+                [""]));
+
+        Assert.Equal(
+            "Portable Entry ID migration conflict at Logbook row 1: EntryID 'ent_existing' does not match Portable Entry ID 'ent_legacy'.",
+            exception.Message);
+        Assert.Equal(
+            "Portable Entry ID migration conflict at Logbook row 1: EntryID '' does not match Portable Entry ID 'ent_legacy'.",
+            blankConflict.Message);
+        Assert.Equal(
+            "Portable Entry ID migration conflict at Logbook row 1: EntryID and Portable Entry ID are both blank.",
+            bothBlankConflict.Message);
     }
 
     [Fact]

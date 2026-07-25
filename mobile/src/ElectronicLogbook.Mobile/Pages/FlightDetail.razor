@@ -39,8 +39,9 @@ else if (CurrentEntry?.Entry is null)
                         <h2>Revisions</h2>
                     </div>
                 </div>
-                @foreach (var revision in History.Revisions.OrderByDescending(revision => revision.CreatedAt))
+                @foreach (var revisionId in History.RevisionHistory)
                 {
+                    var revision = Session.FindOperationV2(revisionId);
                     <div class="history-row">
                         <div>
                             <strong>@revision.Kind</strong>
@@ -71,14 +72,14 @@ else
                 <span class="eyebrow">Entry detail</span>
                 <h1>@Session.FormatRoute(CurrentEntry.Entry)</h1>
             </div>
-            <span class="draft-pill">@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(CurrentEntry.Entry)) hr</span>
+            <span class="draft-pill">@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(CurrentEntry.Entry)) hr</span>
         </header>
 
         <section class="detail-hero">
             <div class="detail-primary-line">
                 <strong>@Session.FormatRegistration(CurrentEntry.Entry)</strong>
                 <strong>@Session.FormatRoute(CurrentEntry.Entry)</strong>
-                <strong>@MobileLogbookSession.FormatHours(PortableLogbookEntryRules.LoggedTime(CurrentEntry.Entry))</strong>
+                <strong>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(CurrentEntry.Entry))</strong>
             </div>
             <span>@MobileLogbookSession.FormatDate(CurrentEntry.Entry.Date) | @Session.FormatAircraft(CurrentEntry.Entry)</span>
         </section>
@@ -116,13 +117,10 @@ else
                         <span class="eyebrow">Immutable history</span>
                         <h2>Revisions</h2>
                     </div>
-                    @if (History.HasConflict)
-                    {
-                        <span class="draft-pill">Conflict</span>
-                    }
                 </div>
-                @foreach (var revision in History.Revisions.OrderByDescending(revision => revision.CreatedAt))
+                @foreach (var revisionId in History.RevisionHistory)
                 {
+                    var revision = Session.FindOperationV2(revisionId);
                     <div class="history-row">
                         <div>
                             <strong>@revision.Kind</strong>
@@ -140,13 +138,13 @@ else
     [Parameter]
     public string? EntryId { get; set; }
 
-    private PortableLogbookMaterializedEntry? CurrentEntry => Session.FindCurrentEntry(EntryId);
+    private PortableLogbookMaterializedEntryV2? CurrentEntry => Session.FindCurrentEntryV2(EntryId);
 
-    private PortableLogbookRevisionHistoryView? History => Session.FindHistory(EntryId);
+    private PortableLogbookMaterializedEntryV2? History => CurrentEntry;
 
     protected override async Task OnInitializedAsync()
     {
-        await Session.EnsureLoadedAsync();
+        await Session.EnsureLoadedWorkbookAsync();
     }
 
     private void EditEntry()
@@ -166,7 +164,7 @@ else
             return;
         }
 
-        Session.CloneEntry(CurrentEntry.Entry);
+        Session.CloneWorkbookEntry(CurrentEntry.Entry);
         Navigation.NavigateTo("/flights/new");
     }
 
@@ -177,7 +175,7 @@ else
             return;
         }
 
-        await Session.DeleteEntryAsync(CurrentEntry);
+        await Session.DeleteWorkbookEntryAsync(CurrentEntry);
         Navigation.NavigateTo("/flights");
     }
 }

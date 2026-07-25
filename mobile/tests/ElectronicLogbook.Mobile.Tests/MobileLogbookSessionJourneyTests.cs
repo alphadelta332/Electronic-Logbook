@@ -43,6 +43,53 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task WorkbookFaithfulEntryIdIsAllocatedOnlyWhenSavePersistsCreateOperation()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+
+        await session.EnsureLoadedWorkbookAsync();
+        Assert.Empty(session.DocumentV2.Operations);
+
+        Assert.NotEmpty(session.WorkbookDraftErrors);
+        Assert.Empty(session.DocumentV2.Operations);
+
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Empty(session.DocumentV2.Operations);
+        Assert.Equal(0, jsRuntime.SaveCount);
+
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+
+        var create = Assert.Single(session.DocumentV2.Operations);
+        Assert.Equal(PortableOperationKind.Create, create.Kind);
+        Assert.StartsWith("ent_", create.EntryId.Value, StringComparison.Ordinal);
+        Assert.Equal(1, jsRuntime.SaveCount);
+
+        var savedEntryId = create.EntryId;
+        var savedRevisionId = create.RevisionId;
+        var current = Assert.Single(session.CurrentEntriesV2);
+        session.EditWorkbookEntry(current);
+        session.WorkbookDraft.Reg = "VH-WBX";
+        await session.SaveWorkbookEntryAsync();
+
+        var correction = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Correction, correction.Kind);
+        Assert.Equal(savedEntryId, correction.EntryId);
+        Assert.Equal(savedRevisionId, Assert.Single(correction.ParentRevisionIds));
+        Assert.Equal(2, jsRuntime.SaveCount);
+
+        await session.DeleteWorkbookEntryAsync(Assert.Single(session.CurrentEntriesV2));
+
+        var deletion = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Deletion, deletion.Kind);
+        Assert.Equal(savedEntryId, deletion.EntryId);
+        Assert.Equal(correction.RevisionId, Assert.Single(deletion.ParentRevisionIds));
+        Assert.Equal(3, jsRuntime.SaveCount);
+    }
+
+    [Fact]
     public async Task Gate3EntryJourneyAddsEditsClonesDeletesAndReloadsFromBrowserStorage()
     {
         var jsRuntime = new JourneyJsRuntime();

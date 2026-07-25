@@ -69,6 +69,8 @@ public sealed class MobileWorkbookEntryDraft
         DgaAzi.GetValueOrDefault() +
         Circling.GetValueOrDefault();
 
+    public int TotalLandings => LandingsDay.GetValueOrDefault() + LandingsNight.GetValueOrDefault();
+
     public static MobileWorkbookEntryDraft Create(IEnumerable<CustomFieldDefinition>? customFields = null)
     {
         var draft = new MobileWorkbookEntryDraft();

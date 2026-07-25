@@ -100,9 +100,13 @@ public sealed class MobileLogbookSession(
 
     public IReadOnlyList<string> DraftErrors => ValidateDraft();
 
+    public IReadOnlyList<string> WorkbookDraftErrors => ValidateWorkbookDraft();
+
     public IReadOnlyList<string> DraftWarnings => ValidateDraftWarnings();
 
     public bool ShouldShowDraftErrors => DraftErrors.Count > 0 && (HasAttemptedSubmit || HasEditedDraft);
+
+    public bool ShouldShowWorkbookDraftErrors => WorkbookDraftErrors.Count > 0 && (HasAttemptedSubmit || HasEditedDraft);
 
     public string DraftModeLabel => EditingEntryId is null ? "New flight" : "Correction";
 
@@ -116,6 +120,14 @@ public sealed class MobileLogbookSession(
             .Values
             .Where(entry => entry.IsDeleted)
             .OrderByDescending(entry => FindOperation(entry.CurrentRevisionId).CreatedAt)
+            .ToArray();
+
+    public IReadOnlyList<PortableLogbookMaterializedEntryV2> DeletedEntriesV2 =>
+        MergeResultV2
+            .Entries
+            .Values
+            .Where(entry => entry.IsDeleted)
+            .OrderByDescending(entry => FindOperationV2(entry.CurrentRevisionId).CreatedAt)
             .ToArray();
 
     public async Task EnsureLoadedAsync()
@@ -229,17 +241,31 @@ public sealed class MobileLogbookSession(
         HasAttemptedSubmit = true;
         ClearLastActionMessage();
 
-        var operation = PortableLogbookOperationV2.Create(
-            DocumentV2.LogbookId,
-            EntryId.New(),
-            RevisionId.New(),
-            deviceId,
-            DateTimeOffset.UtcNow,
-            WorkbookDraft.ToEntry(WorkbookCustomFields()));
+        if (WorkbookDraftErrors.Count > 0)
+        {
+            return;
+        }
+
+        PortableLogbookOperationV2 operation = EditingEntryId is null || EditingRevisionId is null
+            ? PortableLogbookOperationV2.Create(
+                DocumentV2.LogbookId,
+                EntryId.New(),
+                RevisionId.New(),
+                deviceId,
+                DateTimeOffset.UtcNow,
+                WorkbookDraft.ToEntry(WorkbookCustomFields()))
+            : PortableLogbookOperationV2.Correct(
+                DocumentV2.LogbookId,
+                EditingEntryId.Value,
+                RevisionId.New(),
+                [EditingRevisionId.Value],
+                deviceId,
+                DateTimeOffset.UtcNow,
+                WorkbookDraft.ToEntry(WorkbookCustomFields()));
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
         await SaveStateV2Async();
-        SetLastActionMessage("Flight added.");
+        SetLastActionMessage(EditingEntryId is null ? "Flight added." : "Correction saved.");
         ResetWorkbookDraft();
     }
 
@@ -300,6 +326,34 @@ public sealed class MobileLogbookSession(
         SetLastActionMessage("Correction draft opened.", MobileActionMessageScope.Draft);
     }
 
+    public void CloneWorkbookEntry(PortableLogbookWorkbookEntry entry)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry, WorkbookCustomFields(), preserveDate: false);
+        HasAttemptedSubmit = false;
+        HasEditedDraft = false;
+        SetLastActionMessage("Draft started from recent flight.", MobileActionMessageScope.Draft);
+    }
+
+    public void EditWorkbookEntry(PortableLogbookMaterializedEntryV2 entry)
+    {
+        if (IsStorageBlocked || entry.Entry is null)
+        {
+            return;
+        }
+
+        WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry.Entry, WorkbookCustomFields(), preserveDate: true);
+        EditingEntryId = entry.EntryId;
+        EditingRevisionId = entry.CurrentRevisionId;
+        HasAttemptedSubmit = false;
+        HasEditedDraft = false;
+        SetLastActionMessage("Correction draft opened.", MobileActionMessageScope.Draft);
+    }
+
     public async Task DeleteEntryAsync(PortableLogbookMaterializedEntry entry)
     {
         if (IsStorageBlocked)
@@ -320,6 +374,31 @@ public sealed class MobileLogbookSession(
         if (EditingEntryId == entry.EntryId)
         {
             ResetDraft();
+        }
+
+        SetLastActionMessage("Entry deleted.");
+    }
+
+    public async Task DeleteWorkbookEntryAsync(PortableLogbookMaterializedEntryV2 entry)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var operation = PortableLogbookOperationV2.Delete(
+            DocumentV2.LogbookId,
+            entry.EntryId,
+            RevisionId.New(),
+            [entry.CurrentRevisionId],
+            deviceId,
+            DateTimeOffset.UtcNow);
+
+        DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
+        await SaveStateV2Async();
+        if (EditingEntryId == entry.EntryId)
+        {
+            ResetWorkbookDraft();
         }
 
         SetLastActionMessage("Entry deleted.");
@@ -356,6 +435,37 @@ public sealed class MobileLogbookSession(
         SetLastActionMessage("Conflict resolved.");
     }
 
+    public async Task ResolveWorkbookConflictAsync(PortableLogbookConflict conflict, RevisionId selectedRevisionId)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        var selectedOperation = FindOperationV2(selectedRevisionId);
+        PortableLogbookOperationV2 resolution = selectedOperation.Entry is null
+            ? PortableLogbookOperationV2.Delete(
+                DocumentV2.LogbookId,
+                conflict.EntryId,
+                RevisionId.New(),
+                conflict.HeadRevisionIds,
+                deviceId,
+                DateTimeOffset.UtcNow)
+            : PortableLogbookOperationV2.ResolveConflict(
+                DocumentV2.LogbookId,
+                conflict.EntryId,
+                RevisionId.New(),
+                conflict.HeadRevisionIds,
+                deviceId,
+                DateTimeOffset.UtcNow,
+                selectedOperation.Entry,
+                $"Kept revision {selectedRevisionId.Value} in the mobile app.");
+
+        DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, resolution);
+        await SaveStateV2Async();
+        SetLastActionMessage("Conflict resolved.");
+    }
+
     private void SetLastActionMessage(
         string message,
         MobileActionMessageScope scope = MobileActionMessageScope.Global)
@@ -378,6 +488,18 @@ public sealed class MobileLogbookSession(
         }
 
         return MergeResult.Entries.TryGetValue(new EntryId(entryId), out var entry)
+            ? entry
+            : null;
+    }
+
+    public PortableLogbookMaterializedEntryV2? FindCurrentEntryV2(string? entryId)
+    {
+        if (string.IsNullOrWhiteSpace(entryId))
+        {
+            return null;
+        }
+
+        return MergeResultV2.Entries.TryGetValue(new EntryId(entryId), out var entry)
             ? entry
             : null;
     }
@@ -450,8 +572,14 @@ public sealed class MobileLogbookSession(
     public IEnumerable<string> RecentValues(Func<PortableLogbookEntry, string?> selector) =>
         MobileRecentValues.Create(CurrentEntries, selector);
 
+    public IEnumerable<string> RecentWorkbookValues(Func<PortableLogbookWorkbookEntry, string?> selector) =>
+        MobileRecentValues.Create(CurrentEntriesV2, selector);
+
     public IEnumerable<string> RecentAirportValues() =>
         MobileAirportSuggestions.Create(CurrentEntries);
+
+    public IEnumerable<string> RecentWorkbookAirportValues() =>
+        MobileAirportSuggestions.Create(CurrentEntriesV2);
 
     public static string FormatHours(decimal hours) => hours.ToString("0.0");
 
@@ -466,17 +594,35 @@ public sealed class MobileLogbookSession(
         return string.IsNullOrWhiteSpace(route) ? "Route pending" : route;
     }
 
+    public string FormatRoute(PortableLogbookWorkbookEntry entry)
+    {
+        var route = $"{entry.From}-{entry.To}".Trim(' ', '-');
+        return string.IsNullOrWhiteSpace(route) ? "Route pending" : route;
+    }
+
     public string FormatAircraft(PortableLogbookEntry entry)
     {
         var aircraft = $"{entry.AircraftType} {entry.Registration}".Trim();
         return string.IsNullOrWhiteSpace(aircraft) ? "Aircraft pending" : aircraft;
     }
 
+    public string FormatAircraft(PortableLogbookWorkbookEntry entry)
+    {
+        var aircraft = $"{entry.Type} {entry.Reg}".Trim();
+        return string.IsNullOrWhiteSpace(aircraft) ? "Aircraft pending" : aircraft;
+    }
+
     public string FormatRegistration(PortableLogbookEntry entry) =>
         string.IsNullOrWhiteSpace(entry.Registration) ? "REG" : entry.Registration.Trim().ToUpperInvariant();
 
+    public string FormatRegistration(PortableLogbookWorkbookEntry entry) =>
+        string.IsNullOrWhiteSpace(entry.Reg) ? "REG" : entry.Reg.Trim().ToUpperInvariant();
+
     public PortableLogbookOperation FindOperation(RevisionId revisionId) =>
         Document.Operations.First(operation => operation.RevisionId == revisionId);
+
+    public PortableLogbookOperationV2 FindOperationV2(RevisionId revisionId) =>
+        DocumentV2.Operations.First(operation => operation.RevisionId == revisionId);
 
     public IEnumerable<EntryDetail> EntryDetails(PortableLogbookEntry entry)
     {
@@ -543,6 +689,54 @@ public sealed class MobileLogbookSession(
         }
     }
 
+    public IEnumerable<EntryDetail> EntryDetails(PortableLogbookWorkbookEntry entry)
+    {
+        yield return new("Date", FormatDate(entry.Date));
+        yield return new("Type", FormatText(entry.Type));
+        yield return new("Reg", FormatText(entry.Reg));
+        yield return new("Flight ID", FormatText(entry.FlightId));
+        yield return new("PIC", FormatText(entry.Pic));
+        yield return new("Other pilot or crew", FormatText(entry.OtherPilotOrCrew));
+        yield return new("From", FormatText(entry.From));
+        yield return new("To", FormatText(entry.To));
+        yield return new("Via", FormatText(entry.Via));
+        yield return new("Remarks", FormatText(entry.Remarks));
+        yield return new("FR", FormatFlag(entry.FlightReview));
+        yield return new("IPC", FormatFlag(entry.InstrumentProficiencyCheck));
+        yield return new("OPC", FormatFlag(entry.OperatorProficiencyCheck));
+        yield return new("SE ICUS day", FormatNullableHours(entry.SeIcusDay));
+        yield return new("SE ICUS night", FormatNullableHours(entry.SeIcusNight));
+        yield return new("SE dual day", FormatNullableHours(entry.SeDualDay));
+        yield return new("SE dual night", FormatNullableHours(entry.SeDualNight));
+        yield return new("SE command day", FormatNullableHours(entry.SeCommandDay));
+        yield return new("SE command night", FormatNullableHours(entry.SeCommandNight));
+        yield return new("ME ICUS day", FormatNullableHours(entry.MeIcusDay));
+        yield return new("ME ICUS night", FormatNullableHours(entry.MeIcusNight));
+        yield return new("ME dual day", FormatNullableHours(entry.MeDualDay));
+        yield return new("ME dual night", FormatNullableHours(entry.MeDualNight));
+        yield return new("ME command day", FormatNullableHours(entry.MeCommandDay));
+        yield return new("ME command night", FormatNullableHours(entry.MeCommandNight));
+        yield return new("Copilot day", FormatNullableHours(entry.CopilotDay));
+        yield return new("Copilot night", FormatNullableHours(entry.CopilotNight));
+        yield return new("IFR IF", FormatNullableHours(entry.IfrIf));
+        yield return new("IFR sim", FormatNullableHours(entry.IfrSim));
+        yield return new("Landings day", FormatNullableCount(entry.LandingsDay));
+        yield return new("Landings night", FormatNullableCount(entry.LandingsNight));
+        yield return new("ILS", FormatNullableCount(entry.Ils));
+        yield return new("VOR", FormatNullableCount(entry.Vor));
+        yield return new("RNP", FormatNullableCount(entry.Rnp));
+        yield return new("NDB", FormatNullableCount(entry.Ndb));
+        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi));
+        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi));
+        yield return new("Circling", FormatNullableCount(entry.Circling));
+
+        foreach (var field in WorkbookCustomFields())
+        {
+            entry.CustomFields.TryGetValue(field.Id, out var customValue);
+            yield return new(field.Label, FormatText(customValue));
+        }
+    }
+
     private async Task RefreshPackageKeyStatusAsync(LogbookId logbookId)
     {
         try
@@ -585,6 +779,43 @@ public sealed class MobileLogbookSession(
             .ToArray();
     }
 
+    private string[] ValidateWorkbookDraft()
+    {
+        var entry = WorkbookDraft.ToEntry(WorkbookCustomFields());
+        var errors = new List<string>();
+        if (entry.Date is null || entry.Date > DateOnly.FromDateTime(DateTime.Today))
+        {
+            errors.Add("Year, Month, and Day must form a non-future date.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.Type))
+        {
+            errors.Add("Type is required before this entry can be added.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.Reg))
+        {
+            errors.Add("Reg is required before this entry can be added.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.From))
+        {
+            errors.Add("From is required before this entry can be added.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.To))
+        {
+            errors.Add("To is required before this entry can be added.");
+        }
+
+        if (WorkbookFlightTime(entry) + (entry.IfrSim ?? 0) <= 0)
+        {
+            errors.Add("Workbook flight or simulator time cannot be zero.");
+        }
+
+        return errors.ToArray();
+    }
+
     private MobileEntryDraftDefaults FindDraftDefaults() =>
         MobileEntryDraftDefaultPlanner.Create(CurrentEntries);
 
@@ -616,6 +847,37 @@ public sealed class MobileLogbookSession(
 
     private static string FormatNullableCount(int? count) =>
         count?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0";
+
+    private static string FormatFlag(bool? value) =>
+        value == true ? "Yes" : "No";
+
+    public static decimal WorkbookFlightTime(PortableLogbookWorkbookEntry entry) =>
+        (entry.SeIcusDay ?? 0) +
+        (entry.SeIcusNight ?? 0) +
+        (entry.SeDualDay ?? 0) +
+        (entry.SeDualNight ?? 0) +
+        (entry.SeCommandDay ?? 0) +
+        (entry.SeCommandNight ?? 0) +
+        (entry.MeIcusDay ?? 0) +
+        (entry.MeIcusNight ?? 0) +
+        (entry.MeDualDay ?? 0) +
+        (entry.MeDualNight ?? 0) +
+        (entry.MeCommandDay ?? 0) +
+        (entry.MeCommandNight ?? 0) +
+        (entry.CopilotDay ?? 0) +
+        (entry.CopilotNight ?? 0);
+
+    public static decimal WorkbookLoggedTime(PortableLogbookWorkbookEntry entry) =>
+        WorkbookFlightTime(entry) + (entry.IfrSim ?? 0);
+
+    public static int WorkbookApproaches(PortableLogbookWorkbookEntry entry) =>
+        entry.Ils.GetValueOrDefault() +
+        entry.Vor.GetValueOrDefault() +
+        entry.Rnp.GetValueOrDefault() +
+        entry.Ndb.GetValueOrDefault() +
+        entry.DgaCdi.GetValueOrDefault() +
+        entry.DgaAzi.GetValueOrDefault() +
+        entry.Circling.GetValueOrDefault();
 }
 
 public sealed record EntryDetail(string Label, string Value);
