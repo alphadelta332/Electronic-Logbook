@@ -16,11 +16,13 @@ public static class MobileLogbookDocument
         var customFields = PortableLogbookCustomFieldDefinitions
             .Merge(document.CustomFieldDefinitions, requiredCustomFields)
             .Definitions;
-        return PortableLogbookDocumentV2.CreateAustraliaFirst(
+        var updated = PortableLogbookDocumentV2.CreateAustraliaFirst(
             document.LogbookId,
             customFields,
             document.CurrencyOverrideDates,
             document.Operations.Concat([operation]));
+        EnsureValid(updated);
+        return updated;
     }
 
     public static PortableLogbookDocument AppendOperation(
@@ -35,9 +37,27 @@ public static class MobileLogbookDocument
         var customFields = PortableLogbookCustomFieldDefinitions
             .Merge(document.CustomFieldDefinitions, requiredCustomFields)
             .Definitions;
-        return PortableLogbookDocument.CreateAustraliaFirst(
+        var updated = PortableLogbookDocument.CreateAustraliaFirst(
             document.LogbookId,
             customFields,
             document.Operations.Concat([operation]));
+        EnsureValid(updated);
+        return updated;
+    }
+
+    private static void EnsureValid(PortableLogbookDocument document)
+    {
+        if (!PortableLogbookValidator.Validate(document).IsValid)
+        {
+            throw new ArgumentException("The appended portable logbook operation is invalid.", nameof(document));
+        }
+    }
+
+    private static void EnsureValid(PortableLogbookDocumentV2 document)
+    {
+        if (!PortableLogbookValidatorV2.Validate(document).IsValid)
+        {
+            throw new ArgumentException("The appended portable logbook operation is invalid.", nameof(document));
+        }
     }
 }

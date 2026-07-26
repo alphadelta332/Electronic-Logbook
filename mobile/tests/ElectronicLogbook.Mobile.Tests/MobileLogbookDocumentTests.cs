@@ -71,6 +71,43 @@ public sealed class MobileLogbookDocumentTests
         Assert.True(PortableLogbookValidator.Validate(updated, new DateOnly(2026, 7, 19)).IsValid);
     }
 
+    [Fact]
+    public void AppendOperationV2RejectsMalformedOrDuplicateIdsBeforeStateCanChange()
+    {
+        var create = PortableLogbookOperationV2.Create(
+            new LogbookId("log_mobile"),
+            new EntryId("ent_1"),
+            new RevisionId("rev_create"),
+            new DeviceId("dev_mobile"),
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            WorkbookEntry());
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            create.LogbookId,
+            [],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [create]);
+        var malformed = PortableLogbookOperationV2.Correct(
+            create.LogbookId,
+            new EntryId("not_an_entry_id"),
+            new RevisionId("rev_correct"),
+            [create.RevisionId],
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            WorkbookEntry());
+        var duplicateRevision = PortableLogbookOperationV2.Correct(
+            create.LogbookId,
+            create.EntryId,
+            create.RevisionId,
+            [create.RevisionId],
+            create.DeviceId,
+            create.CreatedAt.AddMinutes(1),
+            WorkbookEntry() with { Remarks = "Duplicate revision" });
+
+        Assert.Throws<ArgumentException>(() => MobileLogbookDocument.AppendOperation(document, [], malformed));
+        Assert.Throws<ArgumentException>(() => MobileLogbookDocument.AppendOperation(document, [], duplicateRevision));
+        Assert.Single(document.Operations);
+    }
+
     private static CreateEntryOperation CreateOperation(CustomFieldId customFieldId) =>
         new(
             new LogbookId("log_mobile"),

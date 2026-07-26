@@ -37,6 +37,28 @@ public sealed class PortableLogbookInitializerTests
     }
 
     [Fact]
+    public void EntryIdFactoryRetriesCollisionAgainstAllocatedIds()
+    {
+        var candidates = new Queue<EntryId>([new EntryId("ent_1"), new EntryId("ent_2")]);
+        var idFactory = new PortableLogbookIdFactory(candidates.Dequeue, RevisionId.New);
+
+        var entryId = idFactory.NewEntryIdExcluding(new HashSet<EntryId> { new("ent_1") });
+
+        Assert.Equal(new EntryId("ent_2"), entryId);
+    }
+
+    [Fact]
+    public void EntryIdFactoryRejectsMalformedCandidatesBeforeAllocation()
+    {
+        var candidates = new Queue<EntryId>([new EntryId("not_an_entry_id"), new EntryId("ent_2")]);
+        var idFactory = new PortableLogbookIdFactory(candidates.Dequeue, RevisionId.New);
+
+        var entryId = idFactory.NewEntryIdExcluding(new HashSet<EntryId>());
+
+        Assert.Equal(new EntryId("ent_2"), entryId);
+    }
+
+    [Fact]
     public void CreateInitialDocumentOrdersCustomFieldDefinitionsAndValidates()
     {
         var fieldId = new CustomFieldId("cf_training_kind");

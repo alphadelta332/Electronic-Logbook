@@ -124,7 +124,7 @@ else
                         @foreach (var entry in Session.DeletedEntriesV2)
                         {
                             <NavLink class="history-row" href="@($"/flights/{entry.EntryId.Value}")">
-                                <strong>@entry.EntryId.Value</strong>
+                                <strong>Deleted flight</strong>
                                 <span>@MobileLogbookSession.FormatTimestamp(Session.FindOperationV2(entry.CurrentRevisionId).CreatedAt)</span>
                             </NavLink>
                         }
@@ -146,7 +146,7 @@ else
                 @foreach (var conflict in Session.MergeResultV2.Conflicts)
                 {
                     <div class="history-row">
-                        <strong>@conflict.EntryId.Value</strong>
+                        <strong>Unresolved flight</strong>
                         <span>@string.Join(", ", conflict.HeadRevisionIds.Select(revision => revision.Value))</span>
                     </div>
                     <div class="flight-row-list">

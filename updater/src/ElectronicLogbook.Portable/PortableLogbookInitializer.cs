@@ -14,13 +14,20 @@ public static class PortableLogbookInitializer
         ArgumentNullException.ThrowIfNull(customFieldDefinitions);
 
         idFactory ??= PortableLogbookIdFactory.Default;
-        var operations = entries.Select(entry => new CreateEntryOperation(
-            logbookId,
-            idFactory.NewEntryId(),
-            idFactory.NewRevisionId(),
-            deviceId,
-            createdAt,
-            entry));
+        var allocatedEntryIds = new HashSet<EntryId>();
+        var operations = entries.Select(entry =>
+        {
+            var entryId = idFactory.NewEntryIdExcluding(allocatedEntryIds);
+            allocatedEntryIds.Add(entryId);
+
+            return new CreateEntryOperation(
+                logbookId,
+                entryId,
+                idFactory.NewRevisionId(),
+                deviceId,
+                createdAt,
+                entry);
+        });
 
         return PortableLogbookDocument.CreateAustraliaFirst(logbookId, customFieldDefinitions, operations);
     }
@@ -53,7 +60,7 @@ public sealed class PortableLogbookIdFactory
         for (var attempt = 0; attempt < 10; attempt++)
         {
             var candidate = NewEntryId();
-            if (!existingEntryIds.Contains(candidate))
+            if (EntryId.IsValid(candidate) && !existingEntryIds.Contains(candidate))
             {
                 return candidate;
             }

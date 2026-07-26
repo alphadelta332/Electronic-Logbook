@@ -322,7 +322,7 @@
                 @foreach (var conflict in MergeResult.Conflicts)
                 {
                     <div class="history-row">
-                        <strong>@conflict.EntryId.Value</strong>
+                        <strong>Unresolved flight</strong>
                         <span>@string.Join(", ", conflict.HeadRevisionIds.Select(revision => revision.Value))</span>
                     </div>
                     <div class="entry-list">
@@ -617,7 +617,7 @@
         PortableLogbookOperation operation = EditingEntryId is null || EditingRevisionId is null
             ? new CreateEntryOperation(
                 Document.LogbookId,
-                EntryId.New(),
+                PortableLogbookIdFactory.Default.NewEntryIdExcluding(Document.Operations.Select(operation => operation.EntryId).ToHashSet()),
                 RevisionId.New(),
                 DeviceId,
                 DateTimeOffset.UtcNow,
@@ -1291,7 +1291,7 @@
         var route = $"{summary.From} - {summary.To}".Trim();
         var detail = summary.Kind == PortableOperationKind.Deletion
             ? summary.DeletionReason ?? "Deleted entry"
-            : FirstNonBlank(aircraft, route, summary.Details, summary.EntryId.Value);
+            : FirstNonBlank(aircraft, route, summary.Details, "Flight entry");
         return $"{summary.Kind}: {date} {detail}".Trim();
     }
 

@@ -11,6 +11,12 @@ public readonly record struct EntryId(string Value)
 {
     public static EntryId New() => new($"ent_{Guid.NewGuid():N}");
 
+    public static bool IsValid(EntryId entryId) =>
+        !string.IsNullOrWhiteSpace(entryId.Value) &&
+        entryId.Value.StartsWith("ent_", StringComparison.Ordinal) &&
+        entryId.Value.Length > "ent_".Length &&
+        entryId.Value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+
     public override string ToString() => Value;
 }
 

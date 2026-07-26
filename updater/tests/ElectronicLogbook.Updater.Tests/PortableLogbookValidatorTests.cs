@@ -99,6 +99,17 @@ public sealed class PortableLogbookValidatorTests
     }
 
     [Fact]
+    public void ValidateRejectsMalformedOperationEntryId()
+    {
+        var create = CreateOperation() with { EntryId = new EntryId("not_an_entry_id") };
+        var document = PortableLogbookDocument.CreateAustraliaFirst(create.LogbookId, [], [create]);
+
+        var result = PortableLogbookValidator.Validate(document);
+
+        Assert.Contains(result.Errors, error => error.Code == PortableLogbookValidationCode.InvalidIdentifier);
+    }
+
+    [Fact]
     public void ValidateRejectsBlankParentRevisionIdentifiers()
     {
         var create = CreateOperation();

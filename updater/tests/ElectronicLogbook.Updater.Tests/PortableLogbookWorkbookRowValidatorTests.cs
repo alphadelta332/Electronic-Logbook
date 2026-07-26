@@ -57,6 +57,16 @@ public sealed class PortableLogbookWorkbookRowValidatorTests
     }
 
     [Fact]
+    public void ValidateRejectsMalformedEntryIdBeforeWorkbookReconciliation()
+    {
+        var result = PortableLogbookWorkbookRowValidator.Validate(
+            [new PortableLogbookWorkbookRow(new EntryId("not_an_entry_id"), new RevisionId("rev_1"), Entry("VH-ABC"))],
+            []);
+
+        Assert.Contains(result.Errors, error => error.Code == PortableLogbookWorkbookRowValidationCode.InvalidEntryId);
+    }
+
+    [Fact]
     public void ValidateRejectsMissingCurrentRevisionForKnownEntry()
     {
         var known = Known("ent_1", "rev_1");

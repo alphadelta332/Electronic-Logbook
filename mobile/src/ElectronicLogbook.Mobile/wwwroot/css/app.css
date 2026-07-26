@@ -207,6 +207,10 @@ textarea {
     padding: 20px;
 }
 
+.hero-panel > div {
+    min-width: 0;
+}
+
 .hero-panel h1,
 .entry-header h1,
 .section-title-row h2 {
@@ -218,6 +222,10 @@ textarea {
 .entry-header h1 {
     font-size: 28px;
     line-height: 1.12;
+}
+
+.hero-panel h1 {
+    overflow-wrap: anywhere;
 }
 
 .hero-panel p {

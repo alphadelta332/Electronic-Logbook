@@ -153,6 +153,29 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
     }
 
     [Fact]
+    public void MigratorAllocatesUniqueEntryIdsForExplicitLegacyEnrollment()
+    {
+        var issued = 0;
+        var factory = new PortableLogbookIdFactory(
+            () => new EntryId($"ent_enrolled_{++issued}"),
+            RevisionId.New);
+
+        var values = ExcelWorkbookMigrator.CreateEntryIdEnrollmentValues(3, factory);
+
+        Assert.Equal(["ent_enrolled_1", "ent_enrolled_2", "ent_enrolled_3"], values);
+        Assert.Equal(3, values.Distinct(StringComparer.Ordinal).Count());
+    }
+
+    [Fact]
+    public void MigratorRejectsEmptyLegacyEnrollment()
+    {
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ExcelWorkbookMigrator.CreateEntryIdEnrollmentValues(0));
+
+        Assert.Equal("rows", exception.ParamName);
+    }
+
+    [Fact]
     public void MigratorSkipsPortableMetadataCopyForLegacySourceTables()
     {
         var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(

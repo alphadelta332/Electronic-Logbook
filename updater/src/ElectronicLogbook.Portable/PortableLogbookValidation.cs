@@ -180,7 +180,7 @@ public static class PortableLogbookValidator
                 $"Revision '{operation.RevisionId}' has an invalid logbook ID."));
         }
 
-        if (IsBlank(operation.EntryId.Value))
+        if (!EntryId.IsValid(operation.EntryId))
         {
             errors.Add(new PortableLogbookValidationError(
                 PortableLogbookValidationCode.InvalidIdentifier,

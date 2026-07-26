@@ -39,6 +39,15 @@ public static class PortableLogbookWorkbookRowValidator
                 continue;
             }
 
+            if (!EntryId.IsValid(row.EntryId.Value))
+            {
+                errors.Add(new PortableLogbookWorkbookRowValidationError(
+                    rowNumber,
+                    PortableLogbookWorkbookRowValidationCode.InvalidEntryId,
+                    $"Workbook row has an invalid entry ID '{row.EntryId}'."));
+                continue;
+            }
+
             if (!seenEntryIds.Add(row.EntryId.Value))
             {
                 errors.Add(new PortableLogbookWorkbookRowValidationError(
@@ -91,6 +100,7 @@ public sealed record PortableLogbookWorkbookRowValidationError(
 public enum PortableLogbookWorkbookRowValidationCode
 {
     RevisionWithoutEntryId,
+    InvalidEntryId,
     UnknownEntryId,
     MissingCurrentRevisionId,
     StaleCurrentRevisionId,

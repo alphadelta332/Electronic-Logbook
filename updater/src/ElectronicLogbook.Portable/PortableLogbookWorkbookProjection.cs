@@ -47,15 +47,18 @@ public static class PortableLogbookWorkbookProjection
         }
 
         var seenKnownIds = new HashSet<EntryId>();
+        var allocatedIds = knownByEntryId.Keys.ToHashSet();
         var operations = new List<PortableLogbookOperation>();
 
         foreach (var row in rows)
         {
             if (row.EntryId is null || !knownByEntryId.TryGetValue(row.EntryId.Value, out var known))
             {
+                var entryId = idFactory.NewEntryIdExcluding(allocatedIds);
+                allocatedIds.Add(entryId);
                 operations.Add(new CreateEntryOperation(
                     logbookId,
-                    idFactory.NewEntryId(),
+                    entryId,
                     idFactory.NewRevisionId(),
                     deviceId,
                     createdAt,
@@ -298,6 +301,15 @@ public static class PortableLogbookWorkbookProjection
 
             if (row.EntryId is null)
             {
+                continue;
+            }
+
+            if (!EntryId.IsValid(row.EntryId.Value))
+            {
+                errors.Add(new PortableLogbookWorkbookRowValidationError(
+                    rowNumber,
+                    PortableLogbookWorkbookRowValidationCode.InvalidEntryId,
+                    $"Workbook row has an invalid entry ID '{row.EntryId}'."));
                 continue;
             }
 

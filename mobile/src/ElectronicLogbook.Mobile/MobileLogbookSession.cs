@@ -5,9 +5,11 @@ namespace ElectronicLogbook.Mobile;
 
 public sealed class MobileLogbookSession(
     BrowserLogbookStore logbookStore,
-    BrowserPackageKeyStore packageKeyStore)
+    BrowserPackageKeyStore packageKeyStore,
+    PortableLogbookIdFactory? portableIdFactory = null)
 {
     private readonly DeviceId deviceId = new("dev_mobile_preview");
+    private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
 
     public static readonly CustomFieldDefinition[] CustomFields =
     [
@@ -211,7 +213,7 @@ public sealed class MobileLogbookSession(
         PortableLogbookOperation operation = EditingEntryId is null || EditingRevisionId is null
             ? new CreateEntryOperation(
                 Document.LogbookId,
-                EntryId.New(),
+                portableIdFactory.NewEntryIdExcluding(Document.Operations.Select(operation => operation.EntryId).ToHashSet()),
                 RevisionId.New(),
                 deviceId,
                 DateTimeOffset.UtcNow,
@@ -249,7 +251,7 @@ public sealed class MobileLogbookSession(
         PortableLogbookOperationV2 operation = EditingEntryId is null || EditingRevisionId is null
             ? PortableLogbookOperationV2.Create(
                 DocumentV2.LogbookId,
-                EntryId.New(),
+                portableIdFactory.NewEntryIdExcluding(DocumentV2.Operations.Select(operation => operation.EntryId).ToHashSet()),
                 RevisionId.New(),
                 deviceId,
                 DateTimeOffset.UtcNow,
@@ -306,6 +308,8 @@ public sealed class MobileLogbookSession(
 
         Draft = EntryDraft.FromEntry(entry, preserveDate: false);
         Draft.ClearUnsupportedWorkbookFields();
+        EditingEntryId = null;
+        EditingRevisionId = null;
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
         SetLastActionMessage("Draft started from recent flight.", MobileActionMessageScope.Draft);
@@ -334,6 +338,8 @@ public sealed class MobileLogbookSession(
         }
 
         WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry, WorkbookCustomFields(), preserveDate: false);
+        EditingEntryId = null;
+        EditingRevisionId = null;
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
         SetLastActionMessage("Draft started from recent flight.", MobileActionMessageScope.Draft);

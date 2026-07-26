@@ -90,6 +90,59 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task WorkbookFaithfulCorrectionKeepsEntryIdentityWhenItsDateChangesSortOrder()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        var corrected = Assert.Single(session.CurrentEntriesV2);
+
+        FillWorkbookDraft(session.WorkbookDraft);
+        session.WorkbookDraft.Date = new DateOnly(2026, 7, 25);
+        session.WorkbookDraft.Reg = "VH-LATER";
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Equal("VH-LATER", Assert.Single(session.CurrentEntriesV2, entry => entry.Entry?.Reg == "VH-LATER").Entry?.Reg);
+
+        session.EditWorkbookEntry(corrected);
+        session.WorkbookDraft.Date = new DateOnly(2026, 7, 26);
+        session.WorkbookDraft.Reg = "VH-CORRECTED";
+        await session.SaveWorkbookEntryAsync();
+
+        var firstAfterResort = session.CurrentEntriesV2[0];
+        Assert.Equal(corrected.EntryId, firstAfterResort.EntryId);
+        Assert.Equal("VH-CORRECTED", firstAfterResort.Entry?.Reg);
+    }
+
+    [Fact]
+    public async Task CloneEntryClearsAnOpenCorrectionIdentityAndSavesAsANewEntry()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+
+        await session.EnsureLoadedAsync();
+        FillDraft(session.Draft, "VH-CLONE", 1.0m);
+        await session.SaveEntryAsync();
+        var original = Assert.Single(session.CurrentEntries);
+
+        session.EditEntry(original);
+        session.CloneEntry(original.Entry!);
+
+        Assert.Null(session.EditingEntryId);
+        Assert.Null(session.EditingRevisionId);
+
+        await session.SaveEntryAsync();
+
+        var cloned = Assert.Single(session.CurrentEntries, entry => entry.EntryId != original.EntryId);
+        var cloneOperation = Assert.IsType<CreateEntryOperation>(session.Document.Operations.Last());
+        Assert.Equal(cloned.EntryId, cloneOperation.EntryId);
+        Assert.NotEqual(original.EntryId, cloned.EntryId);
+    }
+
+    [Fact]
     public async Task Gate3EntryJourneyAddsEditsClonesDeletesAndReloadsFromBrowserStorage()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -224,7 +277,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var logbookId = new LogbookId("log_mobile_preview");
         return new CreateEntryOperation(
             logbookId,
-            new EntryId("entry_gate3"),
+            new EntryId("ent_gate3"),
             new RevisionId(revisionId),
             new DeviceId("dev_seed"),
             DateTimeOffset.Parse("2026-07-18T00:00:00Z"),

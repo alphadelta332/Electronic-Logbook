@@ -368,6 +368,11 @@ public sealed class ExcelWorkbookMigrator
         }
 
         PreservePortableLogbookMetadataColumns(source, destination, sourceRows);
+        if (!HasColumn((object)source, PortableLogbookWorkbookFieldCatalog.EntryIdColumnName) &&
+            !HasColumn((object)source, LegacyPortableEntryIdColumnName))
+        {
+            EnrollLegacyLogbookRowsWithEntryIds(destination, sourceRows);
+        }
     }
 
     internal static bool ShouldPreservePortableMetadataColumns(IEnumerable<string> sourceColumnNames)
@@ -473,6 +478,56 @@ public sealed class ExcelWorkbookMigrator
                 throw new InvalidDataException(
                     $"Portable Entry ID migration conflict at Logbook row {index + 1}: EntryID '{entryId}' does not match Portable Entry ID '{legacyEntryId}'.");
             }
+        }
+    }
+
+    internal static string[] CreateEntryIdEnrollmentValues(
+        int rows,
+        PortableLogbookIdFactory? idFactory = null)
+    {
+        if (rows <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows), rows, "EntryID enrollment requires at least one Logbook row.");
+        }
+
+        idFactory ??= PortableLogbookIdFactory.Default;
+        var assignedIds = new HashSet<EntryId>();
+        var values = new string[rows];
+        for (var row = 0; row < rows; row++)
+        {
+            var entryId = idFactory.NewEntryIdExcluding(assignedIds);
+            assignedIds.Add(entryId);
+            values[row] = entryId.Value;
+        }
+
+        return values;
+    }
+
+    private static void EnrollLegacyLogbookRowsWithEntryIds(dynamic destination, int rows)
+    {
+        if (!HasColumn((object)destination, PortableLogbookWorkbookFieldCatalog.EntryIdColumnName))
+        {
+            throw new InvalidDataException("The v2 Logbook destination does not contain EntryID for enrollment.");
+        }
+
+        var assignedIds = CreateEntryIdEnrollmentValues(rows);
+        var values = new object[rows, 1];
+        for (var row = 0; row < rows; row++)
+        {
+            values[row, 0] = assignedIds[row];
+        }
+
+        SetColumnValues(destination, PortableLogbookWorkbookFieldCatalog.EntryIdColumnName, values, rows);
+        var persistedIds = ReadColumnValues(
+            (object)destination,
+            PortableLogbookWorkbookFieldCatalog.EntryIdColumnName,
+            rows)
+            .Select(StableValue)
+            .Select(value => value.Trim())
+            .ToArray();
+        if (!assignedIds.SequenceEqual(persistedIds, StringComparer.Ordinal))
+        {
+            throw new InvalidDataException("EntryID enrollment values were not persisted to the v2 Logbook.");
         }
     }
 

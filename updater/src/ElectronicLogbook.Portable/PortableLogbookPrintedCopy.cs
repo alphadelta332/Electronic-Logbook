@@ -214,8 +214,6 @@ public static class PortableLogbookPrintedCopy
             AppendCell(builder, FormatInt(entry.Holding));
             AppendCell(builder, FormatInt(entry.Rnav));
             AppendCell(builder, FormatInt(entry.Circling));
-            AppendCell(builder, record.EntryId.Value);
-            AppendCell(builder, record.CurrentRevisionId.Value);
             foreach (var field in orderedCustomFields)
             {
                 entry.CustomFields.TryGetValue(field.Id, out var value);
@@ -256,8 +254,6 @@ public static class PortableLogbookPrintedCopy
         yield return "Holding";
         yield return "RNP";
         yield return "Circling";
-        yield return "Entry ID";
-        yield return "Revision ID";
     }
 
     private static void AppendRevisionHistory(StringBuilder builder, IReadOnlyList<PortableLogbookEntryRevisionHistory> histories)
@@ -270,15 +266,13 @@ public static class PortableLogbookPrintedCopy
         }
 
         builder.AppendLine("<table>");
-        builder.AppendLine("<thead><tr><th>Entry ID</th><th>Revision ID</th><th>Kind</th><th>Created</th><th>Device ID</th><th>Verified parents</th></tr></thead>");
+        builder.AppendLine("<thead><tr><th>Revision ID</th><th>Kind</th><th>Created</th><th>Device ID</th><th>Verified parents</th></tr></thead>");
         builder.AppendLine("<tbody>");
         foreach (var history in histories)
         {
             foreach (var revision in history.Revisions)
             {
                 builder.Append("<tr><td>");
-                builder.Append(Escape(history.EntryId.Value));
-                builder.Append("</td><td>");
                 builder.Append(Escape(revision.RevisionId.Value));
                 builder.Append("</td><td>");
                 builder.Append(Escape(revision.Kind.ToString()));
@@ -306,13 +300,11 @@ public static class PortableLogbookPrintedCopy
         }
 
         builder.AppendLine("<table>");
-        builder.AppendLine("<thead><tr><th>Entry ID</th><th>Head revision IDs</th></tr></thead>");
+        builder.AppendLine("<thead><tr><th>Head revision IDs</th></tr></thead>");
         builder.AppendLine("<tbody>");
         foreach (var conflict in conflicts)
         {
             builder.Append("<tr><td>");
-            builder.Append(Escape(conflict.EntryId.Value));
-            builder.Append("</td><td>");
             builder.Append(Escape(string.Join(", ", conflict.HeadRevisionIds.Select(revision => revision.Value))));
             builder.AppendLine("</td></tr>");
         }

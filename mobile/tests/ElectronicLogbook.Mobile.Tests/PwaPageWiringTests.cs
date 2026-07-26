@@ -3,6 +3,20 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class PwaPageWiringTests
 {
     [Fact]
+    public void UserFacingFlightPagesDoNotRenderSystemEntryIds()
+    {
+        var flightDetail = ReadMobilePage("FlightDetail.razor");
+        var logbook = ReadMobilePage("Logbook.razor");
+        var home = ReadMobilePage("Home.razor");
+
+        Assert.DoesNotContain("<h1>@History.EntryId.Value</h1>", flightDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("<strong>@entry.EntryId.Value</strong>", logbook, StringComparison.Ordinal);
+        Assert.DoesNotContain("<strong>@conflict.EntryId.Value</strong>", logbook, StringComparison.Ordinal);
+        Assert.DoesNotContain("<strong>@conflict.EntryId.Value</strong>", home, StringComparison.Ordinal);
+        Assert.DoesNotContain("summary.EntryId.Value", home, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HomePageWiresUserFacingPackageExchangeControls()
     {
         var page = ReadMobilePage("Home.razor");

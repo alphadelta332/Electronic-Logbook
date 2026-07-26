@@ -194,7 +194,7 @@ public sealed class PortableLogbookPrintedCopyTests
         Assert.Contains("1990-01-02", html, StringComparison.Ordinal);
         Assert.Contains("current regulatory review are required", html, StringComparison.Ordinal);
         Assert.Contains("VH-AB1", html, StringComparison.Ordinal);
-        Assert.Contains("ent_1", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("ent_1", html, StringComparison.Ordinal);
         Assert.Contains("rev_1", html, StringComparison.Ordinal);
         Assert.Contains("Create", html, StringComparison.Ordinal);
     }
@@ -225,7 +225,7 @@ public sealed class PortableLogbookPrintedCopyTests
         var html = PortableLogbookPrintedCopy.RenderHtml(plan);
 
         Assert.DoesNotContain("VH-DEL</td><td>YSBK</td><td>YSBK", html, StringComparison.Ordinal);
-        Assert.Contains("ent_deleted", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("ent_deleted", html, StringComparison.Ordinal);
         Assert.Contains("rev_deleted_create", html, StringComparison.Ordinal);
         Assert.Contains("rev_deleted_tombstone", html, StringComparison.Ordinal);
         Assert.Contains("Deletion", html, StringComparison.Ordinal);
@@ -268,7 +268,7 @@ public sealed class PortableLogbookPrintedCopyTests
         Assert.Equal(create.EntryId, conflict.EntryId);
         Assert.Equal(1, plan.AuditSummary.ConflictCount);
         Assert.Contains("Unresolved conflict details", html, StringComparison.Ordinal);
-        Assert.Contains("ent_conflict", html, StringComparison.Ordinal);
+        Assert.DoesNotContain("ent_conflict", html, StringComparison.Ordinal);
         Assert.Contains("rev_incoming_head, rev_local_head", html, StringComparison.Ordinal);
     }
 
