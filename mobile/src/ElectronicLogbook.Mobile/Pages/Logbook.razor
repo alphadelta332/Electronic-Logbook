@@ -18,7 +18,7 @@ else
                 <span class="eyebrow">Logbook</span>
                 <h1>Flight record</h1>
             </div>
-            <span class="draft-pill">@Session.CurrentEntriesV2.Count entry(s)</span>
+            <span class="draft-pill">@(Session.CurrentEntriesV2.Count == 1 ? "1 entry" : $"{Session.CurrentEntriesV2.Count} entries")</span>
         </header>
 
         @if (Session.ShouldShowLastActionMessage(MobileActionMessageSurface.Logbook))

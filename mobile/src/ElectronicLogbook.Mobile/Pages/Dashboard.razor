@@ -145,7 +145,7 @@ else
     private string RecentSnapshotDetail =>
         Session.CurrentEntriesV2.Count == 0
             ? "90-day snapshot will appear after the first dated entry."
-            : $"{RecentFlightCount} flight(s), {MobileLogbookSession.FormatHours(RecentFlyingHours)} hr in the last 90 days.";
+            : $"{FormatCount(RecentFlightCount, "flight")}, {MobileLogbookSession.FormatHours(RecentFlyingHours)} hr in the last 90 days.";
 
     private string RecordHealthIcon =>
         Session.MergeResultV2.Conflicts.Count > 0
@@ -165,7 +165,7 @@ else
         {
             if (Session.MergeResultV2.Conflicts.Count > 0)
             {
-                return $"{Session.MergeResultV2.Conflicts.Count} conflict(s) need review before the device copy is clean.";
+                return $"{FormatCount(Session.MergeResultV2.Conflicts.Count, "conflict")} need review before the device copy is clean.";
             }
 
             if (LastFlight?.Entry is null)
@@ -178,14 +178,17 @@ else
                 return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; none are within the last 90 days.";
             }
 
-            return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; {RecentFlightCount} entry(s) are within the last 90 days.";
+            return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; {FormatCount(RecentFlightCount, "entry")} are within the last 90 days.";
         }
     }
 
     private string NextActionDetail =>
         Session.CurrentEntriesV2.Count == 0
             ? "Create the first device entry or import an encrypted package from the workbook."
-            : $"{Session.CurrentEntriesV2.Count} flight(s) available on this device.";
+            : $"{FormatCount(Session.CurrentEntriesV2.Count, "flight")} available on this device.";
+
+    private static string FormatCount(int count, string singular) =>
+        $"{count} {singular}{(count == 1 ? string.Empty : "s")}";
 
     protected override async Task OnInitializedAsync()
     {
