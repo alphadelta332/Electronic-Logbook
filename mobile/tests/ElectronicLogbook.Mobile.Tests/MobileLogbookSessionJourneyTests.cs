@@ -43,6 +43,29 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task CurrencyOverrideDatesPersistAcrossWorkbookFaithfulReload()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+        var overrides = new PortableLogbookCurrencyOverrideDates(
+            new DateOnly(2026, 7, 1),
+            new DateOnly(2026, 7, 2),
+            new DateOnly(2026, 7, 3));
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.SaveCurrencyOverrideDatesAsync(overrides);
+
+        Assert.Equal(overrides, session.DocumentV2.CurrencyOverrideDates);
+        Assert.Equal("Currency override dates saved.", session.LastActionMessage);
+        Assert.Equal(1, jsRuntime.SaveCount);
+
+        var reloaded = CreateSession(jsRuntime);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(overrides, reloaded.DocumentV2.CurrencyOverrideDates);
+    }
+
+    [Fact]
     public async Task WorkbookFaithfulEntryIdIsAllocatedOnlyWhenSavePersistsCreateOperation()
     {
         var jsRuntime = new JourneyJsRuntime();

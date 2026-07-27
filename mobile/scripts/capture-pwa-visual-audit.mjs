@@ -27,6 +27,7 @@ const profiles = [
     { name: "large-text", width: 412, height: 915, fontScale: 1.25 },
     { name: "wide-768", width: 768, height: 1024, fontScale: 1 }
 ];
+const colorSchemes = ["light", "dark"];
 
 function optionValue(name, fallback) {
     const index = process.argv.indexOf(name);
@@ -76,28 +77,30 @@ await mkdir(outputDirectory, { recursive: true });
 try {
     const browser = await chromium.launch({ headless: true });
     try {
-        for (const profile of profiles) {
-            const context = await browser.newContext({
-                colorScheme: "light",
-                viewport: { width: profile.width, height: profile.height }
-            });
-            const page = await context.newPage();
-            await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-            await page.locator("#app > :not(svg)").first().waitFor({ state: "visible" });
-            await page.evaluate((fontScale) => {
-                document.documentElement.style.fontSize = `${fontScale * 100}%`;
-            }, profile.fontScale);
+        for (const colorScheme of colorSchemes) {
+            for (const profile of profiles) {
+                const context = await browser.newContext({
+                    colorScheme,
+                    viewport: { width: profile.width, height: profile.height }
+                });
+                const page = await context.newPage();
+                await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
+                await page.locator("main .dashboard-page").waitFor({ state: "visible", timeout: 30000 });
+                await page.evaluate((fontScale) => {
+                    document.documentElement.style.fontSize = `${fontScale * 100}%`;
+                }, profile.fontScale);
 
-            const errorUi = page.locator("#blazor-error-ui");
-            if (await errorUi.isVisible()) {
-                throw new Error(`Blazor error UI is visible for ${profile.name}: ${await errorUi.innerText()}`);
+                const errorUi = page.locator("#blazor-error-ui");
+                if (await errorUi.isVisible()) {
+                    throw new Error(`Blazor error UI is visible for ${profile.name} ${colorScheme}: ${await errorUi.innerText()}`);
+                }
+
+                await page.screenshot({
+                    path: join(outputDirectory, `${profile.name}-${colorScheme}-dashboard.png`),
+                    fullPage: true
+                });
+                await context.close();
             }
-
-            await page.screenshot({
-                path: join(outputDirectory, `${profile.name}-dashboard.png`),
-                fullPage: true
-            });
-            await context.close();
         }
     } finally {
         await browser.close();
@@ -106,4 +109,4 @@ try {
     await new Promise((resolveClose) => server.close(resolveClose));
 }
 
-console.log(`Captured ${profiles.length} dashboard screenshots in ${outputDirectory}`);
+console.log(`Captured ${profiles.length * colorSchemes.length} dashboard screenshots in ${outputDirectory}`);

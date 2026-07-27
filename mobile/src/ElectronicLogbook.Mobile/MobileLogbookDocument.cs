@@ -4,6 +4,22 @@ namespace ElectronicLogbook.Mobile;
 
 public static class MobileLogbookDocument
 {
+    public static PortableLogbookDocumentV2 SetCurrencyOverrideDates(
+        PortableLogbookDocumentV2 document,
+        PortableLogbookCurrencyOverrideDates overrideDates)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(overrideDates);
+
+        var updated = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            document.LogbookId,
+            document.CustomFieldDefinitions,
+            overrideDates,
+            document.Operations);
+        EnsureValid(updated);
+        return updated;
+    }
+
     public static PortableLogbookDocumentV2 AppendOperation(
         PortableLogbookDocumentV2 document,
         IEnumerable<CustomFieldDefinition> requiredCustomFields,

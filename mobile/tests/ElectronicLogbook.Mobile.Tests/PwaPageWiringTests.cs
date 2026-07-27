@@ -303,7 +303,7 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3ShellUsesDashboardLogbookAndSettingsNavigationOnly()
+    public void Gate3ShellUsesApprovedFiveDestinationNavigation()
     {
         var layout = File.ReadAllText(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
@@ -319,12 +319,14 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("href=\"/\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/flights\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights/new\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Dashboard</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Logbook</span>", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>New flight</span>", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>Currency</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Settings</span>", layout, StringComparison.Ordinal);
-        Assert.DoesNotContain("href=\"/flights/new\"", layout, StringComparison.Ordinal);
-        Assert.DoesNotContain("<span>New</span>", layout, StringComparison.Ordinal);
         Assert.DoesNotContain("<span>Exchange</span>", layout, StringComparison.Ordinal);
         Assert.DoesNotContain("MudMenu", layout, StringComparison.Ordinal);
     }
@@ -448,33 +450,73 @@ public sealed class PwaPageWiringTests
     public void Gate3LogbookUsesBalancedEntryRowsAndSeparateTotalsView()
     {
         var page = ReadMobilePage("Logbook.razor");
+        var row = ReadMobilePage("LogbookFlightRow.razor");
 
         Assert.Contains("@page \"/flights\"", page, StringComparison.Ordinal);
         Assert.Contains("Entries", page, StringComparison.Ordinal);
         Assert.Contains("Totals", page, StringComparison.Ordinal);
-        Assert.Contains("logbook-entry-row", page, StringComparison.Ordinal);
-        Assert.Contains("logbook-row-date", page, StringComparison.Ordinal);
-        Assert.Contains("FormatRowDate(entry.Entry!.Date)", page, StringComparison.Ordinal);
-        Assert.Contains("dd MMM yy", page, StringComparison.Ordinal);
-        Assert.Contains("logbook-row-route", page, StringComparison.Ordinal);
-        Assert.Contains("Session.FormatRoute(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.Contains("EntryRemarks(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.Contains("entry.Remarks?.Trim() ?? string.Empty", page, StringComparison.Ordinal);
+        Assert.Contains("<LogbookFlightRow Entry=\"@entry\" />", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-entry-row", row, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-date", row, StringComparison.Ordinal);
+        Assert.Contains("FormatRowDate(Entry.Entry!.Date)", row, StringComparison.Ordinal);
+        Assert.Contains("dd MMM yy", row, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-route", row, StringComparison.Ordinal);
+        Assert.Contains("Session.FormatRoute(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.Contains("EntryRemarks(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.Contains("entry.Remarks?.Trim() ?? string.Empty", row, StringComparison.Ordinal);
         Assert.Contains("CurrentEntriesV2", page, StringComparison.Ordinal);
-        Assert.Contains("logbook-row-hours", page, StringComparison.Ordinal);
-        Assert.Contains("MobileLogbookSession.WorkbookLoggedTime(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.Contains("SimLabel(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.Contains("IfrSim.GetValueOrDefault() > 0 ? \"Sim\" : string.Empty", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Session.FormatRegistration(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Session.FormatAircraft(entry.Entry!)", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("EntryMeta", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("ldg |", page, StringComparison.Ordinal);
-        Assert.Contains("Total hours", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-hours", row, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookSession.WorkbookLoggedTime(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.Contains("SimLabel(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.Contains("IfrSim.GetValueOrDefault() > 0 ? \"Sim\" : string.Empty", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.FormatRegistration(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.FormatAircraft(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("EntryMeta", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("ldg |", row, StringComparison.Ordinal);
+        Assert.Contains("Logged columns", page, StringComparison.Ordinal);
         Assert.Contains("filter-sheet", page, StringComparison.Ordinal);
         Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
         Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeletedEntriesV2", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3LogbookSupportsEntriesAndTotalsDeepLinks()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+
+        Assert.Contains("[SupplyParameterFromQuery(Name = \"view\")]", page, StringComparison.Ordinal);
+        Assert.Contains("public string? View { get; set; }", page, StringComparison.Ordinal);
+        Assert.Contains("string.Equals(View, \"totals\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
+        Assert.Contains("/flights?view={", page, StringComparison.Ordinal);
+        Assert.Contains("? \"totals\" : \"entries\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3LogbookTotalsKeepEveryCanonicalHourLandingAndApproachColumnSeparate()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+
+        Assert.Contains("Logged columns", page, StringComparison.Ordinal);
+        foreach (var column in new[]
+                 {
+                     "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", "SeCommandDay", "SeCommandNight",
+                     "MeIcusDay", "MeIcusNight", "MeDualDay", "MeDualNight", "MeCommandDay", "MeCommandNight",
+                     "CopilotDay", "CopilotNight", "IfrIf", "IfrSim",
+                     "LandingsDay", "LandingsNight",
+                     "Ils", "Vor", "Rnp", "Ndb", "DgaCdi", "DgaAzi", "Circling"
+                 })
+        {
+            Assert.Contains($"entry.{column}", page, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("FormatHoursTotal", page, StringComparison.Ordinal);
+        Assert.Contains("FormatCountTotal", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Total hours", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("TotalCommand", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("TotalLandings", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("TotalApproaches", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -513,27 +555,123 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Total hours", page, StringComparison.Ordinal);
         Assert.Contains("Last 90 days", page, StringComparison.Ordinal);
         Assert.Contains("dashboard-last-flight", page, StringComparison.Ordinal);
-        Assert.Contains("LastFlightTitle", page, StringComparison.Ordinal);
-        Assert.Contains("LastFlightDetail", page, StringComparison.Ordinal);
+        Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
         Assert.Contains("RecentSnapshotDetail", page, StringComparison.Ordinal);
         Assert.Contains("TotalFlyingHours", page, StringComparison.Ordinal);
         Assert.Contains("RecentCutoff", page, StringComparison.Ordinal);
         Assert.Contains("MobileLogbookSession.WorkbookLoggedTime", page, StringComparison.Ordinal);
+        Assert.Contains("dashboard-total-hours", page, StringComparison.Ordinal);
+        Assert.Contains("dashboard-empty-state", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Gate3DashboardRecordHealthGivesExplicitReasonWithoutPilotRules()
+    public void Gate3DashboardLinksVfrAndIfrCurrencyStatusToCurrencyPage()
     {
         var page = ReadMobilePage("Dashboard.razor");
 
-        Assert.Contains("dashboard-record-health", page, StringComparison.Ordinal);
-        Assert.Contains("RecordHealthTitle", page, StringComparison.Ordinal);
-        Assert.Contains("RecordHealthReason", page, StringComparison.Ordinal);
-        Assert.Contains("Session.MergeResultV2.Conflicts.Count", page, StringComparison.Ordinal);
-        Assert.Contains("Last dated entry is", page, StringComparison.Ordinal);
-        Assert.Contains("within the last 90 days", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("Part 61", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("CASR", page, StringComparison.Ordinal);
+        Assert.Contains("VFR and IFR status", page, StringComparison.Ordinal);
+        Assert.Contains("VfrCurrencyRows", page, StringComparison.Ordinal);
+        Assert.Contains("IfrCurrencyRows", page, StringComparison.Ordinal);
+        Assert.Contains("Href=\"/currency\"", page, StringComparison.Ordinal);
+        Assert.Contains("View VFR Currency + Recency", page, StringComparison.Ordinal);
+        Assert.Contains("View IFR Currency + Recency", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Package key", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Package health", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Recent flights", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3DashboardDestinationsKeepLastFlightCurrencyAndEmptyStateActionsUsable()
+    {
+        var page = ReadMobilePage("Dashboard.razor");
+
+        Assert.Contains("aria-label=\"Last flight context\"", page, StringComparison.Ordinal);
+        Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
+        Assert.Equal(3, CountOccurrences(page, "Href=\"/currency\""));
+        Assert.Contains("aria-label=\"No flights yet\"", page, StringComparison.Ordinal);
+        Assert.Contains("Href=\"/flights/new\"", page, StringComparison.Ordinal);
+        Assert.Contains("Add first flight", page, StringComparison.Ordinal);
+        Assert.Contains("Href=\"/settings\"", page, StringComparison.Ordinal);
+        Assert.Contains("Open Settings", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3LogbookRowsUseCanonicalWorkbookDateRouteRemarksAndCalculatedTotal()
+    {
+        var page = ReadMobilePage("LogbookFlightRow.razor");
+
+        Assert.Contains("FormatRowDate(Entry.Entry!.Date)", page, StringComparison.Ordinal);
+        Assert.Contains("Session.FormatRoute(Entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("StripGeneratedCrewSuffix(entry.Remarks?.Trim() ?? string.Empty)", page, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookSession.WorkbookLoggedTime(Entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Calculated total time\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3DashboardAndLogbookShareTheCanonicalFlightRow()
+    {
+        var dashboard = ReadMobilePage("Dashboard.razor");
+        var logbook = ReadMobilePage("Logbook.razor");
+
+        Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", dashboard, StringComparison.Ordinal);
+        Assert.Contains("<LogbookFlightRow Entry=\"@entry\" />", logbook, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3CurrencyPageShowsWorkbookFaithfulEngineRowsAndExpirySummaries()
+    {
+        var page = ReadMobilePage("Currency.razor");
+        var summary = ReadMobileSource("MobileCurrencyRecencySummary.cs");
+
+        Assert.Contains("@page \"/currency\"", page, StringComparison.Ordinal);
+        Assert.Contains("Single Engine", page, StringComparison.Ordinal);
+        Assert.Contains("Multi Engine", page, StringComparison.Ordinal);
+        Assert.Contains("Currently expired", page, StringComparison.Ordinal);
+        Assert.Contains("Next expiring", page, StringComparison.Ordinal);
+        Assert.Contains("DaysRemaining", page, StringComparison.Ordinal);
+        Assert.Contains("CreateSingleEngineFlightReview", summary, StringComparison.Ordinal);
+        Assert.Contains("CreateMultiEngineFlightReview", summary, StringComparison.Ordinal);
+        Assert.Contains("CreateCirclingApproach", summary, StringComparison.Ordinal);
+        Assert.Contains("CurrentlyExpiredSingleEngineRows", summary, StringComparison.Ordinal);
+        Assert.Contains("NextExpiringSingleEngineRow", summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3CurrencyPageEditsAndPersistsFlightReviewIpcAndOpcOverrideDates()
+    {
+        var page = ReadMobilePage("Currency.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+
+        Assert.Contains("Flight Review override date", page, StringComparison.Ordinal);
+        Assert.Contains("IPC override date", page, StringComparison.Ordinal);
+        Assert.Contains("OPC override date", page, StringComparison.Ordinal);
+        Assert.Contains("SaveOverrideDatesAsync", page, StringComparison.Ordinal);
+        Assert.Contains("SaveCurrencyOverrideDatesAsync", session, StringComparison.Ordinal);
+        Assert.Contains("SaveStateV2Async", session, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3CurrencyPageKeepsEngineBoundariesAndExpiryStatesAccessible()
+    {
+        var page = ReadMobilePage("Currency.razor");
+
+        Assert.Contains("aria-label=\"Single Engine Currency + Recency\"", page, StringComparison.Ordinal);
+        Assert.Contains("Rows=\"@Summary.SingleEngineRows\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Multi Engine Currency + Recency\"", page, StringComparison.Ordinal);
+        Assert.Contains("Rows=\"@Summary.MultiEngineRows\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Currently expired Single Engine items\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Next expiring Single Engine item\"", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3DashboardRemovesRecordHealthFromTheFlightSummary()
+    {
+        var page = ReadMobilePage("Dashboard.razor");
+
+        Assert.DoesNotContain("dashboard-record-health", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordHealthTitle", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordHealthReason", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.MergeResultV2.Conflicts.Count", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -567,6 +705,60 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate3PrimaryNavigationProvidesSymmetricalDestinationsAndAccessibleRaisedNewFlightAction()
+    {
+        var layout = ReadMobileSource("Layout/MainLayout.razor");
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Contains("href=\"/\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights/new\" class=\"bottom-nav-add\" aria-label=\"New flight\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/currency\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Primary\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Dashboard\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Logbook\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Currency\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Settings\"", layout, StringComparison.Ordinal);
+        Assert.Contains("Icons.Material.Filled.Add", layout, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: repeat(5, minmax(0, 1fr));", css, StringComparison.Ordinal);
+        Assert.Contains("var(--native-safe-bottom)", css, StringComparison.Ordinal);
+        Assert.Contains(".bottom-nav-add-icon", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3LogbookViewSwitcherLabelsItsEntriesAndTotalsDestinations()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+
+        Assert.Contains("role=\"tablist\" aria-label=\"Logbook view\"", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"() => SelectView(LogbookView.Entries)\">Entries</button>", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"() => SelectView(LogbookView.Totals)\">Totals</button>", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo($\"/flights?view={(view == LogbookView.Totals ? \"totals\" : \"entries\")}\");", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightGroupsEveryWorkbookInputAroundTheCanonicalDraft()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+
+        Assert.Contains("type=\"date\"", page, StringComparison.Ordinal);
+        Assert.Contains("@bind=\"Session.WorkbookDraft.Date\"", page, StringComparison.Ordinal);
+        Assert.Contains("Identity", page, StringComparison.Ordinal);
+        Assert.Contains("Pilots and remarks", page, StringComparison.Ordinal);
+        Assert.Contains("FR, IPC, OPC, and custom fields", page, StringComparison.Ordinal);
+        Assert.Contains("Operating capacity", page, StringComparison.Ordinal);
+        Assert.Contains("Landings", page, StringComparison.Ordinal);
+        Assert.Contains("Approach types", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookDraft.FlightReview", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookDraft.InstrumentProficiencyCheck", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookDraft.OperatorProficiencyCheck", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookCustomFields", page, StringComparison.Ordinal);
+        Assert.Contains("public IReadOnlyList<CustomFieldDefinition> WorkbookCustomFields", session, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3NewFlightShowsReducedMotionAwareSaveConfirmationBeforeDashboardReturn()
     {
         var page = ReadMobilePage("NewFlight.razor");
@@ -594,6 +786,33 @@ public sealed class PwaPageWiringTests
         Assert.Contains("animation: none;", css, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Gate3PreservesThemeDraftOfflineAndOverflowContracts()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var css = ReadMobileWebAsset("css/app.css");
+        var offlineWorker = ReadMobileWebAsset("service-worker.published.js");
+
+        Assert.Contains("--app-bg:", css, StringComparison.Ordinal);
+        Assert.Contains("--app-primary:", css, StringComparison.Ordinal);
+        Assert.Contains("html[data-elb-theme=\"dark\"]", css, StringComparison.Ordinal);
+        Assert.Contains("html[data-elb-theme=\"system\"]", css, StringComparison.Ordinal);
+        Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
+        Assert.Contains("animation: none;", css, StringComparison.Ordinal);
+        Assert.Contains("@oninput=\"Session.MarkDraftEdited\"", page, StringComparison.Ordinal);
+        Assert.Contains("@onchange=\"Session.MarkDraftEdited\"", page, StringComparison.Ordinal);
+        Assert.Contains("public bool HasEditedDraft", session, StringComparison.Ordinal);
+        Assert.Contains("HasAttemptedSubmit || HasEditedDraft", session, StringComparison.Ordinal);
+        Assert.Contains("cache.addAll(assetsRequests)", offlineWorker, StringComparison.Ordinal);
+        Assert.Contains("return cachedResponse || fetch(event.request);", offlineWorker, StringComparison.Ordinal);
+        Assert.Contains(".app-main", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-x: hidden;", css, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: repeat(5, minmax(0, 1fr));", css, StringComparison.Ordinal);
+        Assert.Contains(".bottom-nav a", css, StringComparison.Ordinal);
+        Assert.Contains("min-width: 0;", css, StringComparison.Ordinal);
+    }
+
     private static string ReadMobilePage(string relativePath) =>
         File.ReadAllText(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
@@ -617,6 +836,19 @@ public sealed class PwaPageWiringTests
             "..",
             "src",
             "ElectronicLogbook.Mobile",
+            relativePath)));
+
+    private static string ReadMobileWebAsset(string relativePath) =>
+        File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "wwwroot",
             relativePath)));
 
     private static string ReadMobileAsset(params string[] relativePath) =>

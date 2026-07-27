@@ -1,5 +1,6 @@
 @page "/flights"
 @inject MobileLogbookSession Session
+@inject NavigationManager Navigation
 
 <PageTitle>Logbook</PageTitle>
 
@@ -30,8 +31,8 @@ else
         }
 
         <div class="segmented-control" role="tablist" aria-label="Logbook view">
-            <button type="button" class="@EntriesTabClass" @onclick="() => ActiveView = LogbookView.Entries">Entries</button>
-            <button type="button" class="@TotalsTabClass" @onclick="() => ActiveView = LogbookView.Totals">Totals</button>
+            <button type="button" class="@EntriesTabClass" @onclick="() => SelectView(LogbookView.Entries)">Entries</button>
+            <button type="button" class="@TotalsTabClass" @onclick="() => SelectView(LogbookView.Totals)">Totals</button>
         </div>
 
         @if (ActiveView == LogbookView.Entries)
@@ -80,17 +81,7 @@ else
                     <div class="flight-row-list">
                         @foreach (var entry in FilteredEntries)
                         {
-                            <NavLink class="flight-row logbook-entry-row" href="@($"/flights/{entry.EntryId.Value}")">
-                                <strong class="logbook-row-date">@FormatRowDate(entry.Entry!.Date)</strong>
-                                <span class="logbook-row-route">
-                                    <strong>@Session.FormatRoute(entry.Entry!)</strong>
-                                    <span>@EntryRemarks(entry.Entry!)</span>
-                                </span>
-                                <span class="logbook-row-hours">
-                                    <strong>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(entry.Entry!))</strong>
-                                    <span>@SimLabel(entry.Entry!)</span>
-                                </span>
-                            </NavLink>
+                            <LogbookFlightRow Entry="@entry" />
                         }
                     </div>
                 }
@@ -102,14 +93,45 @@ else
                 <div class="section-title-row">
                     <div>
                         <span class="eyebrow">Totals</span>
-                        <h2>Hours and currency</h2>
+                        <h2>Logged columns</h2>
                     </div>
                 </div>
+                <h3>Single engine</h3>
                 <div class="totals-grid">
-                    <StatusMetric Label="Total hours" Value="@MobileLogbookSession.FormatHours(TotalHours)" Detail="logged" />
-                    <StatusMetric Label="Command" Value="@MobileLogbookSession.FormatHours(TotalCommand)" Detail="SE and ME command" />
-                    <StatusMetric Label="Landings" Value="@TotalLandings.ToString()" Detail="day and night" />
-                    <StatusMetric Label="Approaches" Value="@TotalApproaches.ToString()" Detail="ILS, VOR, RNP, NDB, DGA, circling" />
+                    <StatusMetric Label="ICUS day" Value="@(FormatHoursTotal(entry => entry.SeIcusDay))" Detail="SE" />
+                    <StatusMetric Label="ICUS night" Value="@(FormatHoursTotal(entry => entry.SeIcusNight))" Detail="SE" />
+                    <StatusMetric Label="Dual day" Value="@(FormatHoursTotal(entry => entry.SeDualDay))" Detail="SE" />
+                    <StatusMetric Label="Dual night" Value="@(FormatHoursTotal(entry => entry.SeDualNight))" Detail="SE" />
+                    <StatusMetric Label="Command day" Value="@(FormatHoursTotal(entry => entry.SeCommandDay))" Detail="SE" />
+                    <StatusMetric Label="Command night" Value="@(FormatHoursTotal(entry => entry.SeCommandNight))" Detail="SE" />
+                </div>
+                <h3>Multi engine</h3>
+                <div class="totals-grid">
+                    <StatusMetric Label="ICUS day" Value="@(FormatHoursTotal(entry => entry.MeIcusDay))" Detail="ME" />
+                    <StatusMetric Label="ICUS night" Value="@(FormatHoursTotal(entry => entry.MeIcusNight))" Detail="ME" />
+                    <StatusMetric Label="Dual day" Value="@(FormatHoursTotal(entry => entry.MeDualDay))" Detail="ME" />
+                    <StatusMetric Label="Dual night" Value="@(FormatHoursTotal(entry => entry.MeDualNight))" Detail="ME" />
+                    <StatusMetric Label="Command day" Value="@(FormatHoursTotal(entry => entry.MeCommandDay))" Detail="ME" />
+                    <StatusMetric Label="Command night" Value="@(FormatHoursTotal(entry => entry.MeCommandNight))" Detail="ME" />
+                </div>
+                <h3>Other time</h3>
+                <div class="totals-grid">
+                    <StatusMetric Label="Copilot day" Value="@(FormatHoursTotal(entry => entry.CopilotDay))" Detail="hours" />
+                    <StatusMetric Label="Copilot night" Value="@(FormatHoursTotal(entry => entry.CopilotNight))" Detail="hours" />
+                    <StatusMetric Label="IFR actual" Value="@(FormatHoursTotal(entry => entry.IfrIf))" Detail="hours" />
+                    <StatusMetric Label="IFR sim" Value="@(FormatHoursTotal(entry => entry.IfrSim))" Detail="hours" />
+                    <StatusMetric Label="Day landings" Value="@(FormatCountTotal(entry => entry.LandingsDay))" Detail="count" />
+                    <StatusMetric Label="Night landings" Value="@(FormatCountTotal(entry => entry.LandingsNight))" Detail="count" />
+                </div>
+                <h3>Approach types</h3>
+                <div class="totals-grid">
+                    <StatusMetric Label="ILS" Value="@(FormatCountTotal(entry => entry.Ils))" Detail="approaches" />
+                    <StatusMetric Label="VOR" Value="@(FormatCountTotal(entry => entry.Vor))" Detail="approaches" />
+                    <StatusMetric Label="RNP" Value="@(FormatCountTotal(entry => entry.Rnp))" Detail="approaches" />
+                    <StatusMetric Label="NDB" Value="@(FormatCountTotal(entry => entry.Ndb))" Detail="approaches" />
+                    <StatusMetric Label="DGA CDI" Value="@(FormatCountTotal(entry => entry.DgaCdi))" Detail="approaches" />
+                    <StatusMetric Label="DGA AZI" Value="@(FormatCountTotal(entry => entry.DgaAzi))" Detail="approaches" />
+                    <StatusMetric Label="Circling" Value="@(FormatCountTotal(entry => entry.Circling))" Detail="approaches" />
                 </div>
                 @if (Session.DeletedEntriesV2.Count > 0)
                 {
@@ -175,6 +197,9 @@ else
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? View { get; set; }
+
     private LogbookView ActiveView { get; set; } = LogbookView.Entries;
     private string SearchText { get; set; } = string.Empty;
     private bool ShowFilters { get; set; }
@@ -190,25 +215,28 @@ else
             .Where(MatchesActiveFilters)
             .ToArray();
 
-    private decimal TotalHours =>
-        Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
+    private string FormatHoursTotal(Func<PortableLogbookWorkbookEntry, decimal?> column) =>
+        MobileLogbookSession.FormatHours(Session.CurrentEntriesV2.Sum(entry => column(entry.Entry!).GetValueOrDefault()));
 
-    private decimal TotalCommand =>
-        Session.CurrentEntriesV2.Sum(entry =>
-            (entry.Entry!.SeCommandDay ?? 0) +
-            (entry.Entry.SeCommandNight ?? 0) +
-            (entry.Entry.MeCommandDay ?? 0) +
-            (entry.Entry.MeCommandNight ?? 0));
-
-    private int TotalLandings =>
-        Session.CurrentEntriesV2.Sum(entry => (entry.Entry!.LandingsDay ?? 0) + (entry.Entry.LandingsNight ?? 0));
-
-    private int TotalApproaches =>
-        Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookApproaches(entry.Entry!));
+    private string FormatCountTotal(Func<PortableLogbookWorkbookEntry, int?> column) =>
+        Session.CurrentEntriesV2.Sum(entry => column(entry.Entry!).GetValueOrDefault()).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedWorkbookAsync();
+    }
+
+    protected override void OnParametersSet()
+    {
+        ActiveView = string.Equals(View, "totals", StringComparison.OrdinalIgnoreCase)
+            ? LogbookView.Totals
+            : LogbookView.Entries;
+    }
+
+    private void SelectView(LogbookView view)
+    {
+        ActiveView = view;
+        Navigation.NavigateTo($"/flights?view={(view == LogbookView.Totals ? "totals" : "entries")}");
     }
 
     private bool MatchesSearch(PortableLogbookMaterializedEntryV2 materialized)
@@ -243,47 +271,6 @@ else
         FilterRecentOnly = false;
         FilterFlightsWithApproachesOnly = false;
     }
-
-    private static string EntryRemarks(PortableLogbookWorkbookEntry entry) =>
-        entry.Remarks?.Trim() ?? string.Empty;
-
-    private static string StripGeneratedCrewSuffix(string remarks)
-    {
-        if (IsGeneratedCrewText(remarks))
-        {
-            return string.Empty;
-        }
-
-        var suffixStart = remarks.LastIndexOf(" (", StringComparison.Ordinal);
-        if (suffixStart < 0 || !remarks.EndsWith(')'))
-        {
-            return remarks;
-        }
-
-        var suffix = remarks[(suffixStart + 2)..^1];
-        return IsGeneratedCrewText(suffix)
-            ? remarks[..suffixStart]
-            : remarks;
-    }
-
-    private static bool IsGeneratedCrewText(string value)
-    {
-        var parts = value
-            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(part => !string.Equals(part, "Crew: -", StringComparison.OrdinalIgnoreCase))
-            .ToArray();
-
-        return parts.Length > 0 &&
-            parts.All(part =>
-                part.StartsWith("PIC:", StringComparison.OrdinalIgnoreCase) ||
-                part.StartsWith("Crew:", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string FormatRowDate(DateOnly? date) =>
-        date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
-
-    private static string SimLabel(PortableLogbookWorkbookEntry entry) =>
-        entry.IfrSim.GetValueOrDefault() > 0 ? "Sim" : string.Empty;
 
     private static int CountApproaches(PortableLogbookWorkbookEntry entry) =>
         MobileLogbookSession.WorkbookApproaches(entry);

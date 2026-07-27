@@ -40,6 +40,11 @@ public sealed class MobileLogbookSession(
     public MobileWorkbookEntryDraft WorkbookDraft { get; private set; } =
         MobileWorkbookEntryDraft.Create(CustomFields);
 
+    public IReadOnlyList<CustomFieldDefinition> WorkbookCustomFields =>
+        DocumentV2.CustomFieldDefinitions.Count > 0
+            ? DocumentV2.CustomFieldDefinitions.OrderBy(field => field.Order).ToArray()
+            : CustomFields;
+
     public bool HasAttemptedSubmit { get; private set; }
 
     public bool HasEditedDraft { get; private set; }
@@ -255,7 +260,7 @@ public sealed class MobileLogbookSession(
                 RevisionId.New(),
                 deviceId,
                 DateTimeOffset.UtcNow,
-                WorkbookDraft.ToEntry(WorkbookCustomFields()))
+                WorkbookDraft.ToEntry(WorkbookCustomFields))
             : PortableLogbookOperationV2.Correct(
                 DocumentV2.LogbookId,
                 EditingEntryId.Value,
@@ -263,12 +268,25 @@ public sealed class MobileLogbookSession(
                 [EditingRevisionId.Value],
                 deviceId,
                 DateTimeOffset.UtcNow,
-                WorkbookDraft.ToEntry(WorkbookCustomFields()));
+                WorkbookDraft.ToEntry(WorkbookCustomFields));
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
         await SaveStateV2Async();
         SetLastActionMessage(EditingEntryId is null ? "Flight added." : "Correction saved.");
         ResetWorkbookDraft();
+    }
+
+    public async Task SaveCurrencyOverrideDatesAsync(PortableLogbookCurrencyOverrideDates overrideDates)
+    {
+        if (IsStorageBlocked)
+        {
+            return;
+        }
+
+        ArgumentNullException.ThrowIfNull(overrideDates);
+        DocumentV2 = MobileLogbookDocument.SetCurrencyOverrideDates(DocumentV2, overrideDates);
+        await SaveStateV2Async();
+        SetLastActionMessage("Currency override dates saved.");
     }
 
     public void ResetDraft()
@@ -292,7 +310,7 @@ public sealed class MobileLogbookSession(
             return;
         }
 
-        WorkbookDraft = MobileWorkbookEntryDraft.Create(WorkbookCustomFields());
+        WorkbookDraft = MobileWorkbookEntryDraft.Create(WorkbookCustomFields);
         HasAttemptedSubmit = false;
         HasEditedDraft = false;
         EditingEntryId = null;
@@ -337,7 +355,7 @@ public sealed class MobileLogbookSession(
             return;
         }
 
-        WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry, WorkbookCustomFields(), preserveDate: false);
+        WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry, WorkbookCustomFields, preserveDate: false);
         EditingEntryId = null;
         EditingRevisionId = null;
         HasAttemptedSubmit = false;
@@ -352,7 +370,7 @@ public sealed class MobileLogbookSession(
             return;
         }
 
-        WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry.Entry, WorkbookCustomFields(), preserveDate: true);
+        WorkbookDraft = MobileWorkbookEntryDraft.FromEntry(entry.Entry, WorkbookCustomFields, preserveDate: true);
         EditingEntryId = entry.EntryId;
         EditingRevisionId = entry.CurrentRevisionId;
         HasAttemptedSubmit = false;
@@ -736,7 +754,7 @@ public sealed class MobileLogbookSession(
         yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi));
         yield return new("Circling", FormatNullableCount(entry.Circling));
 
-        foreach (var field in WorkbookCustomFields())
+        foreach (var field in WorkbookCustomFields)
         {
             entry.CustomFields.TryGetValue(field.Id, out var customValue);
             yield return new(field.Label, FormatText(customValue));
@@ -787,7 +805,7 @@ public sealed class MobileLogbookSession(
 
     private string[] ValidateWorkbookDraft()
     {
-        var entry = WorkbookDraft.ToEntry(WorkbookCustomFields());
+        var entry = WorkbookDraft.ToEntry(WorkbookCustomFields);
         var errors = new List<string>();
         if (entry.Date is null || entry.Date > DateOnly.FromDateTime(DateTime.Today))
         {
@@ -828,11 +846,6 @@ public sealed class MobileLogbookSession(
     private IEnumerable<CustomFieldDefinition> EntryCustomFields() =>
         Document.CustomFieldDefinitions.Count > 0
             ? Document.CustomFieldDefinitions.OrderBy(field => field.Order)
-            : CustomFields;
-
-    private IEnumerable<CustomFieldDefinition> WorkbookCustomFields() =>
-        DocumentV2.CustomFieldDefinitions.Count > 0
-            ? DocumentV2.CustomFieldDefinitions.OrderBy(field => field.Order)
             : CustomFields;
 
     private static PortableLogbookEntry? EntryPayload(PortableLogbookOperation operation) =>

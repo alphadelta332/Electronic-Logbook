@@ -1,0 +1,115 @@
+@page "/currency"
+@inject MobileLogbookSession Session
+
+<PageTitle>Currency | LogbookOne</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading Currency + Recency</span>
+    </section>
+}
+else
+{
+    <section class="currency-page">
+        <div class="section-title-row">
+            <div>
+                <span class="eyebrow">Workbook calculation</span>
+                <h1>Currency + Recency</h1>
+                <p>Calculated from the current device record as at @Summary.Today.ToString("d MMM yyyy").</p>
+            </div>
+        </div>
+
+        <section class="dashboard-section" aria-label="Single Engine Currency + Recency">
+            <span class="eyebrow">Single Engine</span>
+            <h2>Currency and recency</h2>
+            <CurrencyRowList Rows="@Summary.SingleEngineRows" />
+        </section>
+
+        <section class="dashboard-section" aria-label="Multi Engine Currency + Recency">
+            <span class="eyebrow">Multi Engine</span>
+            <h2>Currency and recency</h2>
+            <CurrencyRowList Rows="@Summary.MultiEngineRows" />
+        </section>
+
+        <section class="dashboard-section" aria-label="Currency override dates">
+            <span class="eyebrow">Workbook override dates</span>
+            <h2>Flight Review, IPC, and OPC</h2>
+            <p>Use these only when the authoritative completion date is not recorded on a flight.</p>
+            <div class="flight-entry-grid">
+                <label>Flight Review override date <input type="date" @bind="FlightReviewOverrideDate" /></label>
+                <label>IPC override date <input type="date" @bind="InstrumentProficiencyCheckOverrideDate" /></label>
+                <label>OPC override date <input type="date" @bind="OperatorProficiencyCheckOverrideDate" /></label>
+            </div>
+            <button class="primary-action" type="button" @onclick="SaveOverrideDatesAsync">Save override dates</button>
+        </section>
+
+        <section class="dashboard-section" aria-label="Currently expired Single Engine items">
+            <span class="eyebrow">Currently expired</span>
+            @if (Summary.CurrentlyExpiredSingleEngineRows.Count == 0)
+            {
+                <p>All Single Engine Currency + Recency items are current.</p>
+            }
+            else
+            {
+                <CurrencyRowList Rows="@Summary.CurrentlyExpiredSingleEngineRows" />
+            }
+        </section>
+
+        <section class="dashboard-section" aria-label="Next expiring Single Engine item">
+            <span class="eyebrow">Next expiring</span>
+            @if (Summary.NextExpiringSingleEngineRow is { } nextExpiring)
+            {
+                <strong>@nextExpiring.Requirement</strong>
+                <span>@nextExpiring.CurrentOrRecentUntilDisplay · @nextExpiring.DaysRemaining days remaining</span>
+            }
+            else
+            {
+                <p>No future Single Engine expiry is available from the current record.</p>
+            }
+        </section>
+    </section>
+}
+
+@code {
+    private DateTime? FlightReviewOverrideDate { get; set; }
+
+    private DateTime? InstrumentProficiencyCheckOverrideDate { get; set; }
+
+    private DateTime? OperatorProficiencyCheckOverrideDate { get; set; }
+
+    private MobileCurrencyRecencySummary Summary => MobileCurrencyRecencySummary.Create(
+        Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
+        Session.DocumentV2.CurrencyOverrideDates,
+        DateOnly.FromDateTime(DateTime.Today));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedWorkbookAsync();
+        LoadOverrideDates();
+    }
+
+    private async Task SaveOverrideDatesAsync()
+    {
+        await Session.SaveCurrencyOverrideDatesAsync(new PortableLogbookCurrencyOverrideDates(
+            ParseOverrideDate(FlightReviewOverrideDate),
+            ParseOverrideDate(InstrumentProficiencyCheckOverrideDate),
+            ParseOverrideDate(OperatorProficiencyCheckOverrideDate)));
+        LoadOverrideDates();
+    }
+
+    private void LoadOverrideDates()
+    {
+        var overrides = Session.DocumentV2.CurrencyOverrideDates;
+        FlightReviewOverrideDate = FormatOverrideDate(overrides.FlightReview);
+        InstrumentProficiencyCheckOverrideDate = FormatOverrideDate(overrides.InstrumentProficiencyCheck);
+        OperatorProficiencyCheckOverrideDate = FormatOverrideDate(overrides.OperatorProficiencyCheck);
+    }
+
+    private static DateOnly? ParseOverrideDate(DateTime? value) =>
+        value is { } date ? DateOnly.FromDateTime(date) : null;
+
+    private static DateTime? FormatOverrideDate(DateOnly? value) =>
+        value?.ToDateTime(TimeOnly.MinValue);
+}

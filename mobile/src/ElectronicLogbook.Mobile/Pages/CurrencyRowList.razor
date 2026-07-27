@@ -1,0 +1,22 @@
+@using ElectronicLogbook.Portable
+
+<div class="currency-row-list">
+    @foreach (var row in Rows)
+    {
+        <article class="flight-row currency-row">
+            <div>
+                <strong>@row.Requirement</strong>
+                <span>@row.Category · @row.CasrReference</span>
+            </div>
+            <div>
+                <strong>@row.Status</strong>
+                <span>@row.CurrentOrRecentUntilDisplay · @row.DaysRemaining days remaining</span>
+            </div>
+        </article>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public IReadOnlyList<PortableLogbookCurrencyRow> Rows { get; set; } = [];
+}

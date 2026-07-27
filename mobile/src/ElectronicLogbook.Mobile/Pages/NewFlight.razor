@@ -57,7 +57,7 @@ else
         <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">Flight and route</span>
+                    <span class="eyebrow">Flight</span>
                     <h2>Identity</h2>
                 </div>
             </div>
@@ -66,11 +66,50 @@ else
                 <label>Type <input @bind="Session.WorkbookDraft.Type" list="aircraft-types" autocapitalize="characters" spellcheck="false" /></label>
                 <label>Reg <input @bind="Session.WorkbookDraft.Reg" list="registrations" autocapitalize="characters" spellcheck="false" /></label>
                 <label>Flight ID <input @bind="Session.WorkbookDraft.FlightId" list="flight-numbers" autocapitalize="characters" spellcheck="false" /></label>
+            </div>
+        </section>
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Crew and route</span>
+                    <h2>Pilots and remarks</h2>
+                </div>
+            </div>
+            <div class="field-grid">
                 <label>PIC <input @bind="Session.WorkbookDraft.Pic" autocapitalize="words" /></label>
                 <label>Other pilot or crew <input @bind="Session.WorkbookDraft.OtherPilotOrCrew" autocapitalize="words" /></label>
                 <label>From <input @bind="Session.WorkbookDraft.From" list="airports" autocapitalize="characters" spellcheck="false" /></label>
                 <label>To <input @bind="Session.WorkbookDraft.To" list="airports" autocapitalize="characters" spellcheck="false" /></label>
                 <label class="field-span">Via <input @bind="Session.WorkbookDraft.Via" list="routes" autocapitalize="characters" spellcheck="false" /></label>
+            </div>
+            <label class="field-wide">Remarks <textarea @bind="Session.WorkbookDraft.Remarks"></textarea></label>
+            <select class="recent-select" @onchange="UseRecentRemark" disabled="@Session.IsStorageBlocked">
+                <option value="">Recent remarks</option>
+                @foreach (var value in Session.RecentWorkbookValues(entry => entry.Remarks))
+                {
+                    <option value="@value">@value</option>
+                }
+            </select>
+        </section>
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Checks and fields</span>
+                    <h2>FR, IPC, OPC, and custom fields</h2>
+                </div>
+            </div>
+            <div class="field-grid">
+                <label><input type="checkbox" @bind="Session.WorkbookDraft.FlightReview" /> Flight review</label>
+                <label><input type="checkbox" @bind="Session.WorkbookDraft.InstrumentProficiencyCheck" /> IPC</label>
+                <label><input type="checkbox" @bind="Session.WorkbookDraft.OperatorProficiencyCheck" /> OPC</label>
+            </div>
+            <div class="field-grid custom-field-grid">
+                @foreach (var field in Session.WorkbookCustomFields)
+                {
+                    <label>@field.Label <input @bind="Session.WorkbookDraft.CustomValues[field.Id]" /></label>
+                }
             </div>
         </section>
 
@@ -105,12 +144,23 @@ else
             <div class="section-title-row">
                 <div>
                     <span class="eyebrow">Currency</span>
-                    <h2>Landings and approaches</h2>
+                    <h2>Landings</h2>
                 </div>
             </div>
             <div class="field-grid numeric-grid">
                 <label>Landings day <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsDay" /></label>
                 <label>Landings night <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsNight" /></label>
+            </div>
+        </section>
+
+        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Currency</span>
+                    <h2>Approach types</h2>
+                </div>
+            </div>
+            <div class="field-grid numeric-grid">
                 <label>ILS <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Ils" /></label>
                 <label>VOR <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Vor" /></label>
                 <label>RNP <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Rnp" /></label>
@@ -118,29 +168,6 @@ else
                 <label>DGA (CDI) <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.DgaCdi" /></label>
                 <label>DGA (Azi) <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.DgaAzi" /></label>
                 <label>Circling <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Circling" /></label>
-            </div>
-        </section>
-
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Remarks</span>
-                    <h2>Notes and custom fields</h2>
-                </div>
-            </div>
-            <label class="field-wide">Remarks <textarea @bind="Session.WorkbookDraft.Remarks"></textarea></label>
-            <select class="recent-select" @onchange="UseRecentRemark" disabled="@Session.IsStorageBlocked">
-                <option value="">Recent remarks</option>
-                @foreach (var value in Session.RecentWorkbookValues(entry => entry.Remarks))
-                {
-                    <option value="@value">@value</option>
-                }
-            </select>
-            <div class="field-grid custom-field-grid">
-                @foreach (var field in MobileLogbookSession.CustomFields)
-                {
-                    <label>@field.Label <input @bind="Session.WorkbookDraft.CustomValues[field.Id]" /></label>
-                }
             </div>
         </section>
 

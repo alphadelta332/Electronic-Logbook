@@ -153,7 +153,7 @@ textarea {
     left: 0;
     z-index: 30;
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
     min-height: calc(66px + var(--native-safe-bottom));
     padding: 6px 10px calc(8px + var(--native-safe-bottom));
@@ -178,6 +178,29 @@ textarea {
 .bottom-nav a.active {
     background: var(--app-primary);
     color: var(--app-primary-text);
+}
+
+.bottom-nav .bottom-nav-add {
+    align-self: start;
+    margin-top: -26px;
+    min-height: 78px;
+}
+
+.bottom-nav-add-icon {
+    display: grid;
+    width: 54px;
+    height: 54px;
+    place-items: center;
+    border: 4px solid var(--app-bg);
+    border-radius: 50%;
+    background: var(--app-primary);
+    color: var(--app-primary-text);
+    box-shadow: 0 6px 14px color-mix(in srgb, var(--app-text) 24%, transparent);
+}
+
+.bottom-nav .bottom-nav-add.active {
+    background: transparent;
+    color: var(--app-primary);
 }
 
 .dashboard-page,
@@ -310,8 +333,32 @@ textarea {
     background: color-mix(in srgb, var(--app-surface) 84%, var(--app-primary));
 }
 
-.dashboard-record-health {
-    border-color: color-mix(in srgb, var(--app-warning) 26%, var(--app-border));
+.dashboard-metrics {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+}
+
+.dashboard-total-hours strong {
+    font-size: 28px;
+}
+
+.dashboard-currency-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.dashboard-currency-card {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    padding: 14px;
+    background: var(--app-surface);
+}
+
+.dashboard-empty-state .action-buttons {
+    justify-content: center;
 }
 
 .dashboard-section,
@@ -723,6 +770,12 @@ textarea {
         border: 1px solid var(--app-border);
         border-radius: 14px;
         padding: 8px;
+    }
+
+    .bottom-nav .bottom-nav-add {
+        align-self: auto;
+        margin-top: 0;
+        min-height: 52px;
     }
 
     .app-main {

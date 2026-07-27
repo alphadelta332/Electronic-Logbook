@@ -126,6 +126,39 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task V2WorkbookPackageMobileStatePackageWorkbookRoundTripPreservesEverySourceFact()
+    {
+        var sourceDocument = CreateV2Document();
+        var sourceWorkbookRows = PortableLogbookWorkbookProjection.CreateCurrentRows(sourceDocument);
+        var sourceWorkbookRow = Assert.Single(sourceWorkbookRows);
+        var sourceFacts = PortableLogbookJson.SerializeV2(sourceDocument);
+        var key = PortableLogbookKey.Generate();
+
+        var workbookPackage = PortableLogbookPackage.Write(sourceDocument, key);
+        var mobileImported = PortableLogbookPackage.ReadV2(workbookPackage, key, sourceDocument.LogbookId);
+        var mobileRuntime = new MemoryJsRuntime();
+        var mobileStore = new BrowserLogbookStore(mobileRuntime);
+
+        await mobileStore.SaveStateAsync(new BrowserLogbookStateV2(mobileImported.Document, [], null));
+
+        var mobileState = await new BrowserLogbookStore(mobileRuntime).LoadStateV2Async();
+        Assert.NotNull(mobileState);
+        var mobilePackage = PortableLogbookPackage.Write(mobileState.Document, key);
+        var returnedWorkbookDocument = PortableLogbookPackage.ReadV2(mobilePackage, key, sourceDocument.LogbookId).Document;
+        var returnedWorkbookRows = PortableLogbookWorkbookProjection.CreateCurrentRows(returnedWorkbookDocument);
+        var returnedWorkbookRow = Assert.Single(returnedWorkbookRows);
+
+        Assert.Equal(sourceFacts, PortableLogbookJson.SerializeV2(returnedWorkbookDocument));
+        Assert.Equal(sourceWorkbookRow.EntryId, returnedWorkbookRow.EntryId);
+        Assert.Equal(sourceWorkbookRow.CurrentRevisionId, returnedWorkbookRow.CurrentRevisionId);
+        Assert.Equal(
+            PortableLogbookJson.SerializeV2(sourceDocument with { Operations = [sourceDocument.Operations.Single() with { Entry = sourceWorkbookRow.Entry }] }),
+            PortableLogbookJson.SerializeV2(sourceDocument with { Operations = [sourceDocument.Operations.Single() with { Entry = returnedWorkbookRow.Entry }] }));
+        Assert.Single(returnedWorkbookDocument.CustomFieldDefinitions);
+        Assert.Equal(sourceDocument.CustomFieldDefinitions, returnedWorkbookDocument.CustomFieldDefinitions);
+    }
+
+    [Fact]
     public async Task LoadStateV2RejectsLegacyV1BrowserStateWithoutOverwritingState()
     {
         var originalJson = JsonSerializer.Serialize(

@@ -1,6 +1,5 @@
 @page "/"
 @inject MobileLogbookSession Session
-@inject NavigationManager Navigation
 
 <PageTitle>LogbookOne</PageTitle>
 
@@ -22,92 +21,70 @@ else
             </section>
         }
 
-        <section class="hero-panel">
-            <div>
-                <span class="eyebrow">Next action</span>
-                <h1>Add today's flight</h1>
-                <p>@NextActionDetail</p>
-            </div>
-            <MudButton Href="/flights/new" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add">
-                Add flight
-            </MudButton>
-        </section>
-
-        <section class="status-strip" aria-label="Operational status">
-            <StatusMetric Label="Total hours" Value="@MobileLogbookSession.FormatHours(TotalFlyingHours)" Detail="logged" />
-            <StatusMetric Label="Last 90 days" Value="@RecentFlightCount.ToString()" Detail="@RecentHoursDetail" />
-            <StatusMetric Label="Entries" Value="@Session.CurrentEntriesV2.Count.ToString()" Detail="current record" />
-            <StatusMetric Label="Package key" Value="@Session.PackageKeyStatus" Detail="device readiness" Attention="@(Session.PackageKeyStatus != "Ready")" />
+        <section class="status-strip dashboard-metrics" aria-label="Flight activity">
+            <article class="status-metric dashboard-total-hours">
+                <span>Total hours</span>
+                <strong>@MobileLogbookSession.FormatHours(TotalFlyingHours)</strong>
+                <small>logged</small>
+            </article>
+            <article class="status-metric">
+                <span>Last 90 days</span>
+                <strong>@RecentFlightCount</strong>
+                <small>@RecentHoursDetail</small>
+            </article>
         </section>
 
         <section class="notice-panel dashboard-last-flight" aria-label="Last flight context">
             <MudIcon Icon="@Icons.Material.Filled.FlightTakeoff" />
             <div>
-                <strong>@LastFlightTitle</strong>
-                <span>@LastFlightDetail</span>
+                <strong>Last flight</strong>
+                @if (LastFlight is null)
+                {
+                    <span>Import a package or add a flight to build the device record.</span>
+                }
+                else
+                {
+                    <LogbookFlightRow Entry="@LastFlight" />
+                }
                 <span>@RecentSnapshotDetail</span>
             </div>
         </section>
 
-        <section class="notice-panel dashboard-record-health" aria-label="Record health">
-            <MudIcon Icon="@RecordHealthIcon" />
-            <div>
-                <strong>@RecordHealthTitle</strong>
-                <span>@RecordHealthReason</span>
-            </div>
-        </section>
-
-        <section class="notice-panel">
-            <MudIcon Icon="@Icons.Material.Filled.HealthAndSafety" />
-            <div>
-                <strong>Package health</strong>
-                <span>@Session.ExchangeStatus.BackupNotice</span>
-                <span>@Session.PackageKeyNotice</span>
-            </div>
-        </section>
-
-        <section class="dashboard-section">
+        <section class="dashboard-section dashboard-currency" aria-label="VFR and IFR Currency + Recency">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">Recent flights</span>
-                    <h2>Current record</h2>
+                    <span class="eyebrow">Currency + Recency</span>
+                    <h2>VFR and IFR status</h2>
                 </div>
-                <MudButton Href="/flights" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Logbook</MudButton>
+                <MudButton Href="/currency" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Currency</MudButton>
             </div>
 
-            @if (Session.CurrentEntriesV2.Count == 0)
-            {
-                <section class="empty-state">
-                    <MudIcon Icon="@Icons.Material.Filled.Flight" />
-                    <strong>No flights on this device yet</strong>
-                    <span>Import a package or start with a new local entry.</span>
+            <div class="dashboard-currency-grid">
+                <section class="dashboard-currency-card" aria-label="VFR currency status">
+                    <strong>VFR</strong>
+                    <CurrencyRowList Rows="@VfrCurrencyRows" />
+                    <MudButton Href="/currency" Variant="Variant.Text">View VFR Currency + Recency</MudButton>
                 </section>
-            }
-            else
-            {
-                <div class="flight-row-list">
-                    @foreach (var entry in Session.CurrentEntriesV2.Take(5))
-                    {
-                        <article class="flight-row">
-                            <div class="route-code">
-                                <strong>@Session.FormatRoute(entry.Entry!)</strong>
-                                <span>@MobileLogbookSession.FormatDate(entry.Entry!.Date)</span>
-                            </div>
-                            <div>
-                                <strong>@Session.FormatAircraft(entry.Entry!)</strong>
-                                <span>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(entry.Entry!)) hr total</span>
-                            </div>
-                            <MudIconButton Icon="@Icons.Material.Filled.ContentCopy" Size="Size.Small" Color="Color.Primary" OnClick="@(() => CloneEntry(entry.Entry!))" aria-label="Clone flight" />
-                        </article>
-                    }
-                </div>
-            }
+                <section class="dashboard-currency-card" aria-label="IFR currency status">
+                    <strong>IFR</strong>
+                    <CurrencyRowList Rows="@IfrCurrencyRows" />
+                    <MudButton Href="/currency" Variant="Variant.Text">View IFR Currency + Recency</MudButton>
+                </section>
+            </div>
         </section>
 
-        <section class="exchange-summary">
-            <span>Last import: @MobileLogbookSession.FormatTimestamp(Session.ExchangeStatus.LastSuccessfulImportAt)</span>
-            <span>Last export: @MobileLogbookSession.FormatTimestamp(Session.ExchangeStatus.LastSuccessfulExportAt)</span>
-        </section>
+        @if (Session.CurrentEntriesV2.Count == 0)
+        {
+            <section class="empty-state dashboard-empty-state" aria-label="No flights yet">
+                <MudIcon Icon="@Icons.Material.Filled.Flight" />
+                <strong>Your device logbook is ready</strong>
+                <span>Add the first flight or import an encrypted workbook package from Settings.</span>
+                <div class="action-buttons">
+                    <MudButton Href="/flights/new" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add">Add first flight</MudButton>
+                    <MudButton Href="/settings" Variant="Variant.Outlined">Open Settings</MudButton>
+                </div>
+            </section>
+        }
     </section>
 }
 
@@ -132,73 +109,32 @@ else
     private string RecentHoursDetail =>
         $"{MobileLogbookSession.FormatHours(RecentFlyingHours)} hr";
 
-    private string LastFlightTitle =>
-        LastFlight?.Entry is null
-            ? "No last flight yet"
-            : $"{Session.FormatRoute(LastFlight.Entry)} on {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}";
-
-    private string LastFlightDetail =>
-        LastFlight?.Entry is null
-            ? "Import a package or add a flight to build the device record."
-            : $"{Session.FormatAircraft(LastFlight.Entry)} | {MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(LastFlight.Entry))} hr";
-
     private string RecentSnapshotDetail =>
         Session.CurrentEntriesV2.Count == 0
             ? "90-day snapshot will appear after the first dated entry."
             : $"{FormatCount(RecentFlightCount, "flight")}, {MobileLogbookSession.FormatHours(RecentFlyingHours)} hr in the last 90 days.";
 
-    private string RecordHealthIcon =>
-        Session.MergeResultV2.Conflicts.Count > 0
-            ? Icons.Material.Filled.ReportProblem
-            : Icons.Material.Filled.HealthAndSafety;
-
-    private string RecordHealthTitle =>
-        Session.MergeResultV2.Conflicts.Count > 0
-            ? "Record needs review"
-            : RecentFlightCount > 0
-                ? "Recent activity recorded"
-                : "No recent activity on this device";
-
-    private string RecordHealthReason
-    {
-        get
-        {
-            if (Session.MergeResultV2.Conflicts.Count > 0)
-            {
-                return $"{FormatCount(Session.MergeResultV2.Conflicts.Count, "conflict")} need review before the device copy is clean.";
-            }
-
-            if (LastFlight?.Entry is null)
-            {
-                return "No active entries are stored locally yet.";
-            }
-
-            if (RecentFlightCount == 0)
-            {
-                return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; none are within the last 90 days.";
-            }
-
-            return $"Last dated entry is {MobileLogbookSession.FormatDate(LastFlight.Entry.Date)}; {FormatCount(RecentFlightCount, "entry")} are within the last 90 days.";
-        }
-    }
-
-    private string NextActionDetail =>
-        Session.CurrentEntriesV2.Count == 0
-            ? "Create the first device entry or import an encrypted package from the workbook."
-            : $"{FormatCount(Session.CurrentEntriesV2.Count, "flight")} available on this device.";
-
     private static string FormatCount(int count, string singular) =>
         $"{count} {singular}{(count == 1 ? string.Empty : "s")}";
+
+    private MobileCurrencyRecencySummary CurrencySummary => MobileCurrencyRecencySummary.Create(
+        Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
+        Session.DocumentV2.CurrencyOverrideDates,
+        DateOnly.FromDateTime(DateTime.Today));
+
+    private IReadOnlyList<PortableLogbookCurrencyRow> VfrCurrencyRows =>
+        CurrencySummary.SingleEngineRows
+            .Where(row => row.Requirement == "Passenger Carrying")
+            .ToArray();
+
+    private IReadOnlyList<PortableLogbookCurrencyRow> IfrCurrencyRows =>
+        CurrencySummary.SingleEngineRows
+            .Where(row => row.Category is "IFR (Apps)" or "Single Pilot IFR")
+            .ToArray();
 
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedWorkbookAsync();
-    }
-
-    private void CloneEntry(PortableLogbookWorkbookEntry entry)
-    {
-        Session.CloneWorkbookEntry(entry);
-        Navigation.NavigateTo("/flights/new");
     }
 
 }

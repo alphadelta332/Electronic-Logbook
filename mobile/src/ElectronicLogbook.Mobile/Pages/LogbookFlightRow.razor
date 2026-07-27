@@ -1,0 +1,54 @@
+@inject MobileLogbookSession Session
+
+<NavLink class="flight-row logbook-entry-row" href="@($"/flights/{Entry.EntryId.Value}")">
+    <strong class="logbook-row-date" aria-label="Flight date">@FormatRowDate(Entry.Entry!.Date)</strong>
+    <span class="logbook-row-route">
+        <strong aria-label="Flight route">@Session.FormatRoute(Entry.Entry!)</strong>
+        <span>@EntryRemarks(Entry.Entry!)</span>
+    </span>
+    <span class="logbook-row-hours">
+        <strong aria-label="Calculated total time">@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(Entry.Entry!))</strong>
+        <span>@SimLabel(Entry.Entry!)</span>
+    </span>
+</NavLink>
+
+@code {
+    [Parameter, EditorRequired]
+    public PortableLogbookMaterializedEntryV2 Entry { get; set; } = null!;
+
+    private static string EntryRemarks(PortableLogbookWorkbookEntry entry) =>
+        StripGeneratedCrewSuffix(entry.Remarks?.Trim() ?? string.Empty);
+
+    private static string StripGeneratedCrewSuffix(string remarks)
+    {
+        if (IsGeneratedCrewText(remarks))
+        {
+            return string.Empty;
+        }
+
+        var suffixStart = remarks.LastIndexOf(" (", StringComparison.Ordinal);
+        if (suffixStart < 0 || !remarks.EndsWith(')'))
+        {
+            return remarks;
+        }
+
+        var suffix = remarks[(suffixStart + 2)..^1];
+        return IsGeneratedCrewText(suffix) ? remarks[..suffixStart] : remarks;
+    }
+
+    private static bool IsGeneratedCrewText(string value)
+    {
+        var parts = value.Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(part => !string.Equals(part, "Crew: -", StringComparison.OrdinalIgnoreCase)).ToArray();
+
+        return parts.Length > 0 && parts.All(part =>
+            part.StartsWith("PIC:", StringComparison.OrdinalIgnoreCase) ||
+            part.StartsWith("Crew:", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string FormatRowDate(DateOnly? date) =>
+        date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
+
+    private static string SimLabel(PortableLogbookWorkbookEntry entry) =>
+        entry.IfrSim.GetValueOrDefault() > 0 ? "Sim" : string.Empty;
+}

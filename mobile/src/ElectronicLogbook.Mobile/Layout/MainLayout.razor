@@ -21,15 +21,25 @@
     </main>
 
     <nav class="bottom-nav" aria-label="Primary">
-        <NavLink href="/" Match="NavLinkMatch.All">
+        <NavLink href="/" Match="NavLinkMatch.All" aria-label="Dashboard">
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
             <span>Dashboard</span>
         </NavLink>
-        <NavLink href="/flights">
+        <NavLink href="/flights" aria-label="Logbook">
             <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
             <span>Logbook</span>
         </NavLink>
-        <NavLink href="/settings">
+        <NavLink href="/flights/new" class="bottom-nav-add" aria-label="New flight">
+            <span class="bottom-nav-add-icon" aria-hidden="true">
+                <MudIcon Icon="@Icons.Material.Filled.Add" />
+            </span>
+            <span>New flight</span>
+        </NavLink>
+        <NavLink href="/currency" aria-label="Currency">
+            <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
+            <span>Currency</span>
+        </NavLink>
+        <NavLink href="/settings" aria-label="Settings">
             <MudIcon Icon="@Icons.Material.Filled.Settings" />
             <span>Settings</span>
         </NavLink>
