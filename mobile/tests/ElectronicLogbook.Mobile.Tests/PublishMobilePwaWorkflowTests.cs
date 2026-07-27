@@ -70,6 +70,30 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.DoesNotContain("force-stop", installScript, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void AndroidAcceptanceWorkflowUsesAnIsolatedDataPreservingPackage()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var packageJson = File.ReadAllText(Path.Combine(mobileRoot, "package.json"));
+        var gradle = File.ReadAllText(Path.Combine(mobileRoot, "android", "app", "build.gradle"));
+        var installScript = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "Install-AndroidAcceptanceBuild.ps1"));
+
+        Assert.Contains("install:android:acceptance", packageJson, StringComparison.Ordinal);
+        Assert.Contains("Install-AndroidAcceptanceBuild.ps1", packageJson, StringComparison.Ordinal);
+        Assert.Contains("acceptance", gradle, StringComparison.Ordinal);
+        Assert.Contains("applicationIdSuffix \".acceptance\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("assembleAcceptance", installScript, StringComparison.Ordinal);
+        Assert.Contains("\"install\", \"-r\"", installScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("pm clear", installScript, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("adb uninstall", installScript, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ReadWorkflow() =>
         File.ReadAllText(Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,

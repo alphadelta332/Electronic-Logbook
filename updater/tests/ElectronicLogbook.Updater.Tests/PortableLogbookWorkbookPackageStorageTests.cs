@@ -388,6 +388,39 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadCurrentRowsV2AcceptsNamedMonthFromWorkbook()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"]);
+        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames
+            .Concat([
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName
+            ])
+            .ToArray();
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AT2", columns);
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbook,
+            [new PortableLogbookWorkbookRowV2(new EntryId("ent_named_month"), new RevisionId("rev_named_month"), CompleteWorkbookEntry())],
+            customFields);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "B2", "Jan");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var row = Assert.Single(PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(workbook, customFields));
+
+        Assert.Equal(1, row.Entry.Month);
+    }
+
+    [Fact]
     public void WriteHiddenMetadataColumnValuesUsesAbsoluteWorksheetColumnsWhenTableDoesNotStartInColumnA()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -744,6 +777,41 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         Assert.Equal(new LogbookId("log_read_identity"), identity.LogbookId);
         Assert.Equal(new DeviceId("dev_read_identity"), identity.DeviceId);
         Assert.Equal(PortableLogbookDocument.CurrentSchemaVersion, identity.SchemaVersion);
+    }
+
+    [Fact]
+    public void ReadCurrencyOverrideDatesReadsWorkbookDefinedNameDates()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var workbookXml = ReadXml(archive, "xl/workbook.xml");
+            var root = workbookXml.Root ?? throw new InvalidOperationException("Workbook XML is invalid.");
+            var ns = root.Name.Namespace;
+            var definedNames = root.Element(ns + "definedNames") ?? new XElement(ns + "definedNames");
+            if (definedNames.Parent is null)
+            {
+                root.Add(definedNames);
+            }
+
+            definedNames.Add(
+                new XElement(ns + "definedName", new XAttribute("name", "FROverride"), "'Backend'!$A$20"),
+                new XElement(ns + "definedName", new XAttribute("name", "IPCOverride"), "'Backend'!$A$21"),
+                new XElement(ns + "definedName", new XAttribute("name", "OPCOverride"), "'Backend'!$A$22"));
+            ReplaceXml(archive, "xl/workbook.xml", workbookXml);
+
+            var backend = ReadXml(archive, "xl/worksheets/sheet1.xml");
+            UpsertInlineStringCell(backend, "A20", "2026-07-01");
+            UpsertInlineStringCell(backend, "A21", "46205");
+            UpsertInlineStringCell(backend, "A22", "2026-07-03");
+            ReplaceXml(archive, "xl/worksheets/sheet1.xml", backend);
+        }
+
+        var overrides = PortableLogbookWorkbookPackageStorage.ReadCurrencyOverrideDates(workbook);
+
+        Assert.Equal(new DateOnly(2026, 7, 1), overrides.FlightReview);
+        Assert.Equal(new DateOnly(2026, 7, 2), overrides.InstrumentProficiencyCheck);
+        Assert.Equal(new DateOnly(2026, 7, 3), overrides.OperatorProficiencyCheck);
     }
 
     [Fact]

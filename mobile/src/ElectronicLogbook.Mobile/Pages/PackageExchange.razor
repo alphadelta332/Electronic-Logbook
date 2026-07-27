@@ -1,0 +1,218 @@
+@page "/exchange"
+@inject MobileLogbookSession Session
+@inject BrowserPackageKeyStore PackageKeyStore
+@inject BrowserFileStore FileStore
+
+<PageTitle>Package exchange</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading package exchange</span>
+    </section>
+}
+else
+{
+    <section class="settings-page">
+        <header class="entry-header">
+            <div>
+                <span class="eyebrow">Package exchange</span>
+                <h1>Workbook-faithful backup</h1>
+            </div>
+            <span class="draft-pill">@Session.PackageKeyStatus</span>
+        </header>
+
+        <section class="notice-panel">
+            <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
+            <div>
+                <strong>Schema v2 only</strong>
+                <span>Preview a workbook package, restore its recovery code, then import or export an encrypted package.</span>
+            </div>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">1. Preview</span>
+                    <h2>Workbook package</h2>
+                </div>
+            </div>
+            <MudButton Variant="Variant.Outlined" OnClick="PreviewPackageAsync" Disabled="@IsBusy">Preview package</MudButton>
+            @if (ImportPlan is not null)
+            {
+                <span class="settings-status-line">@ImportPlan.FileName · schema @ImportPlan.SchemaVersion · @ImportPlan.OperationCount operation(s)</span>
+            }
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">2. Restore</span>
+                    <h2>Workbook recovery key</h2>
+                </div>
+            </div>
+            <MudTextField @bind-Value="RecoveryCode" InputType="InputType.Password" Placeholder="Recovery code" Disabled="@(IsBusy || ImportPlan is null)" />
+            <MudButton Variant="Variant.Outlined" OnClick="RestoreKeyAsync" Disabled="@(IsBusy || ImportPlan is null || string.IsNullOrWhiteSpace(RecoveryCode))">Restore key</MudButton>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">3. Apply or back up</span>
+                    <h2>Encrypted package</h2>
+                </div>
+            </div>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ImportPackageAsync" Disabled="@(!CanImport)">Import package</MudButton>
+            <MudButton Variant="Variant.Outlined" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export package</MudButton>
+        </section>
+
+        @if (!string.IsNullOrWhiteSpace(Message))
+        {
+            <p class="settings-status-line" role="status">@Message</p>
+        }
+        @if (!string.IsNullOrWhiteSpace(Error))
+        {
+            <p class="settings-status-line settings-status-error" role="alert">@Error</p>
+        }
+    </section>
+}
+
+@code {
+    private BrowserFile? PendingImportFile { get; set; }
+    private MobilePackageImportPlanResult? ImportPlan { get; set; }
+    private string RecoveryCode { get; set; } = string.Empty;
+    private bool IsBusy { get; set; }
+    private string? Message { get; set; }
+    private string? Error { get; set; }
+
+    private bool CanImport =>
+        !Session.IsStorageBlocked &&
+        !IsBusy &&
+        PendingImportFile is not null &&
+        ImportPlan is not null &&
+        ImportPlan.SchemaVersion == PortableLogbookDocumentV2.CurrentSchemaVersion &&
+        ImportPlan.LogbookId == Session.DocumentV2.LogbookId &&
+        Session.PackageKeyStatus == "Ready";
+
+    private bool CanExport => !Session.IsStorageBlocked && !IsBusy && Session.PackageKeyStatus == "Ready";
+
+    protected override async Task OnInitializedAsync() => await Session.EnsureLoadedWorkbookAsync();
+
+    private async Task PreviewPackageAsync()
+    {
+        await RunExchangeAsync(async () =>
+        {
+            var file = await FileStore.PickElogbookAsync();
+            if (file is null)
+            {
+                return;
+            }
+
+            var plan = MobilePackageImportPlan.Inspect(file);
+            if (plan.SchemaVersion != PortableLogbookDocumentV2.CurrentSchemaVersion)
+            {
+                throw new InvalidOperationException("This package is not schema v2. Re-export it from the authoritative workbook.");
+            }
+
+            if (plan.LogbookId != Session.DocumentV2.LogbookId &&
+                (Session.DocumentV2.Operations.Count > 0 || Session.ImportReceipts.Count > 0))
+            {
+                throw new InvalidOperationException("This device copy already contains another logbook. Export it before importing a different workbook package.");
+            }
+
+            PendingImportFile = file;
+            ImportPlan = plan;
+            RecoveryCode = string.Empty;
+            Message = "Package manifest previewed. Restore the matching workbook recovery key before importing.";
+        });
+    }
+
+    private async Task RestoreKeyAsync()
+    {
+        await RunExchangeAsync(async () =>
+        {
+            var plan = ImportPlan ?? throw new InvalidOperationException("Preview a schema-v2 package before restoring its key.");
+            var file = PendingImportFile ?? throw new InvalidOperationException("Select the package again before restoring its key.");
+            if (!await Session.RestoreWorkbookPackageKeyAsync(plan.LogbookId, RecoveryCode))
+            {
+                throw new InvalidOperationException("The browser could not retain the restored package key.");
+            }
+
+            var validationDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
+                plan.LogbookId,
+                Session.WorkbookCustomFields,
+                PortableLogbookCurrencyOverrideDates.Empty,
+                []);
+            try
+            {
+                _ = await MobilePackageImportWorkflow.ReadV2Async(validationDocument, file, PackageKeyStore);
+            }
+            catch (MobilePackageImportWorkflowException ex)
+            {
+                await PackageKeyStore.DeletePackageKeyAsync(plan.LogbookId);
+                throw new InvalidOperationException(
+                    "Recovery code does not decrypt the selected package. Confirm the recovery code and .elogbook file came from the same workbook export.",
+                    ex);
+            }
+
+            await Session.AdoptWorkbookLogbookAsync(plan.LogbookId);
+            RecoveryCode = string.Empty;
+            Message = "Package key restored and verified against the selected schema-v2 package.";
+        });
+    }
+
+    private async Task ImportPackageAsync()
+    {
+        await RunExchangeAsync(async () =>
+        {
+            var file = PendingImportFile ?? throw new InvalidOperationException("Preview the package before importing it.");
+            var result = await Session.ApplyWorkbookPackageAsync(file, DateTimeOffset.UtcNow);
+            if (result.Status == MobilePackageImportApplyStatus.RequiresResolution)
+            {
+                throw new InvalidOperationException("This package needs custom-field resolution before it can be applied.");
+            }
+
+            Message = result.Status switch
+            {
+                MobilePackageImportApplyStatus.PackageReplay => "This package was already imported.",
+                MobilePackageImportApplyStatus.DuplicateOperationsRecorded => "Duplicate operations were recorded safely.",
+                MobilePackageImportApplyStatus.AppliedWithConflicts => "Package imported; conflicts need resolution.",
+                _ => "Package imported successfully."
+            };
+        });
+    }
+
+    private async Task ExportPackageAsync()
+    {
+        await RunExchangeAsync(async () =>
+        {
+            var result = await Session.ExportWorkbookPackageAsync(FileStore, DateTimeOffset.UtcNow);
+            Message = $"Exported {result.FileName}.";
+        });
+    }
+
+    private async Task RunExchangeAsync(Func<Task> action)
+    {
+        if (IsBusy || Session.IsStorageBlocked)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        Message = null;
+        Error = null;
+        try
+        {
+            await action();
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or BrowserFileStoreException or MobilePackageImportWorkflowException or PortableLogbookPackageException or JSException)
+        {
+            Error = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+}

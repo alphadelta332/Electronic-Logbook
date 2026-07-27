@@ -45,6 +45,23 @@ public static class PortableLogbookPackageFile
         return PortableLogbookPackage.Read(ReadPackageFileBytes(path, options), key, expectedLogbookId, options);
     }
 
+    /// <summary>
+    /// Reads only a workbook-faithful schema-v2 package. Keeping this as a distinct
+    /// boundary prevents updater callers from accidentally accepting legacy packages.
+    /// </summary>
+    public static PortableLogbookPackageReadResultV2 ReadV2(
+        string path,
+        PortableLogbookKey key,
+        LogbookId? expectedLogbookId = null,
+        PortableLogbookPackageReadOptions? options = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        EnsurePackageExtension(path);
+
+        options ??= PortableLogbookPackageReadOptions.Default;
+        return PortableLogbookPackage.ReadV2(ReadPackageFileBytes(path, options), key, expectedLogbookId, options);
+    }
+
     public static byte[] ReadBytes(
         string path,
         PortableLogbookPackageReadOptions? options = null)

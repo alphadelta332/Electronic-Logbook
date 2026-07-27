@@ -1,11 +1,29 @@
 param(
     [string]$DeviceLabel = "Pixel8",
-    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\mobile-real-device-acceptance-20260722')
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\..\artifacts\mobile-real-device-acceptance-20260722'),
+    [string]$PackageId
 )
 
 $ErrorActionPreference = 'Stop'
 
-$remoteDirectory = '/sdcard/Android/data/com.alphadelta.electroniclogbook/files/exports'
+$knownPackageIds = @(
+    'com.alphadelta.electroniclogbook.dev',
+    'com.alphadelta.electroniclogbook'
+)
+
+if ([string]::IsNullOrWhiteSpace($PackageId)) {
+    $PackageId = $knownPackageIds |
+        Where-Object {
+            @(& adb shell pm list packages --user 0 $_) -contains "package:$_"
+        } |
+        Select-Object -First 1
+
+    if ([string]::IsNullOrWhiteSpace($PackageId)) {
+        throw "Neither the development nor production Electronic Logbook Android app is installed. Install an app before receiving an export."
+    }
+}
+
+$remoteDirectory = "/sdcard/Android/data/$PackageId/files/exports"
 $remoteLines = @(& adb shell "ls -t $remoteDirectory/*.elogbook 2>/dev/null")
 $remoteFile = $remoteLines |
     Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
@@ -24,6 +42,7 @@ if ($LASTEXITCODE -ne 0) {
 
 [pscustomobject]@{
     DeviceLabel = $DeviceLabel
+    PackageId = $PackageId
     RemotePath = $remoteFile
     LocalPath = (Resolve-Path $outputPath).Path
 } | ConvertTo-Json -Depth 3

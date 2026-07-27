@@ -103,6 +103,12 @@ public static class PortableLogbookCommandRunner
                 ImportReceiptCount: 0);
         }
 
+        if (envelope.SchemaVersion != PortableLogbookDocumentV2.CurrentSchemaVersion)
+        {
+            throw new UpdaterUsageException(
+                "This workbook contains an unsupported legacy portable-logbook envelope. Reset its portable metadata/package state from a timestamped backup before enabling schema v2.");
+        }
+
         return new PortableLogbookWorkbookStatus(
             IsEnabled: true,
             WorkbookPath: Path.GetFullPath(workbookPath),
@@ -122,7 +128,8 @@ public static class PortableLogbookCommandRunner
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
         ArgumentException.ThrowIfNullOrWhiteSpace(recoveryOutputPath);
 
-        if (PortableLogbookWorkbookPackageStorage.ReadEnvelope(workbookPath) is not null)
+        var existingEnvelope = PortableLogbookWorkbookPackageStorage.ReadEnvelope(workbookPath);
+        if (existingEnvelope is { SchemaVersion: PortableLogbookDocumentV2.CurrentSchemaVersion })
         {
             throw new UpdaterUsageException("Portable logbook storage is already enabled for this workbook.");
         }
@@ -133,10 +140,20 @@ public static class PortableLogbookCommandRunner
         }
 
         var customFieldDefinitions = PortableLogbookWorkbookPackageStorage.ReadWorkbookCustomFieldDefinitions(workbookPath);
-        var existingRows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(workbookPath, customFieldDefinitions);
-        var setup = PortableLogbookSetup.CreateInitialSetupPlan(
-            existingRows.Select(row => row.Entry),
+        var existingRows = PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(workbookPath, customFieldDefinitions);
+        var currencyOverrideDates = PortableLogbookWorkbookPackageStorage.ReadCurrencyOverrideDates(workbookPath);
+        if (existingEnvelope is not null)
+        {
+            // v1 was never released. The backup below retains its encrypted metadata;
+            // the working copy is re-enrolled from its unchanged visible flight rows.
+            existingRows = existingRows
+                .Select(row => new PortableLogbookWorkbookRowV2(null, null, row.Entry))
+                .ToArray();
+        }
+        var setup = PortableLogbookSetup.CreateInitialSetupPlanV2(
+            existingRows,
             customFieldDefinitions,
+            currencyOverrideDates,
             createdAt);
         var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
             setup.InitialDocument,
@@ -156,7 +173,7 @@ public static class PortableLogbookCommandRunner
             }
 
             PortableLogbookWorkbookPackageStorage.EnsureHiddenMetadataColumns(workbookPath);
-            PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValues(
+            PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
                 workbookPath,
                 setup.WorkbookRows,
                 setup.InitialDocument.CustomFieldDefinitions,
@@ -219,7 +236,7 @@ public static class PortableLogbookCommandRunner
         }
 
         var key = ReadKey(keySource);
-        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbookPath, key)
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
             ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
         var identity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(workbookPath)
             ?? throw new UpdaterUsageException("Portable logbook workbook identity metadata is missing.");
@@ -228,39 +245,47 @@ public static class PortableLogbookCommandRunner
             throw new UpdaterUsageException("Portable logbook workbook identity does not match the stored operation history.");
         }
 
-        var merge = PortableLogbookMerger.Merge(state.Document.Operations);
-        var currentRows = PortableLogbookWorkbookPackageStorage.ReadCurrentRows(
+        var merge = PortableLogbookWorkbookProjection.MergeV2(state.Document.Operations);
+        var currentRows = PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(
             workbookPath,
             state.Document.CustomFieldDefinitions);
-        var export = PortableLogbookPackageExport.ExportPackage(
-            state.Document,
+        var projection = PortableLogbookWorkbookProjection.ReconcileV2(
             merge.Entries.Values,
             currentRows,
+            state.Document.LogbookId,
             identity.DeviceId,
-            key,
-            state.ImportReceipts,
             exportedAt);
-        File.WriteAllBytes(packageOutputPath, export.PackageBytes);
-        var manifest = PortableLogbookPackageFile.ReadManifest(packageOutputPath);
-        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValues(
+        var document = projection.Operations.Count == 0
+            ? state.Document
+            : PortableLogbookDocumentV2.CreateAustraliaFirst(
+                state.Document.LogbookId,
+                state.Document.CustomFieldDefinitions,
+                state.Document.CurrencyOverrideDates,
+                state.Document.Operations.Concat(projection.Operations));
+        var packageBytes = PortableLogbookPackage.Write(document, key);
+        File.WriteAllBytes(packageOutputPath, packageBytes);
+        var manifest = PortableLogbookPackage.ReadManifestForInspection(packageBytes);
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, packageBytes, state.ImportReceipts);
+        var workbookRows = PortableLogbookWorkbookProjection.CreateCurrentRows(document);
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
             workbookPath,
-            export.WorkbookRows,
-            export.Document.CustomFieldDefinitions,
+            workbookRows,
+            document.CustomFieldDefinitions,
             writeVisiblePayloadCells: false);
-        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, export.StorageEnvelope);
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, envelope);
 
         return new PortableLogbookExportResult(
             Path.GetFullPath(workbookPath),
             Path.GetFullPath(packageOutputPath),
-            export.Document.LogbookId,
-            export.Document.SchemaVersion,
-            export.Document.Operations.Count,
-            export.Document.CustomFieldDefinitions.Count,
-            export.WorkbookRows.Count,
-            export.Projection.Operations.Count,
-            export.Projection.CreateCount,
-            export.Projection.CorrectionCount,
-            export.Projection.DeletionCount,
+            document.LogbookId,
+            document.SchemaVersion,
+            document.Operations.Count,
+            document.CustomFieldDefinitions.Count,
+            workbookRows.Count,
+            projection.Operations.Count,
+            projection.CreateCount,
+            projection.CorrectionCount,
+            projection.DeletionCount,
             manifest.CreatedAt,
             exportedAt);
     }
@@ -284,27 +309,26 @@ public static class PortableLogbookCommandRunner
         ArgumentException.ThrowIfNullOrWhiteSpace(packageInputPath);
 
         var key = ReadKey(keySource);
-        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbookPath, key)
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
             ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
-        var incoming = ReadPackageForCommand(packageInputPath, key, state.Document.LogbookId);
-        var plan = PortableLogbookExchange.PlanImport(state.Document, incoming.Document);
+        var plan = CreateImportPlanV2(state.Document, ReadPackageForCommandV2(packageInputPath, key, state.Document.LogbookId));
 
         return new PortableLogbookImportPreviewResult(
             Path.GetFullPath(workbookPath),
             Path.GetFullPath(packageInputPath),
             state.Document.LogbookId,
             state.Document.Operations.Count,
-            incoming.Document.Operations.Count,
-            FormatImportPlanStatus(plan.Status),
-            plan.Preview.NewOperations.Count,
-            plan.Preview.DuplicateOperationCount,
-            plan.Preview.CreateCount,
-            plan.Preview.CorrectionCount,
-            plan.Preview.DeletionCount,
-            plan.Preview.Conflicts.Count,
-            plan.Preview.CustomFieldDefinitions.Conflicts.Count,
-            CreateCommandSummaries(plan.Preview.NewOperationSummaries),
-            CreateCommandSummaries(plan.Preview.DuplicateOperationSummaries));
+            plan.Incoming.Document.Operations.Count,
+            plan.Status,
+            plan.NewOperations.Count,
+            plan.DuplicateOperations.Count,
+            plan.NewOperations.Count(operation => operation.Kind == PortableOperationKind.Create),
+            plan.NewOperations.Count(operation => operation.Kind == PortableOperationKind.Correction),
+            plan.NewOperations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
+            plan.Conflicts.Count,
+            plan.CustomFieldConflictCount,
+            CreateCommandSummariesV2(plan.NewOperations),
+            CreateCommandSummariesV2(plan.DuplicateOperations));
     }
 
     public static PortableLogbookImportApplyResult ApplyImport(
@@ -329,48 +353,44 @@ public static class PortableLogbookCommandRunner
         ArgumentException.ThrowIfNullOrWhiteSpace(packageInputPath);
 
         var key = ReadKey(keySource);
-        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbookPath, key)
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
             ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
         var packageBytes = ReadPackageBytesForCommand(packageInputPath);
-        var import = PortableLogbookPackageImport.ImportPackage(
-            state.Document,
-            packageBytes,
-            key,
-            state.ImportReceipts,
-            importedAt);
-        var status = FormatPackageImportStatus(import.Status);
-        var backupPath = import.StorageEnvelope is null
-            ? null
-            : CreateWorkbookBackup(workbookPath, "portable-import", importedAt);
-
-        if (import.StorageEnvelope is not null)
+        if (PortableLogbookImportLedger.HasSeenPackage(state.ImportReceipts, packageBytes))
         {
-            PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValues(
-                workbookPath,
-                import.WorkbookRows ?? [],
-                import.Document.CustomFieldDefinitions);
-            PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, import.StorageEnvelope);
+            return CreateImportApplyResultV2(workbookPath, packageInputPath, null, state.Document.LogbookId, "packageReplay", [], [], [], 0, false, false, importedAt);
         }
 
-        return new PortableLogbookImportApplyResult(
-            Path.GetFullPath(workbookPath),
-            Path.GetFullPath(packageInputPath),
-            backupPath is null ? null : Path.GetFullPath(backupPath),
-            import.Document.LogbookId,
-            status,
-            import.Plan is null ? 0 : import.Plan.Preview.NewOperations.Count,
-            import.Plan?.Preview.DuplicateOperationCount ?? 0,
-            import.Plan?.Preview.CreateCount ?? 0,
-            import.Plan?.Preview.CorrectionCount ?? 0,
-            import.Plan?.Preview.DeletionCount ?? 0,
-            import.Plan?.Preview.Conflicts.Count ?? 0,
-            import.Plan?.Preview.CustomFieldDefinitions.Conflicts.Count ?? 0,
-            CreateCommandSummaries(import.Plan?.Preview.NewOperationSummaries ?? []),
-            CreateCommandSummaries(import.Plan?.Preview.DuplicateOperationSummaries ?? []),
-            import.WorkbookRows?.Count ?? 0,
-            import.NewReceipt is not null,
-            import.StorageEnvelope is not null,
-            importedAt);
+        var plan = CreateImportPlanV2(
+            state.Document,
+            ReadPackageForCommandV2(packageInputPath, key, state.Document.LogbookId));
+        if (plan.Status is "requiresConflictResolution" or "requiresCustomFieldResolution")
+        {
+            return CreateImportApplyResultV2(workbookPath, packageInputPath, null, state.Document.LogbookId, "requiresResolution", plan.NewOperations, plan.DuplicateOperations, [], plan.CustomFieldConflictCount, false, false, importedAt, plan.Conflicts.Count);
+        }
+
+        var document = plan.NewOperations.Count == 0 &&
+            state.Document.CustomFieldDefinitions.SequenceEqual(plan.CustomFieldDefinitions)
+            ? state.Document
+            : PortableLogbookDocumentV2.CreateAustraliaFirst(
+                state.Document.LogbookId,
+                plan.CustomFieldDefinitions,
+                state.Document.CurrencyOverrideDates,
+                state.Document.Operations.Concat(plan.NewOperations));
+        var receipt = PortableLogbookImportLedger.CreateReceipt(packageBytes, plan.Incoming.Manifest, importedAt);
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
+            document,
+            PortableLogbookPackage.Write(document, key),
+            state.ImportReceipts.Concat([receipt]));
+        var workbookRows = PortableLogbookWorkbookProjection.CreateCurrentRows(document);
+        var backupPath = CreateWorkbookBackup(workbookPath, "portable-import", importedAt);
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbookPath,
+            workbookRows,
+            document.CustomFieldDefinitions);
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, envelope);
+
+        return CreateImportApplyResultV2(workbookPath, packageInputPath, backupPath, document.LogbookId, plan.NewOperations.Count == 0 ? "duplicateOperationsRecorded" : "applied", plan.NewOperations, plan.DuplicateOperations, workbookRows, 0, true, true, importedAt, plan.Conflicts.Count);
     }
 
     public static PortableLogbookPrintedCopyResult CreatePrintedCopy(
@@ -415,10 +435,10 @@ public static class PortableLogbookCommandRunner
         }
 
         var key = ReadKey(keySource);
-        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbookPath, key)
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
             ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
         var request = PortableLogbookPrintedCopy.CreateRequest(
-            state.Document,
+            CreatePresentationDocument(state.Document),
             holderName,
             holderDateOfBirth,
             certifiedOn);
@@ -458,9 +478,9 @@ public static class PortableLogbookCommandRunner
         ArgumentNullException.ThrowIfNull(keySource);
 
         var key = ReadKey(keySource);
-        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbookPath, key)
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
             ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
-        var view = PortableLogbookRevisionHistory.ForEntry(state.Document, entryId);
+        var view = PortableLogbookRevisionHistory.ForEntry(CreatePresentationDocument(state.Document), entryId);
 
         return new PortableLogbookRevisionHistoryResult(
             Path.GetFullPath(workbookPath),
@@ -502,9 +522,9 @@ public static class PortableLogbookCommandRunner
         ArgumentNullException.ThrowIfNull(selectedRevisionId);
 
         var key = ReadKey(keySource);
-        var state = PortableLogbookWorkbookPackageStorage.OpenState(workbookPath, key)
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
             ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
-        var merge = PortableLogbookMerger.Merge(state.Document.Operations);
+        var merge = PortableLogbookWorkbookProjection.MergeV2(state.Document.Operations);
         var conflict = merge.Conflicts.SingleOrDefault(item => item.EntryId == entryId)
             ?? throw new UpdaterUsageException($"Portable entry '{entryId.Value}' does not have an unresolved conflict.");
         if (!conflict.HeadRevisionIds.Contains(selectedRevisionId))
@@ -518,41 +538,41 @@ public static class PortableLogbookCommandRunner
             ?? throw new UpdaterUsageException($"Revision '{selectedRevisionId.Value}' was not found for portable entry '{entryId.Value}'.");
         var deviceId = selectedOperation.DeviceId;
         var resolutionRevisionId = RevisionId.New();
-        PortableLogbookOperation resolution = selectedOperation switch
-        {
-            DeleteEntryOperation => new DeleteEntryOperation(
+        var resolution = selectedOperation.Entry is null
+            ? PortableLogbookOperationV2.Delete(
                 state.Document.LogbookId,
                 entryId,
                 resolutionRevisionId,
-                conflict.HeadRevisionIds.ToHashSet(),
+                conflict.HeadRevisionIds,
                 deviceId,
                 resolvedAt,
-                note),
-            _ => PortableLogbookConflictResolution.CreateResolution(
-                conflict,
-                state.Document.LogbookId,
-                deviceId,
-                resolutionRevisionId,
-                resolvedAt,
-                EntryPayload(selectedOperation) ?? throw new UpdaterUsageException($"Revision '{selectedRevisionId.Value}' has no entry payload to keep."),
                 note)
-        };
-        var document = PortableLogbookDocument.CreateAustraliaFirst(
+            : PortableLogbookOperationV2.ResolveConflict(
+                state.Document.LogbookId,
+                entryId,
+                resolutionRevisionId,
+                conflict.HeadRevisionIds,
+                deviceId,
+                resolvedAt,
+                selectedOperation.Entry,
+                note);
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
             state.Document.LogbookId,
             state.Document.CustomFieldDefinitions,
+            state.Document.CurrencyOverrideDates,
             state.Document.Operations.Concat([resolution]));
         var backupPath = CreateWorkbookBackup(workbookPath, "portable-resolve-conflict", resolvedAt);
         var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
             document,
             PortableLogbookPackage.Write(document, key),
             state.ImportReceipts);
-        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValues(
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
             workbookPath,
             PortableLogbookWorkbookProjection.CreateCurrentRows(document),
             document.CustomFieldDefinitions);
         PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, envelope);
 
-        var postMerge = PortableLogbookMerger.Merge(document.Operations);
+        var postMerge = PortableLogbookWorkbookProjection.MergeV2(document.Operations);
         return new PortableLogbookResolveConflictResult(
             Path.GetFullPath(workbookPath),
             Path.GetFullPath(backupPath),
@@ -563,6 +583,138 @@ public static class PortableLogbookCommandRunner
             postMerge.Conflicts.Count,
             resolvedAt);
     }
+
+    // Printed-copy and revision-history views pre-date the workbook-faithful
+    // schema. They receive a read-only presentation projection; persistent
+    // storage and package exchange remain entirely schema-v2.
+    private static PortableLogbookDocument CreatePresentationDocument(PortableLogbookDocumentV2 document) =>
+        PortableLogbookDocument.CreateAustraliaFirst(
+            document.LogbookId,
+            document.CustomFieldDefinitions,
+            document.Operations.Select(ToPresentationOperation));
+
+    private static PortableLogbookOperation ToPresentationOperation(PortableLogbookOperationV2 operation)
+    {
+        var entry = operation.Entry is null ? null : ToPresentationEntry(operation.Entry);
+        return operation.Kind switch
+        {
+            PortableOperationKind.Create => new CreateEntryOperation(
+                operation.LogbookId, operation.EntryId, operation.RevisionId, operation.DeviceId, operation.CreatedAt,
+                entry ?? throw new InvalidOperationException("Create operation is missing its workbook entry.")),
+            PortableOperationKind.Correction => new CorrectEntryOperation(
+                operation.LogbookId, operation.EntryId, operation.RevisionId, operation.ParentRevisionIds.ToHashSet(), operation.DeviceId, operation.CreatedAt,
+                entry ?? throw new InvalidOperationException("Correction operation is missing its workbook entry.")),
+            PortableOperationKind.Deletion => new DeleteEntryOperation(
+                operation.LogbookId, operation.EntryId, operation.RevisionId, operation.ParentRevisionIds.ToHashSet(), operation.DeviceId, operation.CreatedAt, operation.Reason),
+            PortableOperationKind.ConflictResolution => new ResolveConflictOperation(
+                operation.LogbookId, operation.EntryId, operation.RevisionId, operation.ParentRevisionIds.ToHashSet(), operation.DeviceId, operation.CreatedAt,
+                entry ?? throw new InvalidOperationException("Conflict-resolution operation is missing its workbook entry."), operation.ResolutionNote),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation), operation.Kind, "Unknown portable operation kind.")
+        };
+    }
+
+    private static PortableLogbookEntry ToPresentationEntry(PortableLogbookWorkbookEntry entry) => new(
+        entry.Date,
+        entry.Type,
+        entry.Reg,
+        entry.FlightId,
+        entry.From,
+        entry.To,
+        entry.Via,
+        entry.Remarks,
+        Sum(entry.MeIcusDay, entry.MeIcusNight),
+        Sum(entry.SeCommandDay, entry.SeCommandNight, entry.MeCommandDay, entry.MeCommandNight),
+        Sum(entry.CopilotDay, entry.CopilotNight),
+        Sum(entry.SeDualDay, entry.SeDualNight, entry.MeDualDay, entry.MeDualNight),
+        null,
+        Sum(entry.SeIcusDay, entry.SeDualDay, entry.SeCommandDay, entry.MeIcusDay, entry.MeDualDay, entry.MeCommandDay, entry.CopilotDay),
+        Sum(entry.SeIcusNight, entry.SeDualNight, entry.SeCommandNight, entry.MeIcusNight, entry.MeDualNight, entry.MeCommandNight, entry.CopilotNight),
+        entry.IfrIf,
+        entry.IfrSim,
+        null,
+        null,
+        entry.LandingsDay,
+        entry.LandingsNight,
+        Sum(entry.Ils, entry.Vor, entry.Rnp, entry.Ndb, entry.DgaCdi, entry.DgaAzi, entry.Circling),
+        null,
+        entry.Rnp,
+        entry.Circling,
+        entry.CustomFields);
+
+    private static decimal? Sum(params decimal?[] values)
+    {
+        var presentValues = values.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+        return presentValues.Length == 0 ? null : presentValues.Sum();
+    }
+
+    private static int? Sum(params int?[] values)
+    {
+        var presentValues = values.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
+        return presentValues.Length == 0 ? null : presentValues.Sum();
+    }
+
+    private static V2CommandImportPlan CreateImportPlanV2(
+        PortableLogbookDocumentV2 localDocument,
+        PortableLogbookPackageReadResultV2 incoming)
+    {
+        var plan = PortableLogbookExchange.PlanImport(localDocument, incoming.Document);
+        return new V2CommandImportPlan(
+            incoming,
+            plan.Preview.NewOperations,
+            plan.Preview.DuplicateOperations,
+            plan.Preview.Conflicts,
+            plan.Preview.CustomFieldDefinitions.Conflicts.Count,
+            plan.Preview.CustomFieldDefinitions.Definitions,
+            FormatImportPlanStatus(plan.Status));
+    }
+
+    private static PortableLogbookImportApplyResult CreateImportApplyResultV2(
+        string workbookPath,
+        string packageInputPath,
+        string? backupPath,
+        LogbookId logbookId,
+        string status,
+        IReadOnlyList<PortableLogbookOperationV2> newOperations,
+        IReadOnlyList<PortableLogbookOperationV2> duplicateOperations,
+        IReadOnlyList<PortableLogbookWorkbookRowV2> workbookRows,
+        int customFieldConflictCount,
+        bool receiptRecorded,
+        bool storageUpdated,
+        DateTimeOffset importedAt,
+        int conflictCount = 0) =>
+        new(
+            Path.GetFullPath(workbookPath),
+            Path.GetFullPath(packageInputPath),
+            backupPath is null ? null : Path.GetFullPath(backupPath),
+            logbookId,
+            status,
+            newOperations.Count,
+            duplicateOperations.Count,
+            newOperations.Count(operation => operation.Kind == PortableOperationKind.Create),
+            newOperations.Count(operation => operation.Kind == PortableOperationKind.Correction),
+            newOperations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
+            conflictCount,
+            customFieldConflictCount,
+            CreateCommandSummariesV2(newOperations),
+            CreateCommandSummariesV2(duplicateOperations),
+            workbookRows.Count,
+            receiptRecorded,
+            storageUpdated,
+            importedAt);
+
+    private static IReadOnlyList<PortableLogbookImportCommandSummary> CreateCommandSummariesV2(
+        IReadOnlyList<PortableLogbookOperationV2> operations) =>
+        operations.Select(operation => new PortableLogbookImportCommandSummary(
+            operation.EntryId,
+            operation.RevisionId,
+            FormatOperationKind(operation.Kind),
+            operation.Entry?.Date,
+            operation.Entry?.Type,
+            operation.Entry?.Reg,
+            operation.Entry?.From,
+            operation.Entry?.To,
+            operation.Entry?.Remarks,
+            operation.Reason)).ToArray();
 
     private static void WriteHumanResult(object result)
     {
@@ -741,22 +893,6 @@ public static class PortableLogbookCommandRunner
         }
     }
 
-    private static IReadOnlyList<PortableLogbookImportCommandSummary> CreateCommandSummaries(
-        IReadOnlyList<PortableLogbookImportChangeSummary> summaries) =>
-        summaries
-            .Select(summary => new PortableLogbookImportCommandSummary(
-                summary.EntryId,
-                summary.RevisionId,
-                FormatOperationKind(summary.Kind),
-                summary.Date,
-                summary.AircraftType,
-                summary.Registration,
-                summary.From,
-                summary.To,
-                summary.Details,
-                summary.DeletionReason))
-            .ToArray();
-
     private static string FormatOperationKind(PortableOperationKind kind) =>
         kind switch
         {
@@ -765,16 +901,6 @@ public static class PortableLogbookCommandRunner
             PortableOperationKind.Deletion => "deletion",
             PortableOperationKind.ConflictResolution => "conflictResolution",
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown portable operation kind.")
-        };
-
-    private static PortableLogbookEntry? EntryPayload(PortableLogbookOperation operation) =>
-        operation switch
-        {
-            CreateEntryOperation create => create.Entry,
-            CorrectEntryOperation correction => correction.Entry,
-            ResolveConflictOperation resolution => resolution.Entry,
-            DeleteEntryOperation => null,
-            _ => throw new InvalidOperationException($"Unsupported portable operation type {operation.GetType().Name}.")
         };
 
     private static void WriteHumanStatus(PortableLogbookWorkbookStatus status)
@@ -806,10 +932,21 @@ public static class PortableLogbookCommandRunner
         DateTimeOffset createdAt) =>
         string.Join(
             Environment.NewLine,
-            CreateRecoveryFileLines(setup, workbookPath, credentialTargetName, createdAt));
+            CreateRecoveryFileLines(setup.LogbookId, setup.DeviceId, setup.Key, workbookPath, credentialTargetName, createdAt));
+
+    private static string CreateRecoveryFileText(
+        PortableLogbookSetupPlanV2 setup,
+        string workbookPath,
+        string? credentialTargetName,
+        DateTimeOffset createdAt) =>
+        string.Join(
+            Environment.NewLine,
+            CreateRecoveryFileLines(setup.LogbookId, setup.DeviceId, setup.Key, workbookPath, credentialTargetName, createdAt));
 
     private static IReadOnlyList<string> CreateRecoveryFileLines(
-        PortableLogbookSetupPlan setup,
+        LogbookId logbookId,
+        DeviceId deviceId,
+        PortableLogbookKey key,
         string workbookPath,
         string? credentialTargetName,
         DateTimeOffset createdAt)
@@ -820,9 +957,9 @@ public static class PortableLogbookCommandRunner
                 string.Empty,
                 $"Workbook: {Path.GetFullPath(workbookPath)}",
                 $"Created: {createdAt:O}",
-                $"Logbook ID: {setup.LogbookId.Value}",
-                $"Device ID: {setup.DeviceId.Value}",
-                $"Recovery code: {setup.Key.ToRecoveryCode()}",
+                $"Logbook ID: {logbookId.Value}",
+                $"Device ID: {deviceId.Value}",
+                $"Recovery code: {key.ToRecoveryCode()}",
         };
         if (!string.IsNullOrWhiteSpace(credentialTargetName))
         {
@@ -904,14 +1041,14 @@ public static class PortableLogbookCommandRunner
         };
     }
 
-    private static PortableLogbookPackageReadResult ReadPackageForCommand(
+    private static PortableLogbookPackageReadResultV2 ReadPackageForCommandV2(
         string packageInputPath,
         PortableLogbookKey key,
         LogbookId expectedLogbookId)
     {
         try
         {
-            return PortableLogbookPackageFile.Read(packageInputPath, key, expectedLogbookId);
+            return PortableLogbookPackageFile.ReadV2(packageInputPath, key, expectedLogbookId);
         }
         catch (Exception ex) when (IsPackageUsageError(ex))
         {
@@ -983,6 +1120,15 @@ public static class PortableLogbookCommandRunner
         }
     }
 }
+
+internal sealed record V2CommandImportPlan(
+    PortableLogbookPackageReadResultV2 Incoming,
+    IReadOnlyList<PortableLogbookOperationV2> NewOperations,
+    IReadOnlyList<PortableLogbookOperationV2> DuplicateOperations,
+    IReadOnlyList<PortableLogbookConflict> Conflicts,
+    int CustomFieldConflictCount,
+    IReadOnlyList<CustomFieldDefinition> CustomFieldDefinitions,
+    string Status);
 
 public sealed record PortableLogbookEnableResult(
     string WorkbookPath,

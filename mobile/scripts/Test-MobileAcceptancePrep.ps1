@@ -95,7 +95,7 @@ Assert-Equal -Actual $config.server.androidScheme -Expected "https" -Description
 
 $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
 Assert-Equal -Actual $metadata.artifactType.type -Expected "APK" -Description "Android artifact type"
-Assert-Equal -Actual $metadata.applicationId -Expected "com.alphadelta.electroniclogbook" -Description "Android applicationId"
+Assert-Equal -Actual $metadata.applicationId -Expected "com.alphadelta.electroniclogbook.dev" -Description "Android debug applicationId"
 Assert-Equal -Actual $metadata.variantName -Expected "debug" -Description "Android build variant"
 Assert-Equal -Actual $metadata.elements[0].outputFile -Expected "app-debug.apk" -Description "Android APK output file"
 

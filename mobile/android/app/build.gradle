@@ -20,6 +20,11 @@ android {
         debug {
             applicationIdSuffix ".dev"
         }
+        acceptance {
+            initWith debug
+            applicationIdSuffix ".acceptance"
+            matchingFallbacks = ['debug']
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'

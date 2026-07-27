@@ -186,6 +186,22 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void SettingsRoutesPackageExchangeThroughTheSchemaV2Workspace()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var exchange = ReadMobilePage("PackageExchange.razor");
+
+        Assert.Contains("Href=\"/exchange\"", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("/legacy#exchange", settings, StringComparison.Ordinal);
+        Assert.Contains("@page \"/exchange\"", exchange, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookDocumentV2", exchange, StringComparison.Ordinal);
+        Assert.Contains("MobilePackageImportWorkflow.ReadV2Async", exchange, StringComparison.Ordinal);
+        Assert.Contains("Session.ApplyWorkbookPackageAsync", exchange, StringComparison.Ordinal);
+        Assert.Contains("Session.ExportWorkbookPackageAsync", exchange, StringComparison.Ordinal);
+        Assert.DoesNotContain("PortableLogbookDocument.CreateAustraliaFirst", exchange, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void HomePageOnlySwitchesLogbookForRecoveryRestoreOnEmptyDeviceCopy()
     {
         var page = ReadMobilePage("Home.razor");

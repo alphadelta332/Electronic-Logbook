@@ -119,6 +119,22 @@ public static class PortableLogbookWorkbookPackageStorage
             schemaVersion);
     }
 
+    public static PortableLogbookCurrencyOverrideDates ReadCurrencyOverrideDates(string workbookPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        using var packageStream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(packageStream, ZipArchiveMode.Read, leaveOpen: false);
+        return new PortableLogbookCurrencyOverrideDates(
+            ReadOptionalDefinedNameDate(archive, "FROverride"),
+            ReadOptionalDefinedNameDate(archive, "IPCOverride"),
+            ReadOptionalDefinedNameDate(archive, "OPCOverride"));
+    }
+
     public static bool CopyWorkbookIdentityMetadata(string sourceWorkbookPath, string destinationWorkbookPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceWorkbookPath);
@@ -531,6 +547,16 @@ public static class PortableLogbookWorkbookPackageStorage
         if (!TryParseTableReference((string?)tableRoot.Attribute("ref"), out var startColumn, out var startRow, out _, out var endRow))
         {
             throw new InvalidDataException("Logbook table reference is invalid.");
+        }
+
+        if (int.TryParse(
+                (string?)tableRoot.Attribute("totalsRowCount"),
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var totalsRowCount) &&
+            totalsRowCount > 0)
+        {
+            endRow -= totalsRowCount;
         }
 
         var columnNames = tableRoot
@@ -1203,6 +1229,35 @@ public static class PortableLogbookWorkbookPackageStorage
         return ReadCellText(cell);
     }
 
+    private static DateOnly? ReadOptionalDefinedNameDate(ZipArchive archive, string name)
+    {
+        var value = ReadDefinedNameCellValue(archive, name);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (DateOnly.TryParse(
+                value,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None,
+                out var date))
+        {
+            return date;
+        }
+
+        if (double.TryParse(
+                value,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var serialDate))
+        {
+            return DateOnly.FromDateTime(DateTime.FromOADate(serialDate));
+        }
+
+        throw new InvalidDataException($"Workbook currency override '{name}' is not a valid date.");
+    }
+
     private static string? FindWorksheetEntryForSheet(
         XDocument workbook,
         XDocument workbookRelationships,
@@ -1313,6 +1368,11 @@ public static class PortableLogbookWorkbookPackageStorage
         }
 
         var text = value.Trim();
+        if (field.Id == "dateMonth")
+        {
+            return ConvertWorkbookMonth(text);
+        }
+
         return field.Kind switch
         {
             PortableLogbookWorkbookFieldKind.Boolean => ParseWorkbookBoolean(text),
@@ -1328,6 +1388,31 @@ public static class PortableLogbookWorkbookPackageStorage
                 System.Globalization.CultureInfo.InvariantCulture),
             _ => text
         };
+    }
+
+    private static int ConvertWorkbookMonth(string text)
+    {
+        if (int.TryParse(
+                text,
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var numericMonth) &&
+            numericMonth is >= 1 and <= 12)
+        {
+            return numericMonth;
+        }
+
+        if (DateTime.TryParseExact(
+                text,
+                ["MMM", "MMMM"],
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AllowWhiteSpaces,
+                out var namedMonth))
+        {
+            return namedMonth.Month;
+        }
+
+        throw new FormatException($"Workbook month value '{text}' is not recognised.");
     }
 
     private static bool ParseWorkbookBoolean(string text)

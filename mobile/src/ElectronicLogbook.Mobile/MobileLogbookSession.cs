@@ -53,6 +53,8 @@ public sealed class MobileLogbookSession(
 
     public RevisionId? EditingRevisionId { get; private set; }
 
+    private bool IsLegacyLoaded { get; set; }
+
     public bool IsLoaded { get; private set; }
 
     public bool IsStorageBlocked { get; private set; }
@@ -139,7 +141,7 @@ public sealed class MobileLogbookSession(
 
     public async Task EnsureLoadedAsync()
     {
-        if (IsLoaded)
+        if (IsLegacyLoaded)
         {
             return;
         }
@@ -165,7 +167,7 @@ public sealed class MobileLogbookSession(
         }
         finally
         {
-            IsLoaded = true;
+            IsLegacyLoaded = true;
         }
     }
 
@@ -488,6 +490,74 @@ public sealed class MobileLogbookSession(
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, resolution);
         await SaveStateV2Async();
         SetLastActionMessage("Conflict resolved.");
+    }
+
+    public async Task<bool> RestoreWorkbookPackageKeyAsync(LogbookId logbookId, string recoveryCode)
+    {
+        ArgumentNullException.ThrowIfNull(logbookId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(recoveryCode);
+
+        await packageKeyStore.ImportRecoveryCodeAsync(logbookId, recoveryCode);
+        await RefreshPackageKeyStatusAsync(logbookId);
+        return PackageKeyStatus == "Ready";
+    }
+
+    public async Task AdoptWorkbookLogbookAsync(LogbookId logbookId)
+    {
+        ArgumentNullException.ThrowIfNull(logbookId);
+        if (DocumentV2.LogbookId == logbookId)
+        {
+            return;
+        }
+
+        if (DocumentV2.Operations.Count > 0 || ImportReceipts.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "Cannot switch workbook logbooks after this device copy has local entries or package receipts.");
+        }
+
+        DocumentV2 = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            WorkbookCustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        LastSuccessfulExportAt = null;
+        LastSuccessfulExport = null;
+        await SaveStateV2Async();
+    }
+
+    public async Task<MobilePackageImportApplyWorkflowResultV2> ApplyWorkbookPackageAsync(
+        BrowserFile file,
+        DateTimeOffset importedAt)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        var result = await MobilePackageImportApplyWorkflow.ApplyIfReadyAsync(
+            DocumentV2,
+            file,
+            packageKeyStore,
+            ImportReceipts,
+            importedAt);
+        if (result.Status == MobilePackageImportApplyStatus.RequiresResolution)
+        {
+            return result;
+        }
+
+        DocumentV2 = result.Document;
+        ImportReceipts = result.ImportReceipts;
+        await SaveStateV2Async();
+        return result;
+    }
+
+    public async Task<MobilePackageExportWorkflowResult> ExportWorkbookPackageAsync(
+        BrowserFileStore fileStore,
+        DateTimeOffset exportedAt)
+    {
+        ArgumentNullException.ThrowIfNull(fileStore);
+        var result = await MobilePackageExportWorkflow.ExportAsync(DocumentV2, packageKeyStore, fileStore, exportedAt);
+        LastSuccessfulExportAt = result.ExportedAt;
+        LastSuccessfulExport = BrowserLogbookExportCheckpoint.Create(DocumentV2, result);
+        await SaveStateV2Async();
+        return result;
     }
 
     private void SetLastActionMessage(

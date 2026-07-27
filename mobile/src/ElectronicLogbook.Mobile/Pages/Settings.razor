@@ -54,7 +54,7 @@ else
                     <h2>Import, export, recovery</h2>
                 </div>
             </div>
-            <MudButton Href="/legacy#exchange" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.IosShare">
+            <MudButton Href="/exchange" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.IosShare">
                 Open exchange workspace
             </MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ExportDeviceStateAsync" Disabled="@(Session.IsStorageBlocked || IsDeviceStateExportBusy)">
