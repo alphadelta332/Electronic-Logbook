@@ -3,12 +3,12 @@ using ElectronicLogbook.Mobile.Pages;
 
 namespace ElectronicLogbook.Mobile.Tests;
 
-public sealed class MobileUiComponentTests : TestContext
+public sealed class MobileUiComponentTests : BunitContext
 {
     [Fact]
     public void StatusMetricMarksAttentionState()
     {
-        var component = RenderComponent<StatusMetric>(parameters => parameters
+        var component = Render<StatusMetric>(parameters => parameters
             .Add(metric => metric.Label, "Unexported")
             .Add(metric => metric.Value, "3")
             .Add(metric => metric.Detail, "local operations")
