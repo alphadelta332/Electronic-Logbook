@@ -662,12 +662,37 @@ textarea {
 }
 
 .settings-status-line {
+    display: block;
     color: var(--app-text-muted);
     font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
 }
 
 .settings-status-error {
     color: var(--app-error);
+}
+
+.package-exchange-page {
+    padding-bottom: 16px;
+}
+
+.package-file-summary {
+    max-width: 100%;
+}
+
+.package-exchange-feedback {
+    align-items: flex-start;
+    margin-bottom: 8px;
+    background: var(--app-surface-alt);
+}
+
+.package-exchange-feedback span {
+    overflow-wrap: anywhere;
+}
+
+.package-exchange-feedback.state-banner-error {
+    background: color-mix(in srgb, var(--app-surface) 88%, var(--app-error));
 }
 
 .search-field {

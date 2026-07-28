@@ -198,6 +198,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("MobilePackageImportWorkflow.ReadV2Async", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ApplyWorkbookPackageAsync", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ExportWorkbookPackageAsync", exchange, StringComparison.Ordinal);
+        Assert.Contains("package-exchange-feedback", exchange, StringComparison.Ordinal);
+        Assert.Contains("Exchange needs attention", exchange, StringComparison.Ordinal);
         Assert.DoesNotContain("PortableLogbookDocument.CreateAustraliaFirst", exchange, StringComparison.Ordinal);
     }
 

@@ -1,7 +1,7 @@
 import { createReadStream } from "node:fs";
 import { createServer } from "node:http";
 import { access, mkdir, stat } from "node:fs/promises";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 
@@ -28,6 +28,10 @@ const profiles = [
     { name: "wide-768", width: 768, height: 1024, fontScale: 1 }
 ];
 const colorSchemes = ["light", "dark"];
+const routes = [
+    { name: "dashboard", path: "/", readySelector: "main .dashboard-page" },
+    { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" }
+];
 
 function optionValue(name, fallback) {
     const index = process.argv.indexOf(name);
@@ -48,11 +52,13 @@ async function createStaticServer(root) {
         const server = createServer(async (request, response) => {
             const requestPath = decodeURIComponent(new URL(request.url, "http://127.0.0.1").pathname);
             const requestedPath = normalize(join(root, requestPath));
-            const insideRoot = requestedPath === root || requestedPath.startsWith(`${root}\\`);
+            const relativePath = relative(root, requestedPath);
+            const insideRoot = relativePath === "" || (relativePath && !relativePath.startsWith("..") && !isAbsolute(relativePath));
             let filePath = insideRoot ? requestedPath : "";
 
             try {
-                if (!filePath || !(await stat(filePath)).isFile()) {
+                const fileStat = filePath ? await stat(filePath).catch(() => null) : null;
+                if (!fileStat?.isFile()) {
                     filePath = join(root, "index.html");
                 }
 
@@ -79,27 +85,29 @@ try {
     try {
         for (const colorScheme of colorSchemes) {
             for (const profile of profiles) {
-                const context = await browser.newContext({
-                    colorScheme,
-                    viewport: { width: profile.width, height: profile.height }
-                });
-                const page = await context.newPage();
-                await page.goto(baseUrl, { waitUntil: "domcontentloaded" });
-                await page.locator("main .dashboard-page").waitFor({ state: "visible", timeout: 30000 });
-                await page.evaluate((fontScale) => {
-                    document.documentElement.style.fontSize = `${fontScale * 100}%`;
-                }, profile.fontScale);
+                for (const route of routes) {
+                    const context = await browser.newContext({
+                        colorScheme,
+                        viewport: { width: profile.width, height: profile.height }
+                    });
+                    const page = await context.newPage();
+                    await page.goto(`${baseUrl}${route.path}`, { waitUntil: "domcontentloaded" });
+                    await page.locator(route.readySelector).waitFor({ state: "visible", timeout: 30000 });
+                    await page.evaluate((fontScale) => {
+                        document.documentElement.style.fontSize = `${fontScale * 100}%`;
+                    }, profile.fontScale);
 
-                const errorUi = page.locator("#blazor-error-ui");
-                if (await errorUi.isVisible()) {
-                    throw new Error(`Blazor error UI is visible for ${profile.name} ${colorScheme}: ${await errorUi.innerText()}`);
+                    const errorUi = page.locator("#blazor-error-ui");
+                    if (await errorUi.isVisible()) {
+                        throw new Error(`Blazor error UI is visible for ${route.name} ${profile.name} ${colorScheme}: ${await errorUi.innerText()}`);
+                    }
+
+                    await page.screenshot({
+                        path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}.png`),
+                        fullPage: true
+                    });
+                    await context.close();
                 }
-
-                await page.screenshot({
-                    path: join(outputDirectory, `${profile.name}-${colorScheme}-dashboard.png`),
-                    fullPage: true
-                });
-                await context.close();
             }
         }
     } finally {
@@ -109,4 +117,4 @@ try {
     await new Promise((resolveClose) => server.close(resolveClose));
 }
 
-console.log(`Captured ${profiles.length * colorSchemes.length} dashboard screenshots in ${outputDirectory}`);
+console.log(`Captured ${profiles.length * colorSchemes.length * routes.length} route screenshots in ${outputDirectory}`);

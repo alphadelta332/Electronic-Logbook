@@ -14,7 +14,7 @@
 }
 else
 {
-    <section class="settings-page">
+    <section class="settings-page package-exchange-page">
         <header class="entry-header">
             <div>
                 <span class="eyebrow">Package exchange</span>
@@ -38,10 +38,10 @@ else
                     <h2>Workbook package</h2>
                 </div>
             </div>
-            <MudButton Variant="Variant.Outlined" OnClick="PreviewPackageAsync" Disabled="@IsBusy">Preview package</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PreviewPackageAsync" Disabled="@IsBusy">Preview package</MudButton>
             @if (ImportPlan is not null)
             {
-                <span class="settings-status-line">@ImportPlan.FileName · schema @ImportPlan.SchemaVersion · @ImportPlan.OperationCount operation(s)</span>
+                <span class="settings-status-line package-file-summary">@ImportPlan.FileName · schema @ImportPlan.SchemaVersion · @ImportPlan.OperationCount operation(s)</span>
             }
         </section>
 
@@ -53,7 +53,7 @@ else
                 </div>
             </div>
             <MudTextField @bind-Value="RecoveryCode" InputType="InputType.Password" Placeholder="Recovery code" Disabled="@(IsBusy || ImportPlan is null)" />
-            <MudButton Variant="Variant.Outlined" OnClick="RestoreKeyAsync" Disabled="@(IsBusy || ImportPlan is null || string.IsNullOrWhiteSpace(RecoveryCode))">Restore key</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RestoreKeyAsync" Disabled="@(IsBusy || ImportPlan is null || string.IsNullOrWhiteSpace(RecoveryCode))">Restore key</MudButton>
         </section>
 
         <section class="form-section">
@@ -63,17 +63,19 @@ else
                     <h2>Encrypted package</h2>
                 </div>
             </div>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ImportPackageAsync" Disabled="@(!CanImport)">Import package</MudButton>
-            <MudButton Variant="Variant.Outlined" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export package</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ImportPackageAsync" Disabled="@(!CanImport)">Import package</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.IosShare" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export package</MudButton>
         </section>
 
-        @if (!string.IsNullOrWhiteSpace(Message))
+        @if (!string.IsNullOrWhiteSpace(Message) || !string.IsNullOrWhiteSpace(Error))
         {
-            <p class="settings-status-line" role="status">@Message</p>
-        }
-        @if (!string.IsNullOrWhiteSpace(Error))
-        {
-            <p class="settings-status-line settings-status-error" role="alert">@Error</p>
+            <section class="state-banner package-exchange-feedback @(string.IsNullOrWhiteSpace(Error) ? null : "state-banner-error")" role="@(string.IsNullOrWhiteSpace(Error) ? "status" : "alert")" aria-live="polite">
+                <MudIcon Icon="@(string.IsNullOrWhiteSpace(Error) ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.ErrorOutline)" />
+                <div>
+                    <strong>@(string.IsNullOrWhiteSpace(Error) ? "Exchange ready" : "Exchange needs attention")</strong>
+                    <span>@(Error ?? Message)</span>
+                </div>
+            </section>
         }
     </section>
 }

@@ -245,6 +245,9 @@ public sealed class PwaStaticAssetTests
         Assert.Contains(".exchange-message", css, StringComparison.Ordinal);
         Assert.Contains(".exchange-blocked", css, StringComparison.Ordinal);
         Assert.Contains(".exchange-busy", css, StringComparison.Ordinal);
+        Assert.Contains(".package-exchange-feedback", css, StringComparison.Ordinal);
+        Assert.Contains(".package-file-summary", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere", css, StringComparison.Ordinal);
     }
 
     [Fact]
