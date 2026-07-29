@@ -146,6 +146,29 @@ textarea {
     -webkit-overflow-scrolling: touch;
 }
 
+.nav-progress,
+.view-progress {
+    position: sticky;
+    top: 8px;
+    z-index: 4;
+    display: grid;
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    color: var(--app-text);
+    background: color-mix(in srgb, var(--app-surface) 94%, var(--app-primary));
+    box-shadow: var(--app-shadow);
+}
+
+.nav-progress span,
+.view-progress span {
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
 .bottom-nav {
     position: fixed;
     right: 0;
@@ -178,6 +201,12 @@ textarea {
 .bottom-nav a.active {
     background: var(--app-primary);
     color: var(--app-primary-text);
+}
+
+.bottom-nav a.nav-pending-link {
+    background: color-mix(in srgb, var(--app-primary) 18%, var(--app-surface));
+    color: var(--app-primary);
+    transform: translateY(1px);
 }
 
 .bottom-nav .bottom-nav-add {
@@ -270,6 +299,20 @@ textarea {
     border-radius: 10px;
     padding: 12px;
     background: var(--app-surface);
+}
+
+a.status-metric {
+    color: var(--app-text);
+    text-decoration: none;
+}
+
+a.status-metric:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 70%, transparent);
+    outline-offset: 2px;
+}
+
+a.status-metric:active {
+    transform: translateY(1px);
 }
 
 .status-metric span,
@@ -402,6 +445,87 @@ textarea {
     border-radius: 10px;
     padding: 10px 12px;
     background: var(--app-surface);
+}
+
+.currency-page {
+    display: grid;
+    gap: 16px;
+}
+
+.currency-category-section {
+    gap: 14px;
+}
+
+.currency-engine-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+    gap: 12px;
+}
+
+.currency-engine-panel {
+    display: grid;
+    gap: 10px;
+    min-width: 0;
+}
+
+.currency-engine-panel h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.currency-expired-group {
+    display: grid;
+    gap: 8px;
+}
+
+.currency-expired-group h3 {
+    margin: 4px 0 0;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.currency-row {
+    grid-template-columns: 8px minmax(0, 1fr) minmax(96px, auto);
+    gap: 12px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--app-surface) 92%, var(--currency-row-accent));
+}
+
+.currency-row-current {
+    --currency-row-accent: var(--app-primary);
+    border-color: color-mix(in srgb, var(--app-primary) 42%, var(--app-border));
+}
+
+.currency-row-warning {
+    --currency-row-accent: var(--app-warning);
+    border-color: color-mix(in srgb, var(--app-warning) 48%, var(--app-border));
+}
+
+.currency-row-expired {
+    --currency-row-accent: var(--app-error);
+    border-color: color-mix(in srgb, var(--app-error) 48%, var(--app-border));
+}
+
+.currency-status-dot {
+    width: 8px;
+    height: 44px;
+    border-radius: 999px;
+    background: var(--currency-row-accent);
+}
+
+.currency-row div:last-child {
+    justify-items: end;
+    text-align: right;
+}
+
+.currency-override-section {
+    gap: 14px;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    padding: 14px;
+    background: var(--app-surface-alt);
 }
 
 .logbook-entry-row {
@@ -743,6 +867,40 @@ textarea {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
+}
+
+.totals-subgroup {
+    display: grid;
+    gap: 8px;
+}
+
+.totals-subgroup h4 {
+    margin: 2px 0 -2px;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+}
+
+.totals-grid .status-metric {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: baseline;
+    padding: 10px 12px;
+}
+
+.totals-grid .status-metric span {
+    font-size: 13px;
+    text-transform: none;
+}
+
+.totals-grid .status-metric strong {
+    justify-self: end;
+    font-size: 22px;
+    text-align: right;
+}
+
+.totals-grid .status-metric small {
+    grid-column: 1 / -1;
 }
 
 .detail-hero {

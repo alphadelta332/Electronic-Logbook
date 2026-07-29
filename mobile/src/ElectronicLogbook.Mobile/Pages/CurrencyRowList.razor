@@ -3,10 +3,11 @@
 <div class="currency-row-list">
     @foreach (var row in Rows)
     {
-        <article class="flight-row currency-row">
+        <article class="flight-row currency-row @StatusClass(row)">
+            <span class="currency-status-dot" aria-hidden="true"></span>
             <div>
                 <strong>@row.Requirement</strong>
-                <span>@row.Category · @row.CasrReference</span>
+                <span>@row.RelevantPeriodTotal in relevant period</span>
             </div>
             <div>
                 <strong>@row.Status</strong>
@@ -19,4 +20,11 @@
 @code {
     [Parameter, EditorRequired]
     public IReadOnlyList<PortableLogbookCurrencyRow> Rows { get; set; } = [];
+
+    private static string StatusClass(PortableLogbookCurrencyRow row) =>
+        string.Equals(row.Status, "Not Current", StringComparison.Ordinal)
+            ? "currency-row-expired"
+            : row.DaysRemaining <= 30
+                ? "currency-row-warning"
+                : "currency-row-current";
 }

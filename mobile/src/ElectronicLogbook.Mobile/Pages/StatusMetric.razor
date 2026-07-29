@@ -1,7 +1,10 @@
 <article class="status-metric @(Attention ? "status-metric-attention" : null)">
     <span>@Label</span>
     <strong>@Value</strong>
-    <small>@Detail</small>
+    @if (!string.IsNullOrWhiteSpace(Detail))
+    {
+        <small>@Detail</small>
+    }
 </article>
 
 @code {

@@ -22,12 +22,26 @@ public sealed class MobileLogbookSession(
     public PortableLogbookDocument Document { get; private set; } =
         PortableLogbookDocument.CreateAustraliaFirst(new LogbookId("log_mobile_preview"), CustomFields, []);
 
-    public PortableLogbookDocumentV2 DocumentV2 { get; private set; } =
+    private PortableLogbookDocumentV2 documentV2 =
         PortableLogbookDocumentV2.CreateAustraliaFirst(
             new LogbookId("log_mobile_preview"),
             CustomFields,
             PortableLogbookCurrencyOverrideDates.Empty,
             []);
+
+    private PortableLogbookMergeResultV2? mergeResultV2Cache;
+    private IReadOnlyList<PortableLogbookMaterializedEntryV2>? currentEntriesV2Cache;
+    private IReadOnlyList<PortableLogbookMaterializedEntryV2>? deletedEntriesV2Cache;
+
+    public PortableLogbookDocumentV2 DocumentV2
+    {
+        get => documentV2;
+        private set
+        {
+            documentV2 = value;
+            InvalidateWorkbookProjectionCache();
+        }
+    }
 
     public IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts { get; private set; } = [];
 
@@ -76,7 +90,7 @@ public sealed class MobileLogbookSession(
         PortableLogbookMerger.Merge(Document.Operations);
 
     public PortableLogbookMergeResultV2 MergeResultV2 =>
-        PortableLogbookWorkbookProjection.MergeV2(DocumentV2.Operations);
+        mergeResultV2Cache ??= PortableLogbookWorkbookProjection.MergeV2(DocumentV2.Operations);
 
     public IReadOnlyList<PortableLogbookMaterializedEntry> CurrentEntries =>
         MergeResult
@@ -87,7 +101,7 @@ public sealed class MobileLogbookSession(
             .ToArray();
 
     public IReadOnlyList<PortableLogbookMaterializedEntryV2> CurrentEntriesV2 =>
-        MergeResultV2
+        currentEntriesV2Cache ??= MergeResultV2
             .Entries
             .Values
             .Where(entry => !entry.IsDeleted && entry.Entry is not null)
@@ -132,7 +146,7 @@ public sealed class MobileLogbookSession(
             .ToArray();
 
     public IReadOnlyList<PortableLogbookMaterializedEntryV2> DeletedEntriesV2 =>
-        MergeResultV2
+        deletedEntriesV2Cache ??= MergeResultV2
             .Entries
             .Values
             .Where(entry => entry.IsDeleted)
@@ -572,6 +586,13 @@ public sealed class MobileLogbookSession(
     {
         LastActionMessage = null;
         LastActionMessageScope = MobileActionMessageScope.Global;
+    }
+
+    private void InvalidateWorkbookProjectionCache()
+    {
+        mergeResultV2Cache = null;
+        currentEntriesV2Cache = null;
+        deletedEntriesV2Cache = null;
     }
 
     public PortableLogbookMaterializedEntry? FindCurrentEntry(string? entryId)

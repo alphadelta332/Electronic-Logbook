@@ -22,16 +22,16 @@ else
         }
 
         <section class="status-strip dashboard-metrics" aria-label="Flight activity">
-            <article class="status-metric dashboard-total-hours">
+            <NavLink class="status-metric dashboard-total-hours" href="/flights?view=totals" aria-label="Open logbook totals">
                 <span>Total hours</span>
                 <strong>@MobileLogbookSession.FormatHours(TotalFlyingHours)</strong>
                 <small>logged</small>
-            </article>
-            <article class="status-metric">
+            </NavLink>
+            <NavLink class="status-metric dashboard-recent-hours" href="/flights?view=entries" aria-label="Open logbook entries">
                 <span>Last 90 days</span>
                 <strong>@RecentFlightCount</strong>
                 <small>@RecentHoursDetail</small>
-            </article>
+            </NavLink>
         </section>
 
         <section class="notice-panel dashboard-last-flight" aria-label="Last flight context">
@@ -46,7 +46,6 @@ else
                 {
                     <LogbookFlightRow Entry="@LastFlight" />
                 }
-                <span>@RecentSnapshotDetail</span>
             </div>
         </section>
 
@@ -109,18 +108,12 @@ else
     private string RecentHoursDetail =>
         $"{MobileLogbookSession.FormatHours(RecentFlyingHours)} hr";
 
-    private string RecentSnapshotDetail =>
-        Session.CurrentEntriesV2.Count == 0
-            ? "90-day snapshot will appear after the first dated entry."
-            : $"{FormatCount(RecentFlightCount, "flight")}, {MobileLogbookSession.FormatHours(RecentFlyingHours)} hr in the last 90 days.";
+    private MobileCurrencyRecencySummary? currencySummary;
 
-    private static string FormatCount(int count, string singular) =>
-        $"{count} {singular}{(count == 1 ? string.Empty : "s")}";
-
-    private MobileCurrencyRecencySummary CurrencySummary => MobileCurrencyRecencySummary.Create(
-        Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
-        Session.DocumentV2.CurrencyOverrideDates,
-        DateOnly.FromDateTime(DateTime.Today));
+    private MobileCurrencyRecencySummary CurrencySummary => currencySummary ??= MobileCurrencyRecencySummary.Create(
+            Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
+            Session.DocumentV2.CurrencyOverrideDates,
+            DateOnly.FromDateTime(DateTime.Today));
 
     private IReadOnlyList<PortableLogbookCurrencyRow> VfrCurrencyRows =>
         CurrencySummary.SingleEngineRows
@@ -135,6 +128,10 @@ else
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedWorkbookAsync();
+        currencySummary = MobileCurrencyRecencySummary.Create(
+            Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
+            Session.DocumentV2.CurrencyOverrideDates,
+            DateOnly.FromDateTime(DateTime.Today));
     }
 
 }

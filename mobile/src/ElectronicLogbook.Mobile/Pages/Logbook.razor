@@ -31,9 +31,17 @@ else
         }
 
         <div class="segmented-control" role="tablist" aria-label="Logbook view">
-            <button type="button" class="@EntriesTabClass" @onclick="() => SelectView(LogbookView.Entries)">Entries</button>
-            <button type="button" class="@TotalsTabClass" @onclick="() => SelectView(LogbookView.Totals)">Totals</button>
+            <button type="button" class="@EntriesTabClass" @onclick="() => SelectViewAsync(LogbookView.Entries)">Entries</button>
+            <button type="button" class="@TotalsTabClass" @onclick="() => SelectViewAsync(LogbookView.Totals)">Totals</button>
         </div>
+
+        @if (IsViewSwitchPending)
+        {
+            <section class="view-progress" role="status" aria-live="polite">
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <span>Opening @PendingViewLabel</span>
+            </section>
+        }
 
         @if (ActiveView == LogbookView.Entries)
         {
@@ -97,23 +105,49 @@ else
                     </div>
                 </div>
                 <h3>Single engine</h3>
-                <div class="totals-grid">
-                    <StatusMetric Label="ICUS day" Value="@(FormatHoursTotal(entry => entry.SeIcusDay))" Detail="SE" />
-                    <StatusMetric Label="ICUS night" Value="@(FormatHoursTotal(entry => entry.SeIcusNight))" Detail="SE" />
-                    <StatusMetric Label="Dual day" Value="@(FormatHoursTotal(entry => entry.SeDualDay))" Detail="SE" />
-                    <StatusMetric Label="Dual night" Value="@(FormatHoursTotal(entry => entry.SeDualNight))" Detail="SE" />
-                    <StatusMetric Label="Command day" Value="@(FormatHoursTotal(entry => entry.SeCommandDay))" Detail="SE" />
-                    <StatusMetric Label="Command night" Value="@(FormatHoursTotal(entry => entry.SeCommandNight))" Detail="SE" />
-                </div>
+                <section class="totals-subgroup" aria-label="Single engine ICUS totals">
+                    <h4>ICUS</h4>
+                    <div class="totals-grid">
+                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.SeIcusDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.SeIcusNight))" />
+                    </div>
+                </section>
+                <section class="totals-subgroup" aria-label="Single engine dual totals">
+                    <h4>Dual</h4>
+                    <div class="totals-grid">
+                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.SeDualDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.SeDualNight))" />
+                    </div>
+                </section>
+                <section class="totals-subgroup" aria-label="Single engine command totals">
+                    <h4>Command</h4>
+                    <div class="totals-grid">
+                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.SeCommandDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.SeCommandNight))" />
+                    </div>
+                </section>
                 <h3>Multi engine</h3>
-                <div class="totals-grid">
-                    <StatusMetric Label="ICUS day" Value="@(FormatHoursTotal(entry => entry.MeIcusDay))" Detail="ME" />
-                    <StatusMetric Label="ICUS night" Value="@(FormatHoursTotal(entry => entry.MeIcusNight))" Detail="ME" />
-                    <StatusMetric Label="Dual day" Value="@(FormatHoursTotal(entry => entry.MeDualDay))" Detail="ME" />
-                    <StatusMetric Label="Dual night" Value="@(FormatHoursTotal(entry => entry.MeDualNight))" Detail="ME" />
-                    <StatusMetric Label="Command day" Value="@(FormatHoursTotal(entry => entry.MeCommandDay))" Detail="ME" />
-                    <StatusMetric Label="Command night" Value="@(FormatHoursTotal(entry => entry.MeCommandNight))" Detail="ME" />
-                </div>
+                <section class="totals-subgroup" aria-label="Multi engine ICUS totals">
+                    <h4>ICUS</h4>
+                    <div class="totals-grid">
+                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.MeIcusDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.MeIcusNight))" />
+                    </div>
+                </section>
+                <section class="totals-subgroup" aria-label="Multi engine dual totals">
+                    <h4>Dual</h4>
+                    <div class="totals-grid">
+                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.MeDualDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.MeDualNight))" />
+                    </div>
+                </section>
+                <section class="totals-subgroup" aria-label="Multi engine command totals">
+                    <h4>Command</h4>
+                    <div class="totals-grid">
+                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.MeCommandDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.MeCommandNight))" />
+                    </div>
+                </section>
                 <h3>Other time</h3>
                 <div class="totals-grid">
                     <StatusMetric Label="Copilot day" Value="@(FormatHoursTotal(entry => entry.CopilotDay))" Detail="hours" />
@@ -205,6 +239,8 @@ else
     private bool ShowFilters { get; set; }
     private bool FilterRecentOnly { get; set; }
     private bool FilterFlightsWithApproachesOnly { get; set; }
+    private bool IsViewSwitchPending { get; set; }
+    private string PendingViewLabel { get; set; } = "view";
 
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
@@ -233,9 +269,20 @@ else
             : LogbookView.Entries;
     }
 
-    private void SelectView(LogbookView view)
+    private async Task SelectViewAsync(LogbookView view)
     {
+        if (ActiveView == view)
+        {
+            return;
+        }
+
+        PendingViewLabel = view == LogbookView.Totals ? "Totals" : "Entries";
+        IsViewSwitchPending = true;
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
         ActiveView = view;
+        IsViewSwitchPending = false;
         Navigation.NavigateTo($"/flights?view={(view == LogbookView.Totals ? "totals" : "entries")}");
     }
 

@@ -531,6 +531,9 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("FormatHoursTotal", page, StringComparison.Ordinal);
         Assert.Contains("FormatCountTotal", page, StringComparison.Ordinal);
+        Assert.Contains("totals-subgroup", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Detail=\"SE\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Detail=\"ME\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Total hours", page, StringComparison.Ordinal);
         Assert.DoesNotContain("TotalCommand", page, StringComparison.Ordinal);
         Assert.DoesNotContain("TotalLandings", page, StringComparison.Ordinal);
@@ -574,12 +577,31 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Last 90 days", page, StringComparison.Ordinal);
         Assert.Contains("dashboard-last-flight", page, StringComparison.Ordinal);
         Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
-        Assert.Contains("RecentSnapshotDetail", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecentSnapshotDetail", page, StringComparison.Ordinal);
         Assert.Contains("TotalFlyingHours", page, StringComparison.Ordinal);
         Assert.Contains("RecentCutoff", page, StringComparison.Ordinal);
         Assert.Contains("MobileLogbookSession.WorkbookLoggedTime", page, StringComparison.Ordinal);
         Assert.Contains("dashboard-total-hours", page, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights?view=totals\"", page, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("dashboard-recent-hours", page, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights?view=entries\"", page, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("dashboard-empty-state", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3WorkbookProjectionAndCurrencySummariesAreCachedForResponsiveTabs()
+    {
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var dashboard = ReadMobilePage("Dashboard.razor");
+        var currency = ReadMobilePage("Currency.razor");
+
+        Assert.Contains("mergeResultV2Cache ??= PortableLogbookWorkbookProjection.MergeV2", session, StringComparison.Ordinal);
+        Assert.Contains("currentEntriesV2Cache ??= MergeResultV2", session, StringComparison.Ordinal);
+        Assert.Contains("deletedEntriesV2Cache ??= MergeResultV2", session, StringComparison.Ordinal);
+        Assert.Contains("InvalidateWorkbookProjectionCache", session, StringComparison.Ordinal);
+        Assert.Contains("currencySummary ??= MobileCurrencyRecencySummary.Create", dashboard, StringComparison.Ordinal);
+        Assert.Contains("summary ??= CreateSummary()", currency, StringComparison.Ordinal);
+        Assert.Contains("summary = CreateSummary();", currency, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -647,6 +669,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Currently expired", page, StringComparison.Ordinal);
         Assert.Contains("Next expiring", page, StringComparison.Ordinal);
         Assert.Contains("DaysRemaining", page, StringComparison.Ordinal);
+        Assert.Contains("CurrencyCategories", page, StringComparison.Ordinal);
+        Assert.Contains("RowsForCategory", page, StringComparison.Ordinal);
+        Assert.Contains("Instrument Approaches", page, StringComparison.Ordinal);
         Assert.Contains("CreateSingleEngineFlightReview", summary, StringComparison.Ordinal);
         Assert.Contains("CreateMultiEngineFlightReview", summary, StringComparison.Ordinal);
         Assert.Contains("CreateCirclingApproach", summary, StringComparison.Ordinal);
@@ -672,13 +697,21 @@ public sealed class PwaPageWiringTests
     public void Gate3CurrencyPageKeepsEngineBoundariesAndExpiryStatesAccessible()
     {
         var page = ReadMobilePage("Currency.razor");
+        var row = ReadMobilePage("CurrencyRowList.razor");
 
-        Assert.Contains("aria-label=\"Single Engine Currency + Recency\"", page, StringComparison.Ordinal);
-        Assert.Contains("Rows=\"@Summary.SingleEngineRows\"", page, StringComparison.Ordinal);
-        Assert.Contains("aria-label=\"Multi Engine Currency + Recency\"", page, StringComparison.Ordinal);
-        Assert.Contains("Rows=\"@Summary.MultiEngineRows\"", page, StringComparison.Ordinal);
+        Assert.Contains("currency-category-section", page, StringComparison.Ordinal);
+        Assert.Contains("currency-engine-panel", page, StringComparison.Ordinal);
+        Assert.Contains("currency-expired-group", page, StringComparison.Ordinal);
+        Assert.Contains("Single Engine", page, StringComparison.Ordinal);
+        Assert.Contains("Multi Engine", page, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Currently expired Single Engine items\"", page, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Next expiring Single Engine item\"", page, StringComparison.Ordinal);
+        Assert.Contains("currency-status-dot", row, StringComparison.Ordinal);
+        Assert.Contains("currency-row-current", row, StringComparison.Ordinal);
+        Assert.Contains("currency-row-warning", row, StringComparison.Ordinal);
+        Assert.Contains("currency-row-expired", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("CasrReference", row, StringComparison.Ordinal);
+        Assert.DoesNotContain("@row.Category", row, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -730,7 +763,8 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("href=\"/\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/flights\"", layout, StringComparison.Ordinal);
-        Assert.Contains("href=\"/flights/new\" class=\"bottom-nav-add\" aria-label=\"New flight\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights/new\"", layout, StringComparison.Ordinal);
+        Assert.Contains("AddNavigationClass = \"bottom-nav-add\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Primary\"", layout, StringComparison.Ordinal);
@@ -739,6 +773,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("aria-label=\"Currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Settings\"", layout, StringComparison.Ordinal);
         Assert.Contains("Icons.Material.Filled.Add", layout, StringComparison.Ordinal);
+        Assert.Contains("nav-progress", layout, StringComparison.Ordinal);
+        Assert.Contains("ShowNavigationPending", layout, StringComparison.Ordinal);
+        Assert.Contains("nav-pending-link", css, StringComparison.Ordinal);
         Assert.Contains("grid-template-columns: repeat(5, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains("var(--native-safe-bottom)", css, StringComparison.Ordinal);
         Assert.Contains(".bottom-nav-add-icon", css, StringComparison.Ordinal);
@@ -750,8 +787,11 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Logbook.razor");
 
         Assert.Contains("role=\"tablist\" aria-label=\"Logbook view\"", page, StringComparison.Ordinal);
-        Assert.Contains("@onclick=\"() => SelectView(LogbookView.Entries)\">Entries</button>", page, StringComparison.Ordinal);
-        Assert.Contains("@onclick=\"() => SelectView(LogbookView.Totals)\">Totals</button>", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"() => SelectViewAsync(LogbookView.Entries)\">Entries</button>", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"() => SelectViewAsync(LogbookView.Totals)\">Totals</button>", page, StringComparison.Ordinal);
+        Assert.Contains("view-progress", page, StringComparison.Ordinal);
+        Assert.Contains("IsViewSwitchPending", page, StringComparison.Ordinal);
+        Assert.Contains("await Task.Yield();", page, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo($\"/flights?view={(view == LogbookView.Totals ? \"totals\" : \"entries\")}\");", page, StringComparison.Ordinal);
     }
 

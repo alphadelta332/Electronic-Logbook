@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @implements IDisposable
+@inject NavigationManager Navigation
 @inject MobileUiPreferenceState UiPreferences
 
 <MudThemeProvider Theme="@Theme" IsDarkMode="@UiPreferences.IsDarkMode" />
@@ -17,29 +18,36 @@
     </header>
 
     <main class="app-main">
+        @if (IsNavigationPending)
+        {
+            <section class="nav-progress" role="status" aria-live="polite">
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                <span>Opening @PendingNavigationLabel</span>
+            </section>
+        }
         @Body
     </main>
 
     <nav class="bottom-nav" aria-label="Primary">
-        <NavLink href="/" Match="NavLinkMatch.All" aria-label="Dashboard">
+        <NavLink href="/" Match="NavLinkMatch.All" aria-label="Dashboard" class="@NavPendingClass(DashboardNavigationLabel)" @onclick="ShowDashboardNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
             <span>Dashboard</span>
         </NavLink>
-        <NavLink href="/flights" aria-label="Logbook">
+        <NavLink href="/flights" aria-label="Logbook" class="@NavPendingClass(LogbookNavigationLabel)" @onclick="ShowLogbookNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
             <span>Logbook</span>
         </NavLink>
-        <NavLink href="/flights/new" class="bottom-nav-add" aria-label="New flight">
+        <NavLink href="/flights/new" class="@NavPendingClass(NewFlightNavigationLabel, AddNavigationClass)" aria-label="New flight" @onclick="ShowNewFlightNavigationPending">
             <span class="bottom-nav-add-icon" aria-hidden="true">
                 <MudIcon Icon="@Icons.Material.Filled.Add" />
             </span>
             <span>New flight</span>
         </NavLink>
-        <NavLink href="/currency" aria-label="Currency">
+        <NavLink href="/currency" aria-label="Currency" class="@NavPendingClass(CurrencyNavigationLabel)" @onclick="ShowCurrencyNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
             <span>Currency</span>
         </NavLink>
-        <NavLink href="/settings" aria-label="Settings">
+        <NavLink href="/settings" aria-label="Settings" class="@NavPendingClass(SettingsNavigationLabel)" @onclick="ShowSettingsNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.Settings" />
             <span>Settings</span>
         </NavLink>
@@ -47,21 +55,71 @@
 </div>
 
 @code {
+    private const string DashboardNavigationLabel = "Dashboard";
+    private const string LogbookNavigationLabel = "Logbook";
+    private const string NewFlightNavigationLabel = "New flight";
+    private const string CurrencyNavigationLabel = "Currency";
+    private const string SettingsNavigationLabel = "Settings";
+    private const string AddNavigationClass = "bottom-nav-add";
+
     private readonly MudTheme Theme = MobileTheme.Create();
+    private bool IsNavigationPending { get; set; }
+    private string PendingNavigationLabel { get; set; } = "page";
 
     protected override async Task OnInitializedAsync()
     {
         UiPreferences.Changed += OnUiPreferencesChanged;
+        Navigation.LocationChanged += OnLocationChanged;
         await UiPreferences.EnsureLoadedAsync();
     }
 
     public void Dispose()
     {
         UiPreferences.Changed -= OnUiPreferencesChanged;
+        Navigation.LocationChanged -= OnLocationChanged;
     }
 
     private void OnUiPreferencesChanged()
     {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void ShowNavigationPending(string label, string targetPath)
+    {
+        var currentPath = Navigation.ToBaseRelativePath(Navigation.Uri).Trim('/');
+        var normalizedTarget = targetPath.Trim('/');
+        if (string.Equals(currentPath, normalizedTarget, StringComparison.OrdinalIgnoreCase))
+        {
+            IsNavigationPending = false;
+            return;
+        }
+
+        PendingNavigationLabel = label;
+        IsNavigationPending = true;
+    }
+
+    private void ShowDashboardNavigationPending() => ShowNavigationPending(DashboardNavigationLabel, "/");
+
+    private void ShowLogbookNavigationPending() => ShowNavigationPending(LogbookNavigationLabel, "/flights");
+
+    private void ShowNewFlightNavigationPending() => ShowNavigationPending(NewFlightNavigationLabel, "/flights/new");
+
+    private void ShowCurrencyNavigationPending() => ShowNavigationPending(CurrencyNavigationLabel, "/currency");
+
+    private void ShowSettingsNavigationPending() => ShowNavigationPending(SettingsNavigationLabel, "/settings");
+
+    private string? NavPendingClass(string label, string? baseClass = null)
+    {
+        var pendingClass = IsNavigationPending && string.Equals(PendingNavigationLabel, label, StringComparison.Ordinal)
+            ? "nav-pending-link"
+            : null;
+
+        return string.Join(" ", new[] { baseClass, pendingClass }.Where(value => !string.IsNullOrWhiteSpace(value)));
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        IsNavigationPending = false;
         _ = InvokeAsync(StateHasChanged);
     }
 }

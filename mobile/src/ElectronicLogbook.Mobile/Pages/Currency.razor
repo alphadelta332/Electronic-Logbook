@@ -21,19 +21,38 @@ else
             </div>
         </div>
 
-        <section class="dashboard-section" aria-label="Single Engine Currency + Recency">
-            <span class="eyebrow">Single Engine</span>
-            <h2>Currency and recency</h2>
-            <CurrencyRowList Rows="@Summary.SingleEngineRows" />
-        </section>
+        @foreach (var category in CurrencyCategories)
+        {
+            var singleEngineRows = RowsForCategory(Summary.SingleEngineRows, category);
+            var multiEngineRows = RowsForCategory(Summary.MultiEngineRows, category);
+            if (singleEngineRows.Count == 0 && multiEngineRows.Count == 0)
+            {
+                continue;
+            }
 
-        <section class="dashboard-section" aria-label="Multi Engine Currency + Recency">
-            <span class="eyebrow">Multi Engine</span>
-            <h2>Currency and recency</h2>
-            <CurrencyRowList Rows="@Summary.MultiEngineRows" />
-        </section>
+            <section class="dashboard-section currency-category-section" aria-label="@($"{CategoryHeading(category)} Currency + Recency")">
+                <span class="eyebrow">Currency and recency</span>
+                <h2>@CategoryHeading(category)</h2>
+                <div class="currency-engine-grid">
+                    @if (singleEngineRows.Count > 0)
+                    {
+                        <section class="currency-engine-panel" aria-label="@($"Single Engine {CategoryHeading(category)}")">
+                            <h3>Single Engine</h3>
+                            <CurrencyRowList Rows="@singleEngineRows" />
+                        </section>
+                    }
+                    @if (multiEngineRows.Count > 0)
+                    {
+                        <section class="currency-engine-panel" aria-label="@($"Multi Engine {CategoryHeading(category)}")">
+                            <h3>Multi Engine</h3>
+                            <CurrencyRowList Rows="@multiEngineRows" />
+                        </section>
+                    }
+                </div>
+            </section>
+        }
 
-        <section class="dashboard-section" aria-label="Currency override dates">
+        <section class="dashboard-section currency-override-section" aria-label="Currency override dates">
             <span class="eyebrow">Workbook override dates</span>
             <h2>Flight Review, IPC, and OPC</h2>
             <p>Use these only when the authoritative completion date is not recorded on a flight.</p>
@@ -53,7 +72,19 @@ else
             }
             else
             {
-                <CurrencyRowList Rows="@Summary.CurrentlyExpiredSingleEngineRows" />
+                @foreach (var category in CurrencyCategories)
+                {
+                    var expiredRows = RowsForCategory(Summary.CurrentlyExpiredSingleEngineRows, category);
+                    if (expiredRows.Count == 0)
+                    {
+                        continue;
+                    }
+
+                    <section class="currency-expired-group" aria-label="@($"Expired {CategoryHeading(category)}")">
+                        <h3>@CategoryHeading(category)</h3>
+                        <CurrencyRowList Rows="@expiredRows" />
+                    </section>
+                }
             }
         </section>
 
@@ -73,16 +104,17 @@ else
 }
 
 @code {
+    private static readonly string[] CurrencyCategories = ["License", "Passenger Carrying", "Operation", "Approaches"];
+
     private DateTime? FlightReviewOverrideDate { get; set; }
 
     private DateTime? InstrumentProficiencyCheckOverrideDate { get; set; }
 
     private DateTime? OperatorProficiencyCheckOverrideDate { get; set; }
 
-    private MobileCurrencyRecencySummary Summary => MobileCurrencyRecencySummary.Create(
-        Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
-        Session.DocumentV2.CurrencyOverrideDates,
-        DateOnly.FromDateTime(DateTime.Today));
+    private MobileCurrencyRecencySummary? summary;
+
+    private MobileCurrencyRecencySummary Summary => summary ??= CreateSummary();
 
     protected override async Task OnInitializedAsync()
     {
@@ -97,6 +129,7 @@ else
             ParseOverrideDate(InstrumentProficiencyCheckOverrideDate),
             ParseOverrideDate(OperatorProficiencyCheckOverrideDate)));
         LoadOverrideDates();
+        summary = CreateSummary();
     }
 
     private void LoadOverrideDates()
@@ -106,6 +139,22 @@ else
         InstrumentProficiencyCheckOverrideDate = FormatOverrideDate(overrides.InstrumentProficiencyCheck);
         OperatorProficiencyCheckOverrideDate = FormatOverrideDate(overrides.OperatorProficiencyCheck);
     }
+
+    private static IReadOnlyList<PortableLogbookCurrencyRow> RowsForCategory(
+        IEnumerable<PortableLogbookCurrencyRow> rows,
+        string category) =>
+        rows.Where(row => string.Equals(row.Category, category, StringComparison.Ordinal)).ToArray();
+
+    private static string CategoryHeading(string category) =>
+        string.Equals(category, "Approaches", StringComparison.Ordinal)
+            ? "Instrument Approaches"
+            : category;
+
+    private MobileCurrencyRecencySummary CreateSummary() =>
+        MobileCurrencyRecencySummary.Create(
+            Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
+            Session.DocumentV2.CurrencyOverrideDates,
+            DateOnly.FromDateTime(DateTime.Today));
 
     private static DateOnly? ParseOverrideDate(DateTime? value) =>
         value is { } date ? DateOnly.FromDateTime(date) : null;
