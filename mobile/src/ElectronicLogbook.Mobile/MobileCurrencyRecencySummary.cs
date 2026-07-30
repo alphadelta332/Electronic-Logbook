@@ -35,6 +35,12 @@ public sealed class MobileCurrencyRecencySummary
             .OrderBy(row => row.CurrentOrRecentUntil)
             .FirstOrDefault();
 
+    public MobileDashboardCurrencyPanel VfrDashboardPanel =>
+        MobileDashboardCurrencyPanel.CreateVfr(SingleEngineRows);
+
+    public MobileDashboardCurrencyPanel IfrDashboardPanel =>
+        MobileDashboardCurrencyPanel.CreateIfr(SingleEngineRows);
+
     public static MobileCurrencyRecencySummary Create(
         IEnumerable<PortableLogbookWorkbookEntry> entries,
         PortableLogbookCurrencyOverrideDates overrideDates,

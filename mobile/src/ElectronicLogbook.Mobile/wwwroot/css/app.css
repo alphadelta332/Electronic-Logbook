@@ -395,9 +395,69 @@ a.status-metric:active {
     gap: 10px;
     min-width: 0;
     border: 1px solid var(--app-border);
-    border-radius: 12px;
+    border-left: 6px solid var(--dashboard-currency-accent);
+    border-radius: 8px;
     padding: 14px;
-    background: var(--app-surface);
+    background: color-mix(in srgb, var(--app-surface) 91%, var(--dashboard-currency-accent));
+}
+
+.dashboard-currency-card-current {
+    --dashboard-currency-accent: var(--app-primary);
+}
+
+.dashboard-currency-card-warning {
+    --dashboard-currency-accent: var(--app-warning);
+}
+
+.dashboard-currency-card-expired {
+    --dashboard-currency-accent: var(--app-error);
+}
+
+.dashboard-currency-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.dashboard-currency-card-header strong {
+    font-size: 18px;
+}
+
+.dashboard-currency-status {
+    color: var(--dashboard-currency-accent);
+    font-size: 22px;
+    font-weight: 800;
+    text-align: right;
+}
+
+.dashboard-currency-card p {
+    margin: 0;
+    color: var(--app-text-muted);
+}
+
+.dashboard-currency-checklist {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dashboard-currency-checklist li {
+    display: grid;
+    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+}
+
+.dashboard-currency-checklist span {
+    font-weight: 700;
+}
+
+.dashboard-currency-checklist small {
+    color: var(--app-text-muted);
+    text-align: right;
 }
 
 .dashboard-empty-state .action-buttons {

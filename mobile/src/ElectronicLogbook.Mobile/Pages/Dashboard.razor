@@ -59,15 +59,39 @@ else
             </div>
 
             <div class="dashboard-currency-grid">
-                <section class="dashboard-currency-card" aria-label="VFR currency status">
-                    <strong>VFR</strong>
-                    <CurrencyRowList Rows="@VfrCurrencyRows" />
-                    <MudButton Href="/currency" Variant="Variant.Text">View VFR Currency + Recency</MudButton>
+                <section class="dashboard-currency-card dashboard-currency-card-@VfrDashboardPanel.StatusTone" aria-label="VFR currency status">
+                    <div class="dashboard-currency-card-header">
+                        <strong>@VfrDashboardPanel.Title</strong>
+                        <span class="dashboard-currency-status">@VfrDashboardPanel.StatusLabel</span>
+                    </div>
+                    <p>@VfrDashboardPanel.ActionSentence</p>
+                    <ul class="dashboard-currency-checklist" aria-label="VFR dashboard checks">
+                        @foreach (var rule in VfrDashboardPanel.Rules)
+                        {
+                            <li>
+                                <span>@rule.Label</span>
+                                <small>@rule.Detail</small>
+                            </li>
+                        }
+                    </ul>
+                    <MudButton Href="/currency" Variant="Variant.Text">Open Currency detail</MudButton>
                 </section>
-                <section class="dashboard-currency-card" aria-label="IFR currency status">
-                    <strong>IFR</strong>
-                    <CurrencyRowList Rows="@IfrCurrencyRows" />
-                    <MudButton Href="/currency" Variant="Variant.Text">View IFR Currency + Recency</MudButton>
+                <section class="dashboard-currency-card dashboard-currency-card-@IfrDashboardPanel.StatusTone" aria-label="IFR currency status">
+                    <div class="dashboard-currency-card-header">
+                        <strong>@IfrDashboardPanel.Title</strong>
+                        <span class="dashboard-currency-status">@IfrDashboardPanel.StatusLabel</span>
+                    </div>
+                    <p>@IfrDashboardPanel.ActionSentence</p>
+                    <ul class="dashboard-currency-checklist" aria-label="IFR dashboard checks">
+                        @foreach (var rule in IfrDashboardPanel.Rules)
+                        {
+                            <li>
+                                <span>@rule.Label</span>
+                                <small>@rule.Detail</small>
+                            </li>
+                        }
+                    </ul>
+                    <MudButton Href="/currency" Variant="Variant.Text">Open Currency detail</MudButton>
                 </section>
             </div>
         </section>
@@ -115,15 +139,11 @@ else
             Session.DocumentV2.CurrencyOverrideDates,
             DateOnly.FromDateTime(DateTime.Today));
 
-    private IReadOnlyList<PortableLogbookCurrencyRow> VfrCurrencyRows =>
-        CurrencySummary.SingleEngineRows
-            .Where(row => row.Requirement == "Passenger Carrying")
-            .ToArray();
+    private MobileDashboardCurrencyPanel VfrDashboardPanel =>
+        CurrencySummary.VfrDashboardPanel;
 
-    private IReadOnlyList<PortableLogbookCurrencyRow> IfrCurrencyRows =>
-        CurrencySummary.SingleEngineRows
-            .Where(row => row.Category is "IFR (Apps)" or "Single Pilot IFR")
-            .ToArray();
+    private MobileDashboardCurrencyPanel IfrDashboardPanel =>
+        CurrencySummary.IfrDashboardPanel;
 
     protected override async Task OnInitializedAsync()
     {

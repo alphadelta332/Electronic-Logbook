@@ -610,11 +610,15 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Dashboard.razor");
 
         Assert.Contains("VFR and IFR status", page, StringComparison.Ordinal);
-        Assert.Contains("VfrCurrencyRows", page, StringComparison.Ordinal);
-        Assert.Contains("IfrCurrencyRows", page, StringComparison.Ordinal);
+        Assert.Contains("VfrDashboardPanel", page, StringComparison.Ordinal);
+        Assert.Contains("IfrDashboardPanel", page, StringComparison.Ordinal);
+        Assert.Contains("StatusLabel", page, StringComparison.Ordinal);
+        Assert.Contains("ActionSentence", page, StringComparison.Ordinal);
+        Assert.Contains("dashboard-currency-checklist", page, StringComparison.Ordinal);
         Assert.Contains("Href=\"/currency\"", page, StringComparison.Ordinal);
-        Assert.Contains("View VFR Currency + Recency", page, StringComparison.Ordinal);
-        Assert.Contains("View IFR Currency + Recency", page, StringComparison.Ordinal);
+        Assert.Contains("Open Currency detail", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<CurrencyRowList Rows=\"@VfrCurrencyRows\" />", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<CurrencyRowList Rows=\"@IfrCurrencyRows\" />", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Package key", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Package health", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Recent flights", page, StringComparison.Ordinal);
