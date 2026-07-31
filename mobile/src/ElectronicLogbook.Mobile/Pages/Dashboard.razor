@@ -53,47 +53,11 @@ else
             <div class="section-title-row">
                 <div>
                     <span class="eyebrow">Currency + Recency</span>
-                    <h2>VFR and IFR status</h2>
+                    <h2>VFR and IFR overview</h2>
                 </div>
-                <MudButton Href="/currency" Variant="Variant.Text" EndIcon="@Icons.Material.Filled.ArrowForward">Currency</MudButton>
             </div>
 
-            <div class="dashboard-currency-grid">
-                <section class="dashboard-currency-card dashboard-currency-card-@VfrDashboardPanel.StatusTone" aria-label="VFR currency status">
-                    <div class="dashboard-currency-card-header">
-                        <strong>@VfrDashboardPanel.Title</strong>
-                        <span class="dashboard-currency-status">@VfrDashboardPanel.StatusLabel</span>
-                    </div>
-                    <p>@VfrDashboardPanel.ActionSentence</p>
-                    <ul class="dashboard-currency-checklist" aria-label="VFR dashboard checks">
-                        @foreach (var rule in VfrDashboardPanel.Rules)
-                        {
-                            <li>
-                                <span>@rule.Label</span>
-                                <small>@rule.Detail</small>
-                            </li>
-                        }
-                    </ul>
-                    <MudButton Href="/currency" Variant="Variant.Text">Open Currency detail</MudButton>
-                </section>
-                <section class="dashboard-currency-card dashboard-currency-card-@IfrDashboardPanel.StatusTone" aria-label="IFR currency status">
-                    <div class="dashboard-currency-card-header">
-                        <strong>@IfrDashboardPanel.Title</strong>
-                        <span class="dashboard-currency-status">@IfrDashboardPanel.StatusLabel</span>
-                    </div>
-                    <p>@IfrDashboardPanel.ActionSentence</p>
-                    <ul class="dashboard-currency-checklist" aria-label="IFR dashboard checks">
-                        @foreach (var rule in IfrDashboardPanel.Rules)
-                        {
-                            <li>
-                                <span>@rule.Label</span>
-                                <small>@rule.Detail</small>
-                            </li>
-                        }
-                    </ul>
-                    <MudButton Href="/currency" Variant="Variant.Text">Open Currency detail</MudButton>
-                </section>
-            </div>
+            <DashboardCurrencyOverview VfrPanel="@VfrDashboardPanel" IfrPanel="@IfrDashboardPanel" />
         </section>
 
         @if (Session.CurrentEntriesV2.Count == 0)

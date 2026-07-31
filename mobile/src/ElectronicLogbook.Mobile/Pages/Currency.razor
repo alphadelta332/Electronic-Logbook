@@ -13,91 +13,90 @@
 else
 {
     <section class="currency-page">
-        <div class="section-title-row">
+        <div class="currency-page-header">
             <div>
-                <span class="eyebrow">Workbook calculation</span>
-                <h1>Currency + Recency</h1>
-                <p>Calculated from the current device record as at @Summary.Today.ToString("d MMM yyyy").</p>
+                <h1>Currency &amp; recency</h1>
+                <p>As at @Summary.Today.ToString("d MMM yyyy")</p>
             </div>
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.Event"
+                       OnClick="ToggleOverrideDates"
+                       aria-expanded="@ShowOverrideDates">
+                Override dates
+            </MudButton>
         </div>
 
-        @foreach (var category in CurrencyCategories)
+        @if (ShowOverrideDates)
         {
-            var singleEngineRows = RowsForCategory(Summary.SingleEngineRows, category);
-            var multiEngineRows = RowsForCategory(Summary.MultiEngineRows, category);
-            if (singleEngineRows.Count == 0 && multiEngineRows.Count == 0)
-            {
-                continue;
-            }
-
-            <section class="dashboard-section currency-category-section" aria-label="@($"{CategoryHeading(category)} Currency + Recency")">
-                <span class="eyebrow">Currency and recency</span>
-                <h2>@CategoryHeading(category)</h2>
-                <div class="currency-engine-grid">
-                    @if (singleEngineRows.Count > 0)
-                    {
-                        <section class="currency-engine-panel" aria-label="@($"Single Engine {CategoryHeading(category)}")">
-                            <h3>Single Engine</h3>
-                            <CurrencyRowList Rows="@singleEngineRows" />
-                        </section>
-                    }
-                    @if (multiEngineRows.Count > 0)
-                    {
-                        <section class="currency-engine-panel" aria-label="@($"Multi Engine {CategoryHeading(category)}")">
-                            <h3>Multi Engine</h3>
-                            <CurrencyRowList Rows="@multiEngineRows" />
-                        </section>
-                    }
+            <section class="currency-override-section" aria-label="Currency override dates">
+                <div>
+                    <span class="eyebrow">Workbook override dates</span>
+                    <h2>Flight Review, IPC, and OPC</h2>
+                    <p>Use these only when the authoritative completion date is not recorded on a flight.</p>
                 </div>
+                <div class="flight-entry-grid">
+                    <label>Flight Review override date <input type="date" @bind="FlightReviewOverrideDate" /></label>
+                    <label>IPC override date <input type="date" @bind="InstrumentProficiencyCheckOverrideDate" /></label>
+                    <label>OPC override date <input type="date" @bind="OperatorProficiencyCheckOverrideDate" /></label>
+                </div>
+                <button class="primary-action" type="button" @onclick="SaveOverrideDatesAsync">Save override dates</button>
             </section>
         }
 
-        <section class="dashboard-section currency-override-section" aria-label="Currency override dates">
-            <span class="eyebrow">Workbook override dates</span>
-            <h2>Flight Review, IPC, and OPC</h2>
-            <p>Use these only when the authoritative completion date is not recorded on a flight.</p>
-            <div class="flight-entry-grid">
-                <label>Flight Review override date <input type="date" @bind="FlightReviewOverrideDate" /></label>
-                <label>IPC override date <input type="date" @bind="InstrumentProficiencyCheckOverrideDate" /></label>
-                <label>OPC override date <input type="date" @bind="OperatorProficiencyCheckOverrideDate" /></label>
+        <section class="currency-overview" aria-label="@($"{SelectedEngineHeading} currency status overview")">
+            <div class="currency-overview-item currency-overview-current">
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" aria-hidden="true" />
+                <strong>@CurrentCount</strong>
+                <span>Current</span>
             </div>
-            <button class="primary-action" type="button" @onclick="SaveOverrideDatesAsync">Save override dates</button>
+            <div class="currency-overview-item currency-overview-warning">
+                <MudIcon Icon="@Icons.Material.Filled.Schedule" aria-hidden="true" />
+                <strong>@DueSoonCount</strong>
+                <span>Due soon</span>
+            </div>
+            <div class="currency-overview-item currency-overview-expired">
+                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" aria-hidden="true" />
+                <strong>@ExpiredCount</strong>
+                <span>Expired</span>
+            </div>
         </section>
 
-        <section class="dashboard-section" aria-label="Currently expired Single Engine items">
-            <span class="eyebrow">Currently expired</span>
-            @if (Summary.CurrentlyExpiredSingleEngineRows.Count == 0)
+        <div class="currency-engine-switch" role="group" aria-label="Engine class">
+            <button class="@EngineButtonClass(SingleEngine)"
+                    type="button"
+                    aria-pressed="@(SelectedEngine == SingleEngine)"
+                    @onclick="@(() => SelectedEngine = SingleEngine)">
+                <MudIcon Icon="@Icons.Material.Filled.Flight" aria-hidden="true" />
+                <span>Single engine</span>
+            </button>
+            <button class="@EngineButtonClass(MultiEngine)"
+                    type="button"
+                    aria-pressed="@(SelectedEngine == MultiEngine)"
+                    @onclick="@(() => SelectedEngine = MultiEngine)">
+                <MudIcon Icon="@Icons.Material.Filled.Flight" aria-hidden="true" />
+                <span>Multi engine</span>
+            </button>
+        </div>
+
+        <section class="currency-category-list" aria-label="@($"{SelectedEngineHeading} currency requirements")">
+            @foreach (var category in CurrencyCategories)
             {
-                <p>All Single Engine Currency + Recency items are current.</p>
-            }
-            else
-            {
-                @foreach (var category in CurrencyCategories)
+                var categoryRows = RowsForCategory(ActiveRows, category);
+                if (categoryRows.Count == 0)
                 {
-                    var expiredRows = RowsForCategory(Summary.CurrentlyExpiredSingleEngineRows, category);
-                    if (expiredRows.Count == 0)
-                    {
-                        continue;
-                    }
-
-                    <section class="currency-expired-group" aria-label="@($"Expired {CategoryHeading(category)}")">
-                        <h3>@CategoryHeading(category)</h3>
-                        <CurrencyRowList Rows="@expiredRows" />
-                    </section>
+                    continue;
                 }
-            }
-        </section>
 
-        <section class="dashboard-section" aria-label="Next expiring Single Engine item">
-            <span class="eyebrow">Next expiring</span>
-            @if (Summary.NextExpiringSingleEngineRow is { } nextExpiring)
-            {
-                <strong>@nextExpiring.Requirement</strong>
-                <span>@nextExpiring.CurrentOrRecentUntilDisplay · @nextExpiring.DaysRemaining days remaining</span>
-            }
-            else
-            {
-                <p>No future Single Engine expiry is available from the current record.</p>
+                <details class="currency-category-panel" open="@CategoryStartsExpanded(category)">
+                    <summary>
+                        <MudIcon Icon="@CategoryIcon(category)" class="currency-category-icon" aria-hidden="true" />
+                        <strong>@CategoryHeading(category)</strong>
+                        <span class="@CategoryStatusClass(categoryRows)">@CategoryStatusSummary(categoryRows)</span>
+                        <MudIcon Icon="@Icons.Material.Filled.ExpandMore" class="currency-category-chevron" aria-hidden="true" />
+                    </summary>
+                    <CurrencyRowList Rows="@categoryRows" />
+                </details>
             }
         </section>
     </section>
@@ -105,6 +104,8 @@ else
 
 @code {
     private static readonly string[] CurrencyCategories = ["License", "Passenger Carrying", "Operation", "Approaches"];
+    private const string SingleEngine = "Single";
+    private const string MultiEngine = "Multi";
 
     private DateTime? FlightReviewOverrideDate { get; set; }
 
@@ -112,9 +113,24 @@ else
 
     private DateTime? OperatorProficiencyCheckOverrideDate { get; set; }
 
+    private string SelectedEngine { get; set; } = SingleEngine;
+
+    private bool ShowOverrideDates { get; set; }
+
     private MobileCurrencyRecencySummary? summary;
 
     private MobileCurrencyRecencySummary Summary => summary ??= CreateSummary();
+
+    private IReadOnlyList<PortableLogbookCurrencyRow> ActiveRows =>
+        SelectedEngine == MultiEngine ? Summary.MultiEngineRows : Summary.SingleEngineRows;
+
+    private string SelectedEngineHeading => SelectedEngine == MultiEngine ? "Multi Engine" : "Single Engine";
+
+    private int CurrentCount => ActiveRows.Count(IsCurrent);
+
+    private int DueSoonCount => ActiveRows.Count(IsDueSoon);
+
+    private int ExpiredCount => ActiveRows.Count(IsExpired);
 
     protected override async Task OnInitializedAsync()
     {
@@ -140,15 +156,63 @@ else
         OperatorProficiencyCheckOverrideDate = FormatOverrideDate(overrides.OperatorProficiencyCheck);
     }
 
+    private void ToggleOverrideDates() => ShowOverrideDates = !ShowOverrideDates;
+
     private static IReadOnlyList<PortableLogbookCurrencyRow> RowsForCategory(
         IEnumerable<PortableLogbookCurrencyRow> rows,
         string category) =>
         rows.Where(row => string.Equals(row.Category, category, StringComparison.Ordinal)).ToArray();
 
-    private static string CategoryHeading(string category) =>
-        string.Equals(category, "Approaches", StringComparison.Ordinal)
-            ? "Instrument Approaches"
-            : category;
+    private static string CategoryHeading(string category) => category switch
+    {
+        "License" => "Licence",
+        "Passenger Carrying" => "Passenger carrying",
+        "Operation" => "Operations",
+        "Approaches" => "Instrument approaches",
+        _ => category
+    };
+
+    private static string CategoryIcon(string category) => category switch
+    {
+        "License" => Icons.Material.Filled.Badge,
+        "Passenger Carrying" => Icons.Material.Filled.Group,
+        "Operation" => Icons.Material.Filled.Settings,
+        "Approaches" => Icons.Material.Filled.TrackChanges,
+        _ => Icons.Material.Filled.FactCheck
+    };
+
+    private static bool CategoryStartsExpanded(string category) =>
+        string.Equals(category, "License", StringComparison.Ordinal) ||
+        string.Equals(category, "Approaches", StringComparison.Ordinal);
+
+    private static string CategoryStatusSummary(IReadOnlyList<PortableLogbookCurrencyRow> rows)
+    {
+        var expired = rows.Count(IsExpired);
+        if (expired > 0)
+        {
+            return $"{expired} expired";
+        }
+
+        var dueSoon = rows.Count(IsDueSoon);
+        return dueSoon > 0 ? $"{dueSoon} due soon" : "Current";
+    }
+
+    private static string CategoryStatusClass(IReadOnlyList<PortableLogbookCurrencyRow> rows) =>
+        rows.Any(IsExpired)
+            ? "currency-category-status currency-category-status-expired"
+            : rows.Any(IsDueSoon)
+                ? "currency-category-status currency-category-status-warning"
+                : "currency-category-status currency-category-status-current";
+
+    private string EngineButtonClass(string engine) =>
+        SelectedEngine == engine ? "currency-engine-tab currency-engine-tab-active" : "currency-engine-tab";
+
+    private static bool IsExpired(PortableLogbookCurrencyRow row) =>
+        string.Equals(row.Status, "Not Current", StringComparison.Ordinal);
+
+    private static bool IsDueSoon(PortableLogbookCurrencyRow row) => !IsExpired(row) && row.DaysRemaining <= 30;
+
+    private static bool IsCurrent(PortableLogbookCurrencyRow row) => !IsExpired(row) && !IsDueSoon(row);
 
     private MobileCurrencyRecencySummary CreateSummary() =>
         MobileCurrencyRecencySummary.Create(

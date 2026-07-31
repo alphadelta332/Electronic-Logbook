@@ -9,6 +9,10 @@ $scriptRoot = $PSScriptRoot
 $mobileRoot = Split-Path -Parent $scriptRoot
 $androidRoot = Join-Path $mobileRoot "android"
 $apkPath = Join-Path $androidRoot "app\build\outputs\apk\debug\app-debug.apk"
+$packageName = "com.alphadelta.electroniclogbook.dev"
+
+. (Join-Path $scriptRoot "AndroidDevelopmentSigning.ps1")
+. (Join-Path $scriptRoot "AndroidDebugDeviceBridge.ps1")
 
 function Find-AndroidSdk {
     $candidates = @(
@@ -42,10 +46,34 @@ function Invoke-Checked {
     }
 }
 
+function Resolve-DeviceSerial {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Adb,
+        [string] $RequestedSerial
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedSerial)) {
+        return $RequestedSerial
+    }
+
+    $deviceLines = & $Adb "devices" 2>&1 | Where-Object { $_ -match "^([^\s]+)\s+device$" }
+    $serials = @($deviceLines | ForEach-Object {
+        if ($_ -match "^([^\s]+)\s+device$") { $Matches[1] }
+    })
+    if ($serials.Count -ne 1) {
+        throw "Connect exactly one authorised Android device or pass -DeviceSerial."
+    }
+
+    return $serials[0]
+}
+
 $sdkRoot = Find-AndroidSdk
 $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_SDK_ROOT = $sdkRoot
 $adb = Join-Path $sdkRoot "platform-tools\adb.exe"
+$resolvedDeviceSerial = Resolve-DeviceSerial -Adb $adb -RequestedSerial $DeviceSerial
+$signingIdentity = Initialize-AndroidDevelopmentSigning
+Write-Host "Using durable development certificate $($signingIdentity.CertificateSha256)."
 
 if (-not $SkipSync) {
     Push-Location $mobileRoot
@@ -69,23 +97,22 @@ if (-not (Test-Path -LiteralPath $apkPath -PathType Leaf)) {
     throw "Debug APK was not found at $apkPath."
 }
 
-$installArguments = @()
-if (-not [string]::IsNullOrWhiteSpace($DeviceSerial)) {
-    $installArguments += @("-s", $DeviceSerial)
+$result = Invoke-DataPreservingDebugInstall -Adb $adb -SdkRoot $sdkRoot `
+    -DeviceSerial $resolvedDeviceSerial -PackageName $packageName -ApkPath $apkPath
+
+switch ($result.Mode) {
+    "new-install" {
+        Write-Host "Installed the debug app on a device with no existing debug package."
+    }
+    "in-place-update" {
+        Write-Host "Updated the debug app in place; Android retained its existing logbook data."
+    }
+    "verified-signing-migration" {
+        Write-Host "Migrated the existing logbook to the durable development signing identity."
+        Write-Host "Verified recovery evidence: $($result.BackupPath)"
+    }
+    "resumed-signing-migration" {
+        Write-Host "Resumed and completed the verified development signing migration."
+        Write-Host "Verified recovery evidence: $($result.BackupPath)"
+    }
 }
-
-$installArguments += @("install", "-r", $apkPath)
-
-& $adb @installArguments
-if ($LASTEXITCODE -ne 0) {
-    throw @"
-Data-preserving install failed.
-
-This script deliberately does not clear, uninstall, or reset the app because that destroys
-the private WebView and IndexedDB logbook data on the device. If Android reports
-INSTALL_FAILED_UPDATE_INCOMPATIBLE, first export or otherwise preserve the device logbook
-data, then use a deliberately separate reset procedure.
-"@
-}
-
-Write-Host "Installed debug APK with data-preserving adb install -r."

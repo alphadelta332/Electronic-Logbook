@@ -1,30 +1,52 @@
 @using ElectronicLogbook.Portable
 
-<div class="currency-row-list">
+<ul class="currency-row-list">
     @foreach (var row in Rows)
     {
-        <article class="flight-row currency-row @StatusClass(row)">
-            <span class="currency-status-dot" aria-hidden="true"></span>
-            <div>
+        <li class="currency-requirement-row @StatusClass(row)">
+            <span class="currency-requirement-status-icon" aria-hidden="true">
+                <MudIcon Icon="@StatusIcon(row)" />
+            </span>
+            <div class="currency-requirement-copy">
                 <strong>@row.Requirement</strong>
-                <span>@row.RelevantPeriodTotal in relevant period</span>
+                <span class="currency-requirement-status">@StatusLabel(row)</span>
+                <small>@SupportingDetail(row)</small>
             </div>
-            <div>
-                <strong>@row.Status</strong>
-                <span>@row.CurrentOrRecentUntilDisplay · @row.DaysRemaining days remaining</span>
-            </div>
-        </article>
+        </li>
     }
-</div>
+</ul>
 
 @code {
     [Parameter, EditorRequired]
     public IReadOnlyList<PortableLogbookCurrencyRow> Rows { get; set; } = [];
 
     private static string StatusClass(PortableLogbookCurrencyRow row) =>
-        string.Equals(row.Status, "Not Current", StringComparison.Ordinal)
+        IsExpired(row)
             ? "currency-row-expired"
             : row.DaysRemaining <= 30
                 ? "currency-row-warning"
                 : "currency-row-current";
+
+    private static string StatusIcon(PortableLogbookCurrencyRow row) =>
+        IsExpired(row)
+            ? Icons.Material.Filled.ErrorOutline
+            : row.DaysRemaining <= 30
+                ? Icons.Material.Filled.Schedule
+                : Icons.Material.Filled.CheckCircleOutline;
+
+    private static string StatusLabel(PortableLogbookCurrencyRow row) =>
+        IsExpired(row) ? "Not current" : row.DaysRemaining <= 30 ? "Due soon" : "Current";
+
+    private static string SupportingDetail(PortableLogbookCurrencyRow row)
+    {
+        var dateDetail = row.CurrentOrRecentUntil is null
+            ? "No qualifying record"
+            : IsExpired(row)
+                ? $"Expired {row.CurrentOrRecentUntilDisplay}"
+                : $"Until {row.CurrentOrRecentUntilDisplay}";
+        return $"{dateDetail} · {row.RelevantPeriodTotal} in period";
+    }
+
+    private static bool IsExpired(PortableLogbookCurrencyRow row) =>
+        string.Equals(row.Status, "Not Current", StringComparison.Ordinal);
 }

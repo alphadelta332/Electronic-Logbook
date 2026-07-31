@@ -30,6 +30,7 @@ const profiles = [
 const colorSchemes = ["light", "dark"];
 const routes = [
     { name: "dashboard", path: "/", readySelector: "main .dashboard-page" },
+    { name: "currency", path: "/currency", readySelector: "main .currency-page" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" }
 ];
 
@@ -91,6 +92,13 @@ try {
                         viewport: { width: profile.width, height: profile.height }
                     });
                     const page = await context.newPage();
+                    const browserErrors = [];
+                    page.on("pageerror", error => browserErrors.push(error.message));
+                    page.on("console", message => {
+                        if (message.type() === "error") {
+                            browserErrors.push(message.text());
+                        }
+                    });
                     await page.goto(`${baseUrl}${route.path}`, { waitUntil: "domcontentloaded" });
                     await page.locator(route.readySelector).waitFor({ state: "visible", timeout: 30000 });
                     await page.evaluate((fontScale) => {
@@ -106,6 +114,54 @@ try {
                         path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}.png`),
                         fullPage: true
                     });
+
+                    if (route.name === "dashboard") {
+                        const dashboardPanels = page.locator("details.dashboard-currency-panel");
+                        if (await dashboardPanels.count() !== 2) {
+                            throw new Error(`Dashboard currency overview did not render both panels for ${profile.name} ${colorScheme}`);
+                        }
+
+                        const vfrPanel = dashboardPanels.filter({ hasText: "VFR" });
+                        await vfrPanel.locator("summary").click();
+                        if (!await vfrPanel.evaluate(panel => panel.open)) {
+                            throw new Error(`Dashboard VFR panel did not expand for ${profile.name} ${colorScheme}`);
+                        }
+
+                        await vfrPanel.locator("summary").click();
+                        if (await vfrPanel.evaluate(panel => panel.open)) {
+                            throw new Error(`Dashboard VFR panel did not collapse for ${profile.name} ${colorScheme}`);
+                        }
+                    } else if (route.name === "currency") {
+                        const multiEngine = page.getByRole("button", { name: "Multi engine" });
+                        await multiEngine.click();
+                        await page.waitForTimeout(100);
+                        if (await page.locator("details.currency-category-panel").count() !== 1) {
+                            throw new Error(`Currency Multi engine switch did not activate for ${profile.name} ${colorScheme}`);
+                        }
+
+                        const singleEngine = page.getByRole("button", { name: "Single engine" });
+                        await singleEngine.click();
+                        await page.waitForTimeout(100);
+                        if (await page.locator("details.currency-category-panel").count() !== 4) {
+                            throw new Error(`Currency Single engine switch did not activate for ${profile.name} ${colorScheme}`);
+                        }
+
+                        const passengerPanel = page.locator("details.currency-category-panel")
+                            .filter({ hasText: "Passenger carrying" });
+                        await passengerPanel.locator("summary").click();
+                        if (!await passengerPanel.evaluate(panel => panel.open)) {
+                            throw new Error(`Currency category did not expand for ${profile.name} ${colorScheme}`);
+                        }
+
+                        const overrideButton = page.getByRole("button", { name: "Override dates" });
+                        await overrideButton.click();
+                        await page.locator(".currency-override-section").waitFor({ state: "visible" });
+                    }
+
+                    await page.waitForTimeout(50);
+                    if (browserErrors.length > 0) {
+                        throw new Error(`Browser errors for ${route.name} ${profile.name} ${colorScheme}: ${browserErrors.join(" | ")}`);
+                    }
                     await context.close();
                 }
             }

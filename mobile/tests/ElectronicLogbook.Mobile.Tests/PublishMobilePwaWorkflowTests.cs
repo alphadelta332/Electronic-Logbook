@@ -41,33 +41,39 @@ public sealed class PublishMobilePwaWorkflowTests
     }
 
     [Fact]
-    public void AndroidDebugInstallWorkflowPreservesDeviceDataByDefault()
+    public void AndroidDebugInstallWorkflowAutomatesInPlaceUpdatesAndVerifiedSigningMigration()
     {
-        var packageJson = File.ReadAllText(Path.GetFullPath(Path.Combine(
+        var mobileRoot = Path.GetFullPath(Path.Combine(
             AppContext.BaseDirectory,
             "..",
             "..",
             "..",
             "..",
-            "..",
-            "package.json")));
-        var installScript = File.ReadAllText(Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..",
-            "..",
-            "..",
-            "..",
-            "..",
-            "scripts",
-            "Install-AndroidDebugBuild.ps1")));
+            ".."));
+        var packageJson = File.ReadAllText(Path.Combine(mobileRoot, "package.json"));
+        var installScript = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "Install-AndroidDebugBuild.ps1"));
+        var signingScript = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "AndroidDevelopmentSigning.ps1"));
+        var bridgeScript = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "AndroidDebugDeviceBridge.ps1"));
+        var gradle = File.ReadAllText(Path.Combine(mobileRoot, "android", "app", "build.gradle"));
 
         Assert.Contains("install:android:debug", packageJson, StringComparison.Ordinal);
         Assert.Contains("Install-AndroidDebugBuild.ps1", packageJson, StringComparison.Ordinal);
-        Assert.Contains("\"install\", \"-r\"", installScript, StringComparison.Ordinal);
-        Assert.Contains("deliberately does not clear, uninstall, or reset", installScript, StringComparison.Ordinal);
-        Assert.DoesNotContain("pm clear", installScript, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("adb uninstall", installScript, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("force-stop", installScript, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Initialize-AndroidDevelopmentSigning", installScript, StringComparison.Ordinal);
+        Assert.Contains("Invoke-DataPreservingDebugInstall", installScript, StringComparison.Ordinal);
+        Assert.Contains("LOCALAPPDATA", signingScript, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_DEV_KEYSTORE", signingScript, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_DEV_KEYSTORE", gradle, StringComparison.Ordinal);
+        Assert.Contains("rootProject.file('../../version.txt')", gradle, StringComparison.Ordinal);
+        Assert.Contains("\"install\", \"-r\"", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("android.intent.category.LAUNCHER", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("New-VerifiedIndexedDbSnapshot", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("Assert-EquivalentIndexedDbSnapshots", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("source-backup-verified", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("\"uninstall\", $PackageName", bridgeScript, StringComparison.Ordinal);
+        Assert.True(
+            bridgeScript.IndexOf("source-backup-verified", StringComparison.Ordinal) <
+            bridgeScript.IndexOf("\"uninstall\", $PackageName", StringComparison.Ordinal));
+        Assert.DoesNotContain("pm clear", bridgeScript, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -89,6 +95,7 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("acceptance", gradle, StringComparison.Ordinal);
         Assert.Contains("applicationIdSuffix \".acceptance\"", gradle, StringComparison.Ordinal);
         Assert.Contains("assembleAcceptance", installScript, StringComparison.Ordinal);
+        Assert.Contains("Initialize-AndroidDevelopmentSigning", installScript, StringComparison.Ordinal);
         Assert.Contains("\"install\", \"-r\"", installScript, StringComparison.Ordinal);
         Assert.DoesNotContain("pm clear", installScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("adb uninstall", installScript, StringComparison.OrdinalIgnoreCase);

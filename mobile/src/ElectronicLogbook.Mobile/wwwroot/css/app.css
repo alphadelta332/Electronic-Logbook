@@ -384,80 +384,211 @@ a.status-metric:active {
     font-size: 28px;
 }
 
-.dashboard-currency-grid {
+.dashboard-currency-overview {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.dashboard-currency-card {
-    display: grid;
-    gap: 10px;
-    min-width: 0;
+    overflow: hidden;
     border: 1px solid var(--app-border);
-    border-left: 6px solid var(--dashboard-currency-accent);
-    border-radius: 8px;
-    padding: 14px;
-    background: color-mix(in srgb, var(--app-surface) 91%, var(--dashboard-currency-accent));
+    border-radius: 12px;
+    background: var(--app-surface);
 }
 
-.dashboard-currency-card-current {
+.dashboard-currency-overview-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border-bottom: 1px solid var(--app-border);
+    background: color-mix(in srgb, var(--app-surface) 86%, var(--app-surface-alt));
+}
+
+.dashboard-currency-overview-item {
+    display: grid;
+    grid-template-columns: auto auto;
+    justify-content: center;
+    align-items: center;
+    gap: 2px 8px;
+    min-width: 0;
+    min-height: 76px;
+    padding: 10px 8px;
+    color: var(--dashboard-currency-accent);
+}
+
+.dashboard-currency-overview-item + .dashboard-currency-overview-item {
+    border-left: 1px solid var(--app-border);
+}
+
+.dashboard-currency-overview-current,
+.dashboard-currency-panel-current,
+.dashboard-currency-rule-current {
     --dashboard-currency-accent: var(--app-primary);
 }
 
-.dashboard-currency-card-warning {
-    --dashboard-currency-accent: var(--app-warning);
+.dashboard-currency-overview-warning,
+.dashboard-currency-panel-warning,
+.dashboard-currency-rule-warning {
+    --dashboard-currency-accent: var(--app-attention);
 }
 
-.dashboard-currency-card-expired {
+.dashboard-currency-overview-expired,
+.dashboard-currency-panel-expired,
+.dashboard-currency-rule-expired {
     --dashboard-currency-accent: var(--app-error);
 }
 
-.dashboard-currency-card-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+.dashboard-currency-overview-item .mud-icon-root {
+    grid-row: 1 / 3;
+    font-size: 28px;
 }
 
-.dashboard-currency-card-header strong {
+.dashboard-currency-overview-item strong {
+    align-self: end;
+    font-size: 24px;
+    line-height: 1;
+}
+
+.dashboard-currency-overview-item span {
+    align-self: start;
+    min-width: 0;
+    color: var(--app-text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.dashboard-currency-panel-list {
+    display: grid;
+}
+
+.dashboard-currency-panel {
+    background: var(--app-surface);
+}
+
+.dashboard-currency-panel + .dashboard-currency-panel {
+    border-top: 1px solid var(--app-border);
+}
+
+.dashboard-currency-panel summary {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) auto 24px;
+    align-items: center;
+    gap: 10px;
+    min-height: 78px;
+    padding: 12px 14px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.dashboard-currency-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.dashboard-currency-panel summary:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
+    outline-offset: -3px;
+}
+
+.dashboard-currency-panel-icon {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border: 2px solid var(--dashboard-currency-accent);
+    border-radius: 50%;
+    color: var(--dashboard-currency-accent);
+}
+
+.dashboard-currency-panel-heading {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.dashboard-currency-panel-heading strong {
     font-size: 18px;
 }
 
-.dashboard-currency-status {
+.dashboard-currency-panel-heading small {
+    color: var(--app-text-muted);
+    font-size: 12px;
+}
+
+.dashboard-currency-panel-status {
     color: var(--dashboard-currency-accent);
-    font-size: 22px;
+    font-size: 15px;
     font-weight: 800;
     text-align: right;
 }
 
-.dashboard-currency-card p {
-    margin: 0;
+.dashboard-currency-panel-chevron {
     color: var(--app-text-muted);
+    transition: transform 160ms ease;
 }
 
-.dashboard-currency-checklist {
+.dashboard-currency-panel[open] .dashboard-currency-panel-chevron {
+    transform: rotate(180deg);
+}
+
+.dashboard-currency-panel-body {
     display: grid;
-    gap: 8px;
+    gap: 12px;
+    padding: 0 14px 14px;
+}
+
+.dashboard-currency-panel-body > p {
+    margin: 0;
+    color: var(--app-text-muted);
+    font-size: 13px;
+}
+
+.dashboard-currency-rule-list {
+    display: grid;
     margin: 0;
     padding: 0;
     list-style: none;
+    border-top: 1px solid var(--app-border);
 }
 
-.dashboard-currency-checklist li {
+.dashboard-currency-rule {
     display: grid;
-    grid-template-columns: minmax(0, 0.85fr) minmax(0, 1fr);
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    align-items: center;
     gap: 10px;
-    align-items: baseline;
+    min-height: 64px;
+    padding: 10px 0;
 }
 
-.dashboard-currency-checklist span {
-    font-weight: 700;
+.dashboard-currency-rule + .dashboard-currency-rule {
+    border-top: 1px solid var(--app-border);
 }
 
-.dashboard-currency-checklist small {
+.dashboard-currency-rule > .mud-icon-root,
+.dashboard-currency-rule > em {
+    color: var(--dashboard-currency-accent);
+}
+
+.dashboard-currency-rule > span {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.dashboard-currency-rule strong {
+    font-size: 14px;
+}
+
+.dashboard-currency-rule small {
     color: var(--app-text-muted);
+    font-size: 12px;
+}
+
+.dashboard-currency-rule em {
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 800;
     text-align: right;
+}
+
+.dashboard-currency-open-all {
+    justify-self: stretch;
+    margin: 12px 14px 14px;
 }
 
 .dashboard-empty-state .action-buttons {
@@ -509,78 +640,246 @@ a.status-metric:active {
 
 .currency-page {
     display: grid;
-    gap: 16px;
+    gap: 18px;
 }
 
-.currency-category-section {
-    gap: 14px;
-}
-
-.currency-engine-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(156px, 1fr));
+.currency-page-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
     gap: 12px;
 }
 
-.currency-engine-panel {
-    display: grid;
-    gap: 10px;
-    min-width: 0;
+.currency-page-header h1 {
+    margin-bottom: 4px;
 }
 
-.currency-engine-panel h3 {
+.currency-page-header p,
+.currency-override-section p {
     margin: 0;
-    font-size: 18px;
-}
-
-.currency-expired-group {
-    display: grid;
-    gap: 8px;
-}
-
-.currency-expired-group h3 {
-    margin: 4px 0 0;
     color: var(--app-text-muted);
-    font-size: 12px;
-    font-weight: 800;
-    text-transform: uppercase;
 }
 
-.currency-row {
-    grid-template-columns: 8px minmax(0, 1fr) minmax(96px, auto);
-    gap: 12px;
+.currency-page-header .mud-button-root {
+    flex: 0 0 auto;
+    margin-top: 2px;
+}
+
+.currency-overview {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid var(--app-border);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--app-surface) 92%, var(--currency-row-accent));
+    background: color-mix(in srgb, var(--app-surface) 92%, var(--app-surface-alt));
+}
+
+.currency-overview-item {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: 8px;
+    min-width: 0;
+    padding: 16px 12px;
+}
+
+.currency-overview-item + .currency-overview-item {
+    border-left: 1px solid var(--app-border);
+}
+
+.currency-overview-item .mud-icon-root {
+    grid-row: 1 / 3;
+    font-size: 30px;
+}
+
+.currency-overview-item strong {
+    font-size: 24px;
+    line-height: 1;
+}
+
+.currency-overview-item span {
+    margin-top: 5px;
+    color: var(--app-text-muted);
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.currency-overview-current .mud-icon-root,
+.currency-category-status-current {
+    color: var(--app-primary);
+}
+
+.currency-overview-warning .mud-icon-root,
+.currency-category-status-warning {
+    color: var(--app-attention);
+}
+
+.currency-overview-expired .mud-icon-root,
+.currency-category-status-expired {
+    color: var(--app-error);
+}
+
+.currency-engine-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px;
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    padding: 3px;
+    background: var(--app-surface);
+}
+
+.currency-engine-tab {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 48px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    color: var(--app-text-muted);
+    background: transparent;
+    font-weight: 800;
+}
+
+.currency-engine-tab-active {
+    border-color: color-mix(in srgb, var(--app-primary) 74%, var(--app-border));
+    color: var(--app-text);
+    background: color-mix(in srgb, var(--app-surface) 76%, var(--app-primary));
+}
+
+.currency-engine-tab:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
+    outline-offset: 2px;
+}
+
+.currency-category-list {
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    background: var(--app-surface);
+}
+
+.currency-category-panel + .currency-category-panel {
+    border-top: 1px solid var(--app-border);
+}
+
+.currency-category-panel summary {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto 24px;
+    align-items: center;
+    gap: 10px;
+    min-height: 62px;
+    padding: 10px 14px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.currency-category-panel summary::-webkit-details-marker {
+    display: none;
+}
+
+.currency-category-panel summary:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
+    outline-offset: -3px;
+}
+
+.currency-category-icon {
+    color: var(--app-text-muted);
+}
+
+.currency-category-panel[open] .currency-category-icon {
+    color: var(--app-primary);
+}
+
+.currency-category-panel summary strong {
+    font-size: 17px;
+}
+
+.currency-category-status {
+    font-size: 14px;
+    text-align: right;
+}
+
+.currency-category-chevron {
+    color: var(--app-text-muted);
+    transition: transform 160ms ease;
+}
+
+.currency-category-panel[open] .currency-category-chevron {
+    transform: rotate(180deg);
+}
+
+.currency-row-list {
+    display: grid;
+    margin: 0;
+    padding: 0 14px;
+    list-style: none;
+    border-top: 1px solid var(--app-border);
+}
+
+.currency-requirement-row {
+    --currency-row-accent: var(--app-primary);
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+    min-height: 90px;
+    padding: 12px 0;
+}
+
+.currency-requirement-row + .currency-requirement-row {
+    border-top: 1px solid var(--app-border);
 }
 
 .currency-row-current {
     --currency-row-accent: var(--app-primary);
-    border-color: color-mix(in srgb, var(--app-primary) 42%, var(--app-border));
 }
 
 .currency-row-warning {
-    --currency-row-accent: var(--app-warning);
-    border-color: color-mix(in srgb, var(--app-warning) 48%, var(--app-border));
+    --currency-row-accent: var(--app-attention);
 }
 
 .currency-row-expired {
     --currency-row-accent: var(--app-error);
-    border-color: color-mix(in srgb, var(--app-error) 48%, var(--app-border));
 }
 
-.currency-status-dot {
-    width: 8px;
-    height: 44px;
-    border-radius: 999px;
-    background: var(--currency-row-accent);
+.currency-requirement-status-icon {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border: 2px solid var(--currency-row-accent);
+    border-radius: 50%;
+    color: var(--currency-row-accent);
 }
 
-.currency-row div:last-child {
-    justify-items: end;
-    text-align: right;
+.currency-requirement-copy {
+    display: grid;
+    min-width: 0;
+}
+
+.currency-requirement-copy strong {
+    font-size: 16px;
+    overflow-wrap: anywhere;
+}
+
+.currency-requirement-status {
+    margin-top: 2px;
+    color: var(--currency-row-accent);
+    font-weight: 700;
+}
+
+.currency-requirement-copy small {
+    margin-top: 3px;
+    color: var(--app-text-muted);
+    font-size: 13px;
 }
 
 .currency-override-section {
+    display: grid;
     gap: 14px;
     border: 1px solid var(--app-border);
     border-radius: 8px;
@@ -817,6 +1116,10 @@ a.status-metric:active {
     .save-confirmation,
     .save-confirmation-icon {
         animation: none;
+    }
+
+    .dashboard-currency-panel-chevron {
+        transition: none;
     }
 }
 

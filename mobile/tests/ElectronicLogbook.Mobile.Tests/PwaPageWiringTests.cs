@@ -608,15 +608,21 @@ public sealed class PwaPageWiringTests
     public void Gate3DashboardLinksVfrAndIfrCurrencyStatusToCurrencyPage()
     {
         var page = ReadMobilePage("Dashboard.razor");
+        var overview = ReadMobilePage("DashboardCurrencyOverview.razor");
 
-        Assert.Contains("VFR and IFR status", page, StringComparison.Ordinal);
+        Assert.Contains("VFR and IFR overview", page, StringComparison.Ordinal);
         Assert.Contains("VfrDashboardPanel", page, StringComparison.Ordinal);
         Assert.Contains("IfrDashboardPanel", page, StringComparison.Ordinal);
-        Assert.Contains("StatusLabel", page, StringComparison.Ordinal);
-        Assert.Contains("ActionSentence", page, StringComparison.Ordinal);
-        Assert.Contains("dashboard-currency-checklist", page, StringComparison.Ordinal);
-        Assert.Contains("Href=\"/currency\"", page, StringComparison.Ordinal);
-        Assert.Contains("Open Currency detail", page, StringComparison.Ordinal);
+        Assert.Contains("<DashboardCurrencyOverview", page, StringComparison.Ordinal);
+        Assert.Contains("dashboard-currency-overview-strip", overview, StringComparison.Ordinal);
+        Assert.Contains("<details class=\"dashboard-currency-panel", overview, StringComparison.Ordinal);
+        Assert.Contains("ActionSentence", overview, StringComparison.Ordinal);
+        Assert.Contains("dashboard-currency-rule-list", overview, StringComparison.Ordinal);
+        Assert.Contains("Href=\"/currency\"", overview, StringComparison.Ordinal);
+        Assert.Contains("Review all currency details", overview, StringComparison.Ordinal);
+        Assert.Contains("CheckCircleOutline", overview, StringComparison.Ordinal);
+        Assert.Contains("Schedule", overview, StringComparison.Ordinal);
+        Assert.Contains("ErrorOutline", overview, StringComparison.Ordinal);
         Assert.DoesNotContain("<CurrencyRowList Rows=\"@VfrCurrencyRows\" />", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<CurrencyRowList Rows=\"@IfrCurrencyRows\" />", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Package key", page, StringComparison.Ordinal);
@@ -628,10 +634,11 @@ public sealed class PwaPageWiringTests
     public void Gate3DashboardDestinationsKeepLastFlightCurrencyAndEmptyStateActionsUsable()
     {
         var page = ReadMobilePage("Dashboard.razor");
+        var overview = ReadMobilePage("DashboardCurrencyOverview.razor");
 
         Assert.Contains("aria-label=\"Last flight context\"", page, StringComparison.Ordinal);
         Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
-        Assert.Equal(3, CountOccurrences(page, "Href=\"/currency\""));
+        Assert.Equal(1, CountOccurrences(overview, "Href=\"/currency\""));
         Assert.Contains("aria-label=\"No flights yet\"", page, StringComparison.Ordinal);
         Assert.Contains("Href=\"/flights/new\"", page, StringComparison.Ordinal);
         Assert.Contains("Add first flight", page, StringComparison.Ordinal);
@@ -668,14 +675,15 @@ public sealed class PwaPageWiringTests
         var summary = ReadMobileSource("MobileCurrencyRecencySummary.cs");
 
         Assert.Contains("@page \"/currency\"", page, StringComparison.Ordinal);
-        Assert.Contains("Single Engine", page, StringComparison.Ordinal);
-        Assert.Contains("Multi Engine", page, StringComparison.Ordinal);
-        Assert.Contains("Currently expired", page, StringComparison.Ordinal);
-        Assert.Contains("Next expiring", page, StringComparison.Ordinal);
-        Assert.Contains("DaysRemaining", page, StringComparison.Ordinal);
+        Assert.Contains("Single engine", page, StringComparison.Ordinal);
+        Assert.Contains("Multi engine", page, StringComparison.Ordinal);
+        Assert.Contains("currency-overview", page, StringComparison.Ordinal);
+        Assert.Contains("Due soon", page, StringComparison.Ordinal);
+        Assert.Contains("Expired", page, StringComparison.Ordinal);
+        Assert.Contains("CategoryStatusSummary", page, StringComparison.Ordinal);
         Assert.Contains("CurrencyCategories", page, StringComparison.Ordinal);
         Assert.Contains("RowsForCategory", page, StringComparison.Ordinal);
-        Assert.Contains("Instrument Approaches", page, StringComparison.Ordinal);
+        Assert.Contains("Instrument approaches", page, StringComparison.Ordinal);
         Assert.Contains("CreateSingleEngineFlightReview", summary, StringComparison.Ordinal);
         Assert.Contains("CreateMultiEngineFlightReview", summary, StringComparison.Ordinal);
         Assert.Contains("CreateCirclingApproach", summary, StringComparison.Ordinal);
@@ -703,14 +711,14 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Currency.razor");
         var row = ReadMobilePage("CurrencyRowList.razor");
 
-        Assert.Contains("currency-category-section", page, StringComparison.Ordinal);
-        Assert.Contains("currency-engine-panel", page, StringComparison.Ordinal);
-        Assert.Contains("currency-expired-group", page, StringComparison.Ordinal);
-        Assert.Contains("Single Engine", page, StringComparison.Ordinal);
-        Assert.Contains("Multi Engine", page, StringComparison.Ordinal);
-        Assert.Contains("aria-label=\"Currently expired Single Engine items\"", page, StringComparison.Ordinal);
-        Assert.Contains("aria-label=\"Next expiring Single Engine item\"", page, StringComparison.Ordinal);
-        Assert.Contains("currency-status-dot", row, StringComparison.Ordinal);
+        Assert.Contains("currency-category-list", page, StringComparison.Ordinal);
+        Assert.Contains("currency-category-panel", page, StringComparison.Ordinal);
+        Assert.Contains("currency-engine-switch", page, StringComparison.Ordinal);
+        Assert.Contains("aria-pressed", page, StringComparison.Ordinal);
+        Assert.Contains("SelectedEngineHeading", page, StringComparison.Ordinal);
+        Assert.Contains("currency-requirement-status-icon", row, StringComparison.Ordinal);
+        Assert.Contains("StatusIcon(row)", row, StringComparison.Ordinal);
+        Assert.Contains("StatusLabel(row)", row, StringComparison.Ordinal);
         Assert.Contains("currency-row-current", row, StringComparison.Ordinal);
         Assert.Contains("currency-row-warning", row, StringComparison.Ordinal);
         Assert.Contains("currency-row-expired", row, StringComparison.Ordinal);

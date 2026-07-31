@@ -1,5 +1,17 @@
 apply plugin: 'com.android.application'
 
+def productVersion = rootProject.file('../../version.txt').text.trim()
+def productVersionMatch = productVersion =~ /^(\d+)\.(\d+)\.(\d+)$/
+if (!productVersionMatch.matches()) {
+    throw new GradleException("version.txt must contain a numeric major.minor.patch version.")
+}
+
+def productVersionCode =
+    productVersionMatch[0][1].toInteger() * 1000000 +
+    productVersionMatch[0][2].toInteger() * 1000 +
+    productVersionMatch[0][3].toInteger()
+def developmentKeystorePath = System.getenv('ELECTRONIC_LOGBOOK_DEV_KEYSTORE')
+
 android {
     namespace "com.alphadelta.electroniclogbook"
     compileSdk rootProject.ext.compileSdkVersion
@@ -7,8 +19,8 @@ android {
         applicationId "com.alphadelta.electroniclogbook"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode productVersionCode
+        versionName productVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,14 +28,30 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (developmentKeystorePath) {
+            electronicLogbookDevelopment {
+                storeFile file(developmentKeystorePath)
+                storePassword System.getenv('ELECTRONIC_LOGBOOK_DEV_STORE_PASSWORD') ?: 'android'
+                keyAlias System.getenv('ELECTRONIC_LOGBOOK_DEV_KEY_ALIAS') ?: 'androiddebugkey'
+                keyPassword System.getenv('ELECTRONIC_LOGBOOK_DEV_KEY_PASSWORD') ?: 'android'
+            }
+        }
+    }
     buildTypes {
         debug {
             applicationIdSuffix ".dev"
+            if (developmentKeystorePath) {
+                signingConfig signingConfigs.electronicLogbookDevelopment
+            }
         }
         acceptance {
             initWith debug
             applicationIdSuffix ".acceptance"
             matchingFallbacks = ['debug']
+            if (developmentKeystorePath) {
+                signingConfig signingConfigs.electronicLogbookDevelopment
+            }
         }
         release {
             minifyEnabled false

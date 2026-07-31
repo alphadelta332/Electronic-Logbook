@@ -1,0 +1,116 @@
+<section class="dashboard-currency-overview" aria-label="VFR and IFR currency overview">
+    <div class="dashboard-currency-overview-strip" aria-label="VFR and IFR status totals">
+        <div class="dashboard-currency-overview-item dashboard-currency-overview-current">
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" aria-hidden="true" />
+            <strong>@PanelCount("current")</strong>
+            <span>Current</span>
+        </div>
+        <div class="dashboard-currency-overview-item dashboard-currency-overview-warning">
+            <MudIcon Icon="@Icons.Material.Filled.Schedule" aria-hidden="true" />
+            <strong>@PanelCount("warning")</strong>
+            <span>Action soon</span>
+        </div>
+        <div class="dashboard-currency-overview-item dashboard-currency-overview-expired">
+            <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" aria-hidden="true" />
+            <strong>@PanelCount("expired")</strong>
+            <span>Not current</span>
+        </div>
+    </div>
+
+    <div class="dashboard-currency-panel-list">
+        @foreach (var panel in Panels)
+        {
+            <details class="dashboard-currency-panel dashboard-currency-panel-@panel.StatusTone">
+                <summary>
+                    <span class="dashboard-currency-panel-icon" aria-hidden="true">
+                        <MudIcon Icon="@StatusIcon(panel.StatusTone)" />
+                    </span>
+                    <span class="dashboard-currency-panel-heading">
+                        <strong>@panel.Title</strong>
+                        <small>@PanelSummary(panel)</small>
+                    </span>
+                    <span class="dashboard-currency-panel-status">@panel.StatusLabel</span>
+                    <MudIcon Icon="@Icons.Material.Filled.ExpandMore"
+                             class="dashboard-currency-panel-chevron"
+                             aria-hidden="true" />
+                </summary>
+                <div class="dashboard-currency-panel-body">
+                    <p>@panel.ActionSentence</p>
+                    <ul class="dashboard-currency-rule-list" aria-label="@($"{panel.Title} dashboard checks")">
+                        @foreach (var rule in panel.Rules)
+                        {
+                            var ruleTone = RuleTone(rule);
+                            <li class="dashboard-currency-rule dashboard-currency-rule-@ruleTone">
+                                <MudIcon Icon="@StatusIcon(ruleTone)" aria-hidden="true" />
+                                <span>
+                                    <strong>@rule.Label</strong>
+                                    <small>@rule.Detail</small>
+                                </span>
+                                <em>@RuleStatus(ruleTone)</em>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </details>
+        }
+    </div>
+
+    <MudButton Href="/currency"
+               Variant="Variant.Outlined"
+               Color="Color.Primary"
+               EndIcon="@Icons.Material.Filled.ArrowForward"
+               class="dashboard-currency-open-all">
+        Review all currency details
+    </MudButton>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public MobileDashboardCurrencyPanel VfrPanel { get; set; } = default!;
+
+    [Parameter, EditorRequired]
+    public MobileDashboardCurrencyPanel IfrPanel { get; set; } = default!;
+
+    private IReadOnlyList<MobileDashboardCurrencyPanel> Panels => [VfrPanel, IfrPanel];
+
+    private int PanelCount(string tone) =>
+        Panels.Count(panel => string.Equals(panel.StatusTone, tone, StringComparison.Ordinal));
+
+    private static string PanelSummary(MobileDashboardCurrencyPanel panel)
+    {
+        var expired = panel.Rules.Count(rule => RuleTone(rule) == "expired");
+        if (expired > 0)
+        {
+            return expired == 1 ? "1 check not current" : $"{expired} checks not current";
+        }
+
+        var warning = panel.Rules.Count(rule => RuleTone(rule) == "warning");
+        if (warning > 0)
+        {
+            return warning == 1 ? "1 check needs attention" : $"{warning} checks need attention";
+        }
+
+        return "All dashboard checks current";
+    }
+
+    private static string RuleTone(MobileDashboardCurrencyRule rule) =>
+        !string.Equals(rule.Row.Status, "Current", StringComparison.Ordinal)
+            ? "expired"
+            : rule.Row.DaysRemaining <= rule.ComfortableDays
+                ? "warning"
+                : "current";
+
+    private static string RuleStatus(string tone) => tone switch
+    {
+        "current" => "Current",
+        "warning" => "Action soon",
+        _ => "Not current"
+    };
+
+    private static string StatusIcon(string tone) => tone switch
+    {
+        "current" => Icons.Material.Filled.CheckCircleOutline,
+        "warning" => Icons.Material.Filled.Schedule,
+        _ => Icons.Material.Filled.ErrorOutline
+    };
+}

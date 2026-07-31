@@ -10,6 +10,8 @@ $mobileRoot = Split-Path -Parent $scriptRoot
 $androidRoot = Join-Path $mobileRoot "android"
 $apkPath = Join-Path $androidRoot "app\build\outputs\apk\acceptance\app-acceptance.apk"
 
+. (Join-Path $scriptRoot "AndroidDevelopmentSigning.ps1")
+
 function Find-AndroidSdk {
     $candidates = @(
         $env:ANDROID_HOME,
@@ -46,6 +48,8 @@ $sdkRoot = Find-AndroidSdk
 $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_SDK_ROOT = $sdkRoot
 $adb = Join-Path $sdkRoot "platform-tools\adb.exe"
+$signingIdentity = Initialize-AndroidDevelopmentSigning
+Write-Host "Using durable development certificate $($signingIdentity.CertificateSha256)."
 
 if (-not $SkipSync) {
     Push-Location $mobileRoot
