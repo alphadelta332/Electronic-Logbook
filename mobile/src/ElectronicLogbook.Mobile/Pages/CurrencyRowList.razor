@@ -10,7 +10,13 @@
             <div class="currency-requirement-copy">
                 <strong>@row.Requirement</strong>
                 <span class="currency-requirement-status">@StatusLabel(row)</span>
-                <small>@SupportingDetail(row)</small>
+                <small class="currency-requirement-detail">
+                    <span>@DateDetail(row)</span>
+                    @foreach (var item in MobileCurrencyPeriodDetail.Items(row, ApproachPeriodTotals))
+                    {
+                        <span>@item</span>
+                    }
+                </small>
             </div>
         </li>
     }
@@ -19,6 +25,10 @@
 @code {
     [Parameter, EditorRequired]
     public IReadOnlyList<PortableLogbookCurrencyRow> Rows { get; set; } = [];
+
+    [Parameter, EditorRequired]
+    public MobileCurrencyApproachPeriodTotals ApproachPeriodTotals { get; set; } =
+        MobileCurrencyApproachPeriodTotals.Empty;
 
     private static string StatusClass(PortableLogbookCurrencyRow row) =>
         IsExpired(row)
@@ -37,15 +47,12 @@
     private static string StatusLabel(PortableLogbookCurrencyRow row) =>
         IsExpired(row) ? "Not current" : row.DaysRemaining <= 30 ? "Due soon" : "Current";
 
-    private static string SupportingDetail(PortableLogbookCurrencyRow row)
-    {
-        var dateDetail = row.CurrentOrRecentUntil is null
+    private static string DateDetail(PortableLogbookCurrencyRow row) =>
+        row.CurrentOrRecentUntil is null
             ? "No qualifying record"
             : IsExpired(row)
                 ? $"Expired {row.CurrentOrRecentUntilDisplay}"
                 : $"Until {row.CurrentOrRecentUntilDisplay}";
-        return $"{dateDetail} · {row.RelevantPeriodTotal} in period";
-    }
 
     private static bool IsExpired(PortableLogbookCurrencyRow row) =>
         string.Equals(row.Status, "Not Current", StringComparison.Ordinal);

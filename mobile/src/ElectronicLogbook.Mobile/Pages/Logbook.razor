@@ -97,76 +97,113 @@ else
         }
         else
         {
-            <section class="form-section">
+            <section class="form-section logbook-totals">
                 <div class="section-title-row">
                     <div>
                         <span class="eyebrow">Totals</span>
-                        <h2>Logged columns</h2>
+                        <h2>Flying totals</h2>
                     </div>
                 </div>
-                <h3>Single engine</h3>
-                <section class="totals-subgroup" aria-label="Single engine ICUS totals">
-                    <h4>ICUS</h4>
-                    <div class="totals-grid">
-                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.SeIcusDay))" />
-                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.SeIcusNight))" />
+                <p class="totals-intro">Workbook columns summed across @EntryCountLabel.</p>
+
+                <section class="totals-group" aria-labelledby="single-engine-totals-heading">
+                    <div class="totals-group-heading">
+                        <h3 id="single-engine-totals-heading">Single engine</h3>
+                    </div>
+                    <div class="totals-table" role="table" aria-label="Single engine flying totals">
+                        <div class="totals-table-row totals-table-header" role="row">
+                            <span role="columnheader">Capacity</span>
+                            <span role="columnheader">Day</span>
+                            <span role="columnheader">Night</span>
+                        </div>
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">ICUS</strong>
+                            <span role="cell">@FormatHoursTotal(entry => entry.SeIcusDay)</span>
+                            <span role="cell">@FormatHoursTotal(entry => entry.SeIcusNight)</span>
+                        </div>
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">Dual</strong>
+                            <span role="cell">@FormatHoursTotal(entry => entry.SeDualDay)</span>
+                            <span role="cell">@FormatHoursTotal(entry => entry.SeDualNight)</span>
+                        </div>
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">Command</strong>
+                            <span role="cell">@FormatHoursTotal(entry => entry.SeCommandDay)</span>
+                            <span role="cell">@FormatHoursTotal(entry => entry.SeCommandNight)</span>
+                        </div>
                     </div>
                 </section>
-                <section class="totals-subgroup" aria-label="Single engine dual totals">
-                    <h4>Dual</h4>
-                    <div class="totals-grid">
-                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.SeDualDay))" />
-                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.SeDualNight))" />
+
+                <section class="totals-group" aria-labelledby="multi-engine-totals-heading">
+                    <div class="totals-group-heading">
+                        <h3 id="multi-engine-totals-heading">Multi engine</h3>
+                    </div>
+                    <div class="totals-table" role="table" aria-label="Multi engine flying totals">
+                        <div class="totals-table-row totals-table-header" role="row">
+                            <span role="columnheader">Capacity</span>
+                            <span role="columnheader">Day</span>
+                            <span role="columnheader">Night</span>
+                        </div>
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">ICUS</strong>
+                            <span role="cell">@FormatHoursTotal(entry => entry.MeIcusDay)</span>
+                            <span role="cell">@FormatHoursTotal(entry => entry.MeIcusNight)</span>
+                        </div>
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">Dual</strong>
+                            <span role="cell">@FormatHoursTotal(entry => entry.MeDualDay)</span>
+                            <span role="cell">@FormatHoursTotal(entry => entry.MeDualNight)</span>
+                        </div>
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">Command</strong>
+                            <span role="cell">@FormatHoursTotal(entry => entry.MeCommandDay)</span>
+                            <span role="cell">@FormatHoursTotal(entry => entry.MeCommandNight)</span>
+                        </div>
                     </div>
                 </section>
-                <section class="totals-subgroup" aria-label="Single engine command totals">
-                    <h4>Command</h4>
-                    <div class="totals-grid">
-                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.SeCommandDay))" />
-                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.SeCommandNight))" />
+
+                <section class="totals-group" aria-labelledby="other-time-totals-heading">
+                    <div class="totals-group-heading">
+                        <h3 id="other-time-totals-heading">Other time</h3>
+                    </div>
+                    <div class="totals-pair-list">
+                        <div class="totals-pair-row">
+                            <strong>Copilot</strong>
+                            <span><small>Day</small> @FormatHoursTotal(entry => entry.CopilotDay)</span>
+                            <span><small>Night</small> @FormatHoursTotal(entry => entry.CopilotNight)</span>
+                        </div>
+                        <div class="totals-pair-row">
+                            <strong>Instrument</strong>
+                            <span><small>Actual</small> @FormatHoursTotal(entry => entry.IfrIf)</span>
+                            <span><small>Simulator</small> @FormatHoursTotal(entry => entry.IfrSim)</span>
+                        </div>
                     </div>
                 </section>
-                <h3>Multi engine</h3>
-                <section class="totals-subgroup" aria-label="Multi engine ICUS totals">
-                    <h4>ICUS</h4>
-                    <div class="totals-grid">
-                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.MeIcusDay))" />
-                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.MeIcusNight))" />
+
+                <section class="totals-group" aria-labelledby="movement-totals-heading">
+                    <div class="totals-group-heading">
+                        <h3 id="movement-totals-heading">Landings</h3>
+                    </div>
+                    <div class="totals-count-grid">
+                        <StatusMetric Label="Day" Value="@(FormatCountTotal(entry => entry.LandingsDay))" />
+                        <StatusMetric Label="Night" Value="@(FormatCountTotal(entry => entry.LandingsNight))" />
                     </div>
                 </section>
-                <section class="totals-subgroup" aria-label="Multi engine dual totals">
-                    <h4>Dual</h4>
-                    <div class="totals-grid">
-                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.MeDualDay))" />
-                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.MeDualNight))" />
+
+                <section class="totals-group" aria-labelledby="approach-totals-heading">
+                    <div class="totals-group-heading">
+                        <h3 id="approach-totals-heading">Approaches</h3>
+                    </div>
+                    <div class="totals-count-grid totals-approach-grid">
+                        <StatusMetric Label="ILS" Value="@(FormatCountTotal(entry => entry.Ils))" />
+                        <StatusMetric Label="VOR" Value="@(FormatCountTotal(entry => entry.Vor))" />
+                        <StatusMetric Label="RNP" Value="@(FormatCountTotal(entry => entry.Rnp))" />
+                        <StatusMetric Label="NDB" Value="@(FormatCountTotal(entry => entry.Ndb))" />
+                        <StatusMetric Label="DGA CDI" Value="@(FormatCountTotal(entry => entry.DgaCdi))" />
+                        <StatusMetric Label="DGA AZI" Value="@(FormatCountTotal(entry => entry.DgaAzi))" />
+                        <StatusMetric Label="Circling" Value="@(FormatCountTotal(entry => entry.Circling))" />
                     </div>
                 </section>
-                <section class="totals-subgroup" aria-label="Multi engine command totals">
-                    <h4>Command</h4>
-                    <div class="totals-grid">
-                        <StatusMetric Label="Day" Value="@(FormatHoursTotal(entry => entry.MeCommandDay))" />
-                        <StatusMetric Label="Night" Value="@(FormatHoursTotal(entry => entry.MeCommandNight))" />
-                    </div>
-                </section>
-                <h3>Other time</h3>
-                <div class="totals-grid">
-                    <StatusMetric Label="Copilot day" Value="@(FormatHoursTotal(entry => entry.CopilotDay))" Detail="hours" />
-                    <StatusMetric Label="Copilot night" Value="@(FormatHoursTotal(entry => entry.CopilotNight))" Detail="hours" />
-                    <StatusMetric Label="IFR actual" Value="@(FormatHoursTotal(entry => entry.IfrIf))" Detail="hours" />
-                    <StatusMetric Label="IFR sim" Value="@(FormatHoursTotal(entry => entry.IfrSim))" Detail="hours" />
-                    <StatusMetric Label="Day landings" Value="@(FormatCountTotal(entry => entry.LandingsDay))" Detail="count" />
-                    <StatusMetric Label="Night landings" Value="@(FormatCountTotal(entry => entry.LandingsNight))" Detail="count" />
-                </div>
-                <h3>Approach types</h3>
-                <div class="totals-grid">
-                    <StatusMetric Label="ILS" Value="@(FormatCountTotal(entry => entry.Ils))" Detail="approaches" />
-                    <StatusMetric Label="VOR" Value="@(FormatCountTotal(entry => entry.Vor))" Detail="approaches" />
-                    <StatusMetric Label="RNP" Value="@(FormatCountTotal(entry => entry.Rnp))" Detail="approaches" />
-                    <StatusMetric Label="NDB" Value="@(FormatCountTotal(entry => entry.Ndb))" Detail="approaches" />
-                    <StatusMetric Label="DGA CDI" Value="@(FormatCountTotal(entry => entry.DgaCdi))" Detail="approaches" />
-                    <StatusMetric Label="DGA AZI" Value="@(FormatCountTotal(entry => entry.DgaAzi))" Detail="approaches" />
-                    <StatusMetric Label="Circling" Value="@(FormatCountTotal(entry => entry.Circling))" Detail="approaches" />
-                </div>
                 @if (Session.DeletedEntriesV2.Count > 0)
                 {
                     <section class="history-panel">
@@ -244,6 +281,9 @@ else
 
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
+    private string EntryCountLabel => Session.CurrentEntriesV2.Count == 1
+        ? "1 active entry"
+        : $"{Session.CurrentEntriesV2.Count} active entries";
 
     private IReadOnlyList<PortableLogbookMaterializedEntryV2> FilteredEntries =>
         Session.CurrentEntriesV2

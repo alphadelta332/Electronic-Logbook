@@ -4,7 +4,10 @@
     <strong class="logbook-row-date" aria-label="Flight date">@FormatRowDate(Entry.Entry!.Date)</strong>
     <span class="logbook-row-route">
         <strong aria-label="Flight route">@Session.FormatRoute(Entry.Entry!)</strong>
-        <span>@EntryRemarks(Entry.Entry!)</span>
+        <span class="logbook-row-secondary">
+            <span class="logbook-row-remarks">@EntryRemarks(Entry.Entry!)</span>
+            <span class="logbook-row-aircraft">@EntryAircraftMeta(Entry.Entry!)</span>
+        </span>
     </span>
     <span class="logbook-row-hours">
         <strong aria-label="Calculated total time">@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(Entry.Entry!))</strong>
@@ -48,6 +51,16 @@
 
     private static string FormatRowDate(DateOnly? date) =>
         date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
+
+    private static string EntryAircraftMeta(PortableLogbookWorkbookEntry entry)
+    {
+        var type = entry.Type?.Trim() ?? string.Empty;
+        var identifier = !string.IsNullOrWhiteSpace(entry.FlightId)
+            ? entry.FlightId.Trim()
+            : entry.Reg?.Trim() ?? string.Empty;
+
+        return string.Join(" · ", new[] { type, identifier }.Where(value => value.Length > 0));
+    }
 
     private static string SimLabel(PortableLogbookWorkbookEntry entry) =>
         entry.IfrSim.GetValueOrDefault() > 0 ? "Sim" : string.Empty;

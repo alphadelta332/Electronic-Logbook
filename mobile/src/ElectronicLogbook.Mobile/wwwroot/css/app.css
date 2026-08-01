@@ -88,6 +88,16 @@ textarea {
     font: inherit;
 }
 
+:where(button:not(:disabled), a[href], summary, [role="button"]) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: color-mix(in srgb, var(--app-primary) 24%, transparent);
+}
+
+:where(button:not(:disabled), a[href], summary, [role="button"]):active {
+    filter: brightness(0.88);
+    opacity: 0.82;
+}
+
 .app-shell {
     display: flex;
     flex-direction: column;
@@ -146,7 +156,6 @@ textarea {
     -webkit-overflow-scrolling: touch;
 }
 
-.nav-progress,
 .view-progress {
     position: sticky;
     top: 8px;
@@ -162,7 +171,6 @@ textarea {
     box-shadow: var(--app-shadow);
 }
 
-.nav-progress span,
 .view-progress span {
     font-size: 12px;
     font-weight: 800;
@@ -185,7 +193,66 @@ textarea {
     backdrop-filter: blur(16px);
 }
 
+.bottom-nav::before {
+    content: "";
+    position: absolute;
+    top: 6px;
+    left: 10px;
+    width: calc((100% - 36px) / 5);
+    height: 52px;
+    border-radius: 999px;
+    background: var(--app-primary);
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--app-primary) 26%, transparent);
+    opacity: 0;
+    transform: translateX(0);
+    transition: opacity 120ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform;
+}
+
+.bottom-nav:has(> a.active)::before,
+.bottom-nav:has(> a.nav-pending-link)::before {
+    opacity: 1;
+}
+
+.bottom-nav:has(> a:nth-of-type(2).active)::before {
+    transform: translateX(calc(100% + 4px));
+}
+
+.bottom-nav:has(> a:nth-of-type(3).active)::before {
+    transform: translateX(calc(200% + 8px));
+}
+
+.bottom-nav:has(> a:nth-of-type(4).active)::before {
+    transform: translateX(calc(300% + 12px));
+}
+
+.bottom-nav:has(> a:nth-of-type(5).active)::before {
+    transform: translateX(calc(400% + 16px));
+}
+
+.bottom-nav:has(> a:nth-of-type(1).nav-pending-link)::before {
+    transform: translateX(0);
+}
+
+.bottom-nav:has(> a:nth-of-type(2).nav-pending-link)::before {
+    transform: translateX(calc(100% + 4px));
+}
+
+.bottom-nav:has(> a:nth-of-type(3).nav-pending-link)::before {
+    transform: translateX(calc(200% + 8px));
+}
+
+.bottom-nav:has(> a:nth-of-type(4).nav-pending-link)::before {
+    transform: translateX(calc(300% + 12px));
+}
+
+.bottom-nav:has(> a:nth-of-type(5).nav-pending-link)::before {
+    transform: translateX(calc(400% + 16px));
+}
+
 .bottom-nav a {
+    position: relative;
+    z-index: 1;
     display: grid;
     place-items: center;
     gap: 2px;
@@ -196,17 +263,21 @@ textarea {
     font-size: 11px;
     font-weight: 700;
     text-decoration: none;
+    transition: color 130ms ease;
 }
 
 .bottom-nav a.active {
-    background: var(--app-primary);
+    background: transparent;
     color: var(--app-primary-text);
 }
 
 .bottom-nav a.nav-pending-link {
-    background: color-mix(in srgb, var(--app-primary) 18%, var(--app-surface));
-    color: var(--app-primary);
-    transform: translateY(1px);
+    background: transparent;
+    color: var(--app-primary-text);
+}
+
+.bottom-nav:has(> a.nav-pending-link) > a.active:not(.nav-pending-link) {
+    color: var(--app-text-muted);
 }
 
 .bottom-nav .bottom-nav-add {
@@ -229,7 +300,17 @@ textarea {
 
 .bottom-nav .bottom-nav-add.active {
     background: transparent;
-    color: var(--app-primary);
+    color: var(--app-primary-text);
+}
+
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .dashboard-page,
@@ -654,15 +735,9 @@ a.status-metric:active {
     margin-bottom: 4px;
 }
 
-.currency-page-header p,
-.currency-override-section p {
+.currency-page-header p {
     margin: 0;
     color: var(--app-text-muted);
-}
-
-.currency-page-header .mud-button-root {
-    flex: 0 0 auto;
-    margin-top: 2px;
 }
 
 .currency-overview {
@@ -753,6 +828,14 @@ a.status-metric:active {
 .currency-engine-tab:focus-visible {
     outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
     outline-offset: 2px;
+}
+
+.currency-licence-engine-switch {
+    margin: -2px 14px 10px 52px;
+}
+
+.currency-licence-engine-switch .currency-engine-tab {
+    min-height: 42px;
 }
 
 .currency-category-list {
@@ -851,9 +934,11 @@ a.status-metric:active {
     place-items: center;
     width: 38px;
     height: 38px;
-    border: 2px solid var(--currency-row-accent);
-    border-radius: 50%;
     color: var(--currency-row-accent);
+}
+
+.currency-requirement-status-icon .mud-icon-root {
+    font-size: 38px;
 }
 
 .currency-requirement-copy {
@@ -878,19 +963,77 @@ a.status-metric:active {
     font-size: 13px;
 }
 
-.currency-override-section {
-    display: grid;
-    gap: 14px;
-    border: 1px solid var(--app-border);
-    border-radius: 8px;
-    padding: 14px;
-    background: var(--app-surface-alt);
+.currency-requirement-detail {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 18px;
+    row-gap: 2px;
+}
+
+.currency-requirement-detail span {
+    white-space: nowrap;
 }
 
 .logbook-entry-row {
     grid-template-columns: minmax(92px, 0.95fr) minmax(104px, 1.2fr) minmax(54px, 0.6fr);
     color: var(--app-text);
     text-decoration: none;
+}
+
+.logbook-page .logbook-entry-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "date hours"
+        "route route";
+    row-gap: 10px;
+    min-height: 94px;
+    padding: 14px;
+}
+
+.logbook-page .logbook-row-date {
+    grid-area: date;
+    align-self: start;
+    color: var(--app-text-muted);
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.logbook-page .logbook-row-route {
+    grid-area: route;
+    gap: 4px;
+    padding-top: 10px;
+    border-top: 1px solid var(--app-border);
+    text-align: left;
+}
+
+.logbook-page .logbook-row-route > strong {
+    font-size: 19px;
+}
+
+.logbook-page .logbook-row-route > span {
+    font-size: 14px;
+    line-height: 1.35;
+}
+
+.logbook-page .logbook-row-secondary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 12px;
+}
+
+.logbook-page .logbook-row-aircraft {
+    justify-self: end;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-weight: 750;
+    text-align: right;
+}
+
+.logbook-page .logbook-row-hours {
+    grid-area: hours;
 }
 
 .logbook-row-date,
@@ -1121,6 +1264,11 @@ a.status-metric:active {
     .dashboard-currency-panel-chevron {
         transition: none;
     }
+
+    .bottom-nav::before,
+    .bottom-nav a {
+        transition: none;
+    }
 }
 
 .segmented-control {
@@ -1225,45 +1373,227 @@ a.status-metric:active {
     accent-color: var(--app-primary);
 }
 
-.totals-grid,
 .detail-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
 }
 
-.totals-subgroup {
+.record-field-groups {
     display: grid;
-    gap: 8px;
+    gap: 12px;
 }
 
-.totals-subgroup h4 {
-    margin: 2px 0 -2px;
+.page-back-link {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    gap: 6px;
+    min-height: 40px;
+    margin: -4px 0 -6px;
+    padding: 6px 8px 6px 2px;
+    border-radius: 8px;
+    color: var(--app-primary);
+    font-size: 14px;
+    font-weight: 800;
+    text-decoration: none;
+}
+
+.page-back-link:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
+    outline-offset: 2px;
+}
+
+.record-field-group {
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    background: var(--app-surface);
+}
+
+.record-field-group-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--app-border);
+    background: var(--app-surface-alt);
+    color: var(--app-text);
+}
+
+.record-field-group-heading .mud-icon-root {
+    color: var(--app-primary);
+}
+
+.record-field-group-heading h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.record-field-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin: 0;
+}
+
+.record-field {
+    display: grid;
+    min-width: 0;
+    gap: 3px;
+    padding: 11px 14px;
+    border-bottom: 1px solid var(--app-border);
+}
+
+.record-field:nth-child(odd) {
+    border-right: 1px solid var(--app-border);
+}
+
+.record-field dt {
     color: var(--app-text-muted);
-    font-size: 12px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.025em;
+    text-transform: uppercase;
+}
+
+.record-field dd {
+    min-width: 0;
+    margin: 0;
+    color: var(--app-text);
+    font-size: 15px;
+    font-weight: 750;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.record-field-empty dd {
+    color: var(--app-text-muted);
+    font-weight: 600;
+}
+
+.logbook-totals {
+    gap: 12px;
+}
+
+.totals-intro {
+    margin: -6px 0 2px;
+    color: var(--app-text-muted);
+    font-size: 13px;
+}
+
+.totals-group {
+    display: grid;
+    gap: 10px;
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    background: var(--app-surface-alt);
+}
+
+.totals-group-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px 0;
+}
+
+.totals-group-heading h3 {
+    margin: 0;
+    font-size: 16px;
+}
+
+.totals-table {
+    display: grid;
+    background: var(--app-surface);
+}
+
+.totals-table-row {
+    display: grid;
+    grid-template-columns: minmax(92px, 1.4fr) repeat(2, minmax(64px, 1fr));
+    align-items: center;
+    min-height: 44px;
+    padding: 0 14px;
+    border-top: 1px solid var(--app-border);
+}
+
+.totals-table-row > :not(:first-child) {
+    text-align: right;
+}
+
+.totals-table-row > span {
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+}
+
+.totals-table-header {
+    min-height: 32px;
+    color: var(--app-text-muted);
+    font-size: 11px;
     font-weight: 800;
     text-transform: uppercase;
 }
 
-.totals-grid .status-metric {
+.totals-pair-list {
+    display: grid;
+    background: var(--app-surface);
+}
+
+.totals-pair-row {
+    display: grid;
+    grid-template-columns: minmax(88px, 1.15fr) repeat(2, minmax(76px, 1fr));
+    align-items: center;
+    gap: 8px;
+    min-height: 52px;
+    padding: 8px 14px;
+    border-top: 1px solid var(--app-border);
+}
+
+.totals-pair-row > span {
+    display: grid;
+    justify-items: end;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.totals-pair-row small {
+    color: var(--app-text-muted);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.totals-count-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0 10px 10px;
+}
+
+.totals-count-grid .status-metric {
     grid-template-columns: minmax(0, 1fr) auto;
     align-items: baseline;
     padding: 10px 12px;
 }
 
-.totals-grid .status-metric span {
-    font-size: 13px;
+.totals-count-grid .status-metric span {
+    font-size: 12px;
     text-transform: none;
 }
 
-.totals-grid .status-metric strong {
+.totals-count-grid .status-metric strong {
     justify-self: end;
-    font-size: 22px;
+    font-size: 20px;
     text-align: right;
 }
 
-.totals-grid .status-metric small {
-    grid-column: 1 / -1;
+.totals-approach-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.totals-approach-grid .status-metric:last-child {
+    grid-column: span 2;
 }
 
 .detail-hero {
@@ -1340,9 +1670,16 @@ a.status-metric:active {
     .numeric-grid,
     .exchange-summary,
     .persistent-action-bar,
-    .totals-grid,
     .detail-grid {
         grid-template-columns: 1fr;
+    }
+
+    .totals-approach-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .totals-approach-grid .status-metric:last-child {
+        grid-column: auto;
     }
 
     .flight-row:not(.logbook-entry-row),
@@ -1352,6 +1689,18 @@ a.status-metric:active {
 
     .logbook-entry-row {
         grid-template-columns: minmax(52px, 0.8fr) minmax(92px, 1.3fr) minmax(48px, 0.7fr);
+    }
+
+    .logbook-page .logbook-entry-row {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .record-field-list {
+        grid-template-columns: 1fr;
+    }
+
+    .record-field:nth-child(odd) {
+        border-right: 0;
     }
 
     .hero-panel .mud-button-root,

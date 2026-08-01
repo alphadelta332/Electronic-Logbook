@@ -18,17 +18,10 @@
     </header>
 
     <main class="app-main">
-        @if (IsNavigationPending)
-        {
-            <section class="nav-progress" role="status" aria-live="polite">
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-                <span>Opening @PendingNavigationLabel</span>
-            </section>
-        }
         @Body
     </main>
 
-    <nav class="bottom-nav" aria-label="Primary">
+    <nav class="bottom-nav" aria-label="Primary" aria-busy="@IsNavigationPending">
         <NavLink href="/" Match="NavLinkMatch.All" aria-label="Dashboard" class="@NavPendingClass(DashboardNavigationLabel)" @onclick="ShowDashboardNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
             <span>Dashboard</span>
@@ -51,6 +44,10 @@
             <MudIcon Icon="@Icons.Material.Filled.Settings" />
             <span>Settings</span>
         </NavLink>
+        @if (IsNavigationPending)
+        {
+            <span class="visually-hidden" role="status" aria-live="polite">Opening @PendingNavigationLabel</span>
+        }
     </nav>
 </div>
 
@@ -63,6 +60,7 @@
     private const string AddNavigationClass = "bottom-nav-add";
 
     private readonly MudTheme Theme = MobileTheme.Create();
+    private CancellationTokenSource? navigationFeedbackCancellation;
     private bool IsNavigationPending { get; set; }
     private string PendingNavigationLabel { get; set; } = "page";
 
@@ -75,6 +73,8 @@
 
     public void Dispose()
     {
+        navigationFeedbackCancellation?.Cancel();
+        navigationFeedbackCancellation?.Dispose();
         UiPreferences.Changed -= OnUiPreferencesChanged;
         Navigation.LocationChanged -= OnLocationChanged;
     }
@@ -119,7 +119,28 @@
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
     {
-        IsNavigationPending = false;
-        _ = InvokeAsync(StateHasChanged);
+        if (!IsNavigationPending)
+        {
+            return;
+        }
+
+        navigationFeedbackCancellation?.Cancel();
+        navigationFeedbackCancellation?.Dispose();
+        navigationFeedbackCancellation = new CancellationTokenSource();
+        _ = CompleteNavigationFeedbackAsync(navigationFeedbackCancellation.Token);
+    }
+
+    private async Task CompleteNavigationFeedbackAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(250, cancellationToken);
+            IsNavigationPending = false;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 }

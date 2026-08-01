@@ -31,6 +31,8 @@ const colorSchemes = ["light", "dark"];
 const routes = [
     { name: "dashboard", path: "/", readySelector: "main .dashboard-page" },
     { name: "currency", path: "/currency", readySelector: "main .currency-page" },
+    { name: "logbook-entries", path: "/flights?view=entries", readySelector: "main .logbook-page" },
+    { name: "logbook-totals", path: "/flights?view=totals", readySelector: "main .logbook-totals" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" }
 ];
 
@@ -132,11 +134,50 @@ try {
                             throw new Error(`Dashboard VFR panel did not collapse for ${profile.name} ${colorScheme}`);
                         }
                     } else if (route.name === "currency") {
+                        const currencyOverview = page.locator(".currency-overview");
+                        const categoryPanels = page.locator("details.currency-category-panel");
+                        const licencePanel = categoryPanels.filter({ hasText: "Licence" }).first();
+                        const licenceSummary = licencePanel.locator("summary");
+                        const engineSwitch = licencePanel.locator(".currency-licence-engine-switch");
+                        const overviewBefore = await currencyOverview.innerText();
+                        const nonLicenceBefore = await categoryPanels.evaluateAll(panels =>
+                            panels.slice(1).map(panel => panel.textContent));
+
+                        if (!await engineSwitch.isVisible()) {
+                            throw new Error(`Currency engine selector was not visible in the expanded Licence panel for ${profile.name} ${colorScheme}`);
+                        }
+                        await licenceSummary.click();
+                        if (await licencePanel.evaluate(panel => panel.open) || await engineSwitch.isVisible()) {
+                            throw new Error(`Currency engine selector remained visible when Licence was collapsed for ${profile.name} ${colorScheme}`);
+                        }
+                        await licenceSummary.click();
+                        if (!await licencePanel.evaluate(panel => panel.open) || !await engineSwitch.isVisible()) {
+                            throw new Error(`Currency engine selector did not return when Licence was expanded for ${profile.name} ${colorScheme}`);
+                        }
+
                         const multiEngine = page.getByRole("button", { name: "Multi engine" });
-                        await multiEngine.click();
+                        await multiEngine.hover();
+                        await page.mouse.down();
+                        const pressedHeaderStyle = await licenceSummary.evaluate(summary => {
+                            const style = getComputedStyle(summary);
+                            return { filter: style.filter, opacity: style.opacity };
+                        });
+                        await page.mouse.up();
+                        if (pressedHeaderStyle.filter !== "none" || pressedHeaderStyle.opacity !== "1") {
+                            throw new Error(`Currency engine selector activated the Licence header styling for ${profile.name} ${colorScheme}`);
+                        }
                         await page.waitForTimeout(100);
-                        if (await page.locator("details.currency-category-panel").count() !== 1) {
-                            throw new Error(`Currency Multi engine switch did not activate for ${profile.name} ${colorScheme}`);
+                        if (await categoryPanels.count() !== 4) {
+                            throw new Error(`Currency Multi engine selection hid non-Licence categories for ${profile.name} ${colorScheme}`);
+                        }
+                        if (await currencyOverview.innerText() !== overviewBefore) {
+                            throw new Error(`Currency Multi engine selection changed the overview for ${profile.name} ${colorScheme}`);
+                        }
+
+                        const nonLicenceAfter = await categoryPanels.evaluateAll(panels =>
+                            panels.slice(1).map(panel => panel.textContent));
+                        if (JSON.stringify(nonLicenceAfter) !== JSON.stringify(nonLicenceBefore)) {
+                            throw new Error(`Currency Multi engine selection changed a non-Licence category for ${profile.name} ${colorScheme}`);
                         }
 
                         const singleEngine = page.getByRole("button", { name: "Single engine" });
@@ -152,10 +193,6 @@ try {
                         if (!await passengerPanel.evaluate(panel => panel.open)) {
                             throw new Error(`Currency category did not expand for ${profile.name} ${colorScheme}`);
                         }
-
-                        const overrideButton = page.getByRole("button", { name: "Override dates" });
-                        await overrideButton.click();
-                        await page.locator(".currency-override-section").waitFor({ state: "visible" });
                     }
 
                     await page.waitForTimeout(50);

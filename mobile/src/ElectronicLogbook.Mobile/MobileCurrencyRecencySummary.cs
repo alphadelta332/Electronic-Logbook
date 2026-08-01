@@ -10,11 +10,13 @@ public sealed class MobileCurrencyRecencySummary
     private MobileCurrencyRecencySummary(
         DateOnly today,
         IReadOnlyList<PortableLogbookCurrencyRow> singleEngineRows,
-        IReadOnlyList<PortableLogbookCurrencyRow> multiEngineRows)
+        IReadOnlyList<PortableLogbookCurrencyRow> multiEngineRows,
+        MobileCurrencyApproachPeriodTotals approachPeriodTotals)
     {
         Today = today;
         SingleEngineRows = singleEngineRows;
         MultiEngineRows = multiEngineRows;
+        ApproachPeriodTotals = approachPeriodTotals;
     }
 
     public DateOnly Today { get; }
@@ -22,6 +24,8 @@ public sealed class MobileCurrencyRecencySummary
     public IReadOnlyList<PortableLogbookCurrencyRow> SingleEngineRows { get; }
 
     public IReadOnlyList<PortableLogbookCurrencyRow> MultiEngineRows { get; }
+
+    public MobileCurrencyApproachPeriodTotals ApproachPeriodTotals { get; }
 
     public IReadOnlyList<PortableLogbookCurrencyRow> CurrentlyExpiredSingleEngineRows =>
         SingleEngineRows.Where(row => string.Equals(row.Status, "Not Current", StringComparison.Ordinal)).ToArray();
@@ -73,6 +77,10 @@ public sealed class MobileCurrencyRecencySummary
             PortableLogbookCurrencyRows.CreateMultiEngineInstrumentProficiencyCheck(entryArray, overrideDates, today)
         };
 
-        return new MobileCurrencyRecencySummary(today, singleEngineRows, multiEngineRows);
+        return new MobileCurrencyRecencySummary(
+            today,
+            singleEngineRows,
+            multiEngineRows,
+            MobileCurrencyApproachPeriodTotals.Create(entryArray, today));
     }
 }

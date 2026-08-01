@@ -43,26 +43,42 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
-    public async Task CurrencyOverrideDatesPersistAcrossWorkbookFaithfulReload()
+    public async Task CurrencyRecencySummaryIsSharedUntilTheDateOrDocumentChanges()
     {
         var jsRuntime = new JourneyJsRuntime();
         var session = CreateSession(jsRuntime);
-        var overrides = new PortableLogbookCurrencyOverrideDates(
-            new DateOnly(2026, 7, 1),
-            new DateOnly(2026, 7, 2),
-            new DateOnly(2026, 7, 3));
+        var today = new DateOnly(2026, 8, 1);
 
         await session.EnsureLoadedWorkbookAsync();
-        await session.SaveCurrencyOverrideDatesAsync(overrides);
 
-        Assert.Equal(overrides, session.DocumentV2.CurrencyOverrideDates);
-        Assert.Equal("Currency override dates saved.", session.LastActionMessage);
-        Assert.Equal(1, jsRuntime.SaveCount);
+        var first = session.GetCurrencyRecencySummary(today);
+        Assert.Same(first, session.GetCurrencyRecencySummary(today));
 
-        var reloaded = CreateSession(jsRuntime);
-        await reloaded.EnsureLoadedWorkbookAsync();
+        var nextDay = session.GetCurrencyRecencySummary(today.AddDays(1));
+        Assert.NotSame(first, nextDay);
+        Assert.Same(nextDay, session.GetCurrencyRecencySummary(today.AddDays(1)));
 
-        Assert.Equal(overrides, reloaded.DocumentV2.CurrencyOverrideDates);
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.NotSame(nextDay, session.GetCurrencyRecencySummary(today.AddDays(1)));
+    }
+
+    [Fact]
+    public async Task WorkbookEntryDetailsUseDashForBlankValuesAndSeparateChecksFromCustomFields()
+    {
+        var session = CreateSession(new JourneyJsRuntime());
+        await session.EnsureLoadedWorkbookAsync();
+
+        var details = session.EntryDetails(session.WorkbookDraft.ToEntry(session.WorkbookCustomFields)).ToList();
+
+        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "Flight ID").Value);
+        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "SE ICUS day").Value);
+        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "Landings day").Value);
+        Assert.All(details.Where(detail => detail.Label is "FR" or "IPC" or "OPC"),
+            detail => Assert.Equal(EntryDetailGroup.Checks, detail.Group));
+        Assert.All(details.Where(detail => detail.Group == EntryDetailGroup.CustomFields),
+            detail => Assert.Equal("-", detail.Value));
     }
 
     [Fact]

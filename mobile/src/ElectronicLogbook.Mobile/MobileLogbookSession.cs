@@ -32,6 +32,8 @@ public sealed class MobileLogbookSession(
     private PortableLogbookMergeResultV2? mergeResultV2Cache;
     private IReadOnlyList<PortableLogbookMaterializedEntryV2>? currentEntriesV2Cache;
     private IReadOnlyList<PortableLogbookMaterializedEntryV2>? deletedEntriesV2Cache;
+    private MobileCurrencyRecencySummary? currencyRecencySummaryCache;
+    private DateOnly? currencyRecencySummaryDate;
 
     public PortableLogbookDocumentV2 DocumentV2
     {
@@ -107,6 +109,20 @@ public sealed class MobileLogbookSession(
             .Where(entry => !entry.IsDeleted && entry.Entry is not null)
             .OrderByDescending(entry => entry.Entry!.Date)
             .ToArray();
+
+    public MobileCurrencyRecencySummary GetCurrencyRecencySummary(DateOnly today)
+    {
+        if (currencyRecencySummaryCache is null || currencyRecencySummaryDate != today)
+        {
+            currencyRecencySummaryCache = MobileCurrencyRecencySummary.Create(
+                CurrentEntriesV2.Select(materialized => materialized.Entry!),
+                DocumentV2.CurrencyOverrideDates,
+                today);
+            currencyRecencySummaryDate = today;
+        }
+
+        return currencyRecencySummaryCache;
+    }
 
     public PortableLogbookExchangeStatusSnapshot ExchangeStatus =>
         PortableLogbookExchangeStatus.Create(
@@ -290,19 +306,6 @@ public sealed class MobileLogbookSession(
         await SaveStateV2Async();
         SetLastActionMessage(EditingEntryId is null ? "Flight added." : "Correction saved.");
         ResetWorkbookDraft();
-    }
-
-    public async Task SaveCurrencyOverrideDatesAsync(PortableLogbookCurrencyOverrideDates overrideDates)
-    {
-        if (IsStorageBlocked)
-        {
-            return;
-        }
-
-        ArgumentNullException.ThrowIfNull(overrideDates);
-        DocumentV2 = MobileLogbookDocument.SetCurrencyOverrideDates(DocumentV2, overrideDates);
-        await SaveStateV2Async();
-        SetLastActionMessage("Currency override dates saved.");
     }
 
     public void ResetDraft()
@@ -593,6 +596,8 @@ public sealed class MobileLogbookSession(
         mergeResultV2Cache = null;
         currentEntriesV2Cache = null;
         deletedEntriesV2Cache = null;
+        currencyRecencySummaryCache = null;
+        currencyRecencySummaryDate = null;
     }
 
     public PortableLogbookMaterializedEntry? FindCurrentEntry(string? entryId)
@@ -806,49 +811,49 @@ public sealed class MobileLogbookSession(
 
     public IEnumerable<EntryDetail> EntryDetails(PortableLogbookWorkbookEntry entry)
     {
-        yield return new("Date", FormatDate(entry.Date));
-        yield return new("Type", FormatText(entry.Type));
-        yield return new("Reg", FormatText(entry.Reg));
-        yield return new("Flight ID", FormatText(entry.FlightId));
-        yield return new("PIC", FormatText(entry.Pic));
-        yield return new("Other pilot or crew", FormatText(entry.OtherPilotOrCrew));
-        yield return new("From", FormatText(entry.From));
-        yield return new("To", FormatText(entry.To));
-        yield return new("Via", FormatText(entry.Via));
-        yield return new("Remarks", FormatText(entry.Remarks));
-        yield return new("FR", FormatFlag(entry.FlightReview));
-        yield return new("IPC", FormatFlag(entry.InstrumentProficiencyCheck));
-        yield return new("OPC", FormatFlag(entry.OperatorProficiencyCheck));
-        yield return new("SE ICUS day", FormatNullableHours(entry.SeIcusDay));
-        yield return new("SE ICUS night", FormatNullableHours(entry.SeIcusNight));
-        yield return new("SE dual day", FormatNullableHours(entry.SeDualDay));
-        yield return new("SE dual night", FormatNullableHours(entry.SeDualNight));
-        yield return new("SE command day", FormatNullableHours(entry.SeCommandDay));
-        yield return new("SE command night", FormatNullableHours(entry.SeCommandNight));
-        yield return new("ME ICUS day", FormatNullableHours(entry.MeIcusDay));
-        yield return new("ME ICUS night", FormatNullableHours(entry.MeIcusNight));
-        yield return new("ME dual day", FormatNullableHours(entry.MeDualDay));
-        yield return new("ME dual night", FormatNullableHours(entry.MeDualNight));
-        yield return new("ME command day", FormatNullableHours(entry.MeCommandDay));
-        yield return new("ME command night", FormatNullableHours(entry.MeCommandNight));
-        yield return new("Copilot day", FormatNullableHours(entry.CopilotDay));
-        yield return new("Copilot night", FormatNullableHours(entry.CopilotNight));
-        yield return new("IFR IF", FormatNullableHours(entry.IfrIf));
-        yield return new("IFR sim", FormatNullableHours(entry.IfrSim));
-        yield return new("Landings day", FormatNullableCount(entry.LandingsDay));
-        yield return new("Landings night", FormatNullableCount(entry.LandingsNight));
-        yield return new("ILS", FormatNullableCount(entry.Ils));
-        yield return new("VOR", FormatNullableCount(entry.Vor));
-        yield return new("RNP", FormatNullableCount(entry.Rnp));
-        yield return new("NDB", FormatNullableCount(entry.Ndb));
-        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi));
-        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi));
-        yield return new("Circling", FormatNullableCount(entry.Circling));
+        yield return new("Date", FormatDate(entry.Date), EntryDetailGroup.Flight);
+        yield return new("Type", FormatText(entry.Type), EntryDetailGroup.Flight);
+        yield return new("Reg", FormatText(entry.Reg), EntryDetailGroup.Flight);
+        yield return new("Flight ID", FormatText(entry.FlightId), EntryDetailGroup.Flight);
+        yield return new("PIC", FormatText(entry.Pic), EntryDetailGroup.CrewAndRoute);
+        yield return new("Other pilot or crew", FormatText(entry.OtherPilotOrCrew), EntryDetailGroup.CrewAndRoute);
+        yield return new("From", FormatText(entry.From), EntryDetailGroup.CrewAndRoute);
+        yield return new("To", FormatText(entry.To), EntryDetailGroup.CrewAndRoute);
+        yield return new("Via", FormatText(entry.Via), EntryDetailGroup.CrewAndRoute);
+        yield return new("Remarks", FormatText(entry.Remarks), EntryDetailGroup.CrewAndRoute);
+        yield return new("FR", FormatFlag(entry.FlightReview), EntryDetailGroup.Checks);
+        yield return new("IPC", FormatFlag(entry.InstrumentProficiencyCheck), EntryDetailGroup.Checks);
+        yield return new("OPC", FormatFlag(entry.OperatorProficiencyCheck), EntryDetailGroup.Checks);
+        yield return new("SE ICUS day", FormatNullableHours(entry.SeIcusDay), EntryDetailGroup.LoggedTime);
+        yield return new("SE ICUS night", FormatNullableHours(entry.SeIcusNight), EntryDetailGroup.LoggedTime);
+        yield return new("SE dual day", FormatNullableHours(entry.SeDualDay), EntryDetailGroup.LoggedTime);
+        yield return new("SE dual night", FormatNullableHours(entry.SeDualNight), EntryDetailGroup.LoggedTime);
+        yield return new("SE command day", FormatNullableHours(entry.SeCommandDay), EntryDetailGroup.LoggedTime);
+        yield return new("SE command night", FormatNullableHours(entry.SeCommandNight), EntryDetailGroup.LoggedTime);
+        yield return new("ME ICUS day", FormatNullableHours(entry.MeIcusDay), EntryDetailGroup.LoggedTime);
+        yield return new("ME ICUS night", FormatNullableHours(entry.MeIcusNight), EntryDetailGroup.LoggedTime);
+        yield return new("ME dual day", FormatNullableHours(entry.MeDualDay), EntryDetailGroup.LoggedTime);
+        yield return new("ME dual night", FormatNullableHours(entry.MeDualNight), EntryDetailGroup.LoggedTime);
+        yield return new("ME command day", FormatNullableHours(entry.MeCommandDay), EntryDetailGroup.LoggedTime);
+        yield return new("ME command night", FormatNullableHours(entry.MeCommandNight), EntryDetailGroup.LoggedTime);
+        yield return new("Copilot day", FormatNullableHours(entry.CopilotDay), EntryDetailGroup.LoggedTime);
+        yield return new("Copilot night", FormatNullableHours(entry.CopilotNight), EntryDetailGroup.LoggedTime);
+        yield return new("IFR IF", FormatNullableHours(entry.IfrIf), EntryDetailGroup.LoggedTime);
+        yield return new("IFR sim", FormatNullableHours(entry.IfrSim), EntryDetailGroup.LoggedTime);
+        yield return new("Landings day", FormatNullableCount(entry.LandingsDay), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("Landings night", FormatNullableCount(entry.LandingsNight), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("ILS", FormatNullableCount(entry.Ils), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("VOR", FormatNullableCount(entry.Vor), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("RNP", FormatNullableCount(entry.Rnp), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("NDB", FormatNullableCount(entry.Ndb), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("Circling", FormatNullableCount(entry.Circling), EntryDetailGroup.LandingsAndApproaches);
 
         foreach (var field in WorkbookCustomFields)
         {
             entry.CustomFields.TryGetValue(field.Id, out var customValue);
-            yield return new(field.Label, FormatText(customValue));
+            yield return new(field.Label, FormatText(customValue), EntryDetailGroup.CustomFields);
         }
     }
 
@@ -950,13 +955,15 @@ public sealed class MobileLogbookSession(
         };
 
     private static string FormatText(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "Blank" : value.Trim();
+        string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
 
     private static string FormatNullableHours(decimal? hours) =>
-        hours is null ? "0.0" : FormatHours(hours.Value);
+        hours.GetValueOrDefault() == 0 ? "-" : FormatHours(hours!.Value);
 
     private static string FormatNullableCount(int? count) =>
-        count?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "0";
+        count.GetValueOrDefault() == 0
+            ? "-"
+            : count!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     private static string FormatFlag(bool? value) =>
         value == true ? "Yes" : "No";
@@ -990,7 +997,21 @@ public sealed class MobileLogbookSession(
         entry.Circling.GetValueOrDefault();
 }
 
-public sealed record EntryDetail(string Label, string Value);
+public sealed record EntryDetail(
+    string Label,
+    string Value,
+    EntryDetailGroup Group = EntryDetailGroup.Record);
+
+public enum EntryDetailGroup
+{
+    Record,
+    Flight,
+    CrewAndRoute,
+    Checks,
+    LoggedTime,
+    CustomFields,
+    LandingsAndApproaches
+}
 
 public sealed class EntryDraft
 {

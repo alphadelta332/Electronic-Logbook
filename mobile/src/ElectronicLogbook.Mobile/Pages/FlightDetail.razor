@@ -16,6 +16,10 @@ else if (CurrentEntry?.Entry is null)
     @if (History?.IsDeleted == true)
     {
         <section class="flight-detail-page">
+            <NavLink class="page-back-link" href="/flights?view=entries">
+                <MudIcon Icon="@Icons.Material.Filled.ArrowBack" />
+                <span>Back to Logbook</span>
+            </NavLink>
             <header class="entry-header">
                 <div>
                     <span class="eyebrow">Deleted entry</span>
@@ -67,6 +71,10 @@ else if (CurrentEntry?.Entry is null)
 else
 {
     <section class="flight-detail-page">
+        <NavLink class="page-back-link" href="/flights?view=entries">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowBack" />
+            <span>Back to Logbook</span>
+        </NavLink>
         <header class="entry-header">
             <div>
                 <span class="eyebrow">Entry detail</span>
@@ -94,13 +102,24 @@ else
                     Edit entry
                 </MudButton>
             </div>
-            <div class="entry-details detail-grid" aria-label="Flight entry details">
-                @foreach (var detail in Session.EntryDetails(CurrentEntry.Entry))
+            <div class="record-field-groups" aria-label="Flight entry details">
+                @foreach (var group in DetailGroups)
                 {
-                    <span>
-                        <strong>@detail.Label</strong>
-                        @detail.Value
-                    </span>
+                    <section class="record-field-group" aria-labelledby="@group.HeadingId">
+                        <header class="record-field-group-heading">
+                            <MudIcon Icon="@group.Icon" />
+                            <h3 id="@group.HeadingId">@group.Heading</h3>
+                        </header>
+                        <dl class="record-field-list">
+                            @foreach (var detail in group.Details)
+                            {
+                                <div class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
+                                    <dt>@detail.Label</dt>
+                                    <dd>@detail.Value</dd>
+                                </div>
+                            }
+                        </dl>
+                    </section>
                 }
             </div>
             <div class="row-actions">
@@ -142,10 +161,43 @@ else
 
     private PortableLogbookMaterializedEntryV2? History => CurrentEntry;
 
+    private IReadOnlyList<DetailGroup> DetailGroups
+    {
+        get
+        {
+            if (CurrentEntry?.Entry is null)
+            {
+                return [];
+            }
+
+            var details = Session.EntryDetails(CurrentEntry.Entry).ToList();
+            return
+            [
+                CreateDetailGroup("flight-summary-heading", "Flight", Icons.Material.Filled.Flight, EntryDetailGroup.Flight, details),
+                CreateDetailGroup("crew-route-heading", "Crew and route", Icons.Material.Filled.Route, EntryDetailGroup.CrewAndRoute, details),
+                CreateDetailGroup("checks-heading", "Checks", Icons.Material.Filled.FactCheck, EntryDetailGroup.Checks, details),
+                CreateDetailGroup("logged-time-heading", "Logged time", Icons.Material.Filled.Schedule, EntryDetailGroup.LoggedTime, details),
+                CreateDetailGroup("custom-fields-heading", "Custom fields", Icons.Material.Filled.Tune, EntryDetailGroup.CustomFields, details),
+                CreateDetailGroup("landings-approaches-heading", "Landings and approaches", Icons.Material.Filled.FlightLand, EntryDetailGroup.LandingsAndApproaches, details)
+            ];
+        }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedWorkbookAsync();
     }
+
+    private static DetailGroup CreateDetailGroup(
+        string headingId,
+        string heading,
+        string icon,
+        EntryDetailGroup group,
+        IReadOnlyList<EntryDetail> details) =>
+        new(headingId, heading, icon, details.Where(detail => detail.Group == group).ToList());
+
+    private static bool IsEmptyDetailValue(string value) =>
+        value == "-";
 
     private void EditEntry()
     {
@@ -178,4 +230,10 @@ else
         await Session.DeleteWorkbookEntryAsync(CurrentEntry);
         Navigation.NavigateTo("/flights");
     }
+
+    private sealed record DetailGroup(
+        string HeadingId,
+        string Heading,
+        string Icon,
+        IReadOnlyList<EntryDetail> Details);
 }

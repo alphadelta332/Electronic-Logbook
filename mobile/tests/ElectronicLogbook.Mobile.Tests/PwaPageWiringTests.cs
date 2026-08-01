@@ -469,6 +469,7 @@ public sealed class PwaPageWiringTests
     {
         var page = ReadMobilePage("Logbook.razor");
         var row = ReadMobilePage("LogbookFlightRow.razor");
+        var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("@page \"/flights\"", page, StringComparison.Ordinal);
         Assert.Contains("Entries", page, StringComparison.Ordinal);
@@ -482,6 +483,11 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Session.FormatRoute(Entry.Entry!)", row, StringComparison.Ordinal);
         Assert.Contains("EntryRemarks(Entry.Entry!)", row, StringComparison.Ordinal);
         Assert.Contains("entry.Remarks?.Trim() ?? string.Empty", row, StringComparison.Ordinal);
+        Assert.Contains("logbook-row-aircraft", row, StringComparison.Ordinal);
+        Assert.Contains("EntryAircraftMeta(Entry.Entry!)", row, StringComparison.Ordinal);
+        Assert.Contains("!string.IsNullOrWhiteSpace(entry.FlightId)", row, StringComparison.Ordinal);
+        Assert.Contains("entry.Reg?.Trim() ?? string.Empty", row, StringComparison.Ordinal);
+        Assert.Contains("string.Join(\" · \",", row, StringComparison.Ordinal);
         Assert.Contains("CurrentEntriesV2", page, StringComparison.Ordinal);
         Assert.Contains("logbook-row-hours", row, StringComparison.Ordinal);
         Assert.Contains("MobileLogbookSession.WorkbookLoggedTime(Entry.Entry!)", row, StringComparison.Ordinal);
@@ -491,12 +497,15 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("Session.FormatAircraft(Entry.Entry!)", row, StringComparison.Ordinal);
         Assert.DoesNotContain("EntryMeta", row, StringComparison.Ordinal);
         Assert.DoesNotContain("ldg |", row, StringComparison.Ordinal);
-        Assert.Contains("Logged columns", page, StringComparison.Ordinal);
+        Assert.Contains("Flying totals", page, StringComparison.Ordinal);
         Assert.Contains("filter-sheet", page, StringComparison.Ordinal);
         Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
         Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeletedEntriesV2", page, StringComparison.Ordinal);
+        Assert.Contains(".logbook-page .logbook-entry-row", css, StringComparison.Ordinal);
+        Assert.Contains("\"date hours\"", css, StringComparison.Ordinal);
+        Assert.Contains("\"route route\"", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -516,7 +525,7 @@ public sealed class PwaPageWiringTests
     {
         var page = ReadMobilePage("Logbook.razor");
 
-        Assert.Contains("Logged columns", page, StringComparison.Ordinal);
+        Assert.Contains("Flying totals", page, StringComparison.Ordinal);
         foreach (var column in new[]
                  {
                      "SeIcusDay", "SeIcusNight", "SeDualDay", "SeDualNight", "SeCommandDay", "SeCommandNight",
@@ -531,7 +540,15 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("FormatHoursTotal", page, StringComparison.Ordinal);
         Assert.Contains("FormatCountTotal", page, StringComparison.Ordinal);
-        Assert.Contains("totals-subgroup", page, StringComparison.Ordinal);
+        Assert.Contains("logbook-totals", page, StringComparison.Ordinal);
+        Assert.Contains("totals-table", page, StringComparison.Ordinal);
+        Assert.Contains("totals-pair-list", page, StringComparison.Ordinal);
+        Assert.Contains("totals-count-grid", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"table\"", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"columnheader\"", page, StringComparison.Ordinal);
+        Assert.Contains("Workbook columns summed across @EntryCountLabel", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<span>Hours</span>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("<span>Count</span>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Detail=\"SE\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Detail=\"ME\"", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Total hours", page, StringComparison.Ordinal);
@@ -599,9 +616,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("currentEntriesV2Cache ??= MergeResultV2", session, StringComparison.Ordinal);
         Assert.Contains("deletedEntriesV2Cache ??= MergeResultV2", session, StringComparison.Ordinal);
         Assert.Contains("InvalidateWorkbookProjectionCache", session, StringComparison.Ordinal);
-        Assert.Contains("currencySummary ??= MobileCurrencyRecencySummary.Create", dashboard, StringComparison.Ordinal);
-        Assert.Contains("summary ??= CreateSummary()", currency, StringComparison.Ordinal);
-        Assert.Contains("summary = CreateSummary();", currency, StringComparison.Ordinal);
+        Assert.Contains("currencyRecencySummaryCache", session, StringComparison.Ordinal);
+        Assert.Contains("GetCurrencyRecencySummary", dashboard, StringComparison.Ordinal);
+        Assert.Contains("GetCurrencyRecencySummary", currency, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -692,17 +709,15 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3CurrencyPageEditsAndPersistsFlightReviewIpcAndOpcOverrideDates()
+    public void Gate3CurrencyPageDoesNotExposeOverrideDateEditing()
     {
         var page = ReadMobilePage("Currency.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
 
-        Assert.Contains("Flight Review override date", page, StringComparison.Ordinal);
-        Assert.Contains("IPC override date", page, StringComparison.Ordinal);
-        Assert.Contains("OPC override date", page, StringComparison.Ordinal);
-        Assert.Contains("SaveOverrideDatesAsync", page, StringComparison.Ordinal);
-        Assert.Contains("SaveCurrencyOverrideDatesAsync", session, StringComparison.Ordinal);
-        Assert.Contains("SaveStateV2Async", session, StringComparison.Ordinal);
+        Assert.DoesNotContain("Override dates", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("override date", page, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("SaveOverrideDatesAsync", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("SaveCurrencyOverrideDatesAsync", session, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -710,18 +725,42 @@ public sealed class PwaPageWiringTests
     {
         var page = ReadMobilePage("Currency.razor");
         var row = ReadMobilePage("CurrencyRowList.razor");
+        var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("currency-category-list", page, StringComparison.Ordinal);
         Assert.Contains("currency-category-panel", page, StringComparison.Ordinal);
         Assert.Contains("currency-engine-switch", page, StringComparison.Ordinal);
+        Assert.Contains("currency-licence-engine-switch", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Licence engine class\"", page, StringComparison.Ordinal);
+        Assert.True(
+            page.IndexOf("currency-licence-engine-switch", StringComparison.Ordinal) >
+            page.IndexOf("</summary>", StringComparison.Ordinal));
+        Assert.DoesNotContain("@onclick:stopPropagation", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("@onkeydown:stopPropagation", page, StringComparison.Ordinal);
         Assert.Contains("aria-pressed", page, StringComparison.Ordinal);
-        Assert.Contains("SelectedEngineHeading", page, StringComparison.Ordinal);
+        Assert.Contains("SelectedLicenceRows", page, StringComparison.Ordinal);
+        Assert.Contains("? SelectedLicenceRows", page, StringComparison.Ordinal);
+        Assert.Contains(": Summary.SingleEngineRows", page, StringComparison.Ordinal);
+        Assert.Contains("CurrentCount => Summary.SingleEngineRows.Count", page, StringComparison.Ordinal);
+        Assert.Contains("DueSoonCount => Summary.SingleEngineRows.Count", page, StringComparison.Ordinal);
+        Assert.Contains("ExpiredCount => Summary.SingleEngineRows.Count", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("ActiveRows", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("SelectedEngineHeading", page, StringComparison.Ordinal);
         Assert.Contains("currency-requirement-status-icon", row, StringComparison.Ordinal);
         Assert.Contains("StatusIcon(row)", row, StringComparison.Ordinal);
         Assert.Contains("StatusLabel(row)", row, StringComparison.Ordinal);
+        Assert.Contains("MobileCurrencyPeriodDetail.Items(row, ApproachPeriodTotals)", row, StringComparison.Ordinal);
+        Assert.Contains("ApproachPeriodTotals=\"@Summary.ApproachPeriodTotals\"", page, StringComparison.Ordinal);
+        Assert.Contains("currency-requirement-detail", row, StringComparison.Ordinal);
+        Assert.Contains("column-gap: 18px;", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("{row.RelevantPeriodTotal} in period", row, StringComparison.Ordinal);
         Assert.Contains("currency-row-current", row, StringComparison.Ordinal);
         Assert.Contains("currency-row-warning", row, StringComparison.Ordinal);
         Assert.Contains("currency-row-expired", row, StringComparison.Ordinal);
+        Assert.Contains(".currency-requirement-status-icon .mud-icon-root", css, StringComparison.Ordinal);
+        Assert.Contains(".currency-licence-engine-switch", css, StringComparison.Ordinal);
+        Assert.Contains("margin: -2px 14px 10px 52px;", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("border: 2px solid var(--currency-row-accent);", css, StringComparison.Ordinal);
         Assert.DoesNotContain("CasrReference", row, StringComparison.Ordinal);
         Assert.DoesNotContain("@row.Category", row, StringComparison.Ordinal);
     }
@@ -741,6 +780,7 @@ public sealed class PwaPageWiringTests
     public void Gate3FlightDetailIsReadFirstWithEditHistoryAndDeleteActions()
     {
         var page = ReadMobilePage("FlightDetail.razor");
+        var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("@page \"/flights/{EntryId}\"", page, StringComparison.Ordinal);
         Assert.Contains("Read first", page, StringComparison.Ordinal);
@@ -752,6 +792,28 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Deleted entry", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo($\"/flights/{CurrentEntry.EntryId.Value}/edit\")", page, StringComparison.Ordinal);
+        Assert.Contains("record-field-groups", page, StringComparison.Ordinal);
+        Assert.Contains("Crew and route", page, StringComparison.Ordinal);
+        Assert.Contains("\"Checks\"", page, StringComparison.Ordinal);
+        Assert.Contains("Logged time", page, StringComparison.Ordinal);
+        Assert.Contains("Custom fields", page, StringComparison.Ordinal);
+        Assert.Contains("Landings and approaches", page, StringComparison.Ordinal);
+        Assert.Contains("<dl class=\"record-field-list\">", page, StringComparison.Ordinal);
+        Assert.Contains("<dt>@detail.Label</dt>", page, StringComparison.Ordinal);
+        Assert.Contains("<dd>@detail.Value</dd>", page, StringComparison.Ordinal);
+        Assert.Contains("value == \"-\"", page, StringComparison.Ordinal);
+        Assert.Contains("detail.Group == group", page, StringComparison.Ordinal);
+        Assert.True(
+            page.IndexOf("EntryDetailGroup.LoggedTime", StringComparison.Ordinal) <
+            page.IndexOf("EntryDetailGroup.CustomFields", StringComparison.Ordinal));
+        Assert.True(
+            page.IndexOf("EntryDetailGroup.CustomFields", StringComparison.Ordinal) <
+            page.IndexOf("EntryDetailGroup.LandingsAndApproaches", StringComparison.Ordinal));
+        Assert.Contains("class=\"page-back-link\" href=\"/flights?view=entries\"", page, StringComparison.Ordinal);
+        Assert.Contains("Back to Logbook", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("entry-details detail-grid", page, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-text);", css, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-text-muted);", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -785,9 +847,19 @@ public sealed class PwaPageWiringTests
         Assert.Contains("aria-label=\"Currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Settings\"", layout, StringComparison.Ordinal);
         Assert.Contains("Icons.Material.Filled.Add", layout, StringComparison.Ordinal);
-        Assert.Contains("nav-progress", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("nav-progress", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-busy=\"@IsNavigationPending\"", layout, StringComparison.Ordinal);
+        Assert.Contains("class=\"visually-hidden\" role=\"status\"", layout, StringComparison.Ordinal);
         Assert.Contains("ShowNavigationPending", layout, StringComparison.Ordinal);
+        Assert.Contains("CompleteNavigationFeedbackAsync", layout, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(250, cancellationToken)", layout, StringComparison.Ordinal);
         Assert.Contains("nav-pending-link", css, StringComparison.Ordinal);
+        Assert.Contains(".bottom-nav::before", css, StringComparison.Ordinal);
+        Assert.Contains("transform 260ms", css, StringComparison.Ordinal);
+        Assert.Contains(".bottom-nav:has(> a.active)::before", css, StringComparison.Ordinal);
+        Assert.Contains(":has(> a:nth-of-type(5).nav-pending-link)", css, StringComparison.Ordinal);
+        Assert.Contains("touch-action: manipulation", css, StringComparison.Ordinal);
+        Assert.Contains(":active", css, StringComparison.Ordinal);
         Assert.Contains("grid-template-columns: repeat(5, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains("var(--native-safe-bottom)", css, StringComparison.Ordinal);
         Assert.Contains(".bottom-nav-add-icon", css, StringComparison.Ordinal);

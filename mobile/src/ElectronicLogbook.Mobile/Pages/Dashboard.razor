@@ -98,10 +98,8 @@ else
 
     private MobileCurrencyRecencySummary? currencySummary;
 
-    private MobileCurrencyRecencySummary CurrencySummary => currencySummary ??= MobileCurrencyRecencySummary.Create(
-            Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
-            Session.DocumentV2.CurrencyOverrideDates,
-            DateOnly.FromDateTime(DateTime.Today));
+    private MobileCurrencyRecencySummary CurrencySummary =>
+        currencySummary ??= Session.GetCurrencyRecencySummary(DateOnly.FromDateTime(DateTime.Today));
 
     private MobileDashboardCurrencyPanel VfrDashboardPanel =>
         CurrencySummary.VfrDashboardPanel;
@@ -112,10 +110,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedWorkbookAsync();
-        currencySummary = MobileCurrencyRecencySummary.Create(
-            Session.CurrentEntriesV2.Select(materialized => materialized.Entry!),
-            Session.DocumentV2.CurrencyOverrideDates,
-            DateOnly.FromDateTime(DateTime.Today));
+        currencySummary = Session.GetCurrencyRecencySummary(DateOnly.FromDateTime(DateTime.Today));
     }
 
 }
