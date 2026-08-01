@@ -69,23 +69,29 @@
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key))
     };
 
-    function normalizeThemeMode(value) {
-        return value === "Light" || value === "Dark" || value === "System" ? value : "System";
+    function normalizePreferences(value) {
+        const [themeMode, accent] = String(value ?? "").split("|", 2);
+        return {
+            themeMode: themeMode === "Light" || themeMode === "Dark" || themeMode === "System" ? themeMode : "System",
+            accent: ["Forest", "Ocean", "Sky", "Indigo", "Violet", "Plum", "Rose", "Red", "Orange", "Amber", "Gold", "Teal"].includes(accent) ? accent : "Forest"
+        };
     }
 
     function applyTheme(value) {
-        const themeMode = normalizeThemeMode(value);
-        const themeName = themeMode.toLowerCase();
+        const preferences = normalizePreferences(value);
+        const themeName = preferences.themeMode.toLowerCase();
         document.documentElement.setAttribute("data-elb-theme", themeName);
+        document.documentElement.setAttribute("data-elb-accent", preferences.accent.toLowerCase());
         document.documentElement.style.colorScheme = themeName === "system" ? "light dark" : themeName;
     }
 
     window.electronicLogbookUiPreferences = {
         load: (key) => localStorage.getItem(key),
         save: (key, value) => {
-            const themeMode = normalizeThemeMode(value);
-            localStorage.setItem(key, themeMode);
-            applyTheme(themeMode);
+            const preferences = normalizePreferences(value);
+            const serialized = `${preferences.themeMode}|${preferences.accent}`;
+            localStorage.setItem(key, serialized);
+            applyTheme(serialized);
         },
         applyTheme: (value) => applyTheme(value),
         isSystemDark: () => globalThis.matchMedia?.("(prefers-color-scheme: dark)")?.matches ?? false

@@ -337,6 +337,7 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("href=\"/\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/flights\"", layout, StringComparison.Ordinal);
+        Assert.Contains("href=\"/flights\" Match=\"NavLinkMatch.All\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/flights/new\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
@@ -427,12 +428,20 @@ public sealed class PwaPageWiringTests
         Assert.Contains("ThemeButtonClass(\"Dark\")", settings, StringComparison.Ordinal);
         Assert.Contains("SetSystemThemeModeAsync", settings, StringComparison.Ordinal);
         Assert.Contains("UiPreferences.SetThemeModeAsync(\"System\")", settings, StringComparison.Ordinal);
+        Assert.Contains("Accent colour", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileUiPreferences.AccentOptions", settings, StringComparison.Ordinal);
+        Assert.Contains("SetAccentAsync", settings, StringComparison.Ordinal);
         Assert.Contains("builder.Services.AddScoped<MobileUiPreferenceState>()", program, StringComparison.Ordinal);
         Assert.Contains("electronicLogbookUiPreferences.applyTheme", preferenceStore, StringComparison.Ordinal);
+        Assert.Contains("DefaultAccent", preferenceStore, StringComparison.Ordinal);
         Assert.Contains("await store.ApplyThemeAsync(preferences);", preferenceState, StringComparison.Ordinal);
+        Assert.Contains("SetAccentAsync", preferenceState, StringComparison.Ordinal);
         Assert.Contains("data-elb-theme", script, StringComparison.Ordinal);
+        Assert.Contains("data-elb-accent", script, StringComparison.Ordinal);
         Assert.Contains("html[data-elb-theme=\"dark\"]", css, StringComparison.Ordinal);
         Assert.Contains("html[data-elb-theme=\"system\"]", css, StringComparison.Ordinal);
+        Assert.Contains("html[data-elb-accent=\"ocean\"]", css, StringComparison.Ordinal);
+        Assert.Contains(".accent-picker", css, StringComparison.Ordinal);
         Assert.Contains("color: var(--app-text);", css, StringComparison.Ordinal);
         Assert.DoesNotContain("color: #ffffff;\r\n    font-size: 18px;", css, StringComparison.Ordinal);
     }
@@ -921,6 +930,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("grid-template-columns: repeat(5, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains("var(--native-safe-bottom)", css, StringComparison.Ordinal);
         Assert.Contains(".bottom-nav-add-icon", css, StringComparison.Ordinal);
+        Assert.Contains(":has(> a:nth-of-type(3).active)::before", css, StringComparison.Ordinal);
+        Assert.Contains("opacity: 0;", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -959,6 +970,82 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate3NewFlightAvoidsNativeSuggestionPopups()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+
+        Assert.DoesNotContain("<datalist", page, StringComparison.Ordinal);
+        Assert.DoesNotContain(" list=", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightOmitsRecentRemarksPicker()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+
+        Assert.DoesNotContain("Recent remarks", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("UseRecentRemark", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightKeepsDraftTotalsOutOfTheScrollingView()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var css = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "wwwroot",
+            "css",
+            "app.css")));
+
+        Assert.DoesNotContain("entry-totals", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Draft totals", page, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?s)\.persistent-action-bar\s*\{[^}]*position:\s*sticky", css);
+    }
+
+    [Fact]
+    public void Gate3NewFlightPresentsChecksAsCompactTouchTargets()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var css = File.ReadAllText(Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            "..",
+            "src",
+            "ElectronicLogbook.Mobile",
+            "wwwroot",
+            "css",
+            "app.css")));
+
+        Assert.Contains("field-grid check-grid", page, StringComparison.Ordinal);
+        Assert.Equal(3, page.Split("class=\"check-option\"", StringSplitOptions.None).Length - 1);
+        Assert.Contains(".check-option {", css, StringComparison.Ordinal);
+        Assert.Contains("min-height: 44px;", css, StringComparison.Ordinal);
+        Assert.Contains(".check-option input[type=\"checkbox\"]", css, StringComparison.Ordinal);
+        Assert.Contains("width: 20px;", css, StringComparison.Ordinal);
+        Assert.Contains("height: 20px;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightShowsBlankHourFieldsUntilFocused()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+
+        Assert.Equal(16, page.Split("value=\"@FormatHour(", StringSplitOptions.None).Length - 1);
+        Assert.Equal(16, page.Split("@onfocus=\"() => ShowHourDefault", StringSplitOptions.None).Length - 1);
+        Assert.Equal(16, page.Split("@onblur=\"() => ClearUntouchedHour", StringSplitOptions.None).Length - 1);
+    }
+
+    [Fact]
     public void Gate3NewFlightShowsReducedMotionAwareSaveConfirmationBeforeDashboardReturn()
     {
         var page = ReadMobilePage("NewFlight.razor");
@@ -984,6 +1071,20 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
         Assert.Contains(".save-confirmation-icon", css, StringComparison.Ordinal);
         Assert.Contains("animation: none;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightKeepsTheCompletionActionVisibleAboveBottomNavigation()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("class=\"persistent-action-bar\"", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"SaveAsync\"", page, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"(?s)\.persistent-action-bar\s*\{[^}]*position:\s*(?:sticky|fixed)", css);
+        Assert.Contains("margin-top: 16px;", css, StringComparison.Ordinal);
+        Assert.Contains(".action-buttons .mud-button-root", css, StringComparison.Ordinal);
+        Assert.Contains("width: 100%;", css, StringComparison.Ordinal);
     }
 
     [Fact]

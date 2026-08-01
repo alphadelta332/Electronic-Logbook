@@ -14,6 +14,27 @@ public sealed class MobileWorkbookEntryDraftTests
     ];
 
     [Fact]
+    public void Gate3NewFlightDefaultsPicToSelf()
+    {
+        var draft = MobileWorkbookEntryDraft.Create(CustomFields);
+
+        Assert.Equal("Self", draft.Pic);
+    }
+
+    [Fact]
+    public void Gate3NewFlightLeavesHourFieldsBlankUntilEntered()
+    {
+        var draft = MobileWorkbookEntryDraft.Create(CustomFields);
+        var entry = draft.ToEntry(CustomFields);
+
+        Assert.Null(draft.SeIcusDay);
+        Assert.Null(draft.IfrSim);
+        Assert.Null(entry.SeIcusDay);
+        Assert.Null(entry.IfrSim);
+        Assert.Equal(0m, draft.TotalHours);
+    }
+
+    [Fact]
     public void ToEntryWritesWorkbookCanonicalFieldsWithoutCollapsedMobileFields()
     {
         var draft = MobileWorkbookEntryDraft.Create(CustomFields);

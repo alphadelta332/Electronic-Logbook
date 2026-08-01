@@ -674,13 +674,18 @@ public static class PortableLogbookWorkbookPackageStorage
             .Element(SpreadsheetNamespace + "tableColumns")
             ?.Elements(SpreadsheetNamespace + "tableColumn")
             .Select(column => ((string?)column.Attribute("name") ?? string.Empty).Trim())
-            .Where(name => name.StartsWith("Custom ", StringComparison.OrdinalIgnoreCase))
-            .Take(PortableLogbookCustomFieldSet.WorkbookCustomFieldCount)
             .ToArray()
             ?? throw new InvalidDataException("Logbook table does not contain tableColumns.");
 
-        return columnNames.Length == PortableLogbookCustomFieldSet.WorkbookCustomFieldCount
-            ? PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(columnNames)
+        var customFieldLabels = PortableLogbookWorkbookFieldCatalog.PilotEnteredFields
+            .Select((field, index) => (field, index))
+            .Where(item => item.field.Id.StartsWith("custom", StringComparison.Ordinal))
+            .Select(item => item.index < columnNames.Length ? columnNames[item.index] : string.Empty)
+            .ToArray();
+
+        return customFieldLabels.Length == PortableLogbookCustomFieldSet.WorkbookCustomFieldCount &&
+               customFieldLabels.All(label => !string.IsNullOrWhiteSpace(label))
+            ? PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(customFieldLabels)
             : [];
     }
 

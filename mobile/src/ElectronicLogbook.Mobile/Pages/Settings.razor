@@ -45,6 +45,21 @@ else
                 <button type="button" class="@ThemeButtonClass("Light")" @onclick="SetLightThemeModeAsync">Light</button>
                 <button type="button" class="@ThemeButtonClass("Dark")" @onclick="SetDarkThemeModeAsync">Dark</button>
             </div>
+            <div class="accent-picker" aria-label="Accent colour">
+                @foreach (var accent in MobileUiPreferences.AccentOptions)
+                {
+                    <button type="button"
+                            class="@AccentButtonClass(accent)"
+                            title="@accent accent"
+                            aria-label="@accent accent"
+                            aria-pressed="@(UiPreferences.Accent == accent)"
+                            data-accent="@accent.ToLowerInvariant()"
+                            @onclick="() => SetAccentAsync(accent)">
+                        <span aria-hidden="true"></span>
+                        <span>@accent</span>
+                    </button>
+                }
+            </div>
         </section>
 
         <section class="form-section">
@@ -112,8 +127,13 @@ else
 
     private Task SetDarkThemeModeAsync() => UiPreferences.SetThemeModeAsync("Dark");
 
+    private Task SetAccentAsync(string accent) => UiPreferences.SetAccentAsync(accent);
+
     private string ThemeButtonClass(string themeMode) =>
         UiPreferences.ThemeMode == themeMode ? "active" : string.Empty;
+
+    private string AccentButtonClass(string accent) =>
+        UiPreferences.Accent == accent ? "accent-option active" : "accent-option";
 
     private async Task ExportSupportSummaryAsync()
     {

@@ -8,7 +8,7 @@ public sealed class MobileWorkbookEntryDraft
     public string Type { get; set; } = string.Empty;
     public string Reg { get; set; } = string.Empty;
     public string FlightId { get; set; } = string.Empty;
-    public string Pic { get; set; } = string.Empty;
+    public string Pic { get; set; } = "Self";
     public string OtherPilotOrCrew { get; set; } = string.Empty;
     public string From { get; set; } = string.Empty;
     public string To { get; set; } = string.Empty;
@@ -18,22 +18,22 @@ public sealed class MobileWorkbookEntryDraft
     public bool InstrumentProficiencyCheck { get; set; }
     public bool OperatorProficiencyCheck { get; set; }
     public Dictionary<CustomFieldId, string> CustomValues { get; } = [];
-    public decimal SeIcusDay { get; set; }
-    public decimal SeIcusNight { get; set; }
-    public decimal SeDualDay { get; set; }
-    public decimal SeDualNight { get; set; }
-    public decimal SeCommandDay { get; set; }
-    public decimal SeCommandNight { get; set; }
-    public decimal MeIcusDay { get; set; }
-    public decimal MeIcusNight { get; set; }
-    public decimal MeDualDay { get; set; }
-    public decimal MeDualNight { get; set; }
-    public decimal MeCommandDay { get; set; }
-    public decimal MeCommandNight { get; set; }
-    public decimal CopilotDay { get; set; }
-    public decimal CopilotNight { get; set; }
-    public decimal IfrIf { get; set; }
-    public decimal IfrSim { get; set; }
+    public decimal? SeIcusDay { get; set; }
+    public decimal? SeIcusNight { get; set; }
+    public decimal? SeDualDay { get; set; }
+    public decimal? SeDualNight { get; set; }
+    public decimal? SeCommandDay { get; set; }
+    public decimal? SeCommandNight { get; set; }
+    public decimal? MeIcusDay { get; set; }
+    public decimal? MeIcusNight { get; set; }
+    public decimal? MeDualDay { get; set; }
+    public decimal? MeDualNight { get; set; }
+    public decimal? MeCommandDay { get; set; }
+    public decimal? MeCommandNight { get; set; }
+    public decimal? CopilotDay { get; set; }
+    public decimal? CopilotNight { get; set; }
+    public decimal? IfrIf { get; set; }
+    public decimal? IfrSim { get; set; }
     public int? LandingsDay { get; set; }
     public int? LandingsNight { get; set; }
     public int? Ils { get; set; }
@@ -45,20 +45,20 @@ public sealed class MobileWorkbookEntryDraft
     public int? Circling { get; set; }
 
     public decimal TotalHours =>
-        SeIcusDay +
-        SeIcusNight +
-        SeDualDay +
-        SeDualNight +
-        SeCommandDay +
-        SeCommandNight +
-        MeIcusDay +
-        MeIcusNight +
-        MeDualDay +
-        MeDualNight +
-        MeCommandDay +
-        MeCommandNight +
-        CopilotDay +
-        CopilotNight;
+        SeIcusDay.GetValueOrDefault() +
+        SeIcusNight.GetValueOrDefault() +
+        SeDualDay.GetValueOrDefault() +
+        SeDualNight.GetValueOrDefault() +
+        SeCommandDay.GetValueOrDefault() +
+        SeCommandNight.GetValueOrDefault() +
+        MeIcusDay.GetValueOrDefault() +
+        MeIcusNight.GetValueOrDefault() +
+        MeDualDay.GetValueOrDefault() +
+        MeDualNight.GetValueOrDefault() +
+        MeCommandDay.GetValueOrDefault() +
+        MeCommandNight.GetValueOrDefault() +
+        CopilotDay.GetValueOrDefault() +
+        CopilotNight.GetValueOrDefault();
 
     public int TotalApproaches =>
         Ils.GetValueOrDefault() +
@@ -105,22 +105,22 @@ public sealed class MobileWorkbookEntryDraft
         draft.FlightReview = entry.FlightReview == true;
         draft.InstrumentProficiencyCheck = entry.InstrumentProficiencyCheck == true;
         draft.OperatorProficiencyCheck = entry.OperatorProficiencyCheck == true;
-        draft.SeIcusDay = entry.SeIcusDay ?? 0;
-        draft.SeIcusNight = entry.SeIcusNight ?? 0;
-        draft.SeDualDay = entry.SeDualDay ?? 0;
-        draft.SeDualNight = entry.SeDualNight ?? 0;
-        draft.SeCommandDay = entry.SeCommandDay ?? 0;
-        draft.SeCommandNight = entry.SeCommandNight ?? 0;
-        draft.MeIcusDay = entry.MeIcusDay ?? 0;
-        draft.MeIcusNight = entry.MeIcusNight ?? 0;
-        draft.MeDualDay = entry.MeDualDay ?? 0;
-        draft.MeDualNight = entry.MeDualNight ?? 0;
-        draft.MeCommandDay = entry.MeCommandDay ?? 0;
-        draft.MeCommandNight = entry.MeCommandNight ?? 0;
-        draft.CopilotDay = entry.CopilotDay ?? 0;
-        draft.CopilotNight = entry.CopilotNight ?? 0;
-        draft.IfrIf = entry.IfrIf ?? 0;
-        draft.IfrSim = entry.IfrSim ?? 0;
+        draft.SeIcusDay = entry.SeIcusDay;
+        draft.SeIcusNight = entry.SeIcusNight;
+        draft.SeDualDay = entry.SeDualDay;
+        draft.SeDualNight = entry.SeDualNight;
+        draft.SeCommandDay = entry.SeCommandDay;
+        draft.SeCommandNight = entry.SeCommandNight;
+        draft.MeIcusDay = entry.MeIcusDay;
+        draft.MeIcusNight = entry.MeIcusNight;
+        draft.MeDualDay = entry.MeDualDay;
+        draft.MeDualNight = entry.MeDualNight;
+        draft.MeCommandDay = entry.MeCommandDay;
+        draft.MeCommandNight = entry.MeCommandNight;
+        draft.CopilotDay = entry.CopilotDay;
+        draft.CopilotNight = entry.CopilotNight;
+        draft.IfrIf = entry.IfrIf;
+        draft.IfrSim = entry.IfrSim;
         draft.LandingsDay = entry.LandingsDay;
         draft.LandingsNight = entry.LandingsNight;
         draft.Ils = entry.Ils;

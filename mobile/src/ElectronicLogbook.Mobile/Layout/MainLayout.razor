@@ -26,7 +26,7 @@
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
             <span>Dashboard</span>
         </NavLink>
-        <NavLink href="/flights" aria-label="Logbook" class="@NavPendingClass(LogbookNavigationLabel)" @onclick="ShowLogbookNavigationPending">
+        <NavLink href="/flights" Match="NavLinkMatch.All" aria-label="Logbook" class="@NavPendingClass(LogbookNavigationLabel)" @onclick="ShowLogbookNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
             <span>Logbook</span>
         </NavLink>

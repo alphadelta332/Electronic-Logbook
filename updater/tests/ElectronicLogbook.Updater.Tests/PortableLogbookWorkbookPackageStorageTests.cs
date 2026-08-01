@@ -388,6 +388,28 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadWorkbookCustomFieldDefinitionsPreservesNamedWorkbookHeaders()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames.ToArray();
+        var labels = new[] { "Operation", "Training course", "Client", "Notes" };
+        for (var index = 0; index < labels.Length; index++)
+        {
+            columns[15 + index] = labels[index];
+        }
+
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AR2", columns);
+        }
+
+        var customFields = PortableLogbookWorkbookPackageStorage.ReadWorkbookCustomFieldDefinitions(workbook);
+
+        Assert.Equal(labels, customFields.Select(field => field.Label));
+        Assert.Equal(["cf_workbook_1", "cf_workbook_2", "cf_workbook_3", "cf_workbook_4"], customFields.Select(field => field.Id.Value));
+    }
+
+    [Fact]
     public void ReadCurrentRowsV2AcceptsNamedMonthFromWorkbook()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
