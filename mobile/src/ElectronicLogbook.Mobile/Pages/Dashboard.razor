@@ -27,37 +27,22 @@ else
                 <strong>@MobileLogbookSession.FormatHours(TotalFlyingHours)</strong>
                 <small>logged</small>
             </NavLink>
-            <NavLink class="status-metric dashboard-recent-hours" href="/flights?view=entries" aria-label="Open logbook entries">
-                <span>Last 90 days</span>
-                <strong>@RecentFlightCount</strong>
-                <small>@RecentHoursDetail</small>
+            <NavLink class="status-metric dashboard-period-hours dashboard-hours-28" href="/flights?view=entries" aria-label="Open logbook entries from the last 28 days">
+                <span>Hours last 28 days</span>
+                <strong>@MobileLogbookSession.FormatHours(HoursLast28Days)</strong>
+                <small>logged</small>
+            </NavLink>
+            <NavLink class="status-metric dashboard-period-hours dashboard-hours-365" href="/flights?view=entries" aria-label="Open logbook entries from the last 365 days">
+                <span>Hours last 365 days</span>
+                <strong>@MobileLogbookSession.FormatHours(HoursLast365Days)</strong>
+                <small>logged</small>
             </NavLink>
         </section>
 
-        <section class="notice-panel dashboard-last-flight" aria-label="Last flight context">
-            <MudIcon Icon="@Icons.Material.Filled.FlightTakeoff" />
-            <div>
-                <strong>Last flight</strong>
-                @if (LastFlight is null)
-                {
-                    <span>Import a package or add a flight to build the device record.</span>
-                }
-                else
-                {
-                    <LogbookFlightRow Entry="@LastFlight" />
-                }
-            </div>
-        </section>
+        <DashboardLastFlight Entry="@LastFlight" />
 
-        <section class="dashboard-section dashboard-currency" aria-label="VFR and IFR Currency + Recency">
-            <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Currency + Recency</span>
-                    <h2>VFR and IFR overview</h2>
-                </div>
-            </div>
-
-            <DashboardCurrencyOverview VfrPanel="@VfrDashboardPanel" IfrPanel="@IfrDashboardPanel" />
+        <section class="dashboard-section dashboard-currency" aria-label="Currency and recency status">
+            <DashboardCurrencyOverview Summary="@CurrencySummary" />
         </section>
 
         @if (Session.CurrentEntriesV2.Count == 0)
@@ -76,36 +61,29 @@ else
 }
 
 @code {
-    private DateOnly RecentCutoff => DateOnly.FromDateTime(DateTime.Today.AddDays(-90));
+    private DateOnly Today => DateOnly.FromDateTime(DateTime.Today);
 
     private PortableLogbookMaterializedEntryV2? LastFlight => Session.CurrentEntriesV2.FirstOrDefault();
 
     private decimal TotalFlyingHours =>
         Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
 
-    private IReadOnlyList<PortableLogbookMaterializedEntryV2> RecentEntries =>
-        Session.CurrentEntriesV2
-            .Where(entry => entry.Entry!.Date >= RecentCutoff)
-            .ToArray();
+    private decimal HoursLast28Days =>
+        MobileDashboardFlightActivity.HoursWithinDays(
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+            Today,
+            28);
 
-    private int RecentFlightCount => RecentEntries.Count;
-
-    private decimal RecentFlyingHours =>
-        RecentEntries.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
-
-    private string RecentHoursDetail =>
-        $"{MobileLogbookSession.FormatHours(RecentFlyingHours)} hr";
+    private decimal HoursLast365Days =>
+        MobileDashboardFlightActivity.HoursWithinDays(
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+            Today,
+            365);
 
     private MobileCurrencyRecencySummary? currencySummary;
 
     private MobileCurrencyRecencySummary CurrencySummary =>
         currencySummary ??= Session.GetCurrencyRecencySummary(DateOnly.FromDateTime(DateTime.Today));
-
-    private MobileDashboardCurrencyPanel VfrDashboardPanel =>
-        CurrencySummary.VfrDashboardPanel;
-
-    private MobileDashboardCurrencyPanel IfrDashboardPanel =>
-        CurrencySummary.IfrDashboardPanel;
 
     protected override async Task OnInitializedAsync()
     {

@@ -1,0 +1,59 @@
+@inject MobileLogbookSession Session
+
+@if (Entry is null)
+{
+    <section class="dashboard-last-flight dashboard-last-flight-empty" aria-label="Last flight context">
+        <span class="dashboard-last-flight-icon" aria-hidden="true">
+            <MudIcon Icon="@Icons.Material.Filled.FlightTakeoff" />
+        </span>
+        <span class="dashboard-last-flight-body">
+            <strong class="dashboard-last-flight-label">Last flight</strong>
+            <span class="dashboard-last-flight-empty-copy">Import a package or add a flight to build the device record.</span>
+        </span>
+    </section>
+}
+else
+{
+    var flight = Entry.Entry!;
+    <NavLink class="dashboard-last-flight dashboard-last-flight-link"
+             href="@($"/flights/{Entry.EntryId.Value}")"
+             aria-label="@($"Open last flight details for {FormatDate(flight.Date)}, {Session.FormatRoute(flight)}")">
+        <span class="dashboard-last-flight-icon" aria-hidden="true">
+            <MudIcon Icon="@Icons.Material.Filled.FlightTakeoff" />
+        </span>
+        <span class="dashboard-last-flight-body">
+            <span class="dashboard-last-flight-heading">
+                <strong class="dashboard-last-flight-label">Last flight</strong>
+                <time datetime="@DateIso(flight.Date)">@FormatDate(flight.Date)</time>
+            </span>
+            <strong class="dashboard-last-flight-route">@Session.FormatRoute(flight)</strong>
+            <span class="dashboard-last-flight-aircraft">@AircraftMeta(flight)</span>
+        </span>
+        <span class="dashboard-last-flight-hours"
+              aria-label="@($"{MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(flight))} hours")">
+            <strong>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(flight))</strong>
+            <small>hours</small>
+        </span>
+    </NavLink>
+}
+
+@code {
+    [Parameter]
+    public PortableLogbookMaterializedEntryV2? Entry { get; set; }
+
+    private static string FormatDate(DateOnly? date) =>
+        date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
+
+    private static string DateIso(DateOnly? date) =>
+        date?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
+
+    private static string AircraftMeta(PortableLogbookWorkbookEntry entry)
+    {
+        var type = entry.Type?.Trim() ?? string.Empty;
+        var identifier = !string.IsNullOrWhiteSpace(entry.FlightId)
+            ? entry.FlightId.Trim()
+            : entry.Reg?.Trim() ?? string.Empty;
+        var meta = string.Join(" · ", new[] { type, identifier }.Where(value => value.Length > 0));
+        return meta.Length > 0 ? meta : "Aircraft pending";
+    }
+}

@@ -19,6 +19,10 @@ public sealed class MobileCurrencyRecencySummaryTests
         Assert.Contains(summary.SingleEngineRows, row => row.Requirement == "Flight Review");
         Assert.Contains(summary.SingleEngineRows, row => row.Requirement == "Circling");
         Assert.All(summary.MultiEngineRows, row => Assert.Equal("Not Current", row.Status));
+        Assert.Equal(0, summary.CurrentCount);
+        Assert.Equal(0, summary.DueSoonCount);
+        Assert.Equal(14, summary.ExpiredCount);
+        Assert.Equal(summary.SingleEngineRows.Count, summary.CurrentCount + summary.DueSoonCount + summary.ExpiredCount);
     }
 
     [Fact]
@@ -36,6 +40,25 @@ public sealed class MobileCurrencyRecencySummaryTests
         Assert.Equal("Flight Review", nextExpiring.Requirement);
         Assert.Equal(new DateOnly(2026, 8, 31), nextExpiring.CurrentOrRecentUntil);
         Assert.Equal(35, nextExpiring.DaysRemaining);
+        Assert.Equal(1, summary.CurrentCount);
+        Assert.Equal(0, summary.DueSoonCount);
+        Assert.Equal(13, summary.ExpiredCount);
+    }
+
+    [Fact]
+    public void CreateCountsDueSoonRowsUsingTheCurrencyPageThirtyDayThreshold()
+    {
+        var today = new DateOnly(2026, 7, 27);
+        var overrides = new PortableLogbookCurrencyOverrideDates(
+            new DateOnly(2024, 7, 1),
+            null,
+            null);
+
+        var summary = MobileCurrencyRecencySummary.Create([], overrides, today);
+
+        Assert.Equal(0, summary.CurrentCount);
+        Assert.Equal(1, summary.DueSoonCount);
+        Assert.Equal(13, summary.ExpiredCount);
     }
 
     [Fact]

@@ -453,16 +453,125 @@ a.status-metric:active {
 }
 
 .dashboard-last-flight {
+    display: grid;
+    align-items: center;
+    gap: 14px;
+    min-width: 0;
+    border: 1px solid color-mix(in srgb, var(--app-primary) 34%, var(--app-border));
+    border-radius: 14px;
+    padding: 16px;
     border-color: color-mix(in srgb, var(--app-primary) 34%, var(--app-border));
     background: color-mix(in srgb, var(--app-surface) 84%, var(--app-primary));
 }
 
+.dashboard-last-flight-link {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+    color: var(--app-text);
+    text-decoration: none;
+}
+
+.dashboard-last-flight-empty {
+    grid-template-columns: 44px minmax(0, 1fr);
+}
+
+.dashboard-last-flight-link:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 70%, transparent);
+    outline-offset: 2px;
+}
+
+.dashboard-last-flight-link:active {
+    transform: translateY(1px);
+}
+
+.dashboard-last-flight-icon {
+    display: grid;
+    place-items: center;
+    align-self: stretch;
+    width: 44px;
+    min-height: 44px;
+    border-radius: 12px;
+    color: var(--app-primary);
+    background: color-mix(in srgb, var(--app-primary) 14%, transparent);
+}
+
+.dashboard-last-flight-icon .mud-icon-root {
+    font-size: 28px;
+}
+
+.dashboard-last-flight-body {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+}
+
+.dashboard-last-flight-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    min-width: 0;
+}
+
+.dashboard-last-flight-label {
+    font-size: 16px;
+    font-weight: 850;
+}
+
+.dashboard-last-flight-heading time {
+    margin-left: auto;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-weight: 750;
+    white-space: nowrap;
+}
+
+.dashboard-last-flight-route {
+    min-width: 0;
+    font-size: 20px;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.dashboard-last-flight-aircraft,
+.dashboard-last-flight-empty-copy {
+    color: var(--app-text-muted);
+    font-size: 13px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.dashboard-last-flight-hours {
+    display: grid;
+    align-self: stretch;
+    align-content: center;
+    justify-items: end;
+    min-width: 58px;
+    border-left: 1px solid color-mix(in srgb, var(--app-primary) 28%, var(--app-border));
+    padding-left: 14px;
+    text-align: right;
+}
+
+.dashboard-last-flight-hours strong {
+    font-size: 22px;
+    line-height: 1;
+}
+
+.dashboard-last-flight-hours small {
+    margin-top: 4px;
+    color: var(--app-text-muted);
+    font-size: 11px;
+}
+
 .dashboard-metrics {
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr));
 }
 
 .dashboard-total-hours strong {
     font-size: 28px;
+}
+
+.dashboard-period-hours strong {
+    font-size: 24px;
 }
 
 .dashboard-currency-overview {
@@ -1473,6 +1582,7 @@ a.status-metric:active {
 }
 
 .logbook-totals {
+    --totals-hour-columns: minmax(92px, 1.4fr) repeat(2, minmax(64px, 1fr));
     gap: 12px;
 }
 
@@ -1511,7 +1621,7 @@ a.status-metric:active {
 
 .totals-table-row {
     display: grid;
-    grid-template-columns: minmax(92px, 1.4fr) repeat(2, minmax(64px, 1fr));
+    grid-template-columns: var(--totals-hour-columns);
     align-items: center;
     min-height: 44px;
     padding: 0 14px;
@@ -1535,6 +1645,20 @@ a.status-metric:active {
     text-transform: uppercase;
 }
 
+.totals-time-header {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.totals-time-header .mud-icon-root {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 14px;
+}
+
 .totals-pair-list {
     display: grid;
     background: var(--app-surface);
@@ -1542,9 +1666,8 @@ a.status-metric:active {
 
 .totals-pair-row {
     display: grid;
-    grid-template-columns: minmax(88px, 1.15fr) repeat(2, minmax(76px, 1fr));
+    grid-template-columns: var(--totals-hour-columns);
     align-items: center;
-    gap: 8px;
     min-height: 52px;
     padding: 8px 14px;
     border-top: 1px solid var(--app-border);
@@ -1672,6 +1795,14 @@ a.status-metric:active {
     .persistent-action-bar,
     .detail-grid {
         grid-template-columns: 1fr;
+    }
+
+    .status-strip.dashboard-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dashboard-total-hours {
+        grid-column: 1 / -1;
     }
 
     .totals-approach-grid {

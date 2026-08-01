@@ -558,6 +558,33 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate3LogbookTotalsAlignHourFiguresOnSharedColumnTracks()
+    {
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Contains(
+            "--totals-hour-columns: minmax(92px, 1.4fr) repeat(2, minmax(64px, 1fr));",
+            css,
+            StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(css, "grid-template-columns: var(--totals-hour-columns);"));
+        Assert.Contains("font-variant-numeric: tabular-nums;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3LogbookTotalsPairDayAndNightHeadersWithAccessibleIcons()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Equal(4, CountOccurrences(page, "class=\"totals-time-header\" role=\"columnheader\""));
+        Assert.Equal(2, CountOccurrences(page, "Icons.Material.Filled.LightMode"));
+        Assert.Equal(2, CountOccurrences(page, "Icons.Material.Filled.DarkMode"));
+        Assert.Equal(4, CountOccurrences(page, "aria-hidden=\"true\""));
+        Assert.Contains(".totals-time-header .mud-icon-root", css, StringComparison.Ordinal);
+        Assert.Contains("flex: 0 0 14px;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3NormalMobileUiHidesUnsupportedTakeoffFields()
     {
         var newFlight = ReadMobilePage("NewFlight.razor");
@@ -586,22 +613,29 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3DashboardShowsLastFlightTotalHoursAndNinetyDaySnapshot()
+    public void Gate3DashboardShowsTotalHoursAndSeparate28And365DayHours()
     {
         var page = ReadMobilePage("Dashboard.razor");
+        var activity = ReadMobileSource("MobileDashboardFlightActivity.cs");
+        var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("Total hours", page, StringComparison.Ordinal);
-        Assert.Contains("Last 90 days", page, StringComparison.Ordinal);
-        Assert.Contains("dashboard-last-flight", page, StringComparison.Ordinal);
-        Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("RecentSnapshotDetail", page, StringComparison.Ordinal);
+        Assert.Contains("Hours last 28 days", page, StringComparison.Ordinal);
+        Assert.Contains("Hours last 365 days", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Last 90 days", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecentFlightCount", page, StringComparison.Ordinal);
+        Assert.Contains("<DashboardLastFlight Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
         Assert.Contains("TotalFlyingHours", page, StringComparison.Ordinal);
-        Assert.Contains("RecentCutoff", page, StringComparison.Ordinal);
-        Assert.Contains("MobileLogbookSession.WorkbookLoggedTime", page, StringComparison.Ordinal);
+        Assert.Contains("HoursLast28Days", page, StringComparison.Ordinal);
+        Assert.Contains("HoursLast365Days", page, StringComparison.Ordinal);
+        Assert.Contains("HoursWithinDays", page, StringComparison.Ordinal);
+        Assert.Contains("date >= cutoff && date <= today", activity, StringComparison.Ordinal);
         Assert.Contains("dashboard-total-hours", page, StringComparison.Ordinal);
         Assert.Contains("href=\"/flights?view=totals\"", page, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("dashboard-recent-hours", page, StringComparison.Ordinal);
-        Assert.Contains("href=\"/flights?view=entries\"", page, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(2, CountOccurrences(page, "href=\"/flights?view=entries\""));
+        Assert.Contains("grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr));", css, StringComparison.Ordinal);
+        Assert.Contains(".status-strip.dashboard-metrics", css, StringComparison.Ordinal);
+        Assert.Contains("grid-column: 1 / -1;", css, StringComparison.Ordinal);
         Assert.Contains("dashboard-empty-state", page, StringComparison.Ordinal);
     }
 
@@ -622,21 +656,32 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3DashboardLinksVfrAndIfrCurrencyStatusToCurrencyPage()
+    public void Gate3DashboardCurrencySnapshotShowsOnlyTheFullCurrencyHeaderTotals()
     {
         var page = ReadMobilePage("Dashboard.razor");
         var overview = ReadMobilePage("DashboardCurrencyOverview.razor");
+        var currency = ReadMobilePage("Currency.razor");
+        var summary = ReadMobileSource("MobileCurrencyRecencySummary.cs");
 
-        Assert.Contains("VFR and IFR overview", page, StringComparison.Ordinal);
-        Assert.Contains("VfrDashboardPanel", page, StringComparison.Ordinal);
-        Assert.Contains("IfrDashboardPanel", page, StringComparison.Ordinal);
-        Assert.Contains("<DashboardCurrencyOverview", page, StringComparison.Ordinal);
-        Assert.Contains("dashboard-currency-overview-strip", overview, StringComparison.Ordinal);
-        Assert.Contains("<details class=\"dashboard-currency-panel", overview, StringComparison.Ordinal);
-        Assert.Contains("ActionSentence", overview, StringComparison.Ordinal);
-        Assert.Contains("dashboard-currency-rule-list", overview, StringComparison.Ordinal);
-        Assert.Contains("Href=\"/currency\"", overview, StringComparison.Ordinal);
-        Assert.Contains("Review all currency details", overview, StringComparison.Ordinal);
+        Assert.Contains("<DashboardCurrencyOverview Summary=\"@CurrencySummary\" />", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("VFR and IFR overview", page, StringComparison.Ordinal);
+        Assert.Contains("currency-overview dashboard-currency-overview", overview, StringComparison.Ordinal);
+        Assert.Contains("@Summary.CurrentCount", overview, StringComparison.Ordinal);
+        Assert.Contains("@Summary.DueSoonCount", overview, StringComparison.Ordinal);
+        Assert.Contains("@Summary.ExpiredCount", overview, StringComparison.Ordinal);
+        Assert.Contains("<span>Current</span>", overview, StringComparison.Ordinal);
+        Assert.Contains("<span>Due soon</span>", overview, StringComparison.Ordinal);
+        Assert.Contains("<span>Expired</span>", overview, StringComparison.Ordinal);
+        Assert.DoesNotContain("<details", overview, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudButton", overview, StringComparison.Ordinal);
+        Assert.DoesNotContain("VfrPanel", overview, StringComparison.Ordinal);
+        Assert.DoesNotContain("IfrPanel", overview, StringComparison.Ordinal);
+        Assert.Contains("CurrentCount => Summary.CurrentCount", currency, StringComparison.Ordinal);
+        Assert.Contains("DueSoonCount => Summary.DueSoonCount", currency, StringComparison.Ordinal);
+        Assert.Contains("ExpiredCount => Summary.ExpiredCount", currency, StringComparison.Ordinal);
+        Assert.Contains("public int CurrentCount => SingleEngineRows.Count(IsCurrent);", summary, StringComparison.Ordinal);
+        Assert.Contains("public int DueSoonCount => SingleEngineRows.Count(IsDueSoon);", summary, StringComparison.Ordinal);
+        Assert.Contains("public int ExpiredCount => SingleEngineRows.Count(IsExpired);", summary, StringComparison.Ordinal);
         Assert.Contains("CheckCircleOutline", overview, StringComparison.Ordinal);
         Assert.Contains("Schedule", overview, StringComparison.Ordinal);
         Assert.Contains("ErrorOutline", overview, StringComparison.Ordinal);
@@ -648,14 +693,15 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3DashboardDestinationsKeepLastFlightCurrencyAndEmptyStateActionsUsable()
+    public void Gate3DashboardKeepsLastFlightAndEmptyStateActionsUsableAfterSnapshotSimplification()
     {
         var page = ReadMobilePage("Dashboard.razor");
         var overview = ReadMobilePage("DashboardCurrencyOverview.razor");
+        var lastFlight = ReadMobilePage("DashboardLastFlight.razor");
 
-        Assert.Contains("aria-label=\"Last flight context\"", page, StringComparison.Ordinal);
-        Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
-        Assert.Equal(1, CountOccurrences(overview, "Href=\"/currency\""));
+        Assert.Contains("<DashboardLastFlight Entry=\"@LastFlight\" />", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Last flight context\"", lastFlight, StringComparison.Ordinal);
+        Assert.DoesNotContain("Href=", overview, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"No flights yet\"", page, StringComparison.Ordinal);
         Assert.Contains("Href=\"/flights/new\"", page, StringComparison.Ordinal);
         Assert.Contains("Add first flight", page, StringComparison.Ordinal);
@@ -676,13 +722,25 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3DashboardAndLogbookShareTheCanonicalFlightRow()
+    public void Gate3DashboardUsesDedicatedLastFlightSummaryWithoutChangingLogbookRows()
     {
         var dashboard = ReadMobilePage("Dashboard.razor");
+        var lastFlight = ReadMobilePage("DashboardLastFlight.razor");
         var logbook = ReadMobilePage("Logbook.razor");
+        var css = ReadMobileAsset("css", "app.css");
 
-        Assert.Contains("<LogbookFlightRow Entry=\"@LastFlight\" />", dashboard, StringComparison.Ordinal);
+        Assert.Contains("<DashboardLastFlight Entry=\"@LastFlight\" />", dashboard, StringComparison.Ordinal);
+        Assert.DoesNotContain("<LogbookFlightRow", dashboard, StringComparison.Ordinal);
+        Assert.Contains("dashboard-last-flight-link", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("href=\"@($\"/flights/{Entry.EntryId.Value}\")\"", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("Session.FormatRoute(flight)", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("AircraftMeta(flight)", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("WorkbookLoggedTime(flight)", lastFlight, StringComparison.Ordinal);
+        Assert.DoesNotContain("logbook-entry-row", lastFlight, StringComparison.Ordinal);
         Assert.Contains("<LogbookFlightRow Entry=\"@entry\" />", logbook, StringComparison.Ordinal);
+        Assert.Contains("grid-template-columns: 44px minmax(0, 1fr) auto;", css, StringComparison.Ordinal);
+        Assert.Contains("padding: 16px;", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -741,9 +799,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("SelectedLicenceRows", page, StringComparison.Ordinal);
         Assert.Contains("? SelectedLicenceRows", page, StringComparison.Ordinal);
         Assert.Contains(": Summary.SingleEngineRows", page, StringComparison.Ordinal);
-        Assert.Contains("CurrentCount => Summary.SingleEngineRows.Count", page, StringComparison.Ordinal);
-        Assert.Contains("DueSoonCount => Summary.SingleEngineRows.Count", page, StringComparison.Ordinal);
-        Assert.Contains("ExpiredCount => Summary.SingleEngineRows.Count", page, StringComparison.Ordinal);
+        Assert.Contains("CurrentCount => Summary.CurrentCount", page, StringComparison.Ordinal);
+        Assert.Contains("DueSoonCount => Summary.DueSoonCount", page, StringComparison.Ordinal);
+        Assert.Contains("ExpiredCount => Summary.ExpiredCount", page, StringComparison.Ordinal);
         Assert.DoesNotContain("ActiveRows", page, StringComparison.Ordinal);
         Assert.DoesNotContain("SelectedEngineHeading", page, StringComparison.Ordinal);
         Assert.Contains("currency-requirement-status-icon", row, StringComparison.Ordinal);

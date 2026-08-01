@@ -3,6 +3,7 @@
 
 # Graphify output and local agent state
 graphify-out/
+.graphify-memory/
 .codex/
 .claude/
 
@@ -25,6 +26,21 @@ mobile/src/ElectronicLogbook.Mobile/wwwroot/service-worker.published.js
 **/tests/
 *Tests.cs
 *.Tests.csproj
+*.sln
+
+# Operational automation is maintained source, but it obscures the product's
+# runtime boundaries in the default architecture map.
+.github/
+tools/
+mobile/scripts/
+updater/*.ps1
+/PrepareForRelease.ps1
+/PrepareForTesting.ps1
+
+# Keep prose and local launch profiles out of the default code-only map. The
+# architecture workflow remains tracked guidance rather than graph input.
+*.md
+**/Properties/launchSettings.json
 
 # Binary and rendered artifacts are not useful architecture inputs.
 *.xlsm

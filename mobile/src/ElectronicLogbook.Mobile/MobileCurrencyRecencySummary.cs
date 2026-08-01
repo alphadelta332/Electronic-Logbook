@@ -27,6 +27,12 @@ public sealed class MobileCurrencyRecencySummary
 
     public MobileCurrencyApproachPeriodTotals ApproachPeriodTotals { get; }
 
+    public int CurrentCount => SingleEngineRows.Count(IsCurrent);
+
+    public int DueSoonCount => SingleEngineRows.Count(IsDueSoon);
+
+    public int ExpiredCount => SingleEngineRows.Count(IsExpired);
+
     public IReadOnlyList<PortableLogbookCurrencyRow> CurrentlyExpiredSingleEngineRows =>
         SingleEngineRows.Where(row => string.Equals(row.Status, "Not Current", StringComparison.Ordinal)).ToArray();
 
@@ -44,6 +50,15 @@ public sealed class MobileCurrencyRecencySummary
 
     public MobileDashboardCurrencyPanel IfrDashboardPanel =>
         MobileDashboardCurrencyPanel.CreateIfr(SingleEngineRows);
+
+    private static bool IsExpired(PortableLogbookCurrencyRow row) =>
+        string.Equals(row.Status, "Not Current", StringComparison.Ordinal);
+
+    private static bool IsDueSoon(PortableLogbookCurrencyRow row) =>
+        !IsExpired(row) && row.DaysRemaining <= 30;
+
+    private static bool IsCurrent(PortableLogbookCurrencyRow row) =>
+        !IsExpired(row) && !IsDueSoon(row);
 
     public static MobileCurrencyRecencySummary Create(
         IEnumerable<PortableLogbookWorkbookEntry> entries,

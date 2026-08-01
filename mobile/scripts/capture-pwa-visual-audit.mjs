@@ -78,6 +78,21 @@ async function createStaticServer(root) {
     });
 }
 
+async function createDashboardFlight(page, baseUrl) {
+    await page.goto(`${baseUrl}/flights/new`, { waitUntil: "domcontentloaded" });
+    await page.locator("main .flight-entry-page").waitFor({ state: "visible", timeout: 30000 });
+    await page.getByLabel("Date", { exact: true }).fill("2026-08-01");
+    await page.getByLabel("Type", { exact: true }).fill("B738");
+    await page.getByLabel("Reg", { exact: true }).fill("VH-LNG");
+    await page.getByLabel("Flight ID", { exact: true }).fill("QF1234");
+    await page.getByLabel("PIC", { exact: true }).fill("Self");
+    await page.getByLabel("From", { exact: true }).fill("YMMB");
+    await page.getByLabel("To", { exact: true }).fill("YSSY");
+    await page.getByLabel("SE command day", { exact: true }).fill("2.0");
+    await page.getByRole("button", { name: "Add flight" }).click();
+    await page.locator("main .dashboard-last-flight-link").waitFor({ state: "visible", timeout: 30000 });
+}
+
 const server = await createStaticServer(publishRoot);
 const address = server.address();
 const baseUrl = `http://127.0.0.1:${address.port}`;
@@ -118,21 +133,52 @@ try {
                     });
 
                     if (route.name === "dashboard") {
-                        const dashboardPanels = page.locator("details.dashboard-currency-panel");
-                        if (await dashboardPanels.count() !== 2) {
-                            throw new Error(`Dashboard currency overview did not render both panels for ${profile.name} ${colorScheme}`);
+                        const dashboardOverview = page.locator(".dashboard-currency-overview");
+                        if (await dashboardOverview.locator(".currency-overview-item").count() !== 3) {
+                            throw new Error(`Dashboard currency snapshot did not render three status totals for ${profile.name} ${colorScheme}`);
                         }
 
-                        const vfrPanel = dashboardPanels.filter({ hasText: "VFR" });
-                        await vfrPanel.locator("summary").click();
-                        if (!await vfrPanel.evaluate(panel => panel.open)) {
-                            throw new Error(`Dashboard VFR panel did not expand for ${profile.name} ${colorScheme}`);
+                        const dashboardOverviewText = await dashboardOverview.innerText();
+                        await page.goto(`${baseUrl}/currency`, { waitUntil: "domcontentloaded" });
+                        const currencyOverview = page.locator("main .currency-overview");
+                        await currencyOverview.waitFor({ state: "visible", timeout: 30000 });
+                        const currencyOverviewText = await currencyOverview.innerText();
+
+                        if (dashboardOverviewText !== currencyOverviewText) {
+                            throw new Error(`Dashboard currency snapshot did not match the Currency header totals for ${profile.name} ${colorScheme}`);
                         }
 
-                        await vfrPanel.locator("summary").click();
-                        if (await vfrPanel.evaluate(panel => panel.open)) {
-                            throw new Error(`Dashboard VFR panel did not collapse for ${profile.name} ${colorScheme}`);
+                        await createDashboardFlight(page, baseUrl);
+                        await page.evaluate((fontScale) => {
+                            document.documentElement.style.fontSize = `${fontScale * 100}%`;
+                        }, profile.fontScale);
+
+                        const populatedLastFlight = page.locator(".dashboard-last-flight-link");
+                        const lastFlightLayout = await populatedLastFlight.evaluate((card) => {
+                            const body = card.querySelector(".dashboard-last-flight-body").getBoundingClientRect();
+                            const hours = card.querySelector(".dashboard-last-flight-hours").getBoundingClientRect();
+                            const style = getComputedStyle(card);
+                            return {
+                                nestedLogbookRow: card.querySelector(".logbook-entry-row") !== null,
+                                cardOverflow: card.scrollWidth > card.clientWidth + 1,
+                                pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+                                fieldsOverlap: body.right > hours.left + 1,
+                                paddingInline: Math.min(parseFloat(style.paddingLeft), parseFloat(style.paddingRight))
+                            };
+                        });
+
+                        if (lastFlightLayout.nestedLogbookRow ||
+                            lastFlightLayout.cardOverflow ||
+                            lastFlightLayout.pageOverflow ||
+                            lastFlightLayout.fieldsOverlap ||
+                            lastFlightLayout.paddingInline < 16) {
+                            throw new Error(`Populated Dashboard Last Flight layout failed for ${profile.name} ${colorScheme}: ${JSON.stringify(lastFlightLayout)}`);
                         }
+
+                        await page.screenshot({
+                            path: join(outputDirectory, `${profile.name}-${colorScheme}-dashboard-populated.png`),
+                            fullPage: true
+                        });
                     } else if (route.name === "currency") {
                         const currencyOverview = page.locator(".currency-overview");
                         const categoryPanels = page.locator("details.currency-category-panel");
@@ -210,4 +256,4 @@ try {
     await new Promise((resolveClose) => server.close(resolveClose));
 }
 
-console.log(`Captured ${profiles.length * colorSchemes.length * routes.length} route screenshots in ${outputDirectory}`);
+console.log(`Captured ${profiles.length * colorSchemes.length * routes.length} route screenshots plus ${profiles.length * colorSchemes.length} populated Dashboard screenshots in ${outputDirectory}`);

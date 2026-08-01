@@ -99,11 +99,11 @@ else
     private IReadOnlyList<PortableLogbookCurrencyRow> SelectedLicenceRows =>
         SelectedEngine == MultiEngine ? Summary.MultiEngineRows : Summary.SingleEngineRows;
 
-    private int CurrentCount => Summary.SingleEngineRows.Count(IsCurrent);
+    private int CurrentCount => Summary.CurrentCount;
 
-    private int DueSoonCount => Summary.SingleEngineRows.Count(IsDueSoon);
+    private int DueSoonCount => Summary.DueSoonCount;
 
-    private int ExpiredCount => Summary.SingleEngineRows.Count(IsExpired);
+    private int ExpiredCount => Summary.ExpiredCount;
 
     protected override async Task OnInitializedAsync()
     {

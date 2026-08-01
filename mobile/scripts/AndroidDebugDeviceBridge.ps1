@@ -22,6 +22,25 @@ function Invoke-NativeCapture {
     }
 }
 
+function Get-Sha256Hex {
+    param([Parameter(Mandatory = $true)] [string] $Path)
+
+    $stream = [System.IO.File]::OpenRead($Path)
+    try {
+        $sha256 = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $hash = [System.BitConverter]::ToString($sha256.ComputeHash($stream))
+            return $hash.Replace("-", "").ToLowerInvariant()
+        }
+        finally {
+            $sha256.Dispose()
+        }
+    }
+    finally {
+        $stream.Dispose()
+    }
+}
+
 function Invoke-AdbChecked {
     param(
         [Parameter(Mandatory = $true)] [string] $Adb,
@@ -225,7 +244,7 @@ function Get-IndexedDbArchiveEvidence {
         [pscustomobject]@{
             path = $_.FullName.Substring($indexedDbRoot.Length + 1).Replace("\", "/")
             length = $_.Length
-            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            sha256 = Get-Sha256Hex -Path $_.FullName
         }
     }
 
@@ -270,7 +289,7 @@ function New-VerifiedIndexedDbSnapshot {
     $evidence = Get-IndexedDbArchiveEvidence -ArchivePath $archivePath -EvidenceRoot $evidenceRoot
     return [pscustomobject]@{
         ArchivePath = $archivePath
-        ArchiveSha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        ArchiveSha256 = Get-Sha256Hex -Path $archivePath
         FileCount = $evidence.FileCount
         Files = $evidence.Files
     }
