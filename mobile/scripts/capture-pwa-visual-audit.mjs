@@ -3,6 +3,7 @@ import { createServer } from "node:http";
 import { access, mkdir, stat } from "node:fs/promises";
 import { dirname, extname, join, normalize, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
+import AxeBuilder from "@axe-core/playwright";
 import { chromium } from "playwright";
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -115,6 +116,21 @@ async function createDashboardFlight(page, baseUrl) {
     await page.locator("main .dashboard-last-flight-link").waitFor({ state: "visible", timeout: 30000 });
 }
 
+async function assertAccessible(page, contextLabel) {
+    const accessibilityResults = await new AxeBuilder({ page })
+        .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
+        .analyze();
+    if (accessibilityResults.violations.length > 0) {
+        const violations = accessibilityResults.violations.map(violation => ({
+            id: violation.id,
+            impact: violation.impact,
+            help: violation.help,
+            targets: violation.nodes.flatMap(node => node.target).slice(0, 8)
+        }));
+        throw new Error(`WCAG accessibility audit failed for ${contextLabel}: ${JSON.stringify(violations)}`);
+    }
+}
+
 const server = await createStaticServer(publishRoot);
 const address = server.address();
 const baseUrl = `http://127.0.0.1:${address.port}`;
@@ -172,6 +188,28 @@ try {
                                     !element.getAttribute("title");
                             })
                             .map(element => element.outerHTML.slice(0, 120));
+                        const smallControlTargets = visibleControls
+                            .filter(element => {
+                                const target = element.matches('input[type="checkbox"], input[type="radio"]')
+                                    ? element.closest("label") ?? element
+                                    : element;
+                                const bounds = target.getBoundingClientRect();
+                                return bounds.width < 44 || bounds.height < 44;
+                            })
+                            .map(element => {
+                                const target = element.matches('input[type="checkbox"], input[type="radio"]')
+                                    ? element.closest("label") ?? element
+                                    : element;
+                                const bounds = target.getBoundingClientRect();
+                                return {
+                                    name: element.getAttribute("aria-label") ??
+                                        element.getAttribute("title") ??
+                                        (target.textContent ?? "").trim().slice(0, 60) ??
+                                        element.tagName,
+                                    width: Math.round(bounds.width),
+                                    height: Math.round(bounds.height)
+                                };
+                            });
 
                         return {
                             mainHorizontalOverflow: main ? main.scrollWidth > main.clientWidth + 1 : true,
@@ -191,7 +229,8 @@ try {
                                 })
                                 .map(link => link.getAttribute("aria-label")),
                             headingCount: document.querySelectorAll("main h1").length,
-                            unnamedControls
+                            unnamedControls,
+                            smallControlTargets
                         };
                     });
 
@@ -203,9 +242,12 @@ try {
                         shellLayout.navigationLabelOverflow.length > 0 ||
                         shellLayout.smallNavigationTargets.length > 0 ||
                         shellLayout.headingCount !== 1 ||
-                        shellLayout.unnamedControls.length > 0) {
+                        shellLayout.unnamedControls.length > 0 ||
+                        shellLayout.smallControlTargets.length > 0) {
                         throw new Error(`Shell accessibility/layout audit failed for ${route.name} ${profile.name} ${colorScheme}: ${JSON.stringify(shellLayout)}`);
                     }
+
+                    await assertAccessible(page, `${route.name} ${profile.name} ${colorScheme}`);
 
                     const errorUi = page.locator("#blazor-error-ui");
                     if (await errorUi.isVisible()) {
@@ -260,6 +302,8 @@ try {
                             lastFlightLayout.paddingInline < 16) {
                             throw new Error(`Populated Dashboard Last Flight layout failed for ${profile.name} ${colorScheme}: ${JSON.stringify(lastFlightLayout)}`);
                         }
+
+                        await assertAccessible(page, `dashboard populated ${profile.name} ${colorScheme}`);
 
                         await page.screenshot({
                             path: join(outputDirectory, `${profile.name}-${colorScheme}-dashboard-populated.png`)
@@ -324,6 +368,8 @@ try {
                         if (!await passengerPanel.evaluate(panel => panel.open)) {
                             throw new Error(`Currency category did not expand for ${profile.name} ${colorScheme}`);
                         }
+
+                        await assertAccessible(page, `currency interaction ${profile.name} ${colorScheme}`);
                     }
 
                     await page.waitForTimeout(50);

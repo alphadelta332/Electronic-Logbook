@@ -124,18 +124,28 @@ public sealed class MobileLogbookSession(
         return currencyRecencySummaryCache;
     }
 
-    public PortableLogbookExchangeStatusSnapshot ExchangeStatus =>
-        PortableLogbookExchangeStatus.Create(
-            new PortableLogbookWorkingCopyState(
-                Document.Operations.Count > 0,
-                Document.Operations.Count,
-                Document.Operations.Count(operation => operation.Kind == PortableOperationKind.Create),
-                Document.Operations.Count(operation => operation.Kind == PortableOperationKind.Correction),
-                Document.Operations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
-                Document.Operations.Select(operation => operation.RevisionId).ToArray(),
-                DateTimeOffset.UtcNow),
-            ImportReceipts,
-            LastSuccessfulExportAt);
+    public PortableLogbookExchangeStatusSnapshot ExchangeStatus
+    {
+        get
+        {
+            var exportRequired = DocumentV2.Operations.Count > 0 &&
+                LastSuccessfulExport?.Covers(DocumentV2) != true;
+            var pendingOperations = exportRequired
+                ? DocumentV2.Operations.ToArray()
+                : Array.Empty<PortableLogbookOperationV2>();
+            return PortableLogbookExchangeStatus.Create(
+                new PortableLogbookWorkingCopyState(
+                    exportRequired,
+                    pendingOperations.Length,
+                    pendingOperations.Count(operation => operation.Kind == PortableOperationKind.Create),
+                    pendingOperations.Count(operation => operation.Kind == PortableOperationKind.Correction),
+                    pendingOperations.Count(operation => operation.Kind == PortableOperationKind.Deletion),
+                    pendingOperations.Select(operation => operation.RevisionId).ToArray(),
+                    DateTimeOffset.UtcNow),
+                ImportReceipts,
+                LastSuccessfulExportAt);
+        }
+    }
 
     public IReadOnlyList<string> DraftErrors => ValidateDraft();
 
@@ -559,6 +569,26 @@ public sealed class MobileLogbookSession(
             return result;
         }
 
+        DocumentV2 = result.Document;
+        ImportReceipts = result.ImportReceipts;
+        await SaveStateV2Async();
+        return result;
+    }
+
+    public async Task<MobilePackageImportApplyWorkflowResultV2> ApplyWorkbookPackageWithCustomFieldResolutionsAsync(
+        BrowserFile file,
+        IEnumerable<PortableLogbookCustomFieldDefinitionResolution> resolutions,
+        DateTimeOffset importedAt)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(resolutions);
+        var result = await MobilePackageImportApplyWorkflow.ApplyWithCustomFieldResolutionsAsync(
+            DocumentV2,
+            file,
+            packageKeyStore,
+            ImportReceipts,
+            resolutions,
+            importedAt);
         DocumentV2 = result.Document;
         ImportReceipts = result.ImportReceipts;
         await SaveStateV2Async();

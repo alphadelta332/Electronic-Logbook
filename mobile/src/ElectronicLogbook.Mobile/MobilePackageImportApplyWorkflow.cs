@@ -134,6 +134,59 @@ public static class MobilePackageImportApplyWorkflow
             receipt);
     }
 
+    public static async ValueTask<MobilePackageImportApplyWorkflowResultV2> ApplyWithCustomFieldResolutionsAsync(
+        PortableLogbookDocumentV2 localDocument,
+        BrowserFile file,
+        BrowserPackageKeyStore keyStore,
+        IEnumerable<PortableLogbookPackageReceipt> existingReceipts,
+        IEnumerable<PortableLogbookCustomFieldDefinitionResolution> resolutions,
+        DateTimeOffset importedAt)
+    {
+        ArgumentNullException.ThrowIfNull(localDocument);
+        ArgumentNullException.ThrowIfNull(file);
+        ArgumentNullException.ThrowIfNull(keyStore);
+        ArgumentNullException.ThrowIfNull(existingReceipts);
+        ArgumentNullException.ThrowIfNull(resolutions);
+
+        var receipts = existingReceipts.ToArray();
+        BrowserFileStore.ValidateElogbookFile(file);
+        if (PortableLogbookImportLedger.HasSeenPackage(receipts, file.Bytes))
+        {
+            return new MobilePackageImportApplyWorkflowResultV2(
+                MobilePackageImportApplyStatus.PackageReplay,
+                localDocument,
+                receipts,
+                null,
+                null);
+        }
+
+        var read = await MobilePackageImportWorkflow.ReadV2Async(localDocument, file, keyStore).ConfigureAwait(false);
+        var plan = PortableLogbookExchange.PlanImport(localDocument, read.Document);
+        if (plan.Status != PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
+        {
+            return ApplyReadyPlan(localDocument, file.Bytes, read.Manifest, read.Document, receipts, plan, importedAt);
+        }
+
+        var resolvedDefinitions = PortableLogbookCustomFieldDefinitions.Resolve(
+            plan.Preview.CustomFieldDefinitions,
+            resolutions);
+        var importedDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            localDocument.LogbookId,
+            resolvedDefinitions,
+            localDocument.CurrencyOverrideDates,
+            localDocument.Operations.Concat(plan.Preview.NewOperations));
+        var receipt = PortableLogbookImportLedger.CreateReceipt(file.Bytes, read.Manifest, importedAt);
+        var updatedReceipts = receipts.Concat([receipt]).ToArray();
+        return new MobilePackageImportApplyWorkflowResultV2(
+            plan.Preview.HasConflicts
+                ? MobilePackageImportApplyStatus.AppliedWithConflicts
+                : MobilePackageImportApplyStatus.Applied,
+            importedDocument,
+            updatedReceipts,
+            plan,
+            receipt);
+    }
+
     private static MobilePackageImportApplyWorkflowResult ApplyReadyPlan(
         PortableLogbookDocument localDocument,
         byte[] packageBytes,

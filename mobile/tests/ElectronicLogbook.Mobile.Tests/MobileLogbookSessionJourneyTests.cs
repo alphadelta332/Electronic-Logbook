@@ -32,6 +32,8 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(2, added.Entry.Ils);
         Assert.Equal("Flight added.", session.LastActionMessage);
         Assert.Equal(1, jsRuntime.SaveCount);
+        Assert.True(session.ExchangeStatus.HasUnexportedChanges);
+        Assert.Equal(1, session.ExchangeStatus.PendingOperationCount);
 
         var reloaded = CreateSession(jsRuntime);
         await reloaded.EnsureLoadedWorkbookAsync();

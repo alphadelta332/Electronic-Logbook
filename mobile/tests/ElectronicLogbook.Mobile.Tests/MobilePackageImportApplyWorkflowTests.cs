@@ -39,6 +39,46 @@ public sealed class MobilePackageImportApplyWorkflowTests
     }
 
     [Fact]
+    public async Task ApplyWithCustomFieldResolutionsAsyncV2AppliesPackageAndPreservesCurrencyOverrides()
+    {
+        var fieldId = new CustomFieldId("cf_training_kind");
+        var overrides = new PortableLogbookCurrencyOverrideDates(
+            DateOnly.Parse("2026-07-01"),
+            null,
+            null);
+        var localBase = CreateDocumentV2("rev_local", 1.0m);
+        var local = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            localBase.LogbookId,
+            [new CustomFieldDefinition(fieldId, "Training kind", 1)],
+            overrides,
+            localBase.Operations);
+        var incomingBase = CreateDocumentV2("rev_local", 1.0m, CreateCorrectionV2("rev_incoming", "rev_local", 1.4m));
+        var incoming = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            incomingBase.LogbookId,
+            [new CustomFieldDefinition(fieldId, "Training category", 1)],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            incomingBase.Operations);
+        var key = FixedKey();
+        var packageBytes = PortableLogbookPackage.Write(incoming, key);
+        var jsRuntime = RuntimeWithDecryptionV2(packageBytes, key, local.LogbookId);
+        var file = new BrowserFile("workbook-v2.elogbook", BrowserFileStore.ElogbookContentType, packageBytes);
+
+        var result = await MobilePackageImportApplyWorkflow.ApplyWithCustomFieldResolutionsAsync(
+            local,
+            file,
+            new BrowserPackageKeyStore(jsRuntime),
+            [],
+            [new PortableLogbookCustomFieldDefinitionResolution(fieldId, PortableLogbookCustomFieldDefinitionChoice.UseIncoming)],
+            DateTimeOffset.Parse("2026-07-19T00:01:00Z"));
+
+        Assert.Equal(MobilePackageImportApplyStatus.Applied, result.Status);
+        Assert.Equal("Training category", Assert.Single(result.Document.CustomFieldDefinitions).Label);
+        Assert.Equal(overrides, result.Document.CurrencyOverrideDates);
+        Assert.Equal(2, result.Document.Operations.Count);
+        Assert.Single(result.ImportReceipts);
+    }
+
+    [Fact]
     public async Task ApplyIfReadyAsyncV2RecordsDuplicateOperationsWithoutChangingDocument()
     {
         var local = CreateDocumentV2("rev_local", 1.0m);

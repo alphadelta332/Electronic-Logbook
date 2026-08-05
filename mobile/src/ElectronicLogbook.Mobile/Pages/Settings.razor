@@ -65,7 +65,39 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">Testing controls</span>
+                    <span class="eyebrow">Device health</span>
+                    <h2>Offline copy and backup</h2>
+                </div>
+                <span class="draft-pill">@DeviceHealthLabel</span>
+            </div>
+            <div class="device-health-grid">
+                <article class="device-health-item">
+                    <span>Local storage</span>
+                    <strong>@(Session.IsStorageBlocked ? "Needs attention" : "Ready")</strong>
+                    <small>@(Session.IsStorageBlocked ? Session.StorageError : "Workbook-faithful data is available offline on this device.")</small>
+                </article>
+                <article class="device-health-item">
+                    <span>Recovery key</span>
+                    <strong>@Session.PackageKeyStatus</strong>
+                    <small>@Session.PackageKeyNotice</small>
+                </article>
+                <article class="device-health-item">
+                    <span>Workbook backup</span>
+                    <strong>@BackupHealthLabel</strong>
+                    <small>@BackupHealthDetail</small>
+                </article>
+                <article class="device-health-item">
+                    <span>Package history</span>
+                    <strong>@Session.ImportReceipts.Count import(s)</strong>
+                    <small>@ImportHealthDetail</small>
+                </article>
+            </div>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Workbook data</span>
                     <h2>Import, export, recovery</h2>
                 </div>
             </div>
@@ -134,6 +166,30 @@ else
 
     private string AccentButtonClass(string accent) =>
         UiPreferences.Accent == accent ? "accent-option active" : "accent-option";
+
+    private string DeviceHealthLabel => Session.IsStorageBlocked || Session.PackageKeyStatus == "Unavailable"
+        ? "Needs attention"
+        : Session.ExchangeStatus.HasUnexportedChanges
+            ? "Backup due"
+            : "Ready";
+
+    private string BackupHealthLabel => Session.ExchangeStatus.HasUnexportedChanges
+        ? "Backup due"
+        : Session.LastSuccessfulExportAt is null
+            ? "No export yet"
+            : "Up to date";
+
+    private string BackupHealthDetail => Session.ExchangeStatus.HasUnexportedChanges
+        ? $"{Session.ExchangeStatus.PendingOperationCount} operation(s) are ready to export."
+        : Session.LastSuccessfulExportAt is DateTimeOffset exportedAt
+            ? $"Last exported {FormatTimestamp(exportedAt)}."
+            : "Import an authoritative workbook package before relying on this device copy.";
+
+    private string ImportHealthDetail => Session.ExchangeStatus.LastSuccessfulImportAt is DateTimeOffset importedAt
+        ? $"Last imported {FormatTimestamp(importedAt)}."
+        : "No workbook package has been imported on this device yet.";
+
+    private static string FormatTimestamp(DateTimeOffset value) => value.ToLocalTime().ToString("dd MMM yyyy, HH:mm");
 
     private async Task ExportSupportSummaryAsync()
     {

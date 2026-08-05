@@ -504,7 +504,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Support summary", settings, StringComparison.Ordinal);
         Assert.Contains("ExportSupportSummaryAsync", settings, StringComparison.Ordinal);
         Assert.Contains("MobileSupportSummaryExportWorkflow.ExportAsync", settings, StringComparison.Ordinal);
-        Assert.Contains("Session.Document", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.DocumentV2", settings, StringComparison.Ordinal);
         Assert.Contains("SupportSummaryMessage", settings, StringComparison.Ordinal);
         Assert.Contains("SupportSummaryError", settings, StringComparison.Ordinal);
     }
@@ -520,6 +520,31 @@ public sealed class PwaPageWiringTests
         Assert.Contains("new BrowserLogbookStateV2", settings, StringComparison.Ordinal);
         Assert.Contains("DeviceStateExportMessage", settings, StringComparison.Ordinal);
         Assert.Contains("DeviceStateExportError", settings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate4SettingsAndExchangeExposeDeviceHealthAndResolvableV2PackageImport()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var exchange = ReadMobilePage("PackageExchange.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var workflow = ReadMobileSource("MobilePackageImportApplyWorkflow.cs");
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Contains("Device health", settings, StringComparison.Ordinal);
+        Assert.Contains("Local storage", settings, StringComparison.Ordinal);
+        Assert.Contains("Workbook backup", settings, StringComparison.Ordinal);
+        Assert.Contains("Package history", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.ExchangeStatus.PendingOperationCount", settings, StringComparison.Ordinal);
+        Assert.Contains("DocumentV2.Operations.Count", session, StringComparison.Ordinal);
+        Assert.Contains("ApplyWorkbookPackageWithCustomFieldResolutionsAsync", session, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookDocumentV2 localDocument", workflow, StringComparison.Ordinal);
+        Assert.Contains("Custom field differences", exchange, StringComparison.Ordinal);
+        Assert.Contains("Keep device labels", exchange, StringComparison.Ordinal);
+        Assert.Contains("Use package labels", exchange, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookCustomFieldDefinitionResolution", exchange, StringComparison.Ordinal);
+        Assert.Contains(".device-health-grid", css, StringComparison.Ordinal);
+        Assert.Contains(".custom-field-resolution-row", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1081,9 +1106,9 @@ public sealed class PwaPageWiringTests
     {
         var page = ReadMobilePage("Logbook.razor");
 
-        Assert.Contains("role=\"tablist\" aria-label=\"Logbook view\"", page, StringComparison.Ordinal);
-        Assert.Contains("@onclick=\"() => SelectView(LogbookView.Entries)\">Entries</button>", page, StringComparison.Ordinal);
-        Assert.Contains("@onclick=\"() => SelectView(LogbookView.Totals)\">Totals</button>", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"group\" aria-label=\"Logbook view\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-pressed=\"@(ActiveView == LogbookView.Entries)\" @onclick=\"() => SelectView(LogbookView.Entries)\">Entries</button>", page, StringComparison.Ordinal);
+        Assert.Contains("aria-pressed=\"@(ActiveView == LogbookView.Totals)\" @onclick=\"() => SelectView(LogbookView.Totals)\">Totals</button>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("view-progress", page, StringComparison.Ordinal);
         Assert.DoesNotContain("MudProgressLinear", page, StringComparison.Ordinal);
         Assert.DoesNotContain("IsViewSwitchPending", page, StringComparison.Ordinal);
@@ -1245,6 +1270,28 @@ public sealed class PwaPageWiringTests
         Assert.Contains("grid-template-columns: repeat(7, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains(".bottom-nav a", css, StringComparison.Ordinal);
         Assert.Contains("min-width: 0;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate5AuditEnforcesWcagTargetSizeAndValidLogbookViewSemantics()
+    {
+        var logbook = ReadMobilePage("Logbook.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+        var audit = ReadProjectFile("mobile", "scripts", "capture-pwa-visual-audit.mjs");
+        var package = ReadProjectFile("mobile", "package.json");
+
+        Assert.Contains("\"@axe-core/playwright\"", package, StringComparison.Ordinal);
+        Assert.Contains("import AxeBuilder from \"@axe-core/playwright\";", audit, StringComparison.Ordinal);
+        Assert.Contains("wcag22aa", audit, StringComparison.Ordinal);
+        Assert.Contains("smallControlTargets", audit, StringComparison.Ordinal);
+        Assert.Contains("bounds.width < 44 || bounds.height < 44", audit, StringComparison.Ordinal);
+        Assert.Equal(3, CountOccurrences(audit, "await assertAccessible(page"));
+        Assert.Contains("role=\"group\" aria-label=\"Logbook view\"", logbook, StringComparison.Ordinal);
+        Assert.Equal(2, CountOccurrences(logbook, "aria-pressed="));
+        Assert.DoesNotContain("role=\"tablist\"", logbook, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.mud-button-root\s*\{[^}]*min-height:\s*44px", css);
+        Assert.Matches(@"(?s)\.accent-option\s*\{[^}]*min-height:\s*44px", css);
+        Assert.Matches(@"(?s)\.currency-licence-engine-switch \.currency-engine-tab\s*\{[^}]*min-height:\s*44px", css);
     }
 
     private static string ReadMobilePage(string relativePath) =>

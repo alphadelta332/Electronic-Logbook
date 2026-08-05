@@ -30,9 +30,9 @@ else
             </section>
         }
 
-        <div class="segmented-control" role="tablist" aria-label="Logbook view">
-            <button type="button" class="@EntriesTabClass" @onclick="() => SelectView(LogbookView.Entries)">Entries</button>
-            <button type="button" class="@TotalsTabClass" @onclick="() => SelectView(LogbookView.Totals)">Totals</button>
+        <div class="segmented-control" role="group" aria-label="Logbook view">
+            <button type="button" class="@EntriesTabClass" aria-pressed="@(ActiveView == LogbookView.Entries)" @onclick="() => SelectView(LogbookView.Entries)">Entries</button>
+            <button type="button" class="@TotalsTabClass" aria-pressed="@(ActiveView == LogbookView.Totals)" @onclick="() => SelectView(LogbookView.Totals)">Totals</button>
         </div>
 
         @if (ActiveView == LogbookView.Entries)
@@ -43,7 +43,7 @@ else
                         <span class="eyebrow">Entries</span>
                         <h2>Current record</h2>
                     </div>
-                    <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowFilters = !ShowFilters)">
+                    <MudButton class="logbook-filter-button" Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowFilters = !ShowFilters)">
                         Filters
                     </MudButton>
                 </div>

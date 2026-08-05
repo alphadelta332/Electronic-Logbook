@@ -727,7 +727,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .dashboard-last-flight-heading time {
     margin-left: auto;
-    color: var(--app-text-muted);
+    color: var(--app-text);
     font-size: 12px;
     font-weight: 750;
     white-space: nowrap;
@@ -742,7 +742,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .dashboard-last-flight-aircraft,
 .dashboard-last-flight-empty-copy {
-    color: var(--app-text-muted);
+    color: var(--app-text);
     font-size: 13px;
     line-height: 1.4;
     overflow-wrap: anywhere;
@@ -766,7 +766,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .dashboard-last-flight-hours small {
     margin-top: 4px;
-    color: var(--app-text-muted);
+    color: var(--app-text);
     font-size: 11px;
 }
 
@@ -1145,7 +1145,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .currency-licence-engine-switch .currency-engine-tab {
-    min-height: 42px;
+    min-height: 44px;
 }
 
 .currency-category-list {
@@ -1523,6 +1523,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .action-buttons .mud-button-root {
     flex: 1 1 auto;
     min-width: 0;
+    min-height: 44px;
+}
+
+.mud-button-root {
+    min-height: 44px;
 }
 
 .mud-button-root.mud-button-filled-primary:not(:disabled) {
@@ -1648,7 +1653,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     align-items: center;
     gap: 7px;
     min-width: 0;
-    min-height: 42px;
+    min-height: 44px;
     border: 1px solid var(--app-border);
     border-radius: 8px;
     padding: 7px 8px;
@@ -1697,6 +1702,45 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-error);
 }
 
+.device-health-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.device-health-item,
+.custom-field-resolution-row {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    padding: 12px;
+    background: var(--app-surface-alt);
+}
+
+.device-health-item > span,
+.custom-field-resolution-row > span {
+    color: var(--app-text-muted);
+    font-size: 12px;
+}
+
+.device-health-item > small {
+    color: var(--app-text-muted);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.custom-field-resolution {
+    border-color: color-mix(in srgb, var(--app-primary) 45%, var(--app-border));
+}
+
+@media (max-width: 390px) {
+    .device-health-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
 .package-exchange-page {
     padding-bottom: 16px;
 }
@@ -1737,6 +1781,10 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-text);
 }
 
+.logbook-filter-button {
+    min-height: 44px;
+}
+
 .filter-sheet {
     display: grid;
     gap: 10px;
@@ -1751,7 +1799,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 36px;
+    min-height: 44px;
     color: var(--app-text);
     font-weight: 700;
 }
@@ -2028,6 +2076,10 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .detail-hero span {
     margin: 0;
     color: var(--app-text-muted);
+}
+
+.filter-sheet .mud-button-root {
+    min-height: 44px;
 }
 
 .future-feature-page {

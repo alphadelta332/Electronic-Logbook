@@ -41,7 +41,7 @@ else
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PreviewPackageAsync" Disabled="@IsBusy">Preview package</MudButton>
             @if (ImportPlan is not null)
             {
-                <span class="settings-status-line package-file-summary">@ImportPlan.FileName · schema @ImportPlan.SchemaVersion · @ImportPlan.OperationCount operation(s)</span>
+                <span class="settings-status-line package-file-summary">@ImportPlan.FileName · schema @ImportPlan.SchemaVersion · @ImportPlan.OperationCount operation(s) · created @FormatTimestamp(ImportPlan.PackageCreatedAt)</span>
             }
         </section>
 
@@ -67,6 +67,31 @@ else
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.IosShare" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export package</MudButton>
         </section>
 
+        @if (ImportExchangePlan?.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
+        {
+            <section class="form-section custom-field-resolution" aria-labelledby="custom-field-resolution-heading">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Resolve labels</span>
+                        <h2 id="custom-field-resolution-heading">Custom field differences</h2>
+                    </div>
+                </div>
+                <span class="settings-status-line">Choose which labels this device should keep. Flight values and immutable history are preserved.</span>
+                @foreach (var conflict in ImportExchangePlan.Preview.CustomFieldDefinitions.Conflicts)
+                {
+                    <article class="custom-field-resolution-row">
+                        <strong>@conflict.Id.Value</strong>
+                        <span>On this device: @conflict.LocalDefinition.Label</span>
+                        <span>In package: @conflict.IncomingDefinition.Label</span>
+                    </article>
+                }
+                <div class="row-actions">
+                    <MudButton Variant="Variant.Outlined" OnClick="() => ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice.KeepLocal)" Disabled="@(!CanResolveCustomFields)">Keep device labels</MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="() => ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice.UseIncoming)" Disabled="@(!CanResolveCustomFields)">Use package labels</MudButton>
+                </div>
+            </section>
+        }
+
         @if (!string.IsNullOrWhiteSpace(Message) || !string.IsNullOrWhiteSpace(Error))
         {
             <section class="state-banner package-exchange-feedback @(string.IsNullOrWhiteSpace(Error) ? null : "state-banner-error")" role="@(string.IsNullOrWhiteSpace(Error) ? "status" : "alert")" aria-live="polite">
@@ -83,6 +108,7 @@ else
 @code {
     private BrowserFile? PendingImportFile { get; set; }
     private MobilePackageImportPlanResult? ImportPlan { get; set; }
+    private PortableLogbookImportPlanV2? ImportExchangePlan { get; set; }
     private string RecoveryCode { get; set; } = string.Empty;
     private bool IsBusy { get; set; }
     private string? Message { get; set; }
@@ -98,6 +124,9 @@ else
         Session.PackageKeyStatus == "Ready";
 
     private bool CanExport => !Session.IsStorageBlocked && !IsBusy && Session.PackageKeyStatus == "Ready";
+
+    private bool CanResolveCustomFields => CanImport &&
+        ImportExchangePlan?.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution;
 
     protected override async Task OnInitializedAsync() => await Session.EnsureLoadedWorkbookAsync();
 
@@ -125,6 +154,7 @@ else
 
             PendingImportFile = file;
             ImportPlan = plan;
+            ImportExchangePlan = null;
             RecoveryCode = string.Empty;
             Message = "Package manifest previewed. Restore the matching workbook recovery key before importing.";
         });
@@ -170,18 +200,32 @@ else
         {
             var file = PendingImportFile ?? throw new InvalidOperationException("Preview the package before importing it.");
             var result = await Session.ApplyWorkbookPackageAsync(file, DateTimeOffset.UtcNow);
+            ImportExchangePlan = result.Plan;
             if (result.Status == MobilePackageImportApplyStatus.RequiresResolution)
             {
-                throw new InvalidOperationException("This package needs custom-field resolution before it can be applied.");
+                Error = "Choose which custom-field labels to keep before importing this package.";
+                return;
             }
 
-            Message = result.Status switch
-            {
-                MobilePackageImportApplyStatus.PackageReplay => "This package was already imported.",
-                MobilePackageImportApplyStatus.DuplicateOperationsRecorded => "Duplicate operations were recorded safely.",
-                MobilePackageImportApplyStatus.AppliedWithConflicts => "Package imported; conflicts need resolution.",
-                _ => "Package imported successfully."
-            };
+            Message = FormatImportResult(result.Status);
+        });
+    }
+
+    private async Task ResolveCustomFieldsAsync(PortableLogbookCustomFieldDefinitionChoice choice)
+    {
+        await RunExchangeAsync(async () =>
+        {
+            var file = PendingImportFile ?? throw new InvalidOperationException("Preview the package before resolving custom-field labels.");
+            var plan = ImportExchangePlan ?? throw new InvalidOperationException("Import the package once to inspect its custom-field differences.");
+            var resolutions = plan.Preview.CustomFieldDefinitions.Conflicts
+                .Select(conflict => new PortableLogbookCustomFieldDefinitionResolution(conflict.Id, choice))
+                .ToArray();
+            var result = await Session.ApplyWorkbookPackageWithCustomFieldResolutionsAsync(
+                file,
+                resolutions,
+                DateTimeOffset.UtcNow);
+            ImportExchangePlan = result.Plan;
+            Message = FormatImportResult(result.Status);
         });
     }
 
@@ -217,4 +261,14 @@ else
             IsBusy = false;
         }
     }
+
+    private static string FormatImportResult(MobilePackageImportApplyStatus status) => status switch
+    {
+        MobilePackageImportApplyStatus.PackageReplay => "This package was already imported.",
+        MobilePackageImportApplyStatus.DuplicateOperationsRecorded => "Duplicate operations were recorded safely.",
+        MobilePackageImportApplyStatus.AppliedWithConflicts => "Package imported; entry conflicts need resolution in the logbook.",
+        _ => "Package imported successfully."
+    };
+
+    private static string FormatTimestamp(DateTimeOffset value) => value.ToLocalTime().ToString("dd MMM yyyy, HH:mm");
 }
