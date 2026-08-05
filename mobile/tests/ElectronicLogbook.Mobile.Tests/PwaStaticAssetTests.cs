@@ -264,6 +264,50 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void AppCssKeepsCurrentCurrencyStatusIndependentFromThemeAccent()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+        var currencyRowCurrent = ExtractCssRule(css, ".currency-row-current");
+
+        Assert.Contains("--app-success: #187a46;", css, StringComparison.Ordinal);
+        Assert.Matches(
+            new Regex(@"html\[data-elb-theme=""dark""\]\s*\{[^}]*--app-success:\s*#37d47d", RegexOptions.Singleline),
+            css);
+        Assert.Matches(
+            new Regex(@"\.dashboard-currency-overview-current,[\s\S]*?--dashboard-currency-accent:\s*var\(--app-success\)", RegexOptions.Singleline),
+            css);
+        Assert.Matches(
+            new Regex(@"\.currency-overview-current \.mud-icon-root,[\s\S]*?color:\s*var\(--app-success\)", RegexOptions.Singleline),
+            css);
+        Assert.Contains("--currency-row-accent: var(--app-success)", currencyRowCurrent, StringComparison.Ordinal);
+        Assert.DoesNotContain("var(--app-primary)", currencyRowCurrent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppCssKeepsDashboardExperienceColoursStaticAndDistinct()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+        var expectedColours = new Dictionary<string, string>
+        {
+            [".dashboard-experience-command"] = "#0072b2",
+            [".dashboard-experience-icus"] = "#009e73",
+            [".dashboard-experience-dual"] = "#e69f00",
+            [".dashboard-experience-copilot"] = "#cc79a7",
+            [".dashboard-experience-se"] = "#56b4e9",
+            [".dashboard-experience-me"] = "#d55e00"
+        };
+
+        Assert.Equal(expectedColours.Count, expectedColours.Values.Distinct(StringComparer.Ordinal).Count());
+        foreach (var (selector, colour) in expectedColours)
+        {
+            var rule = ExtractCssRule(css, selector);
+            Assert.Contains($"background: {colour};", rule, StringComparison.Ordinal);
+            Assert.DoesNotContain("var(--app-", rule, StringComparison.Ordinal);
+            Assert.DoesNotContain("color-mix", rule, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void AppCssKeepsMobileShellNavigationAnchoredToViewport()
     {
         var css = ReadMobileAsset(Path.Combine("css", "app.css"));
@@ -283,6 +327,30 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("overscroll-behavior-y: contain", appMain, StringComparison.Ordinal);
         Assert.Contains("position: fixed", bottomNav, StringComparison.Ordinal);
         Assert.Contains("bottom: 0", bottomNav, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AppCssHighlightsActiveNavigationIconAndLabelWithThemeColour()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+        var navigationLink = ExtractCssRule(css, ".bottom-nav a");
+        var pressedNavigationLink = ExtractCssRule(css, ".bottom-nav a:active");
+        var activeNavigationLink = ExtractCssRule(css, ".bottom-nav a.active");
+        var pendingNavigationLink = ExtractCssRule(css, ".bottom-nav a.nav-pending-link");
+        var navigationLabel = ExtractCssRule(css, ".bottom-nav a > span:last-child");
+
+        Assert.DoesNotContain(".bottom-nav::before", css, StringComparison.Ordinal);
+        Assert.Contains("-webkit-tap-highlight-color: transparent", navigationLink, StringComparison.Ordinal);
+        Assert.Contains("transition: color 130ms ease, opacity 100ms ease, transform 100ms ease", navigationLink, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-primary)", pressedNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("filter: none", pressedNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("opacity: 0.72", pressedNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("transform: scale(0.96)", pressedNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("background: transparent", activeNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-primary)", activeNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("background: transparent", pendingNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-primary)", pendingNavigationLink, StringComparison.Ordinal);
+        Assert.Contains("max-width: calc(100% + 6px)", navigationLabel, StringComparison.Ordinal);
     }
 
     private static string ExtractFileBridge(string bridge)

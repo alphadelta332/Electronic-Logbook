@@ -1,0 +1,64 @@
+@using System.Globalization
+
+<section class="dashboard-experience-snapshot" aria-labelledby="dashboard-experience-heading">
+    <header class="dashboard-experience-heading">
+        <h2 id="dashboard-experience-heading">Experience snapshot</h2>
+        <NavLink href="/flights?view=totals" aria-label="Open full logbook totals">
+            <span>View full totals</span>
+            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" aria-hidden="true" />
+        </NavLink>
+    </header>
+
+    <section class="dashboard-experience-group" aria-labelledby="dashboard-authority-heading">
+        <div class="dashboard-experience-group-heading">
+            <h3 id="dashboard-authority-heading">Authority</h3>
+        </div>
+        <div class="dashboard-experience-bar"
+             role="img"
+             aria-label="@AuthorityAriaLabel">
+            <span class="dashboard-experience-command" style="@SegmentStyle(Summary.CommandHours)" aria-hidden="true"></span>
+            <span class="dashboard-experience-icus" style="@SegmentStyle(Summary.IcusHours)" aria-hidden="true"></span>
+            <span class="dashboard-experience-dual" style="@SegmentStyle(Summary.DualHours)" aria-hidden="true"></span>
+            <span class="dashboard-experience-copilot" style="@SegmentStyle(Summary.CopilotHours)" aria-hidden="true"></span>
+        </div>
+        <ul class="dashboard-experience-legend" aria-label="Authority hour totals">
+            <li><span class="dashboard-experience-dot dashboard-experience-command" aria-hidden="true"></span><span>Command</span><strong>@Hours(Summary.CommandHours)</strong></li>
+            <li><span class="dashboard-experience-dot dashboard-experience-icus" aria-hidden="true"></span><span>ICUS</span><strong>@Hours(Summary.IcusHours)</strong></li>
+            <li><span class="dashboard-experience-dot dashboard-experience-dual" aria-hidden="true"></span><span>Dual</span><strong>@Hours(Summary.DualHours)</strong></li>
+            <li><span class="dashboard-experience-dot dashboard-experience-copilot" aria-hidden="true"></span><span>Copilot</span><strong>@Hours(Summary.CopilotHours)</strong></li>
+        </ul>
+    </section>
+
+    <section class="dashboard-experience-group dashboard-experience-engine" aria-labelledby="dashboard-engine-heading">
+        <div class="dashboard-experience-group-heading">
+            <h3 id="dashboard-engine-heading">Engine class</h3>
+        </div>
+        <div class="dashboard-experience-bar"
+             role="img"
+             aria-label="@EngineAriaLabel">
+            <span class="dashboard-experience-se" style="@SegmentStyle(Summary.SingleEngineHours)" aria-hidden="true"></span>
+            <span class="dashboard-experience-me" style="@SegmentStyle(Summary.MultiEngineHours)" aria-hidden="true"></span>
+        </div>
+        <ul class="dashboard-experience-legend" aria-label="Classified engine hour totals">
+            <li><span class="dashboard-experience-dot dashboard-experience-se" aria-hidden="true"></span><span>Single</span><strong>@Hours(Summary.SingleEngineHours)</strong></li>
+            <li><span class="dashboard-experience-dot dashboard-experience-me" aria-hidden="true"></span><span>Multi</span><strong>@Hours(Summary.MultiEngineHours)</strong></li>
+        </ul>
+    </section>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public MobileDashboardExperienceSummary Summary { get; set; } = default!;
+
+    private string AuthorityAriaLabel =>
+        $"Authority hours: Command {Hours(Summary.CommandHours)}, ICUS {Hours(Summary.IcusHours)}, Dual {Hours(Summary.DualHours)}, Copilot {Hours(Summary.CopilotHours)}";
+
+    private string EngineAriaLabel =>
+        $"Classified engine hours: Single engine {Hours(Summary.SingleEngineHours)}, Multi engine {Hours(Summary.MultiEngineHours)}";
+
+    private static string Hours(decimal value) =>
+        MobileLogbookSession.FormatHours(value);
+
+    private static string SegmentStyle(decimal value) =>
+        $"--dashboard-segment-weight: {Math.Max(value, 0).ToString(CultureInfo.InvariantCulture)}";
+}

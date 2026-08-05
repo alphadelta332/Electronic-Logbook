@@ -1,0 +1,49 @@
+@implements IDisposable
+@inject NavigationManager Navigation
+
+<a href="@Href"
+   class="@CssClass"
+   aria-current="@AriaCurrent"
+   @attributes="AdditionalAttributes">
+    @ChildContent
+</a>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Href { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private bool IsActive => string.Equals(
+        Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
+        Navigation.ToAbsoluteUri(Href).AbsolutePath.TrimEnd('/'),
+        StringComparison.OrdinalIgnoreCase);
+
+    private string? CssClass => string.Join(
+        " ",
+        new[] { Class, IsActive ? "active" : null }.Where(value => !string.IsNullOrWhiteSpace(value)));
+
+    private string? AriaCurrent => IsActive ? "page" : null;
+
+    protected override void OnInitialized()
+    {
+        Navigation.LocationChanged += OnLocationChanged;
+    }
+
+    public void Dispose()
+    {
+        Navigation.LocationChanged -= OnLocationChanged;
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+}

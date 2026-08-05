@@ -26,9 +26,13 @@
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
             <span>Dashboard</span>
         </NavLink>
-        <NavLink href="/flights" Match="NavLinkMatch.All" aria-label="Logbook" class="@NavPendingClass(LogbookNavigationLabel)" @onclick="ShowLogbookNavigationPending">
+        <PathOnlyNavLink Href="/flights" aria-label="Logbook" Class="@NavPendingClass(LogbookNavigationLabel)" @onclick="ShowLogbookNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
             <span>Logbook</span>
+        </PathOnlyNavLink>
+        <NavLink href="/currency" aria-label="Currency" class="@NavPendingClass(CurrencyNavigationLabel)" @onclick="ShowCurrencyNavigationPending">
+            <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
+            <span>Currency</span>
         </NavLink>
         <NavLink href="/flights/new" class="@NavPendingClass(NewFlightNavigationLabel, AddNavigationClass)" aria-label="New flight" @onclick="ShowNewFlightNavigationPending">
             <span class="bottom-nav-add-icon" aria-hidden="true">
@@ -36,9 +40,13 @@
             </span>
             <span>New flight</span>
         </NavLink>
-        <NavLink href="/currency" aria-label="Currency" class="@NavPendingClass(CurrencyNavigationLabel)" @onclick="ShowCurrencyNavigationPending">
-            <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
-            <span>Currency</span>
+        <NavLink href="/charts" aria-label="Charts" class="@NavPendingClass(ChartsNavigationLabel)" @onclick="ShowChartsNavigationPending">
+            <MudIcon Icon="@Icons.Material.Filled.BarChart" />
+            <span>Charts</span>
+        </NavLink>
+        <NavLink href="/routes" aria-label="Routes" class="@NavPendingClass(RoutesNavigationLabel)" @onclick="ShowRoutesNavigationPending">
+            <MudIcon Icon="@Icons.Material.Filled.Route" />
+            <span>Routes</span>
         </NavLink>
         <NavLink href="/settings" aria-label="Settings" class="@NavPendingClass(SettingsNavigationLabel)" @onclick="ShowSettingsNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.Settings" />
@@ -54,7 +62,9 @@
 @code {
     private const string DashboardNavigationLabel = "Dashboard";
     private const string LogbookNavigationLabel = "Logbook";
+    private const string RoutesNavigationLabel = "Routes";
     private const string NewFlightNavigationLabel = "New flight";
+    private const string ChartsNavigationLabel = "Charts";
     private const string CurrencyNavigationLabel = "Currency";
     private const string SettingsNavigationLabel = "Settings";
     private const string AddNavigationClass = "bottom-nav-add";
@@ -102,7 +112,11 @@
 
     private void ShowLogbookNavigationPending() => ShowNavigationPending(LogbookNavigationLabel, "/flights");
 
+    private void ShowRoutesNavigationPending() => ShowNavigationPending(RoutesNavigationLabel, "/routes");
+
     private void ShowNewFlightNavigationPending() => ShowNavigationPending(NewFlightNavigationLabel, "/flights/new");
+
+    private void ShowChartsNavigationPending() => ShowNavigationPending(ChartsNavigationLabel, "/charts");
 
     private void ShowCurrencyNavigationPending() => ShowNavigationPending(CurrencyNavigationLabel, "/currency");
 

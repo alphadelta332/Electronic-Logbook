@@ -31,17 +31,9 @@ else
         }
 
         <div class="segmented-control" role="tablist" aria-label="Logbook view">
-            <button type="button" class="@EntriesTabClass" @onclick="() => SelectViewAsync(LogbookView.Entries)">Entries</button>
-            <button type="button" class="@TotalsTabClass" @onclick="() => SelectViewAsync(LogbookView.Totals)">Totals</button>
+            <button type="button" class="@EntriesTabClass" @onclick="() => SelectView(LogbookView.Entries)">Entries</button>
+            <button type="button" class="@TotalsTabClass" @onclick="() => SelectView(LogbookView.Totals)">Totals</button>
         </div>
-
-        @if (IsViewSwitchPending)
-        {
-            <section class="view-progress" role="status" aria-live="polite">
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-                <span>Opening @PendingViewLabel</span>
-            </section>
-        }
 
         @if (ActiveView == LogbookView.Entries)
         {
@@ -288,9 +280,6 @@ else
     private bool ShowFilters { get; set; }
     private bool FilterRecentOnly { get; set; }
     private bool FilterFlightsWithApproachesOnly { get; set; }
-    private bool IsViewSwitchPending { get; set; }
-    private string PendingViewLabel { get; set; } = "view";
-
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
     private string EntryCountLabel => Session.CurrentEntriesV2.Count == 1
@@ -321,20 +310,14 @@ else
             : LogbookView.Entries;
     }
 
-    private async Task SelectViewAsync(LogbookView view)
+    private void SelectView(LogbookView view)
     {
         if (ActiveView == view)
         {
             return;
         }
 
-        PendingViewLabel = view == LogbookView.Totals ? "Totals" : "Entries";
-        IsViewSwitchPending = true;
-        await InvokeAsync(StateHasChanged);
-        await Task.Yield();
-
         ActiveView = view;
-        IsViewSwitchPending = false;
         Navigation.NavigateTo($"/flights?view={(view == LogbookView.Totals ? "totals" : "entries")}");
     }
 

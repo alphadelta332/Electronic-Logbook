@@ -21,29 +21,36 @@ else
             </section>
         }
 
-        <section class="status-strip dashboard-metrics" aria-label="Flight activity">
-            <NavLink class="status-metric dashboard-total-hours" href="/flights?view=totals" aria-label="Open logbook totals">
-                <span>Total hours</span>
+        <section class="dashboard-hours-hero" aria-labelledby="dashboard-total-hours-heading">
+            <NavLink class="dashboard-hours-total" href="/flights?view=totals" aria-label="Open logbook totals">
+                <span id="dashboard-total-hours-heading">Total flying hours</span>
                 <strong>@MobileLogbookSession.FormatHours(TotalFlyingHours)</strong>
-                <small>logged</small>
+                <small>Total aeronautical experience <strong>@MobileLogbookSession.FormatHours(TotalAeronauticalExperience)</strong></small>
             </NavLink>
-            <NavLink class="status-metric dashboard-period-hours dashboard-hours-28" href="/flights?view=entries" aria-label="Open logbook entries from the last 28 days">
-                <span>Hours last 28 days</span>
-                <strong>@MobileLogbookSession.FormatHours(HoursLast28Days)</strong>
-                <small>logged</small>
-            </NavLink>
-            <NavLink class="status-metric dashboard-period-hours dashboard-hours-365" href="/flights?view=entries" aria-label="Open logbook entries from the last 365 days">
-                <span>Hours last 365 days</span>
-                <strong>@MobileLogbookSession.FormatHours(HoursLast365Days)</strong>
-                <small>logged</small>
-            </NavLink>
+            <div class="dashboard-hours-periods" aria-label="Recent flying hours">
+                <NavLink class="dashboard-hours-period" href="/flights?view=entries" aria-label="Open logbook entries from the last 28 days">
+                    <span>@MobileLogbookSession.FormatHours(HoursLast28Days)</span>
+                    <MudIcon Icon="@Icons.Material.Filled.Schedule" aria-hidden="true" />
+                    <strong>Last 28 days</strong>
+                </NavLink>
+                <NavLink class="dashboard-hours-period" href="/flights?view=entries" aria-label="Open logbook entries from the last 365 days">
+                    <span>@MobileLogbookSession.FormatHours(HoursLast365Days)</span>
+                    <MudIcon Icon="@Icons.Material.Filled.CalendarMonth" aria-hidden="true" />
+                    <strong>Last 365 days</strong>
+                </NavLink>
+            </div>
+
+            @if (Session.CurrentEntriesV2.Count > 0)
+            {
+                <DashboardExperienceSnapshot Summary="@ExperienceSummary" />
+            }
         </section>
 
         <DashboardLastFlight Entry="@LastFlight" />
 
-        <section class="dashboard-section dashboard-currency" aria-label="Currency and recency status">
+        <NavLink class="dashboard-section dashboard-currency" href="/currency" aria-label="Open currency and recency status">
             <DashboardCurrencyOverview Summary="@CurrencySummary" />
-        </section>
+        </NavLink>
 
         @if (Session.CurrentEntriesV2.Count == 0)
         {
@@ -66,6 +73,9 @@ else
     private PortableLogbookMaterializedEntryV2? LastFlight => Session.CurrentEntriesV2.FirstOrDefault();
 
     private decimal TotalFlyingHours =>
+        Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookFlightTime(entry.Entry!));
+
+    private decimal TotalAeronauticalExperience =>
         Session.CurrentEntriesV2.Sum(entry => MobileLogbookSession.WorkbookLoggedTime(entry.Entry!));
 
     private decimal HoursLast28Days =>
@@ -80,6 +90,12 @@ else
             Today,
             365);
 
+    private MobileDashboardExperienceSummary? experienceSummary;
+
+    private MobileDashboardExperienceSummary ExperienceSummary =>
+        experienceSummary ??= MobileDashboardExperienceSummary.Create(
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!));
+
     private MobileCurrencyRecencySummary? currencySummary;
 
     private MobileCurrencyRecencySummary CurrencySummary =>
@@ -88,6 +104,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         await Session.EnsureLoadedWorkbookAsync();
+        experienceSummary = MobileDashboardExperienceSummary.Create(
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!));
         currencySummary = Session.GetCurrencyRecencySummary(DateOnly.FromDateTime(DateTime.Today));
     }
 
