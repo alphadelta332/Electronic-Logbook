@@ -1400,6 +1400,11 @@ public static class PortableLogbookWorkbookPackageStorage
             return ConvertWorkbookMonth(text);
         }
 
+        if (field.Id == "dateDay")
+        {
+            return ConvertWorkbookDay(text);
+        }
+
         return field.Kind switch
         {
             PortableLogbookWorkbookFieldKind.Boolean => ParseWorkbookBoolean(text),
@@ -1439,7 +1444,61 @@ public static class PortableLogbookWorkbookPackageStorage
             return namedMonth.Month;
         }
 
+        // Existing workbooks can store Month as an Excel date serial and rely on
+        // cell formatting to display only the month name. Preserve that workbook
+        // representation when enrolling the visible rows into schema v2.
+        if (double.TryParse(
+                text,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var excelDateSerial) &&
+            excelDateSerial >= 32)
+        {
+            try
+            {
+                return DateTime.FromOADate(excelDateSerial).Month;
+            }
+            catch (ArgumentException)
+            {
+                // Fall through to the field-specific format error below.
+            }
+        }
+
         throw new FormatException($"Workbook month value '{text}' is not recognised.");
+    }
+
+    private static int ConvertWorkbookDay(string text)
+    {
+        if (int.TryParse(
+                text,
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var numericDay) &&
+            numericDay is >= 1 and <= 31)
+        {
+            return numericDay;
+        }
+
+        // Existing workbooks can store Day as the full Excel date serial and rely
+        // on cell formatting to display only the day of the month.
+        if (double.TryParse(
+                text,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var excelDateSerial) &&
+            excelDateSerial >= 32)
+        {
+            try
+            {
+                return DateTime.FromOADate(excelDateSerial).Day;
+            }
+            catch (ArgumentException)
+            {
+                // Fall through to the field-specific format error below.
+            }
+        }
+
+        throw new FormatException($"Workbook day value '{text}' is not recognised.");
     }
 
     private static bool ParseWorkbookBoolean(string text)

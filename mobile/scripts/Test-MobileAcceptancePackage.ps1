@@ -45,6 +45,23 @@ function Assert-FileExists {
     }
 }
 
+function ConvertTo-ProcessArgument {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Argument
+    )
+
+    if ($Argument.Contains('"')) {
+        throw "Native process arguments cannot contain a double quote."
+    }
+
+    if ($Argument -match "\s") {
+        return '"' + $Argument + '"'
+    }
+
+    return $Argument
+}
+
 function Invoke-PortableCommand {
     param(
         [Parameter(Mandatory = $true)]
@@ -55,7 +72,11 @@ function Invoke-PortableCommand {
 
     $stdoutPath = "$OutputPath.stdout.tmp"
     $stderrPath = "$OutputPath.stderr.tmp"
-    $processArguments = @("run", "--project", $updaterProject, "--") + $Arguments
+    # Windows PowerShell joins Start-Process ArgumentList values without preserving
+    # their original boundaries. Quote whitespace-bearing paths explicitly so real
+    # workbook filenames remain a single native argument.
+    $processArguments = (@("run", "--project", $updaterProject, "--") + $Arguments) |
+        ForEach-Object { ConvertTo-ProcessArgument -Argument $_ }
     $process = Start-Process `
         -FilePath "dotnet" `
         -ArgumentList $processArguments `

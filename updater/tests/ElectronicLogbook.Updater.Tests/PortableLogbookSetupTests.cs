@@ -67,6 +67,35 @@ public sealed class PortableLogbookSetupTests
             plan.WorkbookRows.Select(row => (row.EntryId!.Value, row.CurrentRevisionId!.Value)));
     }
 
+    [Fact]
+    public void CreateInitialSetupPlanV2PreservesInputOrderForFlightsOnTheSameDate()
+    {
+        var first = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 7,
+            Day = 18,
+            Type = "C172",
+            Reg = "VH-FIRST"
+        };
+        var second = first with { Reg = "VH-SECOND" };
+        var plan = PortableLogbookSetup.CreateInitialSetupPlanV2(
+            [new PortableLogbookWorkbookRowV2(null, null, first), new PortableLogbookWorkbookRowV2(null, null, second)],
+            [],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            DateTimeOffset.Parse("2026-07-18T00:00:00Z"),
+            new LogbookId("log_setup_v2"),
+            new DeviceId("dev_excel_v2"),
+            PortableLogbookKey.Generate(),
+            new PortableLogbookIdFactory(
+                QueueIds([new EntryId("ent_z"), new EntryId("ent_a")]),
+                QueueIds([new RevisionId("rev_z"), new RevisionId("rev_a")])));
+
+        Assert.Equal(
+            [(new EntryId("ent_z"), "VH-FIRST"), (new EntryId("ent_a"), "VH-SECOND")],
+            plan.WorkbookRows.Select(row => (row.EntryId, row.Entry.Reg)));
+    }
+
     private static PortableLogbookEntry Entry(string registration) =>
         PortableLogbookEntry.Empty with
         {

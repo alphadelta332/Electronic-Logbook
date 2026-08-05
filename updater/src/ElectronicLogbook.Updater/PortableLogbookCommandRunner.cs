@@ -266,7 +266,9 @@ public static class PortableLogbookCommandRunner
         File.WriteAllBytes(packageOutputPath, packageBytes);
         var manifest = PortableLogbookPackage.ReadManifestForInspection(packageBytes);
         var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(document, packageBytes, state.ImportReceipts);
-        var workbookRows = PortableLogbookWorkbookProjection.CreateCurrentRows(document);
+        var workbookRows = PreserveVisibleWorkbookRowOrder(
+            currentRows,
+            PortableLogbookWorkbookProjection.CreateCurrentRows(document));
         PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
             workbookPath,
             workbookRows,
@@ -288,6 +290,43 @@ public static class PortableLogbookCommandRunner
             projection.DeletionCount,
             manifest.CreatedAt,
             exportedAt);
+    }
+
+    internal static IReadOnlyList<PortableLogbookWorkbookRowV2> PreserveVisibleWorkbookRowOrder(
+        IReadOnlyList<PortableLogbookWorkbookRowV2> visibleRows,
+        IReadOnlyList<PortableLogbookWorkbookRowV2> projectedRows)
+    {
+        ArgumentNullException.ThrowIfNull(visibleRows);
+        ArgumentNullException.ThrowIfNull(projectedRows);
+
+        var remaining = projectedRows.ToList();
+        var ordered = new List<PortableLogbookWorkbookRowV2>(projectedRows.Count);
+        foreach (var visibleRow in visibleRows)
+        {
+            var matchIndex = visibleRow.EntryId is { } entryId
+                ? remaining.FindIndex(row => row.EntryId == entryId)
+                : remaining.FindIndex(row => WorkbookEntriesEqual(row.Entry, visibleRow.Entry));
+            if (matchIndex < 0)
+            {
+                throw new InvalidDataException("Portable workbook metadata could not be aligned with the visible workbook row order.");
+            }
+
+            ordered.Add(remaining[matchIndex]);
+            remaining.RemoveAt(matchIndex);
+        }
+
+        ordered.AddRange(remaining);
+        return ordered;
+    }
+
+    private static bool WorkbookEntriesEqual(
+        PortableLogbookWorkbookEntry left,
+        PortableLogbookWorkbookEntry right)
+    {
+        var leftValues = PortableLogbookWorkbookEntryFields.ToFieldValues(left);
+        var rightValues = PortableLogbookWorkbookEntryFields.ToFieldValues(right);
+        return leftValues.Count == rightValues.Count &&
+            leftValues.All(pair => rightValues.TryGetValue(pair.Key, out var value) && Equals(pair.Value, value));
     }
 
     public static PortableLogbookImportPreviewResult PreviewImport(

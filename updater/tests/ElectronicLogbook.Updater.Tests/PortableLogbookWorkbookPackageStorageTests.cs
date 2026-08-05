@@ -449,6 +449,72 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadCurrentRowsV2AcceptsExcelDateSerialMonthFromWorkbook()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"]);
+        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames
+            .Concat([
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName
+            ])
+            .ToArray();
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AT2", columns);
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbook,
+            [new PortableLogbookWorkbookRowV2(new EntryId("ent_serial_month"), new RevisionId("rev_serial_month"), CompleteWorkbookEntry())],
+            customFields);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "B2", "44772");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var row = Assert.Single(PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(workbook, customFields));
+
+        Assert.Equal(7, row.Entry.Month);
+    }
+
+    [Fact]
+    public void ReadCurrentRowsV2AcceptsExcelDateSerialDayFromWorkbook()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"]);
+        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames
+            .Concat([
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName
+            ])
+            .ToArray();
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AT2", columns);
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbook,
+            [new PortableLogbookWorkbookRowV2(new EntryId("ent_serial_day"), new RevisionId("rev_serial_day"), CompleteWorkbookEntry())],
+            customFields);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "C2", "44772");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var row = Assert.Single(PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(workbook, customFields));
+
+        Assert.Equal(30, row.Entry.Day);
+    }
+
+    [Fact]
     public void WriteHiddenMetadataColumnValuesUsesAbsoluteWorksheetColumnsWhenTableDoesNotStartInColumnA()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);

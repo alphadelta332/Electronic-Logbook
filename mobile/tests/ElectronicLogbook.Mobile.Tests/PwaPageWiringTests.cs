@@ -67,7 +67,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Home</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Logbook</span>", layout, StringComparison.Ordinal);
-        Assert.Contains("<span>Routes</span>", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>Route Map</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>New flight</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Charts</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Currency</span>", layout, StringComparison.Ordinal);
@@ -786,7 +786,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("aria-label=\"Primary\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Dashboard\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Logbook\"", layout, StringComparison.Ordinal);
-        Assert.Contains("aria-label=\"Routes\"", layout, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Route Map\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Charts\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Settings\"", layout, StringComparison.Ordinal);

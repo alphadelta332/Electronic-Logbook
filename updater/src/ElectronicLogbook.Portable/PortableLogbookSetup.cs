@@ -45,7 +45,16 @@ public static class PortableLogbookSetup
             customFieldDefinitions,
             currencyOverrideDates,
             operations);
-        var workbookRows = PortableLogbookWorkbookProjection.CreateCurrentRows(document);
+        // Keep the workbook's visible row order when assigning the initial hidden
+        // identifiers. The document projection uses EntryId as a same-date
+        // tiebreaker, but freshly generated IDs must not reshuffle multiple flights
+        // logged on the same day.
+        var workbookRows = operations
+            .Select(operation => new PortableLogbookWorkbookRowV2(
+                operation.EntryId,
+                operation.RevisionId,
+                operation.Entry!))
+            .ToArray();
         var packageBytes = PortableLogbookPackage.Write(document, resolvedKey);
         return new PortableLogbookSetupPlanV2(
             resolvedLogbookId,

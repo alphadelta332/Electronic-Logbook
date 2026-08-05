@@ -45,9 +45,9 @@
             <MudIcon Icon="@Icons.Material.Filled.BarChart" />
             <span>Charts</span>
         </NavLink>
-        <NavLink href="/routes" aria-label="Routes" class="@NavPendingClass(RoutesNavigationLabel)" @onclick="ShowRoutesNavigationPending">
+        <NavLink href="/routes" aria-label="Route Map" class="@NavPendingClass(RoutesNavigationLabel)" @onclick="ShowRoutesNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.Route" />
-            <span>Routes</span>
+            <span>Route Map</span>
         </NavLink>
         <NavLink href="/settings" aria-label="Settings" class="@NavPendingClass(SettingsNavigationLabel)" @onclick="ShowSettingsNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.Settings" />
@@ -63,7 +63,7 @@
 @code {
     private const string DashboardNavigationLabel = "Dashboard";
     private const string LogbookNavigationLabel = "Logbook";
-    private const string RoutesNavigationLabel = "Routes";
+    private const string RoutesNavigationLabel = "Route Map";
     private const string NewFlightNavigationLabel = "New flight";
     private const string ChartsNavigationLabel = "Charts";
     private const string CurrencyNavigationLabel = "Currency";

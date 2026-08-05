@@ -563,6 +563,29 @@ public sealed class PortableLogbookCommandTests : IDisposable
         Assert.Contains(updated.Document.Operations, operation => operation.EntryId == new EntryId("ent_v2_command_roundtrip"));
     }
 
+    [Fact]
+    public void PreserveVisibleWorkbookRowOrderKeepsSameDateIdsWithTheirVisibleEntries()
+    {
+        var first = PortableLogbookWorkbookEntry.Empty with { Year = 2026, Month = 7, Day = 27, Reg = "VH-FIRST" };
+        var second = first with { Reg = "VH-SECOND" };
+        var visibleRows = new[]
+        {
+            new PortableLogbookWorkbookRowV2(new EntryId("ent_z"), new RevisionId("rev_old_z"), first),
+            new PortableLogbookWorkbookRowV2(new EntryId("ent_a"), new RevisionId("rev_old_a"), second)
+        };
+        var projectedRows = new[]
+        {
+            new PortableLogbookWorkbookRowV2(new EntryId("ent_a"), new RevisionId("rev_new_a"), second),
+            new PortableLogbookWorkbookRowV2(new EntryId("ent_z"), new RevisionId("rev_new_z"), first)
+        };
+
+        var ordered = PortableLogbookCommandRunner.PreserveVisibleWorkbookRowOrder(visibleRows, projectedRows);
+
+        Assert.Equal([new EntryId("ent_z"), new EntryId("ent_a")], ordered.Select(row => row.EntryId));
+        Assert.Equal([new RevisionId("rev_new_z"), new RevisionId("rev_new_a")], ordered.Select(row => row.CurrentRevisionId));
+        Assert.Equal(["VH-FIRST", "VH-SECOND"], ordered.Select(row => row.Entry.Reg));
+    }
+
     [Fact(Skip = "Superseded by the schema-v2-only portable command contract; retain as historical v1 behavior documentation.")]
     public void EnableRejectsWorkbookThatAlreadyHasPortableStorage()
     {

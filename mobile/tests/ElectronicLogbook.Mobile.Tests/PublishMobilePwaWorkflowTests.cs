@@ -89,6 +89,13 @@ public sealed class PublishMobilePwaWorkflowTests
         var packageJson = File.ReadAllText(Path.Combine(mobileRoot, "package.json"));
         var gradle = File.ReadAllText(Path.Combine(mobileRoot, "android", "app", "build.gradle"));
         var installScript = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "Install-AndroidAcceptanceBuild.ps1"));
+        var acceptanceManifest = File.ReadAllText(Path.Combine(
+            mobileRoot,
+            "android",
+            "app",
+            "src",
+            "acceptance",
+            "AndroidManifest.xml"));
 
         Assert.Contains("install:android:acceptance", packageJson, StringComparison.Ordinal);
         Assert.Contains("Install-AndroidAcceptanceBuild.ps1", packageJson, StringComparison.Ordinal);
@@ -97,8 +104,27 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("assembleAcceptance", installScript, StringComparison.Ordinal);
         Assert.Contains("Initialize-AndroidDevelopmentSigning", installScript, StringComparison.Ordinal);
         Assert.Contains("\"install\", \"-r\"", installScript, StringComparison.Ordinal);
+        Assert.Contains("android:allowBackup=\"false\"", acceptanceManifest, StringComparison.Ordinal);
+        Assert.Contains("tools:replace=\"android:allowBackup\"", acceptanceManifest, StringComparison.Ordinal);
         Assert.DoesNotContain("pm clear", installScript, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("adb uninstall", installScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MobileAcceptancePackageWorkflowQuotesNativeArgumentsContainingSpaces()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var script = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "Test-MobileAcceptancePackage.ps1"));
+
+        Assert.Contains("function ConvertTo-ProcessArgument", script, StringComparison.Ordinal);
+        Assert.Contains("$Argument -match \"\\s\"", script, StringComparison.Ordinal);
+        Assert.Contains("ForEach-Object { ConvertTo-ProcessArgument -Argument $_ }", script, StringComparison.Ordinal);
     }
 
     private static string ReadWorkflow() =>
