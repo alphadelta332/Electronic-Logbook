@@ -391,16 +391,22 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     public void ReadWorkbookCustomFieldDefinitionsPreservesNamedWorkbookHeaders()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
-        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames.ToArray();
+        var columns = new[]
+            {
+                PortableLogbookWorkbookFieldCatalog.EntryIdColumnName,
+                PortableLogbookWorkbookFieldCatalog.CalculatedProjectionColumnNames[0]
+            }
+            .Concat(PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames)
+            .ToArray();
         var labels = new[] { "Operation", "Training course", "Client", "Notes" };
         for (var index = 0; index < labels.Length; index++)
         {
-            columns[15 + index] = labels[index];
+            columns[17 + index] = labels[index];
         }
 
         using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
         {
-            ReplaceLogbookTable(archive, "A1:AR2", columns);
+            ReplaceLogbookTable(archive, "A1:AT2", columns);
         }
 
         var customFields = PortableLogbookWorkbookPackageStorage.ReadWorkbookCustomFieldDefinitions(workbook);

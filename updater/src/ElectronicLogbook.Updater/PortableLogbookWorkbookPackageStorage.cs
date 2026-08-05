@@ -677,11 +677,33 @@ public static class PortableLogbookWorkbookPackageStorage
             .ToArray()
             ?? throw new InvalidDataException("Logbook table does not contain tableColumns.");
 
-        var customFieldLabels = PortableLogbookWorkbookFieldCatalog.PilotEnteredFields
+        var pilotFields = PortableLogbookWorkbookFieldCatalog.PilotEnteredFields;
+        var pilotStartIndex = Array.FindIndex(
+            columnNames,
+            name => string.Equals(
+                name,
+                pilotFields[0].WorkbookColumnName,
+                StringComparison.OrdinalIgnoreCase));
+        var customFieldIndexes = pilotFields
             .Select((field, index) => (field, index))
             .Where(item => item.field.Id.StartsWith("custom", StringComparison.Ordinal))
-            .Select(item => item.index < columnNames.Length ? columnNames[item.index] : string.Empty)
+            .Select(item => item.index)
             .ToArray();
+        var customFieldLabels = pilotStartIndex >= 0 &&
+                                customFieldIndexes.All(index => pilotStartIndex + index < columnNames.Length)
+            ? customFieldIndexes
+                .Select(index => columnNames[pilotStartIndex + index])
+                .ToArray()
+            : [];
+
+        if (customFieldLabels.Length != PortableLogbookCustomFieldSet.WorkbookCustomFieldCount ||
+            customFieldLabels.Any(string.IsNullOrWhiteSpace))
+        {
+            customFieldLabels = columnNames
+                .Where(name => name.StartsWith("Custom ", StringComparison.OrdinalIgnoreCase))
+                .Take(PortableLogbookCustomFieldSet.WorkbookCustomFieldCount)
+                .ToArray();
+        }
 
         return customFieldLabels.Length == PortableLogbookCustomFieldSet.WorkbookCustomFieldCount &&
                customFieldLabels.All(label => !string.IsNullOrWhiteSpace(label))
