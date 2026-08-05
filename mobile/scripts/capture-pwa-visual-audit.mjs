@@ -33,7 +33,11 @@ const routes = [
     { name: "currency", path: "/currency", readySelector: "main .currency-page" },
     { name: "logbook-entries", path: "/flights?view=entries", readySelector: "main .logbook-page" },
     { name: "logbook-totals", path: "/flights?view=totals", readySelector: "main .logbook-totals" },
-    { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" }
+    { name: "new-flight", path: "/flights/new", readySelector: "main .flight-entry-page" },
+    { name: "charts", path: "/charts", readySelector: "main .future-feature-page" },
+    { name: "routes", path: "/routes", readySelector: "main .future-feature-page" },
+    { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" },
+    { name: "settings", path: "/settings", readySelector: "main .settings-page" }
 ];
 
 function optionValue(name, fallback) {
@@ -41,13 +45,31 @@ function optionValue(name, fallback) {
     return index >= 0 && process.argv[index + 1] ? resolve(process.argv[index + 1]) : fallback;
 }
 
+function optionFilter(name, values, keySelector = value => value) {
+    const index = process.argv.indexOf(name);
+    if (index < 0 || !process.argv[index + 1]) {
+        return values;
+    }
+
+    const requested = process.argv[index + 1];
+    const selected = values.filter(value => keySelector(value) === requested);
+    if (selected.length === 0) {
+        throw new Error(`Unknown ${name} value: ${requested}`);
+    }
+
+    return selected;
+}
+
 if (process.argv.includes("--help")) {
-    console.log("Usage: node scripts/capture-pwa-visual-audit.mjs [--publish-root <path>] [--output-dir <path>]");
+    console.log("Usage: node scripts/capture-pwa-visual-audit.mjs [--publish-root <path>] [--output-dir <path>] [--profile <name>] [--theme <light|dark>] [--route <name>]");
     process.exit(0);
 }
 
 const publishRoot = optionValue("--publish-root", defaultPublishRoot);
 const outputDirectory = optionValue("--output-dir", defaultOutputDirectory);
+const selectedProfiles = optionFilter("--profile", profiles, profile => profile.name);
+const selectedColorSchemes = optionFilter("--theme", colorSchemes);
+const selectedRoutes = optionFilter("--route", routes, route => route.name);
 
 async function createStaticServer(root) {
     await access(join(root, "index.html"));
@@ -101,9 +123,9 @@ await mkdir(outputDirectory, { recursive: true });
 try {
     const browser = await chromium.launch({ headless: true });
     try {
-        for (const colorScheme of colorSchemes) {
-            for (const profile of profiles) {
-                for (const route of routes) {
+        for (const colorScheme of selectedColorSchemes) {
+            for (const profile of selectedProfiles) {
+                for (const route of selectedRoutes) {
                     const context = await browser.newContext({
                         colorScheme,
                         viewport: { width: profile.width, height: profile.height }
@@ -120,7 +142,70 @@ try {
                     await page.locator(route.readySelector).waitFor({ state: "visible", timeout: 30000 });
                     await page.evaluate((fontScale) => {
                         document.documentElement.style.fontSize = `${fontScale * 100}%`;
+                        const main = document.querySelector(".app-main");
+                        if (main) {
+                            main.scrollTop = 0;
+                            main.scrollLeft = 0;
+                        }
+                        window.scrollTo(0, 0);
                     }, profile.fontScale);
+                    await page.waitForTimeout(50);
+                    await page.evaluate(() => {
+                        window.electronicLogbookNavigation?.scrollMainToTop();
+                        window.scrollTo(0, 0);
+                    });
+
+                    const shellLayout = await page.evaluate(() => {
+                        const main = document.querySelector(".app-main");
+                        const navigation = document.querySelector(".bottom-nav");
+                        const heading = document.querySelector("main h1");
+                        const navigationLinks = [...document.querySelectorAll(".bottom-nav a")];
+                        const visibleControls = [...document.querySelectorAll("button, a[href], input, select, textarea")]
+                            .filter(element => element.getClientRects().length > 0);
+                        const unnamedControls = visibleControls
+                            .filter(element => {
+                                const labels = "labels" in element ? [...element.labels] : [];
+                                return !element.getAttribute("aria-label") &&
+                                    !element.getAttribute("aria-labelledby") &&
+                                    labels.length === 0 &&
+                                    !(element.textContent ?? "").trim() &&
+                                    !element.getAttribute("title");
+                            })
+                            .map(element => element.outerHTML.slice(0, 120));
+
+                        return {
+                            mainHorizontalOverflow: main ? main.scrollWidth > main.clientWidth + 1 : true,
+                            mainScrollTop: main?.scrollTop ?? -1,
+                            windowScrollY: window.scrollY,
+                            headingTop: heading?.getBoundingClientRect().top ?? -1,
+                            mainTop: main?.getBoundingClientRect().top ?? -1,
+                            navigationHorizontalOverflow: navigation ? navigation.scrollWidth > navigation.clientWidth + 1 : true,
+                            navigationLabelOverflow: navigationLinks
+                                .map(link => link.querySelector("span:last-child"))
+                                .filter(label => label && label.scrollWidth > label.clientWidth + 1)
+                                .map(label => label.textContent?.trim()),
+                            smallNavigationTargets: navigationLinks
+                                .filter(link => {
+                                    const bounds = link.getBoundingClientRect();
+                                    return bounds.width < 44 || bounds.height < 44;
+                                })
+                                .map(link => link.getAttribute("aria-label")),
+                            headingCount: document.querySelectorAll("main h1").length,
+                            unnamedControls
+                        };
+                    });
+
+                    if (shellLayout.mainHorizontalOverflow ||
+                        shellLayout.mainScrollTop !== 0 ||
+                        shellLayout.windowScrollY !== 0 ||
+                        shellLayout.headingTop < shellLayout.mainTop ||
+                        shellLayout.navigationHorizontalOverflow ||
+                        shellLayout.navigationLabelOverflow.length > 0 ||
+                        shellLayout.smallNavigationTargets.length > 0 ||
+                        shellLayout.headingCount !== 1 ||
+                        shellLayout.unnamedControls.length > 0) {
+                        throw new Error(`Shell accessibility/layout audit failed for ${route.name} ${profile.name} ${colorScheme}: ${JSON.stringify(shellLayout)}`);
+                    }
 
                     const errorUi = page.locator("#blazor-error-ui");
                     if (await errorUi.isVisible()) {
@@ -128,8 +213,7 @@ try {
                     }
 
                     await page.screenshot({
-                        path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}.png`),
-                        fullPage: true
+                        path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}.png`)
                     });
 
                     if (route.name === "dashboard") {
@@ -151,7 +235,9 @@ try {
                         await createDashboardFlight(page, baseUrl);
                         await page.evaluate((fontScale) => {
                             document.documentElement.style.fontSize = `${fontScale * 100}%`;
+                            window.electronicLogbookNavigation?.scrollMainToTop();
                         }, profile.fontScale);
+                        await page.waitForTimeout(50);
 
                         const populatedLastFlight = page.locator(".dashboard-last-flight-link");
                         const lastFlightLayout = await populatedLastFlight.evaluate((card) => {
@@ -176,8 +262,7 @@ try {
                         }
 
                         await page.screenshot({
-                            path: join(outputDirectory, `${profile.name}-${colorScheme}-dashboard-populated.png`),
-                            fullPage: true
+                            path: join(outputDirectory, `${profile.name}-${colorScheme}-dashboard-populated.png`)
                         });
                     } else if (route.name === "currency") {
                         const currencyOverview = page.locator(".currency-overview");
@@ -256,4 +341,7 @@ try {
     await new Promise((resolveClose) => server.close(resolveClose));
 }
 
-console.log(`Captured ${profiles.length * colorSchemes.length * routes.length} route screenshots plus ${profiles.length * colorSchemes.length} populated Dashboard screenshots in ${outputDirectory}`);
+const populatedDashboardCount = selectedRoutes.some(route => route.name === "dashboard")
+    ? selectedProfiles.length * selectedColorSchemes.length
+    : 0;
+console.log(`Captured ${selectedProfiles.length * selectedColorSchemes.length * selectedRoutes.length} route screenshots plus ${populatedDashboardCount} populated Dashboard screenshots in ${outputDirectory}`);

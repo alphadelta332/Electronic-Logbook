@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @implements IDisposable
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 @inject MobileUiPreferenceState UiPreferences
 
 <MudThemeProvider Theme="@Theme" IsDarkMode="@UiPreferences.IsDarkMode" />
@@ -24,7 +25,7 @@
     <nav class="bottom-nav" aria-label="Primary" aria-busy="@IsNavigationPending">
         <NavLink href="/" Match="NavLinkMatch.All" aria-label="Dashboard" class="@NavPendingClass(DashboardNavigationLabel)" @onclick="ShowDashboardNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />
-            <span>Dashboard</span>
+            <span>Home</span>
         </NavLink>
         <PathOnlyNavLink Href="/flights" aria-label="Logbook" Class="@NavPendingClass(LogbookNavigationLabel)" @onclick="ShowLogbookNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
@@ -133,6 +134,8 @@
 
     private void OnLocationChanged(object? sender, LocationChangedEventArgs args)
     {
+        _ = ScrollMainToTopAsync();
+
         if (!IsNavigationPending)
         {
             return;
@@ -142,6 +145,18 @@
         navigationFeedbackCancellation?.Dispose();
         navigationFeedbackCancellation = new CancellationTokenSource();
         _ = CompleteNavigationFeedbackAsync(navigationFeedbackCancellation.Token);
+    }
+
+    private async Task ScrollMainToTopAsync()
+    {
+        try
+        {
+            await InvokeAsync(StateHasChanged);
+            await JS.InvokeVoidAsync("electronicLogbookNavigation.scrollMainToTop");
+        }
+        catch (JSDisconnectedException)
+        {
+        }
     }
 
     private async Task CompleteNavigationFeedbackAsync(CancellationToken cancellationToken)

@@ -100,6 +100,15 @@
     applyTheme(localStorage.getItem("electronic-logbook.ui-preferences"));
 
     window.electronicLogbookNavigation = {
+        scrollMainToTop: () => {
+            const main = document.querySelector(".app-main");
+            if (!main) {
+                return;
+            }
+
+            main.scrollTop = 0;
+            main.scrollLeft = 0;
+        },
         handleAndroidBack: () => {
             const path = location.pathname.replace(/\/+$/, "") || "/";
             if (path === "/") {

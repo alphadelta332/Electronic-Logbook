@@ -199,6 +199,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Session.ApplyWorkbookPackageAsync", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ExportWorkbookPackageAsync", exchange, StringComparison.Ordinal);
         Assert.Contains("package-exchange-feedback", exchange, StringComparison.Ordinal);
+        Assert.Contains("Label=\"Recovery code\"", exchange, StringComparison.Ordinal);
         Assert.Contains("Exchange needs attention", exchange, StringComparison.Ordinal);
         Assert.DoesNotContain("PortableLogbookDocument.CreateAustraliaFirst", exchange, StringComparison.Ordinal);
     }
@@ -342,7 +343,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("href=\"/charts\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/currency\"", layout, StringComparison.Ordinal);
         Assert.Contains("href=\"/settings\"", layout, StringComparison.Ordinal);
-        Assert.Contains("<span>Dashboard</span>", layout, StringComparison.Ordinal);
+        Assert.Contains("<span>Home</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Logbook</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>Routes</span>", layout, StringComparison.Ordinal);
         Assert.Contains("<span>New flight</span>", layout, StringComparison.Ordinal);
@@ -706,7 +707,7 @@ public sealed class PwaPageWiringTests
         var page = ReadMobilePage("Dashboard.razor");
         var css = ReadMobileAsset("css", "app.css");
 
-        Assert.Contains("id=\"dashboard-total-hours-heading\">Total flying hours</span>", page, StringComparison.Ordinal);
+        Assert.Contains("<h1 id=\"dashboard-total-hours-heading\">Total flying hours</h1>", page, StringComparison.Ordinal);
         Assert.Contains("<small>Total aeronautical experience <strong>@MobileLogbookSession.FormatHours(TotalAeronauticalExperience)</strong></small>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("FormatHours(TotalAeronauticalExperience) h", page, StringComparison.Ordinal);
         Assert.Matches(
@@ -715,7 +716,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("<strong>Last 28 days</strong>", page, StringComparison.Ordinal);
         Assert.Contains("<strong>Last 365 days</strong>", page, StringComparison.Ordinal);
         Assert.Matches(
-            @"(?s)\.dashboard-hours-total > span\s*\{[^}]*font-size:\s*18px",
+            @"(?s)\.dashboard-hours-total > h1\s*\{[^}]*font-size:\s*18px",
             css);
         Assert.Matches(
             @"(?s)\.dashboard-hours-period > strong\s*\{[^}]*font-size:\s*14px",
@@ -1048,6 +1049,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("class=\"visually-hidden\" role=\"status\"", layout, StringComparison.Ordinal);
         Assert.Contains("ShowNavigationPending", layout, StringComparison.Ordinal);
         Assert.Contains("CompleteNavigationFeedbackAsync", layout, StringComparison.Ordinal);
+        Assert.Contains("@inject IJSRuntime JS", layout, StringComparison.Ordinal);
+        Assert.Contains("_ = ScrollMainToTopAsync();", layout, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookNavigation.scrollMainToTop", layout, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(250, cancellationToken)", layout, StringComparison.Ordinal);
         Assert.Contains("nav-pending-link", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".bottom-nav::before", css, StringComparison.Ordinal);

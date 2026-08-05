@@ -173,9 +173,9 @@ textarea {
     z-index: 30;
     display: grid;
     grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
+    gap: 0;
     min-height: calc(66px + var(--native-safe-bottom));
-    padding: 6px 10px calc(8px + var(--native-safe-bottom));
+    padding: 6px 4px calc(8px + var(--native-safe-bottom));
     border-top: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-surface) 94%, transparent);
     backdrop-filter: blur(16px);
@@ -191,7 +191,7 @@ textarea {
     min-height: 52px;
     border-radius: 10px;
     color: var(--app-text-muted);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 700;
     text-decoration: none;
     -webkit-tap-highlight-color: transparent;
@@ -244,8 +244,10 @@ textarea {
 }
 
 .bottom-nav a > span:last-child {
-    max-width: calc(100% + 6px);
+    width: 100%;
+    max-width: 100%;
     overflow: hidden;
+    text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -296,7 +298,8 @@ textarea {
     min-width: 0;
 }
 
-.dashboard-hours-total > span {
+.dashboard-hours-total > h1 {
+    margin: 0;
     color: var(--app-text-muted);
     font-size: 18px;
     font-weight: 850;

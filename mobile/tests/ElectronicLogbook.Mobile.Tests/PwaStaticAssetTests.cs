@@ -330,6 +330,17 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void NavigationBridgeResetsTheScrollableShellAfterRouteChanges()
+    {
+        var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
+
+        Assert.Contains("scrollMainToTop", bridge, StringComparison.Ordinal);
+        Assert.Contains("document.querySelector(\".app-main\")", bridge, StringComparison.Ordinal);
+        Assert.Contains("main.scrollTop = 0", bridge, StringComparison.Ordinal);
+        Assert.Contains("main.scrollLeft = 0", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AppCssHighlightsActiveNavigationIconAndLabelWithThemeColour()
     {
         var css = ReadMobileAsset(Path.Combine("css", "app.css"));
@@ -350,7 +361,9 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("color: var(--app-primary)", activeNavigationLink, StringComparison.Ordinal);
         Assert.Contains("background: transparent", pendingNavigationLink, StringComparison.Ordinal);
         Assert.Contains("color: var(--app-primary)", pendingNavigationLink, StringComparison.Ordinal);
-        Assert.Contains("max-width: calc(100% + 6px)", navigationLabel, StringComparison.Ordinal);
+        Assert.Contains("width: 100%", navigationLabel, StringComparison.Ordinal);
+        Assert.Contains("max-width: 100%", navigationLabel, StringComparison.Ordinal);
+        Assert.Contains("text-align: center", navigationLabel, StringComparison.Ordinal);
     }
 
     private static string ExtractFileBridge(string bridge)
