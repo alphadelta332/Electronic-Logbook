@@ -87,7 +87,7 @@ public sealed class WorkbookHandoffTests : IDisposable
     }
 
     [Fact]
-    public void ReplaceSourceWithUpdatedValidatesFinalAndBackupVersions()
+    public void ReplaceSourceWithUpdatedPromotesValidatedWorkbookAtCanonicalPathAndCleansHandoffState()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(
             _directory,
@@ -104,8 +104,18 @@ public sealed class WorkbookHandoffTests : IDisposable
             TestRepo.Version,
             "2.0.0");
 
+        Assert.Equal(Path.GetFullPath(source), result.FinalWorkbookPath);
+        Assert.Matches(
+            "^logbook_Old_\\d{8}-\\d{6}(?:_\\d+)?\\.xlsm$",
+            Path.GetFileName(result.BackupWorkbookPath));
         Assert.Equal(TestRepo.Version, WorkbookPackageValidator.ValidateWorkbookPackage(source));
         Assert.Equal("2.0.0", WorkbookPackageValidator.ValidateWorkbookPackage(result.BackupWorkbookPath));
+        Assert.False(File.Exists(staged));
+        Assert.False(File.Exists(BuildJournalPath(source)));
+        Assert.Empty(Directory.EnumerateFiles(_directory, ".*_Staged_*.xlsm"));
+        Assert.Equal(
+            Path.GetFullPath(result.BackupWorkbookPath),
+            Path.GetFullPath(Assert.Single(Directory.EnumerateFiles(_directory, "logbook_Old_*.xlsm"))));
     }
 
     [Fact]
@@ -323,6 +333,13 @@ public sealed class WorkbookHandoffTests : IDisposable
         Assert.False(File.Exists(backup));
         Assert.False(File.Exists(replacement));
         Assert.False(File.Exists(BuildJournalPath(source)));
+
+        var repeatedResult = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.None, repeatedResult.Action);
+        Assert.Equal("old workbook", File.ReadAllText(source));
+        Assert.False(File.Exists(backup));
+        Assert.False(File.Exists(replacement));
     }
 
     [Fact]
@@ -360,6 +377,12 @@ public sealed class WorkbookHandoffTests : IDisposable
         Assert.Equal("old workbook", File.ReadAllText(backup));
         Assert.False(File.Exists(staged));
         Assert.False(File.Exists(BuildJournalPath(source)));
+
+        var repeatedResult = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.None, repeatedResult.Action);
+        Assert.Equal("new workbook", File.ReadAllText(source));
+        Assert.Equal("old workbook", File.ReadAllText(backup));
     }
 
     [Fact]
@@ -426,6 +449,12 @@ public sealed class WorkbookHandoffTests : IDisposable
         Assert.Equal("new workbook", File.ReadAllText(staged));
         Assert.False(File.Exists(replacement));
         Assert.False(File.Exists(BuildJournalPath(source)));
+
+        var repeatedResult = WorkbookHandoff.RecoverIfNeeded(source);
+
+        Assert.Equal(HandoffRecoveryAction.None, repeatedResult.Action);
+        Assert.Equal("old workbook", File.ReadAllText(source));
+        Assert.Equal("new workbook", File.ReadAllText(staged));
     }
 
     [Fact]
@@ -450,15 +479,21 @@ public sealed class WorkbookHandoffTests : IDisposable
         File.WriteAllText(staged, "new workbook");
         File.WriteAllText(replacement, "new workbook");
         WriteJournal(source, staged, replacement, backup, localStageCreated: true);
+        var journalPath = BuildJournalPath(source);
+        var journalEvidence = File.ReadAllText(journalPath);
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            WorkbookHandoff.RecoverIfNeeded(source));
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                WorkbookHandoff.RecoverIfNeeded(source));
 
-        Assert.Contains("Cannot recover interrupted handoff", exception.Message, StringComparison.Ordinal);
-        Assert.False(File.Exists(source));
-        Assert.False(File.Exists(backup));
-        Assert.True(File.Exists(replacement));
-        Assert.True(File.Exists(BuildJournalPath(source)));
+            Assert.Contains("Cannot recover interrupted handoff", exception.Message, StringComparison.Ordinal);
+            Assert.False(File.Exists(source));
+            Assert.False(File.Exists(backup));
+            Assert.Equal("new workbook", File.ReadAllText(staged));
+            Assert.Equal("new workbook", File.ReadAllText(replacement));
+            Assert.Equal(journalEvidence, File.ReadAllText(journalPath));
+        }
     }
 
     [Fact]

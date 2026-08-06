@@ -46,11 +46,13 @@ else
             }
         </section>
 
-        <DashboardLastFlight Entry="@LastFlight" />
+        <div class="dashboard-side-column">
+            <DashboardLastFlight Entry="@LastFlight" />
 
-        <NavLink class="dashboard-section dashboard-currency" href="/currency" aria-label="Open currency and recency status">
-            <DashboardCurrencyOverview Summary="@CurrencySummary" />
-        </NavLink>
+            <NavLink class="dashboard-section dashboard-currency" href="/currency" aria-label="Open currency and recency status">
+                <DashboardCurrencyOverview Summary="@CurrencySummary" />
+            </NavLink>
+        </div>
 
         @if (Session.CurrentEntriesV2.Count == 0)
         {

@@ -26,7 +26,8 @@ const profiles = [
     { name: "360", width: 360, height: 800, fontScale: 1 },
     { name: "pixel8-412x915", width: 412, height: 915, fontScale: 1 },
     { name: "large-text", width: 412, height: 915, fontScale: 1.25 },
-    { name: "wide-768", width: 768, height: 1024, fontScale: 1 }
+    { name: "wide-768", width: 768, height: 1024, fontScale: 1 },
+    { name: "ipad-landscape-1024x768", width: 1024, height: 768, fontScale: 1 }
 ];
 const colorSchemes = ["light", "dark"];
 const routes = [

@@ -1600,13 +1600,30 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
+            CompleteTitleText.Text = "Restore Failed";
+            CompleteSummaryText.Text =
+                "The backup could not be restored. Recoverable workbook copies were kept so the restore can be retried or investigated.";
+            CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Workbook at original path",
+                _lastOutputPath,
+                null,
+                $"Workbook at original path: {_lastOutputPath} (not available)");
+            CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
+                "Retained backup",
+                _lastBackupPath,
+                _lastBackupExpectedVersion,
+                $"Retained backup: {_lastBackupPath} (not available)");
+            RestoreBackupButton.IsEnabled = File.Exists(_lastBackupPath);
+            OpenUpdatedCheckBox.IsEnabled = false;
+            OpenUpdatedCheckBox.IsChecked = false;
+            FooterStatusText.Text = "Restore failed. Recoverable workbook copies were retained.";
             MessageBox.Show(
                 this,
-                ex.Message,
+                $"{ex.Message}{Environment.NewLine}{Environment.NewLine}" +
+                "No recoverable workbook copy was deleted. Review the paths shown on the completion screen, then retry or investigate the retained files.",
                 "Restore failed",
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
-            FooterStatusText.Text = "Restore failed.";
         }
     }
 

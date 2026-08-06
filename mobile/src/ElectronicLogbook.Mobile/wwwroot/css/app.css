@@ -275,6 +275,10 @@ textarea {
     gap: 20px;
 }
 
+.dashboard-side-column {
+    display: contents;
+}
+
 .dashboard-hours-hero {
     display: grid;
     gap: 22px;
@@ -2138,7 +2142,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-text-muted);
 }
 
-@media (min-width: 900px) {
+@media (min-width: 720px) {
     .bottom-nav {
         right: auto;
         top: 74px;
@@ -2165,6 +2169,25 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
         right: max(16px, calc((100vw - 920px) / 2 + 16px));
         bottom: 16px;
         left: max(132px, calc((100vw - 920px) / 2 + 116px));
+    }
+}
+
+@media (min-width: 900px) {
+    .dashboard-page {
+        grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);
+        align-items: start;
+    }
+
+    .dashboard-page > .state-banner,
+    .dashboard-page > .dashboard-empty-state {
+        grid-column: 1 / -1;
+    }
+
+    .dashboard-side-column {
+        display: grid;
+        align-content: start;
+        gap: 20px;
+        min-width: 0;
     }
 }
 

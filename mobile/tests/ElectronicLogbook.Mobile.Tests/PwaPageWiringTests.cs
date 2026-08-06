@@ -480,7 +480,7 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("<DashboardExperienceSnapshot Summary=\"@ExperienceSummary\" />", dashboard, StringComparison.Ordinal);
         Assert.Matches(
-            @"(?s)<section class=""dashboard-hours-hero"".*?<DashboardExperienceSnapshot Summary=""@ExperienceSummary"" />.*?</section>\s*<DashboardLastFlight",
+            @"(?s)<section class=""dashboard-hours-hero"".*?<DashboardExperienceSnapshot Summary=""@ExperienceSummary"" />.*?</section>\s*<div class=""dashboard-side-column"">\s*<DashboardLastFlight",
             dashboard);
         Assert.Contains("<h3 id=\"dashboard-authority-heading\">Authority</h3>", snapshot, StringComparison.Ordinal);
         Assert.Contains("Command", snapshot, StringComparison.Ordinal);
@@ -1014,6 +1014,15 @@ public sealed class PwaPageWiringTests
         Assert.Matches(@"(?s)\.mud-button-root\s*\{[^}]*min-height:\s*44px", css);
         Assert.Matches(@"(?s)\.accent-option\s*\{[^}]*min-height:\s*44px", css);
         Assert.Matches(@"(?s)\.currency-licence-engine-switch \.currency-engine-tab\s*\{[^}]*min-height:\s*44px", css);
+    }
+
+    [Fact]
+    public void VisualAuditCoversTabletPortraitAndLandscapeProfiles()
+    {
+        var audit = ReadProjectFile("mobile", "scripts", "capture-pwa-visual-audit.mjs");
+
+        Assert.Contains("{ name: \"wide-768\", width: 768, height: 1024, fontScale: 1 }", audit, StringComparison.Ordinal);
+        Assert.Contains("{ name: \"ipad-landscape-1024x768\", width: 1024, height: 768, fontScale: 1 }", audit, StringComparison.Ordinal);
     }
 
     private static string ReadMobilePage(string relativePath) =>

@@ -330,6 +330,23 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void AppCssAdaptsTheShellAndDashboardForTabletWidths()
+    {
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+
+        Assert.Matches(
+            new Regex(
+                @"(?s)@media \(min-width: 720px\)\s*\{.*?\.bottom-nav\s*\{.*?top:\s*74px.*?width:\s*88px.*?grid-template-columns:\s*1fr.*?\.app-main\s*\{.*?padding-left:\s*116px",
+                RegexOptions.Singleline),
+            css);
+        Assert.Matches(
+            new Regex(
+                @"(?s)@media \(min-width: 900px\)\s*\{.*?\.dashboard-page\s*\{.*?grid-template-columns:\s*minmax\(0, 3fr\) minmax\(300px, 2fr\).*?\.dashboard-side-column\s*\{.*?display:\s*grid.*?align-content:\s*start.*?gap:\s*20px",
+                RegexOptions.Singleline),
+            css);
+    }
+
+    [Fact]
     public void NavigationBridgeResetsTheScrollableShellAfterRouteChanges()
     {
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
