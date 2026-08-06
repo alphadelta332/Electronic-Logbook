@@ -58,6 +58,18 @@ public static class PortableLogbookCommandRunner
                     options.Note,
                     DateTimeOffset.UtcNow),
                 PortableLogbookCommand.Status => ReadStatus(options.WorkbookPath!),
+                PortableLogbookCommand.HostedPair => PairHostedWorkbook(
+                    options.WorkbookPath!,
+                    new HostedAccountId(options.HostedAccountId!),
+                    new PortableHostedCredential(
+                        options.HostedAccessToken!,
+                        options.HostedRefreshToken!,
+                        options.HostedAccessTokenExpiresAt!.Value),
+                    DateTimeOffset.UtcNow),
+                PortableLogbookCommand.HostedStatus => ReadHostedStatus(options.WorkbookPath!),
+                PortableLogbookCommand.HostedSync => SyncHostedWorkbook(
+                    options.WorkbookPath!,
+                    DateTimeOffset.UtcNow),
                 _ => throw new UpdaterUsageException("Portable command is required.")
             };
 
@@ -118,6 +130,261 @@ public static class PortableLogbookCommandRunner
             envelope.Summary,
             envelope.ImportReceipts.Count);
     }
+
+    public static PortableHostedPairResult PairHostedWorkbook(
+        string workbookPath,
+        HostedAccountId accountId,
+        PortableHostedCredential credential,
+        DateTimeOffset pairedAt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(accountId);
+        ArgumentNullException.ThrowIfNull(credential);
+
+        var identity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(workbookPath)
+            ?? throw new UpdaterUsageException("Portable logbook storage must be enabled before hosted pairing.");
+        var targetName = PortableHostedCredentialStore.CreateTargetName(identity.LogbookId, identity.DeviceId);
+        PortableHostedCredentialStore.Save(targetName, credential);
+        var metadata = PortableLogbookWorkbookPackageStorage.EnsureHostedWorkbookMetadata(
+            workbookPath,
+            accountId,
+            targetName,
+            0,
+            FormatHostedSyncStatus(PortableHostedSyncStatus.SigningIn),
+            pairedAt,
+            null);
+
+        return new PortableHostedPairResult(
+            Path.GetFullPath(workbookPath),
+            accountId,
+            identity.LogbookId,
+            identity.DeviceId,
+            targetName,
+            metadata.Status,
+            pairedAt);
+    }
+
+    public static PortableHostedWorkbookStatusResult ReadHostedStatus(string workbookPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        var identity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(workbookPath);
+        var metadata = PortableLogbookWorkbookPackageStorage.ReadHostedWorkbookMetadata(workbookPath);
+        if (identity is null || metadata is null)
+        {
+            return new PortableHostedWorkbookStatusResult(
+                Path.GetFullPath(workbookPath),
+                IsPaired: false,
+                AccountId: null,
+                LogbookId: identity?.LogbookId,
+                DeviceId: identity?.DeviceId,
+                Status: FormatHostedSyncStatus(PortableHostedSyncStatus.NeedsAttention),
+                LastAcknowledgedHostedRevision: 0,
+                LastStatusAt: null,
+                AttentionRequiredReason: "Workbook is not paired for hosted sync.");
+        }
+
+        return new PortableHostedWorkbookStatusResult(
+            Path.GetFullPath(workbookPath),
+            IsPaired: true,
+            metadata.AccountId,
+            identity.LogbookId,
+            identity.DeviceId,
+            metadata.Status ?? FormatHostedSyncStatus(PortableHostedSyncStatus.Waiting),
+            metadata.LastAcknowledgedHostedRevision,
+            metadata.StatusAt,
+            metadata.AttentionRequiredReason);
+    }
+
+    public static PortableHostedWorkbookSyncResult SyncHostedWorkbook(
+        string workbookPath,
+        DateTimeOffset syncedAt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        var identity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(workbookPath)
+            ?? throw new UpdaterUsageException("Portable logbook storage must be enabled before hosted sync.");
+        var metadata = PortableLogbookWorkbookPackageStorage.ReadHostedWorkbookMetadata(workbookPath);
+        if (metadata is null)
+        {
+            return new PortableHostedWorkbookSyncResult(
+                Path.GetFullPath(workbookPath),
+                IsPaired: false,
+                AccountId: null,
+                identity.LogbookId,
+                identity.DeviceId,
+                Status: FormatHostedSyncStatus(PortableHostedSyncStatus.SigningIn),
+                LastAcknowledgedHostedRevision: 0,
+                LastStatusAt: syncedAt,
+                AttentionRequiredReason: "Workbook is not paired for hosted sync.",
+                PendingWorkbookOperationCount: 0,
+                StoredOperationCount: 0);
+        }
+
+        var credential = PortableHostedCredentialStore.Load(metadata.CredentialTargetName);
+        if (credential is null)
+        {
+            var status = WriteHostedStatus(
+                workbookPath,
+                metadata.AccountId,
+                metadata.CredentialTargetName,
+                metadata.LastAcknowledgedHostedRevision,
+                PortableHostedSyncStatus.SigningIn,
+                syncedAt,
+                "Hosted sign-in is required on this Windows profile.");
+            return CreateHostedSyncResult(status, 0, 0);
+        }
+
+        var keyTarget = PortableLogbookWindowsCredentialStore.CreateTargetName(identity.LogbookId, identity.DeviceId);
+        var key = PortableLogbookWindowsCredentialStore.LoadKey(keyTarget);
+        if (key is null)
+        {
+            var status = WriteHostedStatus(
+                workbookPath,
+                metadata.AccountId,
+                metadata.CredentialTargetName,
+                metadata.LastAcknowledgedHostedRevision,
+                PortableHostedSyncStatus.NeedsAttention,
+                syncedAt,
+                "Workbook encryption key is missing from Windows Credential Manager.");
+            return CreateHostedSyncResult(status, 0, 0);
+        }
+
+        var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)
+            ?? throw new UpdaterUsageException("Portable logbook storage is not enabled for this workbook.");
+        if (identity.LogbookId != state.Document.LogbookId)
+        {
+            throw new UpdaterUsageException("Portable logbook workbook identity does not match the stored operation history.");
+        }
+
+        var merge = PortableLogbookWorkbookProjection.MergeV2(state.Document.Operations);
+        var currentRows = PortableLogbookWorkbookPackageStorage.ReadCurrentRowsV2(
+            workbookPath,
+            state.Document.CustomFieldDefinitions);
+        var projection = PortableLogbookWorkbookProjection.ReconcileV2(
+            merge.Entries.Values,
+            currentRows,
+            state.Document.LogbookId,
+            identity.DeviceId,
+            syncedAt);
+        var document = projection.Operations.Count == 0
+            ? state.Document
+            : PortableLogbookDocumentV2.CreateAustraliaFirst(
+                state.Document.LogbookId,
+                state.Document.CustomFieldDefinitions,
+                state.Document.CurrencyOverrideDates,
+                state.Document.Operations.Concat(projection.Operations));
+        PortableHostedSyncResult? syncResult = null;
+        var syncStatus = PortableHostedSyncStatus.Waiting;
+        var attention = "Hosted transport is not configured in this updater build; workbook changes are queued locally.";
+        var lastAcknowledgedHostedRevision = metadata.LastAcknowledgedHostedRevision;
+        if (SupabaseHostedSyncClient.TryCreate(
+                metadata.AccountId,
+                identity.DeviceId,
+                credential,
+                updatedCredential => PortableHostedCredentialStore.Save(metadata.CredentialTargetName, updatedCredential),
+                out var hostedClient,
+                out var unavailableReason))
+        {
+            var client = hostedClient ?? throw new InvalidOperationException("Hosted sync client was not created.");
+            using (client)
+            {
+                syncResult = new PortableHostedLogbookSync(
+                        client,
+                        client,
+                        client,
+                        SystemSyncClock.Instance)
+                    .SyncAsync(new PortableHostedSyncRequest(document, key, metadata.LastAcknowledgedHostedRevision))
+                    .AsTask()
+                    .GetAwaiter()
+                    .GetResult();
+            }
+
+            document = syncResult.Document;
+            syncStatus = syncResult.Status;
+            attention = syncResult.AttentionRequiredReason;
+            lastAcknowledgedHostedRevision = syncResult.LastAcknowledgedHostedRevision;
+        }
+        else
+        {
+            attention = unavailableReason;
+        }
+
+        var workbookRows = PreserveVisibleWorkbookRowOrder(
+            currentRows,
+            PortableLogbookWorkbookProjection.CreateCurrentRows(document));
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
+            document,
+            PortableLogbookPackage.Write(document, key),
+            state.ImportReceipts);
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbookPath,
+            workbookRows,
+            document.CustomFieldDefinitions,
+            writeVisiblePayloadCells: syncResult?.DownloadedOperationCount > 0);
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbookPath, envelope);
+
+        var hostedStatus = WriteHostedStatus(
+            workbookPath,
+            metadata.AccountId,
+            metadata.CredentialTargetName,
+            lastAcknowledgedHostedRevision,
+            syncStatus,
+            syncedAt,
+            attention);
+        return CreateHostedSyncResult(
+            hostedStatus,
+            syncResult?.PendingLocalOperationCount ?? projection.Operations.Count,
+            document.Operations.Count);
+    }
+
+    private static PortableHostedWorkbookStatusResult WriteHostedStatus(
+        string workbookPath,
+        HostedAccountId accountId,
+        string credentialTargetName,
+        long lastAcknowledgedHostedRevision,
+        PortableHostedSyncStatus status,
+        DateTimeOffset statusAt,
+        string? attentionRequiredReason)
+    {
+        var identity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(workbookPath)
+            ?? throw new UpdaterUsageException("Portable logbook storage must be enabled before hosted sync.");
+        var result = PortableLogbookWorkbookPackageStorage.EnsureHostedWorkbookMetadata(
+            workbookPath,
+            accountId,
+            credentialTargetName,
+            lastAcknowledgedHostedRevision,
+            FormatHostedSyncStatus(status),
+            statusAt,
+            attentionRequiredReason);
+        return new PortableHostedWorkbookStatusResult(
+            Path.GetFullPath(workbookPath),
+            IsPaired: true,
+            result.AccountId,
+            identity.LogbookId,
+            identity.DeviceId,
+            result.Status,
+            result.LastAcknowledgedHostedRevision,
+            result.StatusAt,
+            result.AttentionRequiredReason);
+    }
+
+    private static PortableHostedWorkbookSyncResult CreateHostedSyncResult(
+        PortableHostedWorkbookStatusResult status,
+        int pendingWorkbookOperationCount,
+        int storedOperationCount) =>
+        new(
+            status.WorkbookPath,
+            status.IsPaired,
+            status.AccountId,
+            status.LogbookId,
+            status.DeviceId,
+            status.Status,
+            status.LastAcknowledgedHostedRevision,
+            status.LastStatusAt,
+            status.AttentionRequiredReason,
+            pendingWorkbookOperationCount,
+            storedOperationCount);
 
     public static PortableLogbookEnableResult Enable(
         string workbookPath,
@@ -778,6 +1045,15 @@ public static class PortableLogbookCommandRunner
             case PortableLogbookResolveConflictResult resolveConflict:
                 WriteHumanResolveConflictResult(resolveConflict);
                 break;
+            case PortableHostedPairResult hostedPair:
+                WriteHumanHostedPairResult(hostedPair);
+                break;
+            case PortableHostedWorkbookStatusResult hostedStatus:
+                WriteHumanHostedStatusResult(hostedStatus);
+                break;
+            case PortableHostedWorkbookSyncResult hostedSync:
+                WriteHumanHostedSyncResult(hostedSync);
+                break;
             case PortableLogbookWorkbookStatus status:
                 WriteHumanStatus(status);
                 break;
@@ -916,6 +1192,65 @@ public static class PortableLogbookCommandRunner
         Console.WriteLine($"Kept revision ID: {result.KeptRevisionId}");
         Console.WriteLine($"Resolution revision ID: {result.ResolutionRevisionId}");
         Console.WriteLine($"Remaining conflicts: {result.RemainingConflictCount}");
+    }
+
+    private static void WriteHumanHostedPairResult(PortableHostedPairResult result)
+    {
+        Console.WriteLine("Hosted workbook sync: paired");
+        Console.WriteLine($"Workbook: {result.WorkbookPath}");
+        Console.WriteLine($"Account ID: {result.AccountId.Value}");
+        Console.WriteLine($"Logbook ID: {result.LogbookId.Value}");
+        Console.WriteLine($"Device ID: {result.DeviceId.Value}");
+        Console.WriteLine($"Status: {result.Status}");
+        Console.WriteLine($"Paired at: {result.PairedAt:O}");
+    }
+
+    private static void WriteHumanHostedStatusResult(PortableHostedWorkbookStatusResult result)
+    {
+        Console.WriteLine($"Hosted workbook sync: {result.Status}");
+        Console.WriteLine($"Workbook: {result.WorkbookPath}");
+        Console.WriteLine($"Paired: {result.IsPaired}");
+        if (result.AccountId is not null)
+        {
+            Console.WriteLine($"Account ID: {result.AccountId.Value}");
+        }
+
+        if (result.LogbookId is not null)
+        {
+            Console.WriteLine($"Logbook ID: {result.LogbookId.Value}");
+        }
+
+        if (result.DeviceId is not null)
+        {
+            Console.WriteLine($"Device ID: {result.DeviceId.Value}");
+        }
+
+        Console.WriteLine($"Last hosted revision: {result.LastAcknowledgedHostedRevision}");
+        if (result.LastStatusAt is not null)
+        {
+            Console.WriteLine($"Last status at: {result.LastStatusAt:O}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.AttentionRequiredReason))
+        {
+            Console.WriteLine($"Needs attention: {result.AttentionRequiredReason}");
+        }
+    }
+
+    private static void WriteHumanHostedSyncResult(PortableHostedWorkbookSyncResult result)
+    {
+        WriteHumanHostedStatusResult(new PortableHostedWorkbookStatusResult(
+            result.WorkbookPath,
+            result.IsPaired,
+            result.AccountId,
+            result.LogbookId,
+            result.DeviceId,
+            result.Status,
+            result.LastAcknowledgedHostedRevision,
+            result.LastStatusAt,
+            result.AttentionRequiredReason));
+        Console.WriteLine($"Workbook operations queued: {result.PendingWorkbookOperationCount}");
+        Console.WriteLine($"Stored operations: {result.StoredOperationCount}");
     }
 
     private static void WriteImportSummaries(
@@ -1133,6 +1468,17 @@ public static class PortableLogbookCommandRunner
             _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown package import status.")
         };
 
+    private static string FormatHostedSyncStatus(PortableHostedSyncStatus status) =>
+        status switch
+        {
+            PortableHostedSyncStatus.Synced => "Synced",
+            PortableHostedSyncStatus.Waiting => "Waiting",
+            PortableHostedSyncStatus.Offline => "Offline",
+            PortableHostedSyncStatus.SigningIn => "Signing in",
+            PortableHostedSyncStatus.NeedsAttention => "Needs attention",
+            _ => throw new ArgumentOutOfRangeException(nameof(status), status, "Unknown hosted sync status.")
+        };
+
     private static void TryDeleteRecoveryFile(string recoveryOutputPath)
     {
         try
@@ -1265,6 +1611,39 @@ public sealed record PortableLogbookResolveConflictResult(
     RevisionId ResolutionRevisionId,
     int RemainingConflictCount,
     DateTimeOffset ResolvedAt);
+
+public sealed record PortableHostedPairResult(
+    string WorkbookPath,
+    HostedAccountId AccountId,
+    LogbookId LogbookId,
+    DeviceId DeviceId,
+    string CredentialTargetName,
+    string Status,
+    DateTimeOffset PairedAt);
+
+public sealed record PortableHostedWorkbookStatusResult(
+    string WorkbookPath,
+    bool IsPaired,
+    HostedAccountId? AccountId,
+    LogbookId? LogbookId,
+    DeviceId? DeviceId,
+    string Status,
+    long LastAcknowledgedHostedRevision,
+    DateTimeOffset? LastStatusAt,
+    string? AttentionRequiredReason);
+
+public sealed record PortableHostedWorkbookSyncResult(
+    string WorkbookPath,
+    bool IsPaired,
+    HostedAccountId? AccountId,
+    LogbookId? LogbookId,
+    DeviceId? DeviceId,
+    string Status,
+    long LastAcknowledgedHostedRevision,
+    DateTimeOffset? LastStatusAt,
+    string? AttentionRequiredReason,
+    int PendingWorkbookOperationCount,
+    int StoredOperationCount);
 
 public sealed record PortableLogbookImportCommandSummary(
     EntryId EntryId,

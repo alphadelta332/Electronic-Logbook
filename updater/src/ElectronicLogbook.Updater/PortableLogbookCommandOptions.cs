@@ -17,6 +17,10 @@ public sealed record PortableLogbookCommandOptions(
     string? EntryId,
     string? RevisionId,
     string? Note,
+    string? HostedAccountId,
+    string? HostedAccessToken,
+    string? HostedRefreshToken,
+    DateTimeOffset? HostedAccessTokenExpiresAt,
     string? WindowsCredentialTargetName,
     bool SaveWindowsCredential,
     bool Json,
@@ -84,6 +88,9 @@ public sealed record PortableLogbookCommandOptions(
             "revision-history" => PortableLogbookCommand.RevisionHistory,
             "resolve-conflict" => PortableLogbookCommand.ResolveConflict,
             "status" => PortableLogbookCommand.Status,
+            "hosted-pair" => PortableLogbookCommand.HostedPair,
+            "hosted-sync" => PortableLogbookCommand.HostedSync,
+            "hosted-status" => PortableLogbookCommand.HostedStatus,
             "--help" or "-h" => PortableLogbookCommand.None,
             _ => throw new UpdaterUsageException($"Unknown portable command: {args[0]}")
         };
@@ -100,6 +107,10 @@ public sealed record PortableLogbookCommandOptions(
         string? entryId = null;
         string? revisionId = null;
         string? note = null;
+        string? hostedAccountId = null;
+        string? hostedAccessToken = null;
+        string? hostedRefreshToken = null;
+        DateTimeOffset? hostedAccessTokenExpiresAt = null;
         string? windowsCredentialTargetName = null;
         var saveWindowsCredential = false;
         var json = false;
@@ -156,6 +167,18 @@ public sealed record PortableLogbookCommandOptions(
                 case "--note":
                     note = ReadValue(args, ref index, arg);
                     break;
+                case "--hosted-account-id":
+                    hostedAccountId = ReadValue(args, ref index, arg);
+                    break;
+                case "--hosted-access-token":
+                    hostedAccessToken = ReadValue(args, ref index, arg);
+                    break;
+                case "--hosted-refresh-token":
+                    hostedRefreshToken = ReadValue(args, ref index, arg);
+                    break;
+                case "--hosted-access-token-expires-at":
+                    hostedAccessTokenExpiresAt = ReadDateTimeOffsetValue(args, ref index, arg);
+                    break;
                 case "--json":
                     json = true;
                     break;
@@ -173,7 +196,7 @@ public sealed record PortableLogbookCommandOptions(
 
         if (showHelp)
         {
-            return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, windowsCredentialTargetName, saveWindowsCredential, json, true);
+            return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, hostedAccountId, hostedAccessToken, hostedRefreshToken, hostedAccessTokenExpiresAt, windowsCredentialTargetName, saveWindowsCredential, json, true);
         }
 
         if ((command == PortableLogbookCommand.Enable ||
@@ -183,10 +206,36 @@ public sealed record PortableLogbookCommandOptions(
                 command == PortableLogbookCommand.PrintedCopy ||
                 command == PortableLogbookCommand.RevisionHistory ||
                 command == PortableLogbookCommand.ResolveConflict ||
-                command == PortableLogbookCommand.Status)
+                command == PortableLogbookCommand.Status ||
+                command == PortableLogbookCommand.HostedPair ||
+                command == PortableLogbookCommand.HostedSync ||
+                command == PortableLogbookCommand.HostedStatus)
             && string.IsNullOrWhiteSpace(workbook))
         {
             throw new UpdaterUsageException($"--workbook is required for portable {CommandName(command)}.");
+        }
+
+        if (command == PortableLogbookCommand.HostedPair)
+        {
+            if (string.IsNullOrWhiteSpace(hostedAccountId))
+            {
+                throw new UpdaterUsageException("--hosted-account-id is required for portable hosted-pair.");
+            }
+
+            if (string.IsNullOrWhiteSpace(hostedAccessToken))
+            {
+                throw new UpdaterUsageException("--hosted-access-token is required for portable hosted-pair.");
+            }
+
+            if (string.IsNullOrWhiteSpace(hostedRefreshToken))
+            {
+                throw new UpdaterUsageException("--hosted-refresh-token is required for portable hosted-pair.");
+            }
+
+            if (hostedAccessTokenExpiresAt is null)
+            {
+                throw new UpdaterUsageException("--hosted-access-token-expires-at is required for portable hosted-pair.");
+            }
         }
 
         if (command == PortableLogbookCommand.Enable && string.IsNullOrWhiteSpace(recoveryOutput))
@@ -283,6 +332,9 @@ public sealed record PortableLogbookCommandOptions(
         entryId = string.IsNullOrWhiteSpace(entryId) ? null : entryId.Trim();
         revisionId = string.IsNullOrWhiteSpace(revisionId) ? null : revisionId.Trim();
         note = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+        hostedAccountId = string.IsNullOrWhiteSpace(hostedAccountId) ? null : hostedAccountId.Trim();
+        hostedAccessToken = string.IsNullOrWhiteSpace(hostedAccessToken) ? null : hostedAccessToken.Trim();
+        hostedRefreshToken = string.IsNullOrWhiteSpace(hostedRefreshToken) ? null : hostedRefreshToken.Trim();
         windowsCredentialTargetName = string.IsNullOrWhiteSpace(windowsCredentialTargetName)
             ? null
             : windowsCredentialTargetName.Trim();
@@ -357,7 +409,7 @@ public sealed record PortableLogbookCommandOptions(
             throw new UpdaterUsageException("--save-windows-credential is only supported for portable enable.");
         }
 
-        return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, windowsCredentialTargetName, saveWindowsCredential, json, false);
+        return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, hostedAccountId, hostedAccessToken, hostedRefreshToken, hostedAccessTokenExpiresAt, windowsCredentialTargetName, saveWindowsCredential, json, false);
     }
 
     private static string ReadValue(IReadOnlyList<string> args, ref int index, string option)
@@ -399,6 +451,21 @@ public sealed record PortableLogbookCommandOptions(
         return parsed;
     }
 
+    private static DateTimeOffset ReadDateTimeOffsetValue(IReadOnlyList<string> args, ref int index, string option)
+    {
+        var value = ReadValue(args, ref index, option);
+        if (!DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var parsed))
+        {
+            throw new UpdaterUsageException($"{option} must use an ISO-8601 date/time.");
+        }
+
+        return parsed;
+    }
+
     private static string CommandName(PortableLogbookCommand command) =>
         command switch
         {
@@ -410,6 +477,9 @@ public sealed record PortableLogbookCommandOptions(
             PortableLogbookCommand.RevisionHistory => "revision-history",
             PortableLogbookCommand.ResolveConflict => "resolve-conflict",
             PortableLogbookCommand.Status => "status",
+            PortableLogbookCommand.HostedPair => "hosted-pair",
+            PortableLogbookCommand.HostedSync => "hosted-sync",
+            PortableLogbookCommand.HostedStatus => "hosted-status",
             _ => "command"
         };
 }
@@ -424,5 +494,8 @@ public enum PortableLogbookCommand
     PrintedCopy,
     RevisionHistory,
     ResolveConflict,
-    Status
+    Status,
+    HostedPair,
+    HostedSync,
+    HostedStatus
 }

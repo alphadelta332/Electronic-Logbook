@@ -64,7 +64,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
                 document,
                 stored.ImportReceipts ?? [],
                 stored.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
-                exportCheckpoint);
+                exportCheckpoint,
+                stored.HostedSync);
         }
         catch (JsonException ex)
         {
@@ -122,7 +123,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
                 document,
                 stored.ImportReceipts ?? [],
                 stored.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
-                exportCheckpoint);
+                exportCheckpoint,
+                stored.HostedSync);
         }
         catch (JsonException ex)
         {
@@ -142,7 +144,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             document,
             existing?.ImportReceipts ?? [],
             existing?.LastSuccessfulExportAt,
-            existingExportCheckpoint));
+            existingExportCheckpoint,
+            existing?.HostedSync));
     }
 
     public async ValueTask SaveDocumentAsync(PortableLogbookDocumentV2 document)
@@ -157,7 +160,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             document,
             existing?.ImportReceipts ?? [],
             existing?.LastSuccessfulExportAt,
-            existingExportCheckpoint));
+            existingExportCheckpoint,
+            existing?.HostedSync));
     }
 
     public async ValueTask SaveStateAsync(BrowserLogbookState state)
@@ -171,6 +175,7 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         var exportCheckpoint = state.LastSuccessfulExport?.Covers(document) == true
             ? state.LastSuccessfulExport
             : null;
+        var hostedSync = state.HostedSync ?? existing?.HostedSync;
 
         var stored = new BrowserLogbookStoredDocument(
             CurrentStoreVersion,
@@ -178,7 +183,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             PortableLogbookJson.Serialize(document),
             state.ImportReceipts,
             state.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
-            exportCheckpoint);
+            exportCheckpoint,
+            hostedSync);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
             DocumentKey,
@@ -196,6 +202,7 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
         var exportCheckpoint = state.LastSuccessfulExport?.Covers(document) == true
             ? state.LastSuccessfulExport
             : null;
+        var hostedSync = state.HostedSync ?? existing?.HostedSync;
 
         var stored = new BrowserLogbookStoredDocument(
             CurrentStoreVersion,
@@ -203,7 +210,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             PortableLogbookJson.SerializeV2(document),
             state.ImportReceipts,
             state.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
-            exportCheckpoint);
+            exportCheckpoint,
+            hostedSync);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
             DocumentKey,
@@ -329,19 +337,55 @@ public sealed record BrowserLogbookStoredDocument(
     string DocumentJson,
     IReadOnlyList<PortableLogbookPackageReceipt>? ImportReceipts = null,
     DateTimeOffset? LastSuccessfulExportAt = null,
-    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null);
+    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null,
+    BrowserHostedSyncState? HostedSync = null);
 
 public sealed record BrowserLogbookState(
     PortableLogbookDocument Document,
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
     DateTimeOffset? LastSuccessfulExportAt,
-    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null);
+    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null,
+    BrowserHostedSyncState? HostedSync = null);
 
 public sealed record BrowserLogbookStateV2(
     PortableLogbookDocumentV2 Document,
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
     DateTimeOffset? LastSuccessfulExportAt,
-    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null);
+    BrowserLogbookExportCheckpoint? LastSuccessfulExport = null,
+    BrowserHostedSyncState? HostedSync = null);
+
+public sealed record BrowserHostedSyncState(
+    HostedAccountId AccountId,
+    LogbookId LogbookId,
+    DeviceId DeviceId,
+    long LastAcknowledgedHostedRevision,
+    PortableHostedSyncStatus LastStatus,
+    DateTimeOffset? LastAttemptedAt = null,
+    DateTimeOffset? LastSyncedAt = null,
+    string? AttentionRequiredReason = null,
+    int PendingLocalOperationCount = 0,
+    IReadOnlyList<RevisionId>? UploadedRevisionIds = null)
+{
+    public BrowserHostedSyncState WithResult(PortableHostedSyncResult result, DateTimeOffset attemptedAt)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var uploadedRevisionIds = (UploadedRevisionIds ?? [])
+            .Concat(result.UploadedRevisionIds ?? [])
+            .Distinct()
+            .OrderBy(revisionId => revisionId.Value, StringComparer.Ordinal)
+            .ToArray();
+        return this with
+        {
+            LastAcknowledgedHostedRevision = result.LastAcknowledgedHostedRevision,
+            LastStatus = result.Status,
+            LastAttemptedAt = attemptedAt,
+            LastSyncedAt = result.Status == PortableHostedSyncStatus.Synced ? attemptedAt : LastSyncedAt,
+            AttentionRequiredReason = result.AttentionRequiredReason,
+            PendingLocalOperationCount = result.PendingLocalOperationCount,
+            UploadedRevisionIds = uploadedRevisionIds
+        };
+    }
+}
 
 public sealed record BrowserLogbookExportCheckpoint(
     DateTimeOffset ExportedAt,

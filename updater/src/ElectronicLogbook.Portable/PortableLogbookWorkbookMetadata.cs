@@ -5,6 +5,12 @@ public static class PortableLogbookWorkbookMetadata
     public const string LogbookIdName = "PortableLogbookId";
     public const string DeviceIdName = "PortableLogbookDeviceId";
     public const string SchemaVersionName = "PortableLogbookSchemaVersion";
+    public const string HostedAccountIdName = "PortableHostedAccountId";
+    public const string HostedCredentialTargetName = "PortableHostedCredentialTarget";
+    public const string HostedLastAcknowledgedRevisionName = "PortableHostedLastAcknowledgedRevision";
+    public const string HostedSyncStatusName = "PortableHostedSyncStatus";
+    public const string HostedSyncStatusAtName = "PortableHostedSyncStatusAt";
+    public const string HostedSyncAttentionName = "PortableHostedSyncAttention";
     public const string OperationHistoryPartName = "portable-logbook-history.elogbook";
     public const string ImportLedgerPartName = "portable-logbook-import-ledger.json";
     public const string StorageCustomXmlPartPath = "customXml/portable-logbook-storage.xml";

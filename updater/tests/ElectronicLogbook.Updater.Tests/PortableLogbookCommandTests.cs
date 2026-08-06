@@ -58,6 +58,60 @@ public sealed class PortableLogbookCommandTests : IDisposable
     }
 
     [Fact]
+    public void ParseAcceptsHiddenHostedPairCommand()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+
+        var options = PortableLogbookCommandOptions.Parse(
+            [
+                "hosted-pair",
+                "--workbook",
+                workbook,
+                "--hosted-account-id",
+                "acct_123",
+                "--hosted-access-token",
+                "access-token",
+                "--hosted-refresh-token",
+                "refresh-token",
+                "--hosted-access-token-expires-at",
+                "2026-08-06T12:00:00Z",
+                "--json"
+            ]);
+
+        Assert.Equal(PortableLogbookCommand.HostedPair, options.Command);
+        Assert.Equal(Path.GetFullPath(workbook), options.WorkbookPath);
+        Assert.Equal("acct_123", options.HostedAccountId);
+        Assert.Equal("access-token", options.HostedAccessToken);
+        Assert.Equal("refresh-token", options.HostedRefreshToken);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-06T12:00:00Z"), options.HostedAccessTokenExpiresAt);
+        Assert.True(options.Json);
+    }
+
+    [Fact]
+    public void ParseAcceptsHiddenHostedSyncCommand()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+
+        var options = PortableLogbookCommandOptions.Parse(["hosted-sync", "--workbook", workbook, "--json"]);
+
+        Assert.Equal(PortableLogbookCommand.HostedSync, options.Command);
+        Assert.Equal(Path.GetFullPath(workbook), options.WorkbookPath);
+        Assert.True(options.Json);
+    }
+
+    [Fact]
+    public void ParseRejectsHostedPairWithoutTokens()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+
+        var exception = Assert.Throws<UpdaterUsageException>(
+            () => PortableLogbookCommandOptions.Parse(
+                ["hosted-pair", "--workbook", workbook, "--hosted-account-id", "acct_123"]));
+
+        Assert.Contains("--hosted-access-token", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ParseAcceptsPortableExportWorkbookRecoveryFileAndPackageOutputPath()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -373,6 +427,31 @@ public sealed class PortableLogbookCommandTests : IDisposable
         Assert.Equal(Path.GetFullPath(workbook), status.WorkbookPath);
         Assert.Null(status.Summary);
         Assert.Equal(0, status.ImportReceiptCount);
+    }
+
+    [Fact]
+    public void HostedWorkbookMetadataRoundTripsThroughHiddenDefinedNames()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+
+        var result = PortableLogbookWorkbookPackageStorage.EnsureHostedWorkbookMetadata(
+            workbook,
+            new HostedAccountId("acct_123"),
+            "ElectronicLogbook.Hosted/log_123/dev_123",
+            42,
+            "Waiting",
+            DateTimeOffset.Parse("2026-08-06T12:00:00Z"),
+            "Network unavailable.");
+        var readBack = PortableLogbookWorkbookPackageStorage.ReadHostedWorkbookMetadata(workbook);
+
+        Assert.True(result.WorkbookMutated);
+        Assert.NotNull(readBack);
+        Assert.Equal("acct_123", readBack.AccountId.Value);
+        Assert.Equal("ElectronicLogbook.Hosted/log_123/dev_123", readBack.CredentialTargetName);
+        Assert.Equal(42, readBack.LastAcknowledgedHostedRevision);
+        Assert.Equal("Waiting", readBack.Status);
+        Assert.Equal(DateTimeOffset.Parse("2026-08-06T12:00:00Z"), readBack.StatusAt);
+        Assert.Equal("Network unavailable.", readBack.AttentionRequiredReason);
     }
 
     [Fact(Skip = "Superseded by the schema-v2-only portable command contract; retain as historical v1 behavior documentation.")]

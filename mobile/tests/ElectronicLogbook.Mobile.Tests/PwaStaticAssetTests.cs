@@ -108,6 +108,8 @@ public sealed class PwaStaticAssetTests
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
 
         Assert.Contains("window.electronicLogbookKeys", bridge, StringComparison.Ordinal);
+        Assert.Contains("nativeKeyPlugin()", bridge, StringComparison.Ordinal);
+        Assert.Contains("native.importPackageKey({ keyName, keyBytes: Array.from(keyBytes) })", bridge, StringComparison.Ordinal);
         Assert.Contains("{ name: \"AES-GCM\", length: 256 }", bridge, StringComparison.Ordinal);
         Assert.Contains("false,", bridge, StringComparison.Ordinal);
         Assert.Contains("[\"encrypt\", \"decrypt\"]", bridge, StringComparison.Ordinal);
@@ -124,12 +126,39 @@ public sealed class PwaStaticAssetTests
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
 
         Assert.Contains("getRequiredPackageKey", bridge, StringComparison.Ordinal);
+        Assert.Contains("native.encryptPackagePayload", bridge, StringComparison.Ordinal);
+        Assert.Contains("native.decryptPackagePayload", bridge, StringComparison.Ordinal);
         Assert.Contains("crypto.subtle.encrypt", bridge, StringComparison.Ordinal);
         Assert.Contains("crypto.subtle.decrypt", bridge, StringComparison.Ordinal);
         Assert.Contains("additionalData: new Uint8Array(additionalData)", bridge, StringComparison.Ordinal);
         Assert.Contains("tagLength: 128", bridge, StringComparison.Ordinal);
         Assert.Contains("encrypted.slice(encrypted.length - 16)", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("exportKey", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidNativeKeyBridgeWrapsPackageKeysWithAndroidKeystore()
+    {
+        var plugin = ReadRepositoryFile(
+            "android",
+            "app",
+            "src",
+            "main",
+            "java",
+            "com",
+            "alphadelta",
+            "electroniclogbook",
+            "ElectronicLogbookNativeFilesPlugin.java");
+
+        Assert.Contains("AndroidKeyStore", plugin, StringComparison.Ordinal);
+        Assert.Contains("electronic-logbook.package-key-wrapper", plugin, StringComparison.Ordinal);
+        Assert.Contains("KeyGenParameterSpec.Builder", plugin, StringComparison.Ordinal);
+        Assert.Contains("KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT", plugin, StringComparison.Ordinal);
+        Assert.Contains("setBlockModes(KeyProperties.BLOCK_MODE_GCM)", plugin, StringComparison.Ordinal);
+        Assert.Contains("setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)", plugin, StringComparison.Ordinal);
+        Assert.Contains("getSharedPreferences(NativeKeyPreferences", plugin, StringComparison.Ordinal);
+        Assert.Contains("cipher.updateAAD(keyName.getBytes(StandardCharsets.UTF_8))", plugin, StringComparison.Ordinal);
+        Assert.Contains("Arrays.fill(packageKey, (byte) 0)", plugin, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -401,6 +430,18 @@ public sealed class PwaStaticAssetTests
 
     private static string ReadMobileAsset(string relativePath) =>
         File.ReadAllText(GetMobileAssetPath(relativePath));
+
+    private static string ReadRepositoryFile(params string[] relativePath) =>
+        File.ReadAllText(Path.GetFullPath(Path.Combine(
+            [
+                AppContext.BaseDirectory,
+                "..",
+                "..",
+                "..",
+                "..",
+                "..",
+                .. relativePath
+            ])));
 
     private static string GetMobileAssetPath(string relativePath) =>
         Path.GetFullPath(Path.Combine(

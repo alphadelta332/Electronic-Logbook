@@ -73,7 +73,7 @@ public sealed class InMemoryHostedLogbookLedger : IHostedLogbookLedger
         var page = operations
             .Where(operation => operation.HostedRevision > afterHostedRevision)
             .OrderBy(operation => operation.HostedRevision)
-            .Take(pageSize)
+            .Take(Math.Min(pageSize, IHostedLogbookLedger.MaxOperationPageSize))
             .ToArray();
         var throughRevision = page.Length > 0 ? page[^1].HostedRevision : afterHostedRevision;
         var hasMore = operations.Any(operation => operation.HostedRevision > throughRevision);
@@ -99,14 +99,25 @@ public sealed class InMemoryHostedLogbookLedger : IHostedLogbookLedger
         var accepted = new List<HostedOperationEnvelope>();
         foreach (var upload in operations)
         {
+            ValidateUpload(logbookId, deviceId, upload);
+
             if (!string.Equals(upload.DeviceId.Value, deviceId.Value, StringComparison.Ordinal))
             {
-                throw new InvalidOperationException("Uploaded operation device does not match the authenticated device.");
+                throw new HostedLedgerException(
+                    HostedLedgerFailureReason.DeviceMismatch,
+                    "Uploaded operation device does not match the authenticated device.");
             }
 
             var existing = logbookOperations.SingleOrDefault(operation => operation.RevisionId == upload.RevisionId);
             if (existing is not null)
             {
+                if (!OperationPayloadMatches(existing, upload))
+                {
+                    throw new HostedLedgerException(
+                        HostedLedgerFailureReason.OperationReplayRejected,
+                        "Operation revision was replayed with different encrypted payload metadata.");
+                }
+
                 accepted.Add(existing);
                 continue;
             }
@@ -124,6 +135,7 @@ public sealed class InMemoryHostedLogbookLedger : IHostedLogbookLedger
                 upload.PayloadCiphertext,
                 upload.PayloadNonce,
                 upload.PayloadTag,
+                upload.PayloadHash,
                 upload.ParentRevisionIds.ToArray());
             logbookOperations.Add(envelope);
             accepted.Add(envelope);
@@ -146,29 +158,215 @@ public sealed class InMemoryHostedLogbookLedger : IHostedLogbookLedger
             throw new ArgumentOutOfRangeException(nameof(throughHostedRevision), "Hosted revision cursor cannot be negative.");
         }
 
-        acknowledgements[(logbookId, deviceId)] = throughHostedRevision;
+        var hostedHighest = operationsByLogbook.TryGetValue(logbookId, out var operations) && operations.Count > 0
+            ? operations[^1].HostedRevision
+            : 0;
+        if (throughHostedRevision > hostedHighest)
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.CheckpointOutsideHostedHistory,
+                "Acknowledgement revision is outside hosted history.");
+        }
+
+        var key = (logbookId, deviceId);
+        acknowledgements[key] = acknowledgements.TryGetValue(key, out var current)
+            ? Math.Max(current, throughHostedRevision)
+            : throughHostedRevision;
         return ValueTask.CompletedTask;
+    }
+
+    private static void ValidateUpload(LogbookId logbookId, DeviceId deviceId, HostedOperationUpload upload)
+    {
+        ArgumentNullException.ThrowIfNull(upload);
+
+        if (string.IsNullOrWhiteSpace(logbookId.Value)
+            || string.IsNullOrWhiteSpace(deviceId.Value)
+            || string.IsNullOrWhiteSpace(upload.RevisionId.Value)
+            || string.IsNullOrWhiteSpace(upload.EntryId.Value)
+            || string.IsNullOrWhiteSpace(upload.DeviceId.Value))
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.InvalidIdentifier,
+                "Hosted operation identifiers must be present.");
+        }
+
+        if (upload.SchemaVersion != PortableLogbookDocumentV2.CurrentSchemaVersion)
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.UnsupportedSchemaVersion,
+                "Hosted operation schema version is not supported.");
+        }
+
+        if (upload.PayloadCiphertext.Length > IHostedLogbookLedger.MaxPayloadCiphertextLength)
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.PayloadTooLarge,
+                "Hosted operation encrypted payload is too large for the private pilot boundary.");
+        }
+
+        if (LooksLikePlaintextPayload(upload.PayloadCiphertext))
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.PlaintextPayloadRejected,
+                "Hosted operation payload must be encrypted before upload.");
+        }
+
+        if (upload.PayloadCiphertext.Length < 16
+            || upload.PayloadNonce.Length < 12
+            || upload.PayloadTag.Length < 16
+            || upload.PayloadHash.Length != 64
+            || !upload.PayloadHash.All(IsLowerHex))
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.InvalidPayloadEnvelope,
+                "Hosted operation encrypted payload metadata is incomplete.");
+        }
+    }
+
+    private static bool OperationPayloadMatches(HostedOperationEnvelope existing, HostedOperationUpload upload) =>
+        string.Equals(existing.PayloadCiphertext, upload.PayloadCiphertext, StringComparison.Ordinal)
+        && string.Equals(existing.PayloadNonce, upload.PayloadNonce, StringComparison.Ordinal)
+        && string.Equals(existing.PayloadTag, upload.PayloadTag, StringComparison.Ordinal)
+        && string.Equals(existing.PayloadHash, upload.PayloadHash, StringComparison.Ordinal);
+
+    private static bool LooksLikePlaintextPayload(string payload) =>
+        payload.Contains("\"kind\"", StringComparison.OrdinalIgnoreCase)
+        || payload.Contains("\"entry\"", StringComparison.OrdinalIgnoreCase)
+        || payload.Contains("aircraft", StringComparison.OrdinalIgnoreCase)
+        || payload.Contains("route", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsLowerHex(char value) =>
+        value is >= '0' and <= '9' or >= 'a' and <= 'f';
+}
+
+public sealed class InMemoryHostedPilotHealthReporter(
+    IHostedLogbookLedger ledger,
+    ISyncClock clock)
+    : IHostedPilotHealthReporter
+{
+    public HostedPilotHealthSnapshot Snapshot { get; set; } = new(
+        HostedPilotQuotaStatus.Ok,
+        HostedPilotQuotaStatus.Ok,
+        HostedPilotQuotaStatus.Ok,
+        ActiveAccountCount: 1,
+        ActiveDeviceCount: 1,
+        StoredOperationCount: 0,
+        EstimatedDatabaseBytes: 0,
+        DateTimeOffset.UnixEpoch,
+        PaidPlanUpgradeTriggers: []);
+
+    public IReadOnlyList<HostedRedactedSecurityEvent> SecurityEvents { get; set; } = [];
+
+    public ValueTask<HostedPilotHealthSnapshot> GetHealthAsync(CancellationToken cancellationToken = default) =>
+        ValueTask.FromResult(Snapshot with { CheckedAt = clock.UtcNow });
+
+    public ValueTask<HostedPilotDiagnosticsBundle> CreateRedactedDiagnosticsAsync(
+        HostedDiagnosticsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return ValueTask.FromResult(new HostedPilotDiagnosticsBundle(
+            clock.UtcNow,
+            new Dictionary<string, string>
+            {
+                ["supabase_url"] = "[redacted]",
+                ["anon_key"] = "[redacted]",
+                ["account_id"] = request.AccountId is null ? "[none]" : "[redacted]",
+                ["logbook_id"] = request.LogbookId is null ? "[none]" : "[redacted]"
+            },
+            Snapshot.PaidPlanUpgradeTriggers,
+            SecurityEvents,
+            ContainsCiphertextPayloads: request.IncludeCiphertextPayloads));
+    }
+
+    public ValueTask<HostedPilotLogicalBackup> CreateLogicalBackupAsync(
+        HostedLogicalBackupRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var operationCount = 0;
+        if (ledger is InMemoryHostedLogbookLedger inMemoryLedger)
+        {
+            operationCount = inMemoryLedger.ReadMissingOperationsAsync(
+                    request.LogbookId,
+                    afterHostedRevision: 0,
+                    pageSize: IHostedLogbookLedger.MaxOperationPageSize,
+                    cancellationToken)
+                .AsTask()
+                .GetAwaiter()
+                .GetResult()
+                .Operations
+                .Count;
+        }
+
+        return ValueTask.FromResult(new HostedPilotLogicalBackup(
+            request.LogbookId,
+            clock.UtcNow,
+            AccountCount: Snapshot.ActiveAccountCount,
+            DeviceCount: Snapshot.ActiveDeviceCount,
+            OperationCount: operationCount,
+            ContainsCiphertextPayloads: request.IncludeCiphertextPayloads));
+    }
+
+    public ValueTask<HostedRestorePlan> ValidateRestoreAsync(
+        HostedPilotLogicalBackup backup,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(backup);
+        var warnings = backup.ContainsCiphertextPayloads
+            ? Array.Empty<string>()
+            : ["Backup omits ciphertext payloads and can validate metadata only."];
+        return ValueTask.FromResult(new HostedRestorePlan(
+            backup.LogbookId,
+            backup.OperationCount,
+            CanRestore: backup.ContainsCiphertextPayloads,
+            warnings));
     }
 }
 
 public sealed class InMemoryHostedLogbookAuthenticator(
     HostedAccountId accountId,
     DeviceId deviceId,
-    ISyncClock clock)
+    ISyncClock clock,
+    string invitedEmail = "pilot@example.com")
     : IHostedLogbookAuthenticator
 {
     private HostedSyncSession? currentSession;
     private HostedSignInStart? pendingSignIn;
+    private string? pendingVerificationCode;
+    private bool refreshTokenRevoked;
+
+    public HostedAccountStatus AccountStatus { get; set; } = HostedAccountStatus.Invited;
+
+    public HostedDeviceStatus DeviceStatus { get; set; } = HostedDeviceStatus.Active;
 
     public ValueTask<HostedSyncSession?> GetCurrentSessionAsync(CancellationToken cancellationToken = default) =>
         ValueTask.FromResult(currentSession);
 
     public ValueTask<HostedSignInStart> StartEmailSignInAsync(
         string email,
+        bool shouldCreateUser = false,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        if (shouldCreateUser)
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.PublicRegistrationBlocked,
+                "Public account registration is disabled for the private pilot.");
+        }
+
+        ThrowIfAccountOrDeviceBlocked();
+
+        if (!string.Equals(email.Trim(), invitedEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvitationRequired,
+                "Sign-in is available only for invited pilot accounts.");
+        }
+
         pendingSignIn = new HostedSignInStart(accountId, MaskEmail(email), clock.UtcNow.AddMinutes(10));
+        pendingVerificationCode = "123456";
         return ValueTask.FromResult(pendingSignIn);
     }
 
@@ -177,13 +375,36 @@ public sealed class InMemoryHostedLogbookAuthenticator(
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(verificationCode);
-        if (pendingSignIn is null || pendingSignIn.ExpiresAt <= clock.UtcNow)
+        ThrowIfAccountOrDeviceBlocked();
+
+        if (pendingSignIn is null || pendingVerificationCode is null)
         {
-            throw new InvalidOperationException("No pending sign-in request is available.");
+            throw new HostedSignInException(
+                HostedSignInFailureReason.VerificationExpired,
+                "No pending sign-in request is available.");
+        }
+
+        if (pendingSignIn.ExpiresAt <= clock.UtcNow)
+        {
+            pendingSignIn = null;
+            pendingVerificationCode = null;
+            throw new HostedSignInException(
+                HostedSignInFailureReason.VerificationExpired,
+                "The sign-in verification code has expired.");
+        }
+
+        if (!string.Equals(verificationCode, pendingVerificationCode, StringComparison.Ordinal))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvalidVerificationCode,
+                "The sign-in verification code is not valid.");
         }
 
         currentSession = new HostedSyncSession(accountId, deviceId, clock.UtcNow.AddHours(1));
         pendingSignIn = null;
+        pendingVerificationCode = null;
+        refreshTokenRevoked = false;
+        AccountStatus = HostedAccountStatus.Active;
         return ValueTask.FromResult(currentSession);
     }
 
@@ -191,7 +412,19 @@ public sealed class InMemoryHostedLogbookAuthenticator(
     {
         if (currentSession is null)
         {
-            throw new InvalidOperationException("Cannot refresh before sign-in.");
+            throw new HostedSignInException(
+                HostedSignInFailureReason.SignedOut,
+                "Cannot refresh before sign-in.");
+        }
+
+        ThrowIfAccountOrDeviceBlocked();
+
+        if (refreshTokenRevoked)
+        {
+            currentSession = null;
+            throw new HostedSignInException(
+                HostedSignInFailureReason.RefreshTokenRevoked,
+                "The hosted refresh token has been revoked.");
         }
 
         currentSession = currentSession with { AccessTokenExpiresAt = clock.UtcNow.AddHours(1) };
@@ -202,7 +435,34 @@ public sealed class InMemoryHostedLogbookAuthenticator(
     {
         currentSession = null;
         pendingSignIn = null;
+        pendingVerificationCode = null;
+        refreshTokenRevoked = true;
         return ValueTask.CompletedTask;
+    }
+
+    public void RevokeRefreshToken() => refreshTokenRevoked = true;
+
+    private void ThrowIfAccountOrDeviceBlocked()
+    {
+        if (AccountStatus is HostedAccountStatus.Disabled)
+        {
+            currentSession = null;
+            pendingSignIn = null;
+            pendingVerificationCode = null;
+            throw new HostedSignInException(
+                HostedSignInFailureReason.AccountDisabled,
+                "The hosted account is disabled.");
+        }
+
+        if (DeviceStatus is HostedDeviceStatus.Revoked or HostedDeviceStatus.Disabled)
+        {
+            currentSession = null;
+            pendingSignIn = null;
+            pendingVerificationCode = null;
+            throw new HostedSignInException(
+                HostedSignInFailureReason.DeviceRevoked,
+                "The hosted device is no longer allowed to sync.");
+        }
     }
 
     private static string MaskEmail(string email)

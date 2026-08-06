@@ -99,14 +99,55 @@ values
         '{}'::jsonb,
         now(),
         now()
+    ),
+    (
+        '10000000-0000-0000-0000-000000000004',
+        '00000000-0000-0000-0000-000000000000',
+        'authenticated',
+        'authenticated',
+        'disabled@example.invalid',
+        '',
+        now(),
+        '{"provider":"email","providers":["email"]}'::jsonb,
+        '{}'::jsonb,
+        now(),
+        now()
+    ),
+    (
+        '10000000-0000-0000-0000-000000000005',
+        '00000000-0000-0000-0000-000000000000',
+        'authenticated',
+        'authenticated',
+        'invited@example.invalid',
+        '',
+        now(),
+        '{"provider":"email","providers":["email"]}'::jsonb,
+        '{}'::jsonb,
+        now(),
+        now()
+    ),
+    (
+        '10000000-0000-0000-0000-000000000006',
+        '00000000-0000-0000-0000-000000000000',
+        'authenticated',
+        'authenticated',
+        'selfregistered@example.invalid',
+        '',
+        now(),
+        '{"provider":"email","providers":["email"]}'::jsonb,
+        '{}'::jsonb,
+        now(),
+        now()
     )
 on conflict (id) do nothing;
 
-insert into public.accounts (account_id, invited_email, display_name, status)
+insert into public.accounts (account_id, invited_email, display_name, status, disabled_at)
 values
-    ('10000000-0000-0000-0000-000000000001', 'owner@example.invalid', 'Owner', 'active'),
-    ('10000000-0000-0000-0000-000000000002', 'writer@example.invalid', 'Writer', 'active'),
-    ('10000000-0000-0000-0000-000000000003', 'outsider@example.invalid', 'Outsider', 'active');
+    ('10000000-0000-0000-0000-000000000001', 'owner@example.invalid', 'Owner', 'active', null),
+    ('10000000-0000-0000-0000-000000000002', 'writer@example.invalid', 'Writer', 'active', null),
+    ('10000000-0000-0000-0000-000000000003', 'outsider@example.invalid', 'Outsider', 'active', null),
+    ('10000000-0000-0000-0000-000000000004', 'disabled@example.invalid', 'Disabled', 'disabled', now()),
+    ('10000000-0000-0000-0000-000000000005', 'invited@example.invalid', 'Invited', 'invited', null);
 
 insert into public.logbooks (logbook_id, owner_account_id, display_name)
 values
@@ -216,6 +257,69 @@ values (
 );
 
 set local role authenticated;
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000005', true);
+
+select public.accept_hosted_invitation(
+    'Accepted Pilot',
+    'android',
+    'Pixel 8 Pro',
+    'public-signing-key',
+    'fingerprint'
+);
+
+select elb_rls_test.assert_true(
+    'invited user can accept invitation and becomes active',
+    (
+        select status = 'active' and display_name = 'Accepted Pilot'
+        from public.accounts
+        where account_id = '10000000-0000-0000-0000-000000000005'
+    )
+);
+
+select elb_rls_test.assert_true(
+    'invitation acceptance registers an active owned device',
+    (
+        select count(*) = 1
+        from public.devices
+        where account_id = '10000000-0000-0000-0000-000000000005'
+          and device_type = 'android'
+          and platform_label = 'Pixel 8 Pro'
+          and status = 'active'
+    )
+);
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000004', true);
+
+select elb_rls_test.expect_error(
+    'disabled account cannot accept invitation or register a device',
+    $sql$
+        select public.accept_hosted_invitation(
+            'Disabled Pilot',
+            'android',
+            'Disabled Android',
+            null,
+            null
+        )
+    $sql$,
+    '%account disabled%'
+);
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000006', true);
+
+select elb_rls_test.expect_error(
+    'authenticated user without invitation cannot self-register',
+    $sql$
+        select public.accept_hosted_invitation(
+            'Self Registered',
+            'android',
+            'Uninvited Android',
+            null,
+            null
+        )
+    $sql$,
+    '%invitation required%'
+);
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000003', true);
 
@@ -411,6 +515,69 @@ select elb_rls_test.expect_error(
     '%operation id replayed with different payload%'
 );
 
+select elb_rls_test.expect_error(
+    'plaintext operation payload is rejected before storage',
+    $sql$
+        select public.append_hosted_operation(
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000002',
+            '50000000-0000-0000-0000-000000000007',
+            'writer-plaintext-1',
+            null,
+            1,
+            '[]'::jsonb,
+            'upsert-entry',
+            1,
+            '{"entry":"plaintext flight"}',
+            repeat('e', 16),
+            repeat('f', 32),
+            repeat('5', 64),
+            now(),
+            '{}'::jsonb
+        )
+    $sql$,
+    '%plaintext operation payloads are not allowed%'
+);
+
+select elb_rls_test.expect_error(
+    'malformed encrypted payload envelope is rejected',
+    $sql$
+        select public.append_hosted_operation(
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000002',
+            '50000000-0000-0000-0000-000000000008',
+            'writer-malformed-1',
+            null,
+            1,
+            '[]'::jsonb,
+            'upsert-entry',
+            1,
+            repeat('d', 32),
+            'short',
+            repeat('f', 32),
+            repeat('5', 64),
+            now(),
+            '{}'::jsonb
+        )
+    $sql$,
+    '%encrypted payload envelope is incomplete%'
+);
+
+select elb_rls_test.assert_true(
+    'missing operation pulls are revision ordered and page bounded',
+    (
+        select count(*) = 1
+          and min(revision) = 1
+          and max(revision) = 1
+          and bool_or(has_more)
+        from public.read_missing_operations(
+            '20000000-0000-0000-0000-000000000001',
+            0,
+            1
+        )
+    )
+);
+
 select public.record_operation_ack(
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000002',
@@ -440,6 +607,21 @@ select elb_rls_test.assert_true(
 );
 
 select elb_rls_test.expect_error(
+    'acknowledgement cannot move beyond hosted history',
+    $sql$
+        select public.record_operation_ack(
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000002',
+            3,
+            3,
+            3,
+            'impossible'
+        )
+    $sql$,
+    '%acknowledgement revision is outside hosted history%'
+);
+
+select elb_rls_test.expect_error(
     'writer cannot acknowledge another account device',
     $sql$
         select public.record_operation_ack(
@@ -452,6 +634,52 @@ select elb_rls_test.expect_error(
         )
     $sql$,
     '%device access denied%'
+);
+
+select elb_rls_test.assert_true(
+    'redacted diagnostics omit ciphertext payloads and secrets',
+    (
+        select diagnostic->>'contains_ciphertext_payloads' = 'false'
+          and diagnostic->>'supabase_url' = '[redacted]'
+          and diagnostic::text not like '%dddd%'
+        from public.create_redacted_hosted_diagnostics(
+            '20000000-0000-0000-0000-000000000001'
+        ) diagnostic
+    )
+);
+
+select elb_rls_test.assert_true(
+    'writer cannot create owner-only logical export manifest',
+    (
+        select public.create_hosted_logical_export_manifest(
+            '20000000-0000-0000-0000-000000000001'
+        ) is null
+    )
+);
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+
+select elb_rls_test.assert_true(
+    'owner can create logical export manifest for restore rehearsal',
+    (
+        select manifest->>'contains_ciphertext_payloads' = 'true'
+          and (manifest->>'operation_count')::integer = 2
+          and manifest->>'restore_target' like '%Sydney Supabase%'
+        from public.create_hosted_logical_export_manifest(
+            '20000000-0000-0000-0000-000000000001'
+        ) manifest
+    )
+);
+
+select elb_rls_test.assert_true(
+    'pilot health reports counts and upgrade triggers without service secrets',
+    (
+        select active_account_count >= 3
+          and active_device_count >= 3
+          and stored_operation_count = 2
+          and jsonb_typeof(paid_plan_upgrade_triggers) = 'array'
+        from public.get_hosted_pilot_health()
+    )
 );
 
 rollback;

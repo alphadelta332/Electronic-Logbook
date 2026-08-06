@@ -24,6 +24,12 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.Contains("x:Name=\"PortableRevisionHistoryButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableResolveConflictButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableRefreshStatusButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Account, sync, and Advanced recovery", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Enable Sync\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Recovery Export\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Recovery Import\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Resolve Sync Conflict\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Refresh Sync Status\"", xaml, StringComparison.Ordinal);
         Assert.Contains("TryReadPortableLogbookStatusTextWithRetryAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.ReadStatus", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.Enable", codeBehind, StringComparison.Ordinal);
@@ -40,8 +46,8 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.Contains("Holder date of birth (yyyy-mm-dd, rendered only into this printed copy):", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.ReadRevisionHistory", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.ResolveConflict", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("Portable logbook: not enabled", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("Portable logbook: enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("Workbook sync: not enabled", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("Workbook sync: enabled", codeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

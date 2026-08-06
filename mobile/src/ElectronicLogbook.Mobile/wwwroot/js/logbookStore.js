@@ -64,6 +64,11 @@
         return key;
     }
 
+    function nativeKeyPlugin() {
+        const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookNativeFiles;
+        return globalThis.Capacitor?.isNativePlatform?.() && plugin?.hasPackageKey ? plugin : null;
+    }
+
     window.electronicLogbookStore = {
         load: (key) => withStore(documentStoreName, "readonly", (store) => store.get(key)),
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key))
@@ -126,10 +131,21 @@
     };
 
     window.electronicLogbookKeys = {
-        isSupported: () => Boolean(globalThis.crypto?.subtle && globalThis.indexedDB),
-        hasPackageKey: async (keyName) => Boolean(
-            await withStore(keyStoreName, "readonly", (store) => store.get(keyName))),
+        isSupported: () => Boolean(nativeKeyPlugin() || (globalThis.crypto?.subtle && globalThis.indexedDB)),
+        hasPackageKey: async (keyName) => {
+            const native = nativeKeyPlugin();
+            if (native) {
+                return Boolean((await native.hasPackageKey({ keyName })).exists);
+            }
+
+            return Boolean(await withStore(keyStoreName, "readonly", (store) => store.get(keyName)));
+        },
         ensurePackageKey: async (keyName) => {
+            const native = nativeKeyPlugin();
+            if (native) {
+                return Boolean((await native.ensurePackageKey({ keyName })).created);
+            }
+
             const existing = await withStore(keyStoreName, "readonly", (store) => store.get(keyName));
             if (existing) {
                 return false;
@@ -140,6 +156,11 @@
             return true;
         },
         importPackageKey: async (keyName, keyBytes) => {
+            const native = nativeKeyPlugin();
+            if (native) {
+                return Boolean((await native.importPackageKey({ keyName, keyBytes: Array.from(keyBytes) })).imported);
+            }
+
             if (!globalThis.crypto?.subtle) {
                 throw new Error("Web Crypto is not available in this browser.");
             }
@@ -154,9 +175,29 @@
             return true;
         },
         deletePackageKey: async (keyName) => {
+            const native = nativeKeyPlugin();
+            if (native) {
+                await native.deletePackageKey({ keyName });
+                return;
+            }
+
             await withStore(keyStoreName, "readwrite", (store) => store.delete(keyName));
         },
         encrypt: async (keyName, nonce, plaintext, additionalData) => {
+            const native = nativeKeyPlugin();
+            if (native) {
+                const result = await native.encryptPackagePayload({
+                    keyName,
+                    nonce: Array.from(nonce),
+                    plaintext: Array.from(plaintext),
+                    additionalData: Array.from(additionalData)
+                });
+                return {
+                    ciphertext: new Uint8Array(result.ciphertext),
+                    tag: new Uint8Array(result.tag)
+                };
+            }
+
             const key = await getRequiredPackageKey(keyName);
             const encrypted = new Uint8Array(await crypto.subtle.encrypt(
                 {
@@ -173,6 +214,18 @@
             };
         },
         decrypt: async (keyName, nonce, ciphertext, tag, additionalData) => {
+            const native = nativeKeyPlugin();
+            if (native) {
+                const result = await native.decryptPackagePayload({
+                    keyName,
+                    nonce: Array.from(nonce),
+                    ciphertext: Array.from(ciphertext),
+                    tag: Array.from(tag),
+                    additionalData: Array.from(additionalData)
+                });
+                return new Uint8Array(result.plaintext);
+            }
+
             const key = await getRequiredPackageKey(keyName);
             const encrypted = new Uint8Array(ciphertext.length + tag.length);
             encrypted.set(new Uint8Array(ciphertext));

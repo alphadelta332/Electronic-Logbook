@@ -38,20 +38,20 @@
                 <TextBlock Margin="0,16,0,0" x:Name="InstalledVersionText" Text="Installed version: unknown" />
                 <TextBlock Margin="0,6,0,0" x:Name="LatestVersionText" Text="Update channel: checking..." />
                 <TextBlock Margin="0,6,0,0" x:Name="LastCheckedText" Text="Last checked: never" />
-                <TextBlock Margin="0,6,0,0" x:Name="PortableLogbookStatusText" Text="Portable logbook: checking..." />
-                <TextBlock Margin="0,16,0,0" Text="Portable logbook actions" FontWeight="SemiBold" />
+                <TextBlock Margin="0,6,0,0" x:Name="PortableLogbookStatusText" Text="Workbook sync: checking..." />
+                <TextBlock Margin="0,16,0,0" Text="Account, sync, and Advanced recovery" FontWeight="SemiBold" />
                 <UniformGrid Margin="0,8,0,0" Rows="2" Columns="4">
                     <Button Margin="0,0,8,8"
                             x:Name="PortableEnableButton"
-                            Content="Enable"
+                            Content="Enable Sync"
                             Click="PortableEnableButton_OnClick" />
                     <Button Margin="0,0,8,8"
                             x:Name="PortableExportButton"
-                            Content="Export Package"
+                            Content="Recovery Export"
                             Click="PortableExportButton_OnClick" />
                     <Button Margin="0,0,8,8"
                             x:Name="PortableImportButton"
-                            Content="Import Package"
+                            Content="Recovery Import"
                             Click="PortableImportButton_OnClick" />
                     <Button Margin="0,0,0,8"
                             x:Name="PortablePrintedCopyButton"
@@ -63,11 +63,11 @@
                             Click="PortableRevisionHistoryButton_OnClick" />
                     <Button Margin="0,0,8,0"
                             x:Name="PortableResolveConflictButton"
-                            Content="Resolve Conflict"
+                            Content="Resolve Sync Conflict"
                             Click="PortableResolveConflictButton_OnClick" />
                     <Button Margin="0,0,8,0"
                             x:Name="PortableRefreshStatusButton"
-                            Content="Refresh Status"
+                            Content="Refresh Sync Status"
                             Click="PortableRefreshStatusButton_OnClick" />
                 </UniformGrid>
             </StackPanel>

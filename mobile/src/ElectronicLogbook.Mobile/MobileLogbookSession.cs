@@ -6,10 +6,15 @@ namespace ElectronicLogbook.Mobile;
 public sealed class MobileLogbookSession(
     BrowserLogbookStore logbookStore,
     BrowserPackageKeyStore packageKeyStore,
-    PortableLogbookIdFactory? portableIdFactory = null)
+    PortableLogbookIdFactory? portableIdFactory = null,
+    IHostedLogbookAuthenticator? hostedAuthenticator = null,
+    IHostedLogbookLedger? hostedLedger = null,
+    INetworkStatus? networkStatus = null,
+    ISyncClock? syncClock = null)
 {
-    private readonly DeviceId deviceId = new("dev_mobile_preview");
+    private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
+    private readonly ISyncClock syncClock = syncClock ?? SystemSyncClock.Instance;
 
     public static readonly CustomFieldDefinition[] CustomFields =
     [
@@ -51,6 +56,10 @@ public sealed class MobileLogbookSession(
 
     public BrowserLogbookExportCheckpoint? LastSuccessfulExport { get; private set; }
 
+    public BrowserHostedSyncState? HostedSync { get; private set; }
+
+    public HostedSignInStart? PendingHostedSignIn { get; private set; }
+
     public EntryDraft Draft { get; private set; } = EntryDraft.Create();
 
     public MobileWorkbookEntryDraft WorkbookDraft { get; private set; } =
@@ -78,6 +87,44 @@ public sealed class MobileLogbookSession(
     public string? StorageError { get; private set; }
 
     public string PackageKeyStatus { get; private set; } = "Checking";
+
+    public bool HasHostedSync => HostedSync is not null;
+
+    public string HostedSyncStatusLabel =>
+        HostedSync?.LastStatus switch
+        {
+            PortableHostedSyncStatus.Synced => "Synced",
+            PortableHostedSyncStatus.Waiting => "Waiting",
+            PortableHostedSyncStatus.Offline => "Offline",
+            PortableHostedSyncStatus.SigningIn => "Signing in",
+            PortableHostedSyncStatus.NeedsAttention => "Needs attention",
+            _ => "Not connected"
+        };
+
+    public string HostedSyncStatusDetail
+    {
+        get
+        {
+            if (HostedSync is null)
+            {
+                return "Connect an invited account to use automatic hosted sync.";
+            }
+
+            return HostedSync.LastStatus switch
+            {
+                PortableHostedSyncStatus.Synced => HostedSync.LastSyncedAt is DateTimeOffset syncedAt
+                    ? $"Last synced {FormatTimestamp(syncedAt)}."
+                    : "This device is connected and ready to sync.",
+                PortableHostedSyncStatus.Waiting => "More hosted operations are waiting; sync will continue shortly.",
+                PortableHostedSyncStatus.Offline => HostedSync.PendingLocalOperationCount > 0
+                    ? $"{HostedSync.PendingLocalOperationCount} local operation(s) will sync when the network returns."
+                    : "This device is offline; local edits remain available.",
+                PortableHostedSyncStatus.SigningIn => "Finish signing in to resume hosted sync.",
+                PortableHostedSyncStatus.NeedsAttention => HostedSync.AttentionRequiredReason ?? "Hosted sync needs attention.",
+                _ => "Hosted sync is not connected."
+            };
+        }
+    }
 
     public string? LastActionMessage { get; private set; }
 
@@ -195,6 +242,8 @@ public sealed class MobileLogbookSession(
                 ImportReceipts = state.ImportReceipts;
                 LastSuccessfulExportAt = state.LastSuccessfulExportAt;
                 LastSuccessfulExport = state.LastSuccessfulExport;
+                HostedSync = state.HostedSync;
+                deviceId = HostedSync?.DeviceId ?? deviceId;
             }
 
             await RefreshPackageKeyStatusAsync();
@@ -227,10 +276,13 @@ public sealed class MobileLogbookSession(
                 ImportReceipts = state.ImportReceipts;
                 LastSuccessfulExportAt = state.LastSuccessfulExportAt;
                 LastSuccessfulExport = state.LastSuccessfulExport;
+                HostedSync = state.HostedSync;
+                deviceId = HostedSync?.DeviceId ?? deviceId;
             }
 
             await RefreshPackageKeyStatusAsync(DocumentV2.LogbookId);
             ResetWorkbookDraft();
+            await TrySyncHostedAsync(BackgroundSyncReason.LaunchOrResume);
         }
         catch (BrowserLogbookStoreException ex)
         {
@@ -314,6 +366,7 @@ public sealed class MobileLogbookSession(
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
         await SaveStateV2Async();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         SetLastActionMessage(EditingEntryId is null ? "Flight added." : "Correction saved.");
         ResetWorkbookDraft();
     }
@@ -449,6 +502,7 @@ public sealed class MobileLogbookSession(
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
         await SaveStateV2Async();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         if (EditingEntryId == entry.EntryId)
         {
             ResetWorkbookDraft();
@@ -516,6 +570,7 @@ public sealed class MobileLogbookSession(
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, resolution);
         await SaveStateV2Async();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         SetLastActionMessage("Conflict resolved.");
     }
 
@@ -550,6 +605,67 @@ public sealed class MobileLogbookSession(
         LastSuccessfulExport = null;
         await SaveStateV2Async();
     }
+
+    public async Task<HostedSignInStart> StartHostedInviteAcceptanceAsync(string email)
+    {
+        if (hostedAuthenticator is null)
+        {
+            throw new InvalidOperationException("Hosted sync is not configured on this device.");
+        }
+
+        ClearLastActionMessage();
+        PendingHostedSignIn = await hostedAuthenticator.StartEmailSignInAsync(email, shouldCreateUser: false);
+        SetLastActionMessage("Verification code sent.");
+        return PendingHostedSignIn;
+    }
+
+    public async Task CompleteHostedInviteAcceptanceAsync(string verificationCode)
+    {
+        if (hostedAuthenticator is null)
+        {
+            throw new InvalidOperationException("Hosted sync is not configured on this device.");
+        }
+
+        if (DocumentV2.Operations.Count > 0 || ImportReceipts.Count > 0)
+        {
+            throw new InvalidOperationException(
+                "App-only setup must start before importing a workbook package or recording flights.");
+        }
+
+        ClearLastActionMessage();
+        var session = await hostedAuthenticator.CompleteEmailSignInAsync(verificationCode);
+        var plan = PortableLogbookSetup.CreateInitialSetupPlanV2(
+            existingRows: [],
+            customFieldDefinitions: CustomFields,
+            currencyOverrideDates: PortableLogbookCurrencyOverrideDates.Empty,
+            createdAt: syncClock.UtcNow,
+            deviceId: session.DeviceId,
+            idFactory: portableIdFactory);
+        await packageKeyStore.ImportRecoveryCodeAsync(plan.LogbookId, plan.Key.ToRecoveryCode());
+
+        DocumentV2 = plan.InitialDocument;
+        deviceId = session.DeviceId;
+        ImportReceipts = [];
+        LastSuccessfulExportAt = null;
+        LastSuccessfulExport = null;
+        HostedSync = new BrowserHostedSyncState(
+            session.AccountId,
+            plan.LogbookId,
+            session.DeviceId,
+            LastAcknowledgedHostedRevision: 0,
+            PortableHostedSyncStatus.Synced,
+            LastAttemptedAt: syncClock.UtcNow);
+        PendingHostedSignIn = null;
+        await SaveStateV2Async();
+        await RefreshPackageKeyStatusAsync(DocumentV2.LogbookId);
+        SetLastActionMessage("Account connected.");
+    }
+
+    public Task<PortableHostedSyncResult?> SyncHostedNowAsync() =>
+        SyncHostedAsync(BackgroundSyncReason.ManualRefresh);
+
+    public Task<PortableHostedSyncResult?> SyncHostedAfterNetworkRestoredAsync() =>
+        SyncHostedAsync(BackgroundSyncReason.NetworkRestored);
 
     public async Task<MobilePackageImportApplyWorkflowResultV2> ApplyWorkbookPackageAsync(
         BrowserFile file,
@@ -906,10 +1022,52 @@ public sealed class MobileLogbookSession(
     }
 
     private ValueTask SaveStateAsync() =>
-        logbookStore.SaveStateAsync(new BrowserLogbookState(Document, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport));
+        logbookStore.SaveStateAsync(new BrowserLogbookState(Document, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport, HostedSync));
 
     private ValueTask SaveStateV2Async() =>
-        logbookStore.SaveStateAsync(new BrowserLogbookStateV2(DocumentV2, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport));
+        logbookStore.SaveStateAsync(new BrowserLogbookStateV2(DocumentV2, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport, HostedSync));
+
+    private async Task TrySyncHostedAsync(BackgroundSyncReason reason)
+    {
+        if (HostedSync is null || hostedLedger is null || networkStatus is null || hostedAuthenticator is null)
+        {
+            return;
+        }
+
+        _ = await SyncHostedAsync(reason);
+    }
+
+    private async Task<PortableHostedSyncResult?> SyncHostedAsync(BackgroundSyncReason reason)
+    {
+        if (HostedSync is null)
+        {
+            return null;
+        }
+
+        if (hostedLedger is null || networkStatus is null || hostedAuthenticator is null)
+        {
+            var unavailable = PortableHostedSyncResult.NeedsAttention(
+                DocumentV2,
+                HostedSync.LastAcknowledgedHostedRevision,
+                DocumentV2.Operations.Count,
+                "Hosted sync is not configured on this device.");
+            HostedSync = HostedSync.WithResult(unavailable, syncClock.UtcNow);
+            await SaveStateV2Async();
+            return unavailable;
+        }
+
+        var result = await new MobileHostedSyncWorkflow(
+                packageKeyStore,
+                hostedLedger,
+                hostedAuthenticator,
+                networkStatus,
+                syncClock)
+            .SyncAsync(new PortableHostedSyncRequestContext(DocumentV2, HostedSync, reason));
+        DocumentV2 = result.Document;
+        HostedSync = HostedSync.WithResult(result, syncClock.UtcNow);
+        await SaveStateV2Async();
+        return result;
+    }
 
     private string[] ValidateDraft()
     {

@@ -3,13 +3,13 @@
 @inject BrowserPackageKeyStore PackageKeyStore
 @inject BrowserFileStore FileStore
 
-<PageTitle>Package exchange</PageTitle>
+<PageTitle>Advanced recovery</PageTitle>
 
 @if (!Session.IsLoaded)
 {
     <section class="ui-state">
         <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
-        <span>Loading package exchange</span>
+        <span>Loading advanced recovery</span>
     </section>
 }
 else
@@ -17,8 +17,8 @@ else
     <section class="settings-page package-exchange-page">
         <header class="entry-header">
             <div>
-                <span class="eyebrow">Package exchange</span>
-                <h1>Workbook-faithful backup</h1>
+                <span class="eyebrow">Advanced recovery</span>
+                <h1>Manual Package Exchange</h1>
             </div>
             <span class="draft-pill">@Session.PackageKeyStatus</span>
         </header>
@@ -26,19 +26,19 @@ else
         <section class="notice-panel">
             <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
             <div>
-                <strong>Schema v2 only</strong>
-                <span>Preview a workbook package, restore its recovery code, then import or export an encrypted package.</span>
+                <strong>Support workflow</strong>
+                <span>Use this only for recovery, account export, key loss, conflict support, or moving data when hosted sync cannot be used.</span>
             </div>
         </section>
 
         <section class="form-section">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">1. Preview</span>
-                    <h2>Workbook package</h2>
+                    <span class="eyebrow">1. Inspect</span>
+                    <h2>Recovery package</h2>
                 </div>
             </div>
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PreviewPackageAsync" Disabled="@IsBusy">Preview package</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FolderOpen" OnClick="PreviewPackageAsync" Disabled="@IsBusy">Inspect recovery package</MudButton>
             @if (ImportPlan is not null)
             {
                 <span class="settings-status-line package-file-summary">@ImportPlan.FileName · schema @ImportPlan.SchemaVersion · @ImportPlan.OperationCount operation(s) · created @FormatTimestamp(ImportPlan.PackageCreatedAt)</span>
@@ -48,23 +48,23 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">2. Restore</span>
-                    <h2>Workbook recovery key</h2>
+                    <span class="eyebrow">2. Verify</span>
+                    <h2>Recovery code</h2>
                 </div>
             </div>
             <MudTextField @bind-Value="RecoveryCode" InputType="InputType.Password" Label="Recovery code" Disabled="@(IsBusy || ImportPlan is null)" />
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RestoreKeyAsync" Disabled="@(IsBusy || ImportPlan is null || string.IsNullOrWhiteSpace(RecoveryCode))">Restore key</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RestoreKeyAsync" Disabled="@(IsBusy || ImportPlan is null || string.IsNullOrWhiteSpace(RecoveryCode))">Verify recovery code</MudButton>
         </section>
 
         <section class="form-section">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">3. Apply or back up</span>
-                    <h2>Encrypted package</h2>
+                    <span class="eyebrow">3. Recover or export</span>
+                    <h2>Encrypted support package</h2>
                 </div>
             </div>
-            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ImportPackageAsync" Disabled="@(!CanImport)">Import package</MudButton>
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.IosShare" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export package</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ImportPackageAsync" Disabled="@(!CanImport)">Recover from package</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.IosShare" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export support package</MudButton>
         </section>
 
         @if (ImportExchangePlan?.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
@@ -97,7 +97,7 @@ else
             <section class="state-banner package-exchange-feedback @(string.IsNullOrWhiteSpace(Error) ? null : "state-banner-error")" role="@(string.IsNullOrWhiteSpace(Error) ? "status" : "alert")" aria-live="polite">
                 <MudIcon Icon="@(string.IsNullOrWhiteSpace(Error) ? Icons.Material.Filled.CheckCircle : Icons.Material.Filled.ErrorOutline)" />
                 <div>
-                    <strong>@(string.IsNullOrWhiteSpace(Error) ? "Exchange ready" : "Exchange needs attention")</strong>
+                    <strong>@(string.IsNullOrWhiteSpace(Error) ? "Recovery ready" : "Recovery needs attention")</strong>
                     <span>@(Error ?? Message)</span>
                 </div>
             </section>

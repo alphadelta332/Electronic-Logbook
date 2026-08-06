@@ -119,6 +119,53 @@ public static class PortableLogbookWorkbookPackageStorage
             schemaVersion);
     }
 
+    public static PortableHostedWorkbookMetadata? ReadHostedWorkbookMetadata(string workbookPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        using var packageStream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(packageStream, ZipArchiveMode.Read, leaveOpen: false);
+        var accountId = ReadDefinedNameCellValue(archive, PortableLogbookWorkbookMetadata.HostedAccountIdName);
+        var credentialTargetName = ReadDefinedNameCellValue(archive, PortableLogbookWorkbookMetadata.HostedCredentialTargetName);
+        var lastRevisionText = ReadDefinedNameCellValue(archive, PortableLogbookWorkbookMetadata.HostedLastAcknowledgedRevisionName);
+        var status = ReadDefinedNameCellValue(archive, PortableLogbookWorkbookMetadata.HostedSyncStatusName);
+        var statusAtText = ReadDefinedNameCellValue(archive, PortableLogbookWorkbookMetadata.HostedSyncStatusAtName);
+        var attention = ReadDefinedNameCellValue(archive, PortableLogbookWorkbookMetadata.HostedSyncAttentionName);
+        if (string.IsNullOrWhiteSpace(accountId) ||
+            string.IsNullOrWhiteSpace(credentialTargetName) ||
+            !long.TryParse(
+                string.IsNullOrWhiteSpace(lastRevisionText) ? "0" : lastRevisionText,
+                System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var lastAcknowledgedHostedRevision))
+        {
+            return null;
+        }
+
+        DateTimeOffset? statusAt = null;
+        if (!string.IsNullOrWhiteSpace(statusAtText) &&
+            DateTimeOffset.TryParse(
+                statusAtText,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var parsedStatusAt))
+        {
+            statusAt = parsedStatusAt;
+        }
+
+        return new PortableHostedWorkbookMetadata(
+            new HostedAccountId(accountId),
+            credentialTargetName,
+            lastAcknowledgedHostedRevision,
+            string.IsNullOrWhiteSpace(status) ? null : status,
+            statusAt,
+            string.IsNullOrWhiteSpace(attention) ? null : attention);
+    }
+
     public static PortableLogbookCurrencyOverrideDates ReadCurrencyOverrideDates(string workbookPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
@@ -1110,6 +1157,119 @@ public static class PortableLogbookWorkbookPackageStorage
             schemaVersion,
             namesAdded,
             cellsWritten);
+    }
+
+    public static PortableHostedWorkbookMetadataPackageResult EnsureHostedWorkbookMetadata(
+        string workbookPath,
+        HostedAccountId accountId,
+        string credentialTargetName,
+        long lastAcknowledgedHostedRevision,
+        string status,
+        DateTimeOffset statusAt,
+        string? attentionRequiredReason = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(accountId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(credentialTargetName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(status);
+
+        var values = new (string Name, string Value)[]
+        {
+            (PortableLogbookWorkbookMetadata.HostedAccountIdName, accountId.Value),
+            (PortableLogbookWorkbookMetadata.HostedCredentialTargetName, credentialTargetName),
+            (PortableLogbookWorkbookMetadata.HostedLastAcknowledgedRevisionName, lastAcknowledgedHostedRevision.ToString(System.Globalization.CultureInfo.InvariantCulture)),
+            (PortableLogbookWorkbookMetadata.HostedSyncStatusName, status),
+            (PortableLogbookWorkbookMetadata.HostedSyncStatusAtName, statusAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)),
+            (PortableLogbookWorkbookMetadata.HostedSyncAttentionName, attentionRequiredReason ?? string.Empty)
+        };
+        var result = WriteMetadataValues(workbookPath, values);
+        return new PortableHostedWorkbookMetadataPackageResult(
+            accountId,
+            credentialTargetName,
+            lastAcknowledgedHostedRevision,
+            status,
+            statusAt,
+            attentionRequiredReason,
+            result.NamesAdded,
+            result.CellsWritten);
+    }
+
+    private static WorkbookMetadataWriteResult WriteMetadataValues(
+        string workbookPath,
+        IReadOnlyList<(string Name, string Value)> values)
+    {
+        using var archive = ZipFile.Open(workbookPath, ZipArchiveMode.Update);
+        var workbook = ReadXmlEntry(archive, "xl/workbook.xml")
+            ?? throw new InvalidDataException("Workbook package does not contain xl/workbook.xml.");
+        var workbookRelationships = ReadXmlEntry(archive, "xl/_rels/workbook.xml.rels")
+            ?? throw new InvalidDataException("Workbook package does not contain workbook relationships.");
+        var root = workbook.Root
+            ?? throw new InvalidDataException("Workbook XML is invalid.");
+        var definedNames = root.Element(SpreadsheetNamespace + "definedNames");
+        if (definedNames is null)
+        {
+            definedNames = new XElement(SpreadsheetNamespace + "definedNames");
+            var sheets = root.Element(SpreadsheetNamespace + "sheets");
+            if (sheets is not null)
+            {
+                sheets.AddAfterSelf(definedNames);
+            }
+            else
+            {
+                root.Add(definedNames);
+            }
+        }
+
+        var metadataSheet = FindWorkbookMetadataSheet(root, workbookRelationships, definedNames)
+            ?? throw new InvalidDataException("Workbook package does not contain a metadata sheet for portable identity values.");
+        var metadataWorksheet = ReadXmlEntry(archive, metadataSheet.WorksheetEntryName)
+            ?? throw new InvalidDataException("Workbook metadata worksheet part is invalid.");
+        var nextMetadataRow = FindNextMetadataRow(workbook, metadataWorksheet, metadataSheet.SheetName);
+        var namesAdded = new List<string>();
+        var cellsWritten = new List<string>();
+
+        foreach (var (name, value) in values)
+        {
+            var definedName = FindDefinedName(definedNames, name);
+            string cellReference;
+            var parsedCellReference = string.Empty;
+            var existingReferenceIsUsable = false;
+            if (definedName is not null &&
+                TryParseSingleCellReference(definedName.Value, out var definedSheetName, out parsedCellReference) &&
+                string.Equals(definedSheetName, metadataSheet.SheetName, StringComparison.OrdinalIgnoreCase))
+            {
+                existingReferenceIsUsable = true;
+            }
+
+            if (definedName is null || !existingReferenceIsUsable)
+            {
+                definedName ??= new XElement(
+                    SpreadsheetNamespace + "definedName",
+                    new XAttribute("name", name));
+                if (definedName.Parent is null)
+                {
+                    definedNames.Add(definedName);
+                    namesAdded.Add(name);
+                }
+
+                cellReference = $"{metadataSheet.MetadataColumnName}{nextMetadataRow}";
+                nextMetadataRow++;
+                definedName.Value = CreateSingleCellReference(metadataSheet.SheetName, cellReference);
+            }
+            else
+            {
+                cellReference = parsedCellReference;
+            }
+
+            definedName.SetAttributeValue("hidden", "1");
+            UpsertInlineStringCell(metadataWorksheet, cellReference, value);
+            cellsWritten.Add(cellReference);
+        }
+
+        WriteXmlEntry(archive, "xl/workbook.xml", workbook);
+        WriteXmlEntry(archive, metadataSheet.WorksheetEntryName, metadataWorksheet);
+
+        return new WorkbookMetadataWriteResult(namesAdded, cellsWritten);
     }
 
     private static XDocument CreateEnvelopeXml(PortableLogbookWorkbookStorageEnvelope envelope)
@@ -2241,3 +2401,28 @@ public sealed record PortableLogbookWorkbookIdentity(
     LogbookId LogbookId,
     DeviceId DeviceId,
     int SchemaVersion);
+
+public sealed record PortableHostedWorkbookMetadata(
+    HostedAccountId AccountId,
+    string CredentialTargetName,
+    long LastAcknowledgedHostedRevision,
+    string? Status,
+    DateTimeOffset? StatusAt,
+    string? AttentionRequiredReason);
+
+public sealed record PortableHostedWorkbookMetadataPackageResult(
+    HostedAccountId AccountId,
+    string CredentialTargetName,
+    long LastAcknowledgedHostedRevision,
+    string Status,
+    DateTimeOffset StatusAt,
+    string? AttentionRequiredReason,
+    IReadOnlyList<string> NamesAdded,
+    IReadOnlyList<string> CellsWritten)
+{
+    public bool WorkbookMutated => NamesAdded.Count > 0 || CellsWritten.Count > 0;
+}
+
+internal sealed record WorkbookMetadataWriteResult(
+    IReadOnlyList<string> NamesAdded,
+    IReadOnlyList<string> CellsWritten);

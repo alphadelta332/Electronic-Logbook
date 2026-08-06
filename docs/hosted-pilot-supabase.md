@@ -73,6 +73,18 @@ Configure Auth in the Supabase dashboard for each project:
 Invitations are created administratively. The app and workbook must not contain a shared
 service credential capable of creating users.
 
+After a Supabase Auth invitation is accepted, the client should call
+`public.accept_hosted_invitation(...)` with the local device type and platform label. The
+function activates an invited account, registers the device, and records a redacted
+security event. It rejects disabled accounts and authenticated users without a matching
+invited account row, which keeps accidental public self-registration outside the hosted
+ledger even if an Auth user exists.
+
+Portable client implementations should expose these local auth outcomes without relying
+on live Supabase tests: invitation required, public registration blocked, expired or
+invalid verification, refresh-token revocation, account disabled, device revoked, and
+signed out.
+
 ## Schema Boundary
 
 The hosted database stores synchronization metadata and ciphertext only. The
@@ -86,6 +98,8 @@ Operation writes should go through `public.append_hosted_operation(...)`. It:
 - requires active writer membership and an active device owned by the authenticated
   account;
 - assigns the next hosted revision inside a transaction;
+- rejects missing identifiers, unsupported operation formats, non-array parent metadata,
+  incomplete encrypted envelopes, oversized ciphertext, and plaintext-looking payloads;
 - accepts idempotent retries with the same operation id and payload metadata;
 - records and rejects replay attempts that reuse an operation id with different payload
   metadata.
@@ -93,7 +107,33 @@ Operation writes should go through `public.append_hosted_operation(...)`. It:
 Pulls should use `public.read_missing_operations(...)`, which clamps page size to 200
 rows and returns ordered revisions plus the current highest revision. Acknowledgements
 should use `public.record_operation_ack(...)`, which only moves the durable cursor
-forward for the authenticated account's own active device.
+forward for the authenticated account's own active device and rejects checkpoints beyond
+hosted history.
+
+Portable clients should preserve the same local behavior through
+`IHostedLogbookLedger`: payloads must already be encrypted, the payload hash must be the
+lowercase SHA-256 hex digest used for replay detection, retries are idempotent only when
+the encrypted payload metadata matches, pull pages are bounded to 200 operations, and
+acknowledgements are monotonic.
+
+## Health, Diagnostics, And Restore
+
+Use `public.get_hosted_pilot_health()` for pre-pilot and weekly private-pilot checks. It
+returns active account, device, operation, and estimated database-size counts plus
+conservative upgrade-trigger labels. Treat those triggers as a review point, not as
+current Supabase plan documentation; confirm the live plan limits in the Supabase
+dashboard before deciding whether to continue on Free or upgrade.
+
+Use `public.create_redacted_hosted_diagnostics(...)` for support bundles. It redacts
+project URLs, keys, account IDs, logbook IDs, and omits operation ciphertext. If the user
+explicitly requests a hosted data backup, create it separately rather than attaching it
+to diagnostics.
+
+Use `public.create_hosted_logical_export_manifest(...)` as the owner-only restore
+rehearsal entrypoint. The manifest records counts and the highest hosted revision for a
+logbook; the actual restore rehearsal should export the matching logical rows from a
+development or pilot project and import them into a separate Sydney project or disposable
+local database before inviting pilot users.
 
 ## Local Secrets
 

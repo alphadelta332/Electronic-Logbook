@@ -1853,7 +1853,7 @@ public partial class MainWindow : Window
             }
         }
 
-        return "Portable logbook: unavailable";
+        return "Workbook sync: unavailable";
     }
 
     private static string? TryReadPortableLogbookStatusText(string workbookPath)
@@ -1868,12 +1868,12 @@ public partial class MainWindow : Window
             var status = PortableLogbookCommandRunner.ReadStatus(workbookPath);
             if (!status.IsEnabled || status.Summary is null)
             {
-                return "Portable logbook: not enabled";
+                return "Workbook sync: not enabled";
             }
 
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Portable logbook: enabled ({0} current, {1} conflicts)",
+                "Workbook sync: enabled ({0} current, {1} conflict(s))",
                 status.Summary.CurrentRecordCount,
                 status.Summary.UnresolvedConflictCount);
         }
@@ -1883,7 +1883,7 @@ public partial class MainWindow : Window
         }
         catch (InvalidDataException)
         {
-            return "Portable logbook: storage unreadable";
+            return "Workbook sync: storage unreadable";
         }
         catch (UnauthorizedAccessException)
         {
@@ -1891,7 +1891,7 @@ public partial class MainWindow : Window
         }
         catch (System.Xml.XmlException)
         {
-            return "Portable logbook: storage unreadable";
+            return "Workbook sync: storage unreadable";
         }
     }
 

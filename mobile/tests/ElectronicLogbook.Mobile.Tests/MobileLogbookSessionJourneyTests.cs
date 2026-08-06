@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
@@ -7,6 +8,115 @@ namespace ElectronicLogbook.Mobile.Tests;
 
 public sealed class MobileLogbookSessionJourneyTests
 {
+    [Fact]
+    public async Task HostedInviteAcceptanceInitializesAppOnlyV2LogbookBeforeWorkbookImport()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-06T01:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock);
+
+        await session.EnsureLoadedWorkbookAsync();
+        var signIn = await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+
+        Assert.Equal("p***@example.com", signIn.DeliveryHint);
+        Assert.Null(session.PendingHostedSignIn);
+        Assert.Equal(PortableLogbookDocumentV2.CurrentSchemaVersion, session.DocumentV2.SchemaVersion);
+        Assert.StartsWith("log_", session.DocumentV2.LogbookId.Value, StringComparison.Ordinal);
+        Assert.Empty(session.DocumentV2.Operations);
+        Assert.NotNull(session.HostedSync);
+        Assert.Equal(new HostedAccountId("acct_private"), session.HostedSync.AccountId);
+        Assert.Equal(session.DocumentV2.LogbookId, session.HostedSync.LogbookId);
+        Assert.Equal(new DeviceId("dev_android"), session.HostedSync.DeviceId);
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync.LastStatus);
+        Assert.Equal(0, session.HostedSync.LastAcknowledgedHostedRevision);
+        Assert.Equal("Ready", session.PackageKeyStatus);
+        Assert.Equal("Account connected.", session.LastActionMessage);
+        Assert.Single(jsRuntime.ImportedPackageKeys);
+
+        var reloaded = CreateSession(jsRuntime, authenticator, clock);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(session.DocumentV2.LogbookId, reloaded.DocumentV2.LogbookId);
+        Assert.Equal(session.HostedSync, reloaded.HostedSync);
+        Assert.Equal("Ready", reloaded.PackageKeyStatus);
+    }
+
+    [Fact]
+    public async Task HostedInviteAcceptanceDoesNotReplaceExistingWorkbookPackageState()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-06T01:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock);
+
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await session.CompleteHostedInviteAcceptanceAsync("123456"));
+
+        Assert.Contains("before importing", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(session.HostedSync);
+        Assert.Single(session.DocumentV2.Operations);
+    }
+
+    [Fact]
+    public async Task HostedSessionAutomaticallySyncsAfterLocalEditAndAfterNetworkRestored()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-06T01:00:00Z"));
+        var ledger = new InMemoryHostedLogbookLedger();
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(session.WorkbookDraft);
+
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Equal("Flight added.", session.LastActionMessage);
+        Assert.NotNull(session.HostedSync);
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync.LastStatus);
+        Assert.Equal(1, session.HostedSync.LastAcknowledgedHostedRevision);
+        var hostedAfterFirstSave = await ledger.ReadMissingOperationsAsync(session.DocumentV2.LogbookId, 0, 10);
+        Assert.Single(hostedAfterFirstSave.Operations);
+        Assert.DoesNotContain("\"entry\"", hostedAfterFirstSave.Operations[0].PayloadCiphertext, StringComparison.OrdinalIgnoreCase);
+
+        network.Availability = new NetworkAvailability(IsOnline: false);
+        FillWorkbookDraft(session.WorkbookDraft);
+        session.WorkbookDraft.Reg = "VH-OFF";
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Equal(2, session.DocumentV2.Operations.Count);
+        Assert.Equal(PortableHostedSyncStatus.Offline, session.HostedSync.LastStatus);
+        Assert.Equal(1, session.HostedSync.PendingLocalOperationCount);
+        Assert.Single((await ledger.ReadMissingOperationsAsync(session.DocumentV2.LogbookId, 0, 10)).Operations);
+
+        network.Availability = new NetworkAvailability(IsOnline: true);
+        var restored = await session.SyncHostedAfterNetworkRestoredAsync();
+
+        Assert.NotNull(restored);
+        Assert.Equal(PortableHostedSyncStatus.Synced, restored.Status);
+        Assert.Equal(2, session.HostedSync.LastAcknowledgedHostedRevision);
+        Assert.Equal(2, (await ledger.ReadMissingOperationsAsync(session.DocumentV2.LogbookId, 0, 10)).Operations.Count);
+    }
+
     [Fact]
     public async Task WorkbookFaithfulJourneySavesCanonicalV2EntryAndReloadsFromBrowserStorage()
     {
@@ -276,8 +386,19 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal("VH-LOCAL", Assert.Single(reloaded.CurrentEntries).Entry?.Registration);
     }
 
-    private static MobileLogbookSession CreateSession(JourneyJsRuntime jsRuntime) =>
-        new(new BrowserLogbookStore(jsRuntime), new BrowserPackageKeyStore(jsRuntime));
+    private static MobileLogbookSession CreateSession(
+        JourneyJsRuntime jsRuntime,
+        IHostedLogbookAuthenticator? hostedAuthenticator = null,
+        ISyncClock? syncClock = null,
+        IHostedLogbookLedger? hostedLedger = null,
+        INetworkStatus? networkStatus = null) =>
+        new(
+            new BrowserLogbookStore(jsRuntime),
+            new BrowserPackageKeyStore(jsRuntime),
+            hostedAuthenticator: hostedAuthenticator,
+            hostedLedger: hostedLedger,
+            networkStatus: networkStatus,
+            syncClock: syncClock);
 
     private static void FillDraft(EntryDraft draft, string registration, decimal hours)
     {
@@ -362,6 +483,10 @@ public sealed class MobileLogbookSessionJourneyTests
 
         public int SaveCount { get; private set; }
 
+        public List<string> ImportedPackageKeys { get; } = [];
+
+        private Dictionary<string, byte[]> PackageKeys { get; } = [];
+
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
         {
             return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
@@ -378,7 +503,10 @@ public sealed class MobileLogbookSessionJourneyTests
                 "electronicLogbookStore.load" => new ValueTask<TValue>((TValue)(object?)StoredJson!),
                 "electronicLogbookStore.save" => Save<TValue>(args),
                 "electronicLogbookKeys.isSupported" => new ValueTask<TValue>((TValue)(object)true),
-                "electronicLogbookKeys.hasPackageKey" => new ValueTask<TValue>((TValue)(object)true),
+                "electronicLogbookKeys.hasPackageKey" => new ValueTask<TValue>((TValue)(object)HasPackageKey(args)),
+                "electronicLogbookKeys.importPackageKey" => ImportPackageKey<TValue>(args),
+                "electronicLogbookKeys.encrypt" => Encrypt<TValue>(args),
+                "electronicLogbookKeys.decrypt" => Decrypt<TValue>(args),
                 _ => throw new JSException($"Unexpected JS call: {identifier}")
             };
         }
@@ -391,6 +519,50 @@ public sealed class MobileLogbookSessionJourneyTests
             SaveCount++;
             JsonSerializer.Deserialize<BrowserLogbookStoredDocument>(StoredJson, PortableLogbookJson.SerializerOptions);
             return new ValueTask<TValue>(default(TValue)!);
+        }
+
+        private bool HasPackageKey(object?[]? args)
+        {
+            Assert.NotNull(args);
+            var keyName = Assert.IsType<string>(args[0]);
+            return PackageKeys.Count == 0 || PackageKeys.ContainsKey(keyName);
+        }
+
+        private ValueTask<TValue> ImportPackageKey<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            var keyName = Assert.IsType<string>(args[0]);
+            PackageKeys[keyName] = Assert.IsType<byte[]>(args[1]).ToArray();
+            ImportedPackageKeys.Add(keyName);
+            return new ValueTask<TValue>((TValue)(object)true);
+        }
+
+        private ValueTask<TValue> Encrypt<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            var key = PackageKeys[Assert.IsType<string>(args[0])];
+            var nonce = Assert.IsType<byte[]>(args[1]);
+            var plaintext = Assert.IsType<byte[]>(args[2]);
+            var additionalData = Assert.IsType<byte[]>(args[3]);
+            var ciphertext = new byte[plaintext.Length];
+            var tag = new byte[16];
+            using var aes = new AesGcm(key, tag.Length);
+            aes.Encrypt(nonce, plaintext, ciphertext, tag, additionalData);
+            return new ValueTask<TValue>((TValue)(object)new BrowserPackageCiphertext(ciphertext, tag));
+        }
+
+        private ValueTask<TValue> Decrypt<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            var key = PackageKeys[Assert.IsType<string>(args[0])];
+            var nonce = Assert.IsType<byte[]>(args[1]);
+            var ciphertext = Assert.IsType<byte[]>(args[2]);
+            var tag = Assert.IsType<byte[]>(args[3]);
+            var additionalData = Assert.IsType<byte[]>(args[4]);
+            var plaintext = new byte[ciphertext.Length];
+            using var aes = new AesGcm(key, tag.Length);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext, additionalData);
+            return new ValueTask<TValue>((TValue)(object)plaintext);
         }
     }
 }

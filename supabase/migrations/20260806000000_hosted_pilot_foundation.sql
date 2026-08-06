@@ -542,6 +542,44 @@ begin
         raise exception 'unsupported operation format version';
     end if;
 
+    if length(trim(p_portable_revision_id)) = 0
+       or p_entry_id is not null and length(trim(p_entry_id)) = 0
+       or length(trim(p_operation_type)) = 0 then
+        raise exception 'operation identifiers are required';
+    end if;
+
+    if p_base_revision is not null and p_base_revision < 0 then
+        raise exception 'base revision cannot be negative';
+    end if;
+
+    if jsonb_typeof(coalesce(p_parent_revision_ids, '[]'::jsonb)) <> 'array' then
+        raise exception 'parent revision ids must be an array';
+    end if;
+
+    if length(p_payload_ciphertext) > 262144 then
+        raise exception 'encrypted payload exceeds private pilot size limit';
+    end if;
+
+    if length(p_payload_ciphertext) < 16
+       or length(p_payload_nonce) < 12
+       or length(p_payload_tag) < 16
+       or p_payload_hash !~ '^[0-9a-f]{64}$' then
+        raise exception 'encrypted payload envelope is incomplete';
+    end if;
+
+    if position('"kind"' in lower(p_payload_ciphertext)) > 0
+       or position('"entry"' in lower(p_payload_ciphertext)) > 0
+       or position('"aircraft"' in lower(p_payload_ciphertext)) > 0
+       or position('"route"' in lower(p_payload_ciphertext)) > 0
+       or position('flight' in lower(p_payload_ciphertext)) > 0
+       or position('remarks' in lower(p_payload_ciphertext)) > 0 then
+        raise exception 'plaintext operation payloads are not allowed';
+    end if;
+
+    if jsonb_typeof(coalesce(p_redacted_routing_hints, '{}'::jsonb)) <> 'object' then
+        raise exception 'routing hints must be a redacted object';
+    end if;
+
     select *
     into existing
     from public.operations
@@ -770,6 +808,224 @@ begin
 end;
 $$;
 
+create or replace function public.get_hosted_pilot_health()
+returns table (
+    active_account_count bigint,
+    active_device_count bigint,
+    stored_operation_count bigint,
+    estimated_database_bytes bigint,
+    database_size_status text,
+    paid_plan_upgrade_triggers jsonb
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    with measured as (
+        select
+            (select count(*) from public.accounts where status = 'active') as active_account_count,
+            (select count(*) from public.devices where status = 'active') as active_device_count,
+            (select count(*) from public.operations) as stored_operation_count,
+            (
+                pg_total_relation_size('public.accounts'::regclass)
+                + pg_total_relation_size('public.logbooks'::regclass)
+                + pg_total_relation_size('public.logbook_memberships'::regclass)
+                + pg_total_relation_size('public.devices'::regclass)
+                + pg_total_relation_size('public.operations'::regclass)
+                + pg_total_relation_size('public.operation_acks'::regclass)
+                + pg_total_relation_size('public.security_events'::regclass)
+            ) as estimated_database_bytes
+    )
+    select
+        active_account_count,
+        active_device_count,
+        stored_operation_count,
+        estimated_database_bytes,
+        case
+            when estimated_database_bytes >= 450000000 then 'upgrade_required'
+            when estimated_database_bytes >= 400000000 then 'near_limit'
+            else 'ok'
+        end as database_size_status,
+        to_jsonb(array_remove(array[
+            case when estimated_database_bytes >= 450000000 then 'database storage reached private-pilot upgrade trigger' end,
+            case when active_account_count >= 45 then 'active pilot accounts nearing configured free-tier ceiling' end,
+            case when stored_operation_count >= 50000 then 'operation count requires restore rehearsal and paid-plan review' end
+        ], null)) as paid_plan_upgrade_triggers
+    from measured;
+$$;
+
+create or replace function public.create_redacted_hosted_diagnostics(
+    p_logbook_id uuid default null
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    with health as (
+        select *
+        from public.get_hosted_pilot_health()
+    ),
+    events as (
+        select coalesce(jsonb_agg(jsonb_build_object(
+            'created_at', e.created_at,
+            'event_type', e.event_type,
+            'severity', e.severity,
+            'details', e.redacted_details
+        ) order by e.created_at desc), '[]'::jsonb) as rows
+        from public.security_events e
+        where (p_logbook_id is null or e.logbook_id = p_logbook_id)
+          and (
+              e.account_id = auth.uid()
+              or e.logbook_id is null
+              or public.elb_has_logbook_role(e.logbook_id, 'owner')
+          )
+        limit 100
+    )
+    select jsonb_build_object(
+        'created_at', now(),
+        'supabase_url', '[redacted]',
+        'anon_key', '[redacted]',
+        'account_id', case when auth.uid() is null then '[anonymous]' else '[redacted]' end,
+        'logbook_id', case when p_logbook_id is null then '[none]' else '[redacted]' end,
+        'contains_ciphertext_payloads', false,
+        'health', to_jsonb(health),
+        'security_events', events.rows
+    )
+    from health, events;
+$$;
+
+create or replace function public.create_hosted_logical_export_manifest(
+    p_logbook_id uuid
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select jsonb_build_object(
+        'logbook_id', p_logbook_id,
+        'exported_at', now(),
+        'contains_ciphertext_payloads', true,
+        'account_count', (
+            select count(*)
+            from public.logbook_memberships m
+            where m.logbook_id = p_logbook_id
+              and m.revoked_at is null
+        ),
+        'device_count', (
+            select count(*)
+            from public.devices d
+            join public.logbook_memberships m on m.account_id = d.account_id
+            where m.logbook_id = p_logbook_id
+              and m.revoked_at is null
+        ),
+        'operation_count', (
+            select count(*)
+            from public.operations o
+            where o.logbook_id = p_logbook_id
+        ),
+        'highest_revision', (
+            select coalesce(max(o.revision), 0)
+            from public.operations o
+            where o.logbook_id = p_logbook_id
+        ),
+        'restore_target', 'separate Sydney Supabase project or disposable local database'
+    )
+    where public.elb_has_logbook_role(p_logbook_id, 'owner');
+$$;
+
+create or replace function public.accept_hosted_invitation(
+    p_display_name text,
+    p_device_type public.elb_device_type,
+    p_platform_label text,
+    p_public_signing_key text default null,
+    p_signing_key_fingerprint text default null
+)
+returns public.devices
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    account public.accounts%rowtype;
+    saved_device public.devices%rowtype;
+begin
+    if auth.uid() is null then
+        raise exception 'authentication required';
+    end if;
+
+    select *
+    into account
+    from public.accounts
+    where account_id = auth.uid();
+
+    if not found then
+        raise exception 'invitation required';
+    end if;
+
+    if account.status = 'disabled' then
+        raise exception 'account disabled';
+    end if;
+
+    if account.status not in ('invited', 'active') then
+        raise exception 'account cannot accept invitation';
+    end if;
+
+    if length(trim(p_platform_label)) = 0 then
+        raise exception 'platform label is required';
+    end if;
+
+    update public.accounts
+    set status = 'active',
+        display_name = coalesce(nullif(trim(p_display_name), ''), display_name)
+    where account_id = auth.uid()
+      and status = 'invited';
+
+    insert into public.devices (
+        account_id,
+        device_type,
+        platform_label,
+        public_signing_key,
+        signing_key_fingerprint,
+        last_seen_at,
+        status
+    )
+    values (
+        auth.uid(),
+        p_device_type,
+        trim(p_platform_label),
+        nullif(trim(p_public_signing_key), ''),
+        nullif(trim(p_signing_key_fingerprint), ''),
+        now(),
+        'active'
+    )
+    returning * into saved_device;
+
+    insert into public.security_events (
+        account_id,
+        device_id,
+        event_type,
+        severity,
+        actor_account_id,
+        redacted_details
+    )
+    values (
+        auth.uid(),
+        saved_device.device_id,
+        case when account.status = 'invited' then 'invitation_accepted' else 'device_registered' end,
+        'info',
+        auth.uid(),
+        jsonb_build_object('device_type', p_device_type, 'platform_label', trim(p_platform_label))
+    );
+
+    return saved_device;
+end;
+$$;
+
 revoke all on
     public.accounts,
     public.logbooks,
@@ -787,6 +1043,12 @@ revoke all on function public.append_hosted_operation(
 ) from anon, authenticated;
 revoke all on function public.read_missing_operations(uuid, bigint, integer) from anon, authenticated;
 revoke all on function public.record_operation_ack(uuid, uuid, bigint, bigint, bigint, text) from anon, authenticated;
+revoke all on function public.get_hosted_pilot_health() from anon, authenticated;
+revoke all on function public.create_redacted_hosted_diagnostics(uuid) from anon, authenticated;
+revoke all on function public.create_hosted_logical_export_manifest(uuid) from anon, authenticated;
+revoke all on function public.accept_hosted_invitation(
+    text, public.elb_device_type, text, text, text
+) from anon, authenticated;
 
 grant usage on schema public to authenticated;
 grant select, insert, update on public.accounts to authenticated;
@@ -803,5 +1065,11 @@ grant execute on function public.append_hosted_operation(
 ) to authenticated;
 grant execute on function public.read_missing_operations(uuid, bigint, integer) to authenticated;
 grant execute on function public.record_operation_ack(uuid, uuid, bigint, bigint, bigint, text) to authenticated;
+grant execute on function public.get_hosted_pilot_health() to authenticated;
+grant execute on function public.create_redacted_hosted_diagnostics(uuid) to authenticated;
+grant execute on function public.create_hosted_logical_export_manifest(uuid) to authenticated;
+grant execute on function public.accept_hosted_invitation(
+    text, public.elb_device_type, text, text, text
+) to authenticated;
 
 commit;

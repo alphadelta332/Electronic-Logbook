@@ -85,6 +85,39 @@ public sealed class VbaPortableLogbookCommandTests
     }
 
     [Fact]
+    public void ModLogbookExposesGuardedHostedWorkbookSyncBridge()
+    {
+        var source = ReadModLogbookSource();
+
+        Assert.Contains("Public Sub QueueHostedWorkbookSync", source, StringComparison.Ordinal);
+        Assert.Contains("Public Sub RunQueuedHostedWorkbookSync()", source, StringComparison.Ordinal);
+        Assert.Contains("Public Sub FlushHostedWorkbookSyncBeforeSave()", source, StringComparison.Ordinal);
+        Assert.Contains("Public Sub RefreshHostedWorkbookSyncStatus()", source, StringComparison.Ordinal);
+        Assert.Contains("mHostedWorkbookSyncBusy", source, StringComparison.Ordinal);
+        Assert.Contains("mHostedWorkbookSyncQueued", source, StringComparison.Ordinal);
+        Assert.Contains("Application.OnTime", source, StringComparison.Ordinal);
+        Assert.Contains("\"hosted-sync\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"hosted-status\"", source, StringComparison.Ordinal);
+        Assert.Contains("--json", source, StringComparison.Ordinal);
+        Assert.Contains("\"Synced\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"Waiting\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"Signing in\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"Needs attention\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThisWorkbookQueuesHostedSyncOnOpenSaveAndChange()
+    {
+        var source = ReadThisWorkbookSource();
+
+        Assert.Contains("RefreshHostedWorkbookSyncStatus", source, StringComparison.Ordinal);
+        Assert.Contains("QueueHostedWorkbookSync \"open\"", source, StringComparison.Ordinal);
+        Assert.Contains("Private Sub Workbook_BeforeSave", source, StringComparison.Ordinal);
+        Assert.Contains("FlushHostedWorkbookSyncBeforeSave", source, StringComparison.Ordinal);
+        Assert.Contains("QueueHostedWorkbookSync \"change\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StandardLogbookExportDoesNotExposePortableMetadataColumns()
     {
         var source = ReadModLogbookSource();
@@ -203,6 +236,23 @@ public sealed class VbaPortableLogbookCommandTests
         }
 
         throw new FileNotFoundException("Could not find modLogbook.bas from the test output directory.");
+    }
+
+    private static string ReadThisWorkbookSource()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            var candidate = Path.Combine(directory.FullName, "ThisWorkbook.cls");
+            if (File.Exists(candidate))
+            {
+                return File.ReadAllText(candidate);
+            }
+
+            directory = directory.Parent;
+        }
+
+        throw new FileNotFoundException("Could not find ThisWorkbook.cls from the test output directory.");
     }
 
     private static string ExtractVbaProcedureBody(string source, string procedureName, string terminator)

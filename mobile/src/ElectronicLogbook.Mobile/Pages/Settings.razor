@@ -3,7 +3,7 @@
 @inject MobileUiPreferenceState UiPreferences
 @inject BrowserFileStore FileStore
 
-<PageTitle>Settings</PageTitle>
+<PageTitle>Account and sync</PageTitle>
 
 @if (!Session.IsLoaded)
 {
@@ -18,17 +18,17 @@ else
         <header class="entry-header">
             <div>
                 <span class="eyebrow">Settings</span>
-                <h1>Device copy</h1>
+                <h1>Account and sync</h1>
             </div>
-            <span class="draft-pill">@Session.PackageKeyStatus</span>
+            <span class="draft-pill">@Session.HostedSyncStatusLabel</span>
         </header>
 
         <section class="notice-panel">
             <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
             <div>
-                <strong>Package exchange</strong>
-                <span>@Session.ExchangeStatus.BackupNotice</span>
-                <span>@Session.PackageKeyNotice</span>
+                <strong>Connection status</strong>
+                <span>@Session.HostedSyncStatusDetail</span>
+                <span>@AttentionGuidance</span>
             </div>
         </section>
 
@@ -77,19 +77,14 @@ else
                     <small>@(Session.IsStorageBlocked ? Session.StorageError : "Workbook-faithful data is available offline on this device.")</small>
                 </article>
                 <article class="device-health-item">
-                    <span>Recovery key</span>
+                    <span>Device encryption</span>
                     <strong>@Session.PackageKeyStatus</strong>
                     <small>@Session.PackageKeyNotice</small>
                 </article>
                 <article class="device-health-item">
-                    <span>Workbook backup</span>
+                    <span>Offline changes</span>
                     <strong>@BackupHealthLabel</strong>
                     <small>@BackupHealthDetail</small>
-                </article>
-                <article class="device-health-item">
-                    <span>Package history</span>
-                    <strong>@Session.ImportReceipts.Count import(s)</strong>
-                    <small>@ImportHealthDetail</small>
                 </article>
             </div>
         </section>
@@ -97,15 +92,86 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">Workbook data</span>
-                    <h2>Import, export, recovery</h2>
+                    <span class="eyebrow">Connection</span>
+                    <h2>Hosted sync</h2>
+                </div>
+                <span class="draft-pill">@Session.HostedSyncStatusLabel</span>
+            </div>
+            <div class="device-health-grid">
+                <article class="device-health-item">
+                    <span>Account</span>
+                    <strong>@(Session.HasHostedSync ? "Connected" : "Not connected")</strong>
+                    <small>@Session.HostedSyncStatusDetail</small>
+                </article>
+                <article class="device-health-item">
+                    <span>Workbook pairing</span>
+                    <strong>@Session.PackageKeyStatus</strong>
+                    <small>@PairingDetail</small>
+                </article>
+            </div>
+            @if (!Session.HasHostedSync)
+            {
+                <div class="field-grid">
+                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Disabled="@IsAccountBusy" />
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
+                        Send sign-in code
+                    </MudButton>
+                    <MudTextField @bind-Value="HostedVerificationCode" InputType="InputType.Text" Label="Verification code" Disabled="@(IsAccountBusy || Session.PendingHostedSignIn is null)" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Link" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || Session.PendingHostedSignIn is null || string.IsNullOrWhiteSpace(HostedVerificationCode))">
+                        Connect account
+                    </MudButton>
+                </div>
+            }
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncNowAsync" Disabled="@(!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)">
+                Sync now
+            </MudButton>
+            @if (!string.IsNullOrWhiteSpace(AccountMessage))
+            {
+                <span class="settings-status-line">@AccountMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(AccountError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@AccountError</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(SyncMessage))
+            {
+                <span class="settings-status-line">@SyncMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(SyncError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@SyncError</span>
+            }
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Advanced recovery</span>
+                    <h2>Support and account data</h2>
                 </div>
             </div>
-            <MudButton Href="/exchange" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.IosShare">
-                Open exchange workspace
+            <div class="device-health-grid">
+                <article class="device-health-item">
+                    <span>Manual Package Exchange</span>
+                    <strong>@Session.ImportReceipts.Count import(s)</strong>
+                    <small>@ImportHealthDetail</small>
+                </article>
+                <article class="device-health-item">
+                    <span>Account export</span>
+                    <strong>Local only</strong>
+                    <small>Exports stay on this device until you choose where to store or share them.</small>
+                </article>
+                <article class="device-health-item">
+                    <span>Account deletion</span>
+                    <strong>Support assisted</strong>
+                    <small>Use the support summary when requesting account deletion or revoked-device recovery.</small>
+                </article>
+            </div>
+            <MudButton Href="/exchange" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Construction">
+                Advanced recovery workspace
             </MudButton>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ExportDeviceStateAsync" Disabled="@(Session.IsStorageBlocked || IsDeviceStateExportBusy)">
-                Export device state
+                Export account backup
             </MudButton>
             @if (!string.IsNullOrWhiteSpace(DeviceStateExportMessage))
             {
@@ -142,10 +208,18 @@ else
 @code {
     private bool IsSupportSummaryBusy { get; set; }
     private bool IsDeviceStateExportBusy { get; set; }
+    private bool IsSyncBusy { get; set; }
+    private bool IsAccountBusy { get; set; }
+    private string HostedEmail { get; set; } = string.Empty;
+    private string HostedVerificationCode { get; set; } = string.Empty;
     private string? SupportSummaryMessage { get; set; }
     private string? SupportSummaryError { get; set; }
     private string? DeviceStateExportMessage { get; set; }
     private string? DeviceStateExportError { get; set; }
+    private string? SyncMessage { get; set; }
+    private string? SyncError { get; set; }
+    private string? AccountMessage { get; set; }
+    private string? AccountError { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -183,13 +257,103 @@ else
         ? $"{Session.ExchangeStatus.PendingOperationCount} operation(s) are ready to export."
         : Session.LastSuccessfulExportAt is DateTimeOffset exportedAt
             ? $"Last exported {FormatTimestamp(exportedAt)}."
-            : "Import an authoritative workbook package before relying on this device copy.";
+            : "Local edits are saved on this device first and will sync after account connection.";
 
     private string ImportHealthDetail => Session.ExchangeStatus.LastSuccessfulImportAt is DateTimeOffset importedAt
         ? $"Last imported {FormatTimestamp(importedAt)}."
-        : "No workbook package has been imported on this device yet.";
+        : "No manual workbook package has been imported on this device yet.";
+
+    private string PairingDetail => Session.HasHostedSync
+        ? "This device is paired to the hosted account; workbook pairing happens through the updater."
+        : "Connect an invited account before pairing a workbook.";
+
+    private string AttentionGuidance => Session.HostedSyncStatusLabel switch
+    {
+        "Needs attention" => "Resolve conflicts, reauthenticate, restore a lost key, or recover a revoked device from Advanced recovery/support.",
+        "Signing in" => "Finish sign-in with the verification code sent to the invited email.",
+        "Offline" => "You can keep working; queued edits sync when the network returns.",
+        _ => "Daily sync stays automatic. Package tools are only for Advanced recovery/support."
+    };
+
+    private async Task StartHostedSignInAsync()
+    {
+        if (IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))
+        {
+            return;
+        }
+
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            var signIn = await Session.StartHostedInviteAcceptanceAsync(HostedEmail);
+            AccountMessage = $"Code sent to {signIn.DeliveryHint}.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HostedSignInException or JSException)
+        {
+            AccountError = ex.Message;
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
+
+    private async Task CompleteHostedSignInAsync()
+    {
+        if (IsAccountBusy || Session.PendingHostedSignIn is null || string.IsNullOrWhiteSpace(HostedVerificationCode))
+        {
+            return;
+        }
+
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            await Session.CompleteHostedInviteAcceptanceAsync(HostedVerificationCode);
+            HostedVerificationCode = string.Empty;
+            AccountMessage = Session.LastActionMessage ?? "Account connected.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or HostedSignInException or JSException)
+        {
+            AccountError = ex.Message;
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
 
     private static string FormatTimestamp(DateTimeOffset value) => value.ToLocalTime().ToString("dd MMM yyyy, HH:mm");
+
+    private async Task SyncNowAsync()
+    {
+        if (!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)
+        {
+            return;
+        }
+
+        IsSyncBusy = true;
+        SyncMessage = null;
+        SyncError = null;
+        try
+        {
+            var result = await Session.SyncHostedNowAsync();
+            SyncMessage = result is null
+                ? "Hosted sync is not connected."
+                : $"{Session.HostedSyncStatusLabel}: {Session.HostedSyncStatusDetail}";
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException)
+        {
+            SyncError = ex.Message;
+        }
+        finally
+        {
+            IsSyncBusy = false;
+        }
+    }
 
     private async Task ExportSupportSummaryAsync()
     {
@@ -236,7 +400,8 @@ else
                     Session.DocumentV2,
                     Session.ImportReceipts,
                     Session.LastSuccessfulExportAt,
-                    Session.LastSuccessfulExport),
+                    Session.LastSuccessfulExport,
+                    Session.HostedSync),
                 FileStore,
                 DateTimeOffset.UtcNow);
             DeviceStateExportMessage = $"Exported {result.FileName}.";

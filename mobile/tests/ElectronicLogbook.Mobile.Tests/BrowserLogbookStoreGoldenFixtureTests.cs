@@ -126,6 +126,68 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
     }
 
     [Fact]
+    public async Task SaveAndLoadStateV2RoundTripsHostedSyncCheckpointAndPairing()
+    {
+        var document = CreateV2Document();
+        var hostedSync = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            document.LogbookId,
+            new DeviceId("dev_android"),
+            LastAcknowledgedHostedRevision: 42,
+            PortableHostedSyncStatus.Synced,
+            LastAttemptedAt: DateTimeOffset.Parse("2026-08-06T01:00:00Z"),
+            LastSyncedAt: DateTimeOffset.Parse("2026-08-06T01:00:00Z"));
+        var store = new BrowserLogbookStore(new MemoryJsRuntime());
+
+        await store.SaveStateAsync(new BrowserLogbookStateV2(
+            document,
+            ImportReceipts: [],
+            LastSuccessfulExportAt: null,
+            LastSuccessfulExport: null,
+            hostedSync));
+        var reloaded = await store.LoadStateV2Async();
+
+        Assert.NotNull(reloaded);
+        Assert.Equal(hostedSync, reloaded.HostedSync);
+    }
+
+    [Fact]
+    public async Task SaveDocumentV2PreservesExistingHostedSyncCheckpoint()
+    {
+        var document = CreateV2Document();
+        var hostedSync = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            document.LogbookId,
+            new DeviceId("dev_android"),
+            LastAcknowledgedHostedRevision: 42,
+            PortableHostedSyncStatus.Waiting,
+            LastAttemptedAt: DateTimeOffset.Parse("2026-08-06T01:00:00Z"),
+            AttentionRequiredReason: "More operations are queued.");
+        var jsRuntime = new MemoryJsRuntime();
+        var store = new BrowserLogbookStore(jsRuntime);
+        await store.SaveStateAsync(new BrowserLogbookStateV2(
+            document,
+            ImportReceipts: [],
+            LastSuccessfulExportAt: null,
+            LastSuccessfulExport: null,
+            hostedSync));
+
+        await store.SaveDocumentAsync(document with
+        {
+            Operations =
+            [
+                .. document.Operations,
+                CreateV2Operation(document.LogbookId, "ent_second", "rev_second", DateTimeOffset.Parse("2026-08-06T02:00:00Z"))
+            ]
+        });
+
+        var reloaded = await store.LoadStateV2Async();
+        Assert.NotNull(reloaded);
+        Assert.Equal(hostedSync, reloaded.HostedSync);
+        Assert.Equal(2, reloaded.Document.Operations.Count);
+    }
+
+    [Fact]
     public async Task V2WorkbookPackageMobileStatePackageWorkbookRoundTripPreservesEverySourceFact()
     {
         var sourceDocument = CreateV2Document();
@@ -772,6 +834,34 @@ public sealed class BrowserLogbookStoreGoldenFixtureTests
             [new CustomFieldDefinition(customFieldId, "Custom 1", 1)],
             new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 1), null, null),
             [operation]);
+    }
+
+    private static PortableLogbookOperationV2 CreateV2Operation(
+        LogbookId logbookId,
+        string entryId,
+        string revisionId,
+        DateTimeOffset createdAt)
+    {
+        var entry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 8,
+            Day = 6,
+            Type = "DA40",
+            Reg = "VH-SNC",
+            From = "YSBK",
+            To = "YSCN",
+            SeCommandDay = 1.0m,
+            LandingsDay = 1
+        };
+
+        return PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId(entryId),
+            new RevisionId(revisionId),
+            new DeviceId("dev_mobile"),
+            createdAt,
+            entry);
     }
 
     private static string Normalize(string value) =>

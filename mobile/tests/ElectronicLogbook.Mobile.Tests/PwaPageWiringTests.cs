@@ -14,21 +14,28 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void SettingsRoutesPackageExchangeThroughTheSchemaV2Workspace()
+    public void SettingsRoutesPackageExchangeThroughAdvancedRecoveryOnly()
     {
         var settings = ReadMobilePage("Settings.razor");
         var exchange = ReadMobilePage("PackageExchange.razor");
 
         Assert.Contains("Href=\"/exchange\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Advanced recovery", settings, StringComparison.Ordinal);
+        Assert.Contains("Advanced recovery workspace", settings, StringComparison.Ordinal);
+        Assert.Contains("Account export", settings, StringComparison.Ordinal);
+        Assert.Contains("Account deletion", settings, StringComparison.Ordinal);
         Assert.DoesNotContain("/legacy#exchange", settings, StringComparison.Ordinal);
         Assert.Contains("@page \"/exchange\"", exchange, StringComparison.Ordinal);
+        Assert.Contains("<PageTitle>Advanced recovery</PageTitle>", exchange, StringComparison.Ordinal);
+        Assert.Contains("<h1>Manual Package Exchange</h1>", exchange, StringComparison.Ordinal);
+        Assert.Contains("Use this only for recovery, account export, key loss, conflict support", exchange, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookDocumentV2", exchange, StringComparison.Ordinal);
         Assert.Contains("MobilePackageImportWorkflow.ReadV2Async", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ApplyWorkbookPackageAsync", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ExportWorkbookPackageAsync", exchange, StringComparison.Ordinal);
         Assert.Contains("package-exchange-feedback", exchange, StringComparison.Ordinal);
         Assert.Contains("Label=\"Recovery code\"", exchange, StringComparison.Ordinal);
-        Assert.Contains("Exchange needs attention", exchange, StringComparison.Ordinal);
+        Assert.Contains("Recovery needs attention", exchange, StringComparison.Ordinal);
         Assert.DoesNotContain("PortableLogbookDocument.CreateAustraliaFirst", exchange, StringComparison.Ordinal);
     }
 
@@ -208,7 +215,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Color=\"Color.Primary\" OnClick=\"SaveAsync\"", newFlight, StringComparison.Ordinal);
         Assert.Contains("@Session.SaveLabel", newFlight, StringComparison.Ordinal);
         Assert.Contains("Color=\"Color.Primary\" StartIcon=\"@Icons.Material.Filled.Edit\" OnClick=\"EditEntry\"", flightDetail, StringComparison.Ordinal);
-        Assert.Contains("Href=\"/exchange\" Variant=\"Variant.Filled\" Color=\"Color.Primary\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Href=\"/exchange\" Variant=\"Variant.Outlined\"", settings, StringComparison.Ordinal);
         Assert.Matches(
             @"(?s)\.mud-button-root\.mud-button-filled-primary:not\(:disabled\)\s*\{(?=[^}]*background-color:\s*var\(--app-primary\))(?=[^}]*color:\s*var\(--app-primary-text\))",
             css);
@@ -232,16 +239,42 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3SettingsExposesDeviceStateExportForDevelopmentRecovery()
+    public void Gate3SettingsExposesDeviceStateExportForAdvancedRecovery()
     {
         var settings = ReadMobilePage("Settings.razor");
 
-        Assert.Contains("Export device state", settings, StringComparison.Ordinal);
+        Assert.Contains("Export account backup", settings, StringComparison.Ordinal);
         Assert.Contains("ExportDeviceStateAsync", settings, StringComparison.Ordinal);
         Assert.Contains("MobileDeviceStateExportWorkflow.ExportAsync", settings, StringComparison.Ordinal);
         Assert.Contains("new BrowserLogbookStateV2", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.HostedSync", settings, StringComparison.Ordinal);
         Assert.Contains("DeviceStateExportMessage", settings, StringComparison.Ordinal);
         Assert.Contains("DeviceStateExportError", settings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsExposesHostedSyncStatusAndManualRefresh()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+
+        Assert.Contains("Connection status", settings, StringComparison.Ordinal);
+        Assert.Contains("Hosted sync", settings, StringComparison.Ordinal);
+        Assert.Contains("Invited email", settings, StringComparison.Ordinal);
+        Assert.Contains("Verification code", settings, StringComparison.Ordinal);
+        Assert.Contains("Send sign-in code", settings, StringComparison.Ordinal);
+        Assert.Contains("Connect account", settings, StringComparison.Ordinal);
+        Assert.Contains("StartHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("CompleteHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("@Session.HostedSyncStatusLabel", settings, StringComparison.Ordinal);
+        Assert.Contains("@Session.HostedSyncStatusDetail", settings, StringComparison.Ordinal);
+        Assert.Contains("Sync now", settings, StringComparison.Ordinal);
+        Assert.Contains("SyncHostedNowAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("reauthenticate", settings, StringComparison.Ordinal);
+        Assert.Contains("restore a lost key", settings, StringComparison.Ordinal);
+        Assert.Contains("revoked device", settings, StringComparison.Ordinal);
+        Assert.Contains("Needs attention", session, StringComparison.Ordinal);
+        Assert.Contains("PendingLocalOperationCount", session, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -255,8 +288,8 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("Device health", settings, StringComparison.Ordinal);
         Assert.Contains("Local storage", settings, StringComparison.Ordinal);
-        Assert.Contains("Workbook backup", settings, StringComparison.Ordinal);
-        Assert.Contains("Package history", settings, StringComparison.Ordinal);
+        Assert.Contains("Offline changes", settings, StringComparison.Ordinal);
+        Assert.Contains("Manual Package Exchange", settings, StringComparison.Ordinal);
         Assert.Contains("Session.ExchangeStatus.PendingOperationCount", settings, StringComparison.Ordinal);
         Assert.Contains("DocumentV2.Operations.Count", session, StringComparison.Ordinal);
         Assert.Contains("ApplyWorkbookPackageWithCustomFieldResolutionsAsync", session, StringComparison.Ordinal);

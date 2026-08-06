@@ -44,6 +44,7 @@ Private Sub Workbook_Open()
     ' Check Status of SuppressWarnings
     SetWorkbookOpenStatus "Refreshing warning controls"
     RefreshSuppressWarningsButton
+    RefreshHostedWorkbookSyncStatus
 
     ' Apply the selected New Entry layout and keep layout radio controls configured.
     SetWorkbookOpenStatus "Preparing New Entry layout"
@@ -62,6 +63,7 @@ Private Sub Workbook_Open()
     ' Always start interactive sessions on the primary entry field.
     SetWorkbookOpenStatus "Opening New Entry screen"
     NavigateToDefaultOpenView
+    QueueHostedWorkbookSync "open"
 
     FinishWorkbookOpenStatus "Ready"
     Exit Sub
@@ -75,6 +77,13 @@ Fail:
     FinishWorkbookOpenStatus "Open failed"
     On Error GoTo 0
     Err.Raise openErrNum, openErrSource, openErrDesc
+End Sub
+
+Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
+    On Error GoTo CleanExit
+    FlushHostedWorkbookSyncBeforeSave
+
+CleanExit:
 End Sub
 
 Private Sub BeginWorkbookOpenStatus()
@@ -186,6 +195,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     statsSheetChanged = (Sh.Name = "Stats")
     If Sh.Name = "New Entry" Then ClearNewEntryValidationHighlightsForTarget Target
     MarkRoutesDirtyForChangedRange Sh, Target
+    QueueHostedWorkbookSync "change"
 
     Set layoutCell = ThisWorkbook.Names("NewEntryLayout").RefersToRange
     If layoutCell Is Nothing Then

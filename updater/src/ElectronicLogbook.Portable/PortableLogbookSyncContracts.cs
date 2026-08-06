@@ -2,6 +2,9 @@ namespace ElectronicLogbook.Portable;
 
 public interface IHostedLogbookLedger
 {
+    public const int MaxOperationPageSize = 200;
+    public const int MaxPayloadCiphertextLength = 262_144;
+
     ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
         LogbookId logbookId,
         long afterHostedRevision,
@@ -21,12 +24,30 @@ public interface IHostedLogbookLedger
         CancellationToken cancellationToken = default);
 }
 
+public interface IHostedPilotHealthReporter
+{
+    ValueTask<HostedPilotHealthSnapshot> GetHealthAsync(CancellationToken cancellationToken = default);
+
+    ValueTask<HostedPilotDiagnosticsBundle> CreateRedactedDiagnosticsAsync(
+        HostedDiagnosticsRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<HostedPilotLogicalBackup> CreateLogicalBackupAsync(
+        HostedLogicalBackupRequest request,
+        CancellationToken cancellationToken = default);
+
+    ValueTask<HostedRestorePlan> ValidateRestoreAsync(
+        HostedPilotLogicalBackup backup,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IHostedLogbookAuthenticator
 {
     ValueTask<HostedSyncSession?> GetCurrentSessionAsync(CancellationToken cancellationToken = default);
 
     ValueTask<HostedSignInStart> StartEmailSignInAsync(
         string email,
+        bool shouldCreateUser = false,
         CancellationToken cancellationToken = default);
 
     ValueTask<HostedSyncSession> CompleteEmailSignInAsync(
@@ -84,6 +105,7 @@ public sealed record HostedOperationUpload(
     string PayloadCiphertext,
     string PayloadNonce,
     string PayloadTag,
+    string PayloadHash,
     IReadOnlyList<RevisionId> ParentRevisionIds);
 
 public sealed record HostedOperationEnvelope(
@@ -96,6 +118,7 @@ public sealed record HostedOperationEnvelope(
     string PayloadCiphertext,
     string PayloadNonce,
     string PayloadTag,
+    string PayloadHash,
     IReadOnlyList<RevisionId> ParentRevisionIds);
 
 public sealed record HostedOperationPage(
@@ -120,6 +143,114 @@ public sealed record HostedSignInStart(
 public sealed record HostedAccountId(string Value);
 
 public sealed record SyncSecretName(string Value);
+
+public enum HostedAccountStatus
+{
+    Invited,
+    Active,
+    Disabled
+}
+
+public enum HostedDeviceStatus
+{
+    Active,
+    Revoked,
+    Disabled
+}
+
+public enum HostedSignInFailureReason
+{
+    InvitationRequired,
+    VerificationExpired,
+    InvalidVerificationCode,
+    RefreshTokenRevoked,
+    AccountDisabled,
+    DeviceRevoked,
+    SignedOut,
+    PublicRegistrationBlocked
+}
+
+public sealed class HostedSignInException(
+    HostedSignInFailureReason reason,
+    string message)
+    : Exception(message)
+{
+    public HostedSignInFailureReason Reason { get; } = reason;
+}
+
+public enum HostedLedgerFailureReason
+{
+    InvalidIdentifier,
+    DeviceMismatch,
+    UnsupportedSchemaVersion,
+    PlaintextPayloadRejected,
+    PayloadTooLarge,
+    InvalidPayloadEnvelope,
+    OperationReplayRejected,
+    CheckpointOutsideHostedHistory
+}
+
+public sealed class HostedLedgerException(
+    HostedLedgerFailureReason reason,
+    string message)
+    : Exception(message)
+{
+    public HostedLedgerFailureReason Reason { get; } = reason;
+}
+
+public enum HostedPilotQuotaStatus
+{
+    Ok,
+    NearLimit,
+    UpgradeRequired
+}
+
+public sealed record HostedPilotHealthSnapshot(
+    HostedPilotQuotaStatus DatabaseSizeStatus,
+    HostedPilotQuotaStatus AuthUserStatus,
+    HostedPilotQuotaStatus StorageStatus,
+    int ActiveAccountCount,
+    int ActiveDeviceCount,
+    int StoredOperationCount,
+    long EstimatedDatabaseBytes,
+    DateTimeOffset CheckedAt,
+    IReadOnlyList<string> PaidPlanUpgradeTriggers);
+
+public sealed record HostedDiagnosticsRequest(
+    HostedAccountId? AccountId,
+    LogbookId? LogbookId,
+    bool IncludeCiphertextPayloads = false);
+
+public sealed record HostedPilotDiagnosticsBundle(
+    DateTimeOffset CreatedAt,
+    IReadOnlyDictionary<string, string> RedactedConfiguration,
+    IReadOnlyList<string> HealthWarnings,
+    IReadOnlyList<HostedRedactedSecurityEvent> SecurityEvents,
+    bool ContainsCiphertextPayloads);
+
+public sealed record HostedRedactedSecurityEvent(
+    DateTimeOffset CreatedAt,
+    string EventType,
+    string Severity,
+    IReadOnlyDictionary<string, string> RedactedDetails);
+
+public sealed record HostedLogicalBackupRequest(
+    LogbookId LogbookId,
+    bool IncludeCiphertextPayloads);
+
+public sealed record HostedPilotLogicalBackup(
+    LogbookId LogbookId,
+    DateTimeOffset ExportedAt,
+    int AccountCount,
+    int DeviceCount,
+    int OperationCount,
+    bool ContainsCiphertextPayloads);
+
+public sealed record HostedRestorePlan(
+    LogbookId LogbookId,
+    int OperationCount,
+    bool CanRestore,
+    IReadOnlyList<string> Warnings);
 
 public sealed record BackgroundSyncRequest(
     LogbookId LogbookId,
