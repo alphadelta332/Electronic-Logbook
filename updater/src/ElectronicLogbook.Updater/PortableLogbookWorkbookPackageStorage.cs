@@ -1025,8 +1025,6 @@ public static class PortableLogbookWorkbookPackageStorage
         int schemaVersion)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
-        ArgumentNullException.ThrowIfNull(logbookId);
-        ArgumentNullException.ThrowIfNull(deviceId);
 
         using var archive = ZipFile.Open(workbookPath, ZipArchiveMode.Update);
         var workbook = ReadXmlEntry(archive, "xl/workbook.xml")

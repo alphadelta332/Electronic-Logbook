@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace ElectronicLogbook.Mobile.Tests;
 
-public sealed class PathOnlyNavLinkTests : TestContext
+public sealed class PathOnlyNavLinkTests : BunitContext
 {
     [Fact]
     public void ExactPathMatchIgnoresQueryAndFragmentButNotChildRoutes()
@@ -13,7 +13,7 @@ public sealed class PathOnlyNavLinkTests : TestContext
         var navigation = Services.GetRequiredService<NavigationManager>();
         navigation.NavigateTo("/flights?view=totals#summary");
 
-        var component = RenderComponent<PathOnlyNavLink>(parameters => parameters
+        var component = Render<PathOnlyNavLink>(parameters => parameters
             .Add(link => link.Href, "/flights")
             .AddChildContent("Logbook"));
 

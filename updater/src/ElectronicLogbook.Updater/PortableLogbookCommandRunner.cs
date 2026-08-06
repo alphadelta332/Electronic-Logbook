@@ -557,8 +557,6 @@ public static class PortableLogbookCommandRunner
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
         ArgumentNullException.ThrowIfNull(keySource);
-        ArgumentNullException.ThrowIfNull(entryId);
-        ArgumentNullException.ThrowIfNull(selectedRevisionId);
 
         var key = ReadKey(keySource);
         var state = PortableLogbookWorkbookPackageStorage.OpenStateV2(workbookPath, key)

@@ -64,16 +64,51 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("ELECTRONIC_LOGBOOK_DEV_KEYSTORE", signingScript, StringComparison.Ordinal);
         Assert.Contains("ELECTRONIC_LOGBOOK_DEV_KEYSTORE", gradle, StringComparison.Ordinal);
         Assert.Contains("rootProject.file('../../version.txt')", gradle, StringComparison.Ordinal);
+        Assert.Contains("$packageName = \"com.alphadelta.electroniclogbook.dev\"", installScript, StringComparison.Ordinal);
+        Assert.Contains("Invoke-DataPreservingDebugInstall", installScript, StringComparison.Ordinal);
+        Assert.Contains("adb devices failed", installScript, StringComparison.Ordinal);
+        Assert.Contains("$ErrorActionPreference = \"Continue\"", installScript, StringComparison.Ordinal);
         Assert.Contains("\"install\", \"-r\"", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("android.intent.category.LAUNCHER", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("New-VerifiedIndexedDbSnapshot", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("app_webview/Default/IndexedDB", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("Assert-EquivalentIndexedDbSnapshots", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("source-backup-verified", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("\"uninstall\", $PackageName", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("this script will not uninstall an inaccessible", bridgeScript, StringComparison.Ordinal);
         Assert.True(
             bridgeScript.IndexOf("source-backup-verified", StringComparison.Ordinal) <
             bridgeScript.IndexOf("\"uninstall\", $PackageName", StringComparison.Ordinal));
         Assert.DoesNotContain("pm clear", bridgeScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AndroidUpgradePreservesProductionAndDebugApplicationIdentity()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var capacitorConfig = File.ReadAllText(Path.Combine(mobileRoot, "capacitor.config.json"));
+        var gradle = File.ReadAllText(Path.Combine(mobileRoot, "android", "app", "build.gradle"));
+        var acceptancePrepScript = File.ReadAllText(Path.Combine(mobileRoot, "scripts", "Test-MobileAcceptancePrep.ps1"));
+        var browserFileStoreTests = File.ReadAllText(Path.Combine(
+            mobileRoot,
+            "tests",
+            "ElectronicLogbook.Mobile.Tests",
+            "BrowserFileStoreTests.cs"));
+
+        Assert.Contains("\"appId\": \"com.alphadelta.electroniclogbook\"", capacitorConfig, StringComparison.Ordinal);
+        Assert.Contains("applicationId = \"com.alphadelta.electroniclogbook\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("applicationIdSuffix \".dev\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("applicationIdSuffix \".acceptance\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionCode = productVersionCode", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionName = productVersion", gradle, StringComparison.Ordinal);
+        Assert.Contains("Assert-Equal -Actual $metadata.applicationId -Expected \"com.alphadelta.electroniclogbook.dev\"", acceptancePrepScript, StringComparison.Ordinal);
+        Assert.Contains("/Android/data/com.alphadelta.electroniclogbook/files/exports/logbook.elogbook", browserFileStoreTests, StringComparison.Ordinal);
     }
 
     [Fact]

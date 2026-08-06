@@ -58,7 +58,7 @@ public sealed class MobileLogbookSession(
 
     public IReadOnlyList<CustomFieldDefinition> WorkbookCustomFields =>
         DocumentV2.CustomFieldDefinitions.Count > 0
-            ? DocumentV2.CustomFieldDefinitions.OrderBy(field => field.Order).ToArray()
+            ? DocumentV2.CustomFieldDefinitions.OrderBy(customField => customField.Order).ToArray()
             : CustomFields;
 
     public bool HasAttemptedSubmit { get; private set; }
@@ -521,7 +521,6 @@ public sealed class MobileLogbookSession(
 
     public async Task<bool> RestoreWorkbookPackageKeyAsync(LogbookId logbookId, string recoveryCode)
     {
-        ArgumentNullException.ThrowIfNull(logbookId);
         ArgumentException.ThrowIfNullOrWhiteSpace(recoveryCode);
 
         await packageKeyStore.ImportRecoveryCodeAsync(logbookId, recoveryCode);
@@ -531,7 +530,6 @@ public sealed class MobileLogbookSession(
 
     public async Task AdoptWorkbookLogbookAsync(LogbookId logbookId)
     {
-        ArgumentNullException.ThrowIfNull(logbookId);
         if (DocumentV2.LogbookId == logbookId)
         {
             return;

@@ -56,7 +56,21 @@ function Resolve-DeviceSerial {
         return $RequestedSerial
     }
 
-    $deviceLines = & $Adb "devices" 2>&1 | Where-Object { $_ -match "^([^\s]+)\s+device$" }
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $adbOutput = & $Adb "devices" 2>&1
+        $adbExitCode = $LASTEXITCODE
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
+    if ($adbExitCode -ne 0) {
+        throw "adb devices failed: $($adbOutput -join [Environment]::NewLine)"
+    }
+
+    $deviceLines = $adbOutput | Where-Object { $_ -match "^([^\s]+)\s+device$" }
     $serials = @($deviceLines | ForEach-Object {
         if ($_ -match "^([^\s]+)\s+device$") { $Matches[1] }
     })
