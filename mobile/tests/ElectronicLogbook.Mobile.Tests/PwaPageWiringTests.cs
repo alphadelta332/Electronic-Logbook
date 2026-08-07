@@ -94,18 +94,17 @@ public sealed class PwaPageWiringTests
     {
         var routes = ReadMobilePage("Routes.razor");
         var charts = ReadMobilePage("Charts.razor");
-        var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("@page \"/routes\"", routes, StringComparison.Ordinal);
         Assert.Contains("<h1 id=\"routes-heading\">Route map</h1>", routes, StringComparison.Ordinal);
-        Assert.Contains("Coming soon", routes, StringComparison.Ordinal);
-        Assert.Contains("Planned after the first release", routes, StringComparison.Ordinal);
+        Assert.Contains("<p>Coming soon!</p>", routes, StringComparison.Ordinal);
+        Assert.DoesNotContain("future-feature", routes, StringComparison.Ordinal);
+        Assert.DoesNotContain("Planned after the first release", routes, StringComparison.Ordinal);
         Assert.Contains("@page \"/charts\"", charts, StringComparison.Ordinal);
         Assert.Contains("<h1 id=\"charts-heading\">Charts</h1>", charts, StringComparison.Ordinal);
-        Assert.Contains("Coming soon", charts, StringComparison.Ordinal);
-        Assert.Contains("Planned after the first release", charts, StringComparison.Ordinal);
-        Assert.Contains(".future-feature-page", css, StringComparison.Ordinal);
-        Assert.Contains(".future-feature-hero", css, StringComparison.Ordinal);
+        Assert.Contains("<p>Coming soon!</p>", charts, StringComparison.Ordinal);
+        Assert.DoesNotContain("future-feature", charts, StringComparison.Ordinal);
+        Assert.DoesNotContain("Planned after the first release", charts, StringComparison.Ordinal);
     }
 
     [Fact]

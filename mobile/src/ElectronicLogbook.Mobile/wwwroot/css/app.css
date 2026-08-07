@@ -2086,54 +2086,6 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     min-height: 44px;
 }
 
-.future-feature-page {
-    display: grid;
-    gap: 18px;
-}
-
-.future-feature-hero {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 16px;
-    align-items: center;
-    border: 1px solid var(--app-border);
-    border-radius: 16px;
-    padding: 22px 18px;
-    background:
-        radial-gradient(circle at top left, color-mix(in srgb, var(--app-primary) 18%, transparent), transparent 55%),
-        var(--app-surface);
-}
-
-.future-feature-icon {
-    display: grid;
-    width: 58px;
-    height: 58px;
-    place-items: center;
-    border-radius: 16px;
-    background: color-mix(in srgb, var(--app-primary) 16%, var(--app-surface));
-    color: var(--app-primary);
-}
-
-.future-feature-icon .mud-icon-root {
-    font-size: 34px;
-}
-
-.future-feature-hero div {
-    display: grid;
-    gap: 5px;
-    min-width: 0;
-}
-
-.future-feature-hero strong {
-    font-size: 20px;
-}
-
-.future-feature-hero p {
-    margin: 0;
-    color: var(--app-text-muted);
-    line-height: 1.45;
-}
-
 .ui-state {
     display: grid;
     place-items: center;
