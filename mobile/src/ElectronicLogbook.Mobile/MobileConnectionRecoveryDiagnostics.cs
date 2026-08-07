@@ -121,11 +121,8 @@ public sealed class MobileConnectionRecoveryWorkflow(
     BrowserLogbookStore logbookStore,
     BrowserPackageKeyStore packageKeyStore,
     ISyncClock clock,
-    PortableLogbookIdFactory? idFactory = null,
     Func<MobileConnectionStage, Exception?>? faultInjector = null)
 {
-    private readonly PortableLogbookIdFactory idFactory = idFactory ?? PortableLogbookIdFactory.Default;
-
     public async Task<MobileConnectionDiagnosticReport> RunPreflightAsync(
         CancellationToken cancellationToken = default)
     {
@@ -309,14 +306,8 @@ public sealed class MobileConnectionRecoveryWorkflow(
         }
     }
 
-    private PortableLogbookSetupPlanV2 CreatePlan(HostedSyncSession session) =>
-        PortableLogbookSetup.CreateInitialSetupPlanV2(
-            [],
-            MobileLogbookSession.CustomFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
-            clock.UtcNow,
-            deviceId: session.DeviceId,
-            idFactory: idFactory);
+    private MobileAppOnlyLogbookPlan CreatePlan(HostedSyncSession session) =>
+        MobileAppOnlyLogbookPlan.Create(session.DeviceId);
 
     private sealed class DiagnosticRun
     {
@@ -437,6 +428,25 @@ public sealed record MobileConnectionRecoveryResult(
     MobileConnectionDiagnosticReport Diagnostics,
     PortableLogbookDocumentV2? Document,
     BrowserHostedSyncState? HostedSync);
+
+public sealed record MobileAppOnlyLogbookPlan(
+    LogbookId LogbookId,
+    DeviceId DeviceId,
+    PortableLogbookKey Key,
+    PortableLogbookDocumentV2 InitialDocument)
+{
+    public static MobileAppOnlyLogbookPlan Create(DeviceId deviceId)
+    {
+        var logbookId = LogbookId.New();
+        var key = PortableLogbookKey.Generate();
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        return new MobileAppOnlyLogbookPlan(logbookId, deviceId, key, document);
+    }
+}
 
 public static partial class MobileDiagnosticRedactor
 {

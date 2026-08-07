@@ -711,13 +711,7 @@ public sealed class MobileLogbookSession(
 
     private async Task CompleteHostedInviteSetupAsync(HostedSyncSession session)
     {
-        var plan = PortableLogbookSetup.CreateInitialSetupPlanV2(
-            existingRows: [],
-            customFieldDefinitions: CustomFields,
-            currencyOverrideDates: PortableLogbookCurrencyOverrideDates.Empty,
-            createdAt: syncClock.UtcNow,
-            deviceId: session.DeviceId,
-            idFactory: portableIdFactory);
+        var plan = MobileAppOnlyLogbookPlan.Create(session.DeviceId);
         await packageKeyStore.ImportRecoveryCodeAsync(plan.LogbookId, plan.Key.ToRecoveryCode());
 
         DocumentV2 = plan.InitialDocument;

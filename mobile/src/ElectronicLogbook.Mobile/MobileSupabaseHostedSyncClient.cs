@@ -73,7 +73,17 @@ public sealed class MobileSupabaseHostedSyncClient(
 
         if (credential.AccessTokenExpiresAt <= clock.UtcNow)
         {
-            throw new MobileHostedDiagnosticException("ACCESS_TOKEN_EXPIRED", "The retained access token is expired; refresh is required before recovery.");
+            try
+            {
+                await RefreshAsync(cancellationToken);
+            }
+            catch (HostedSignInException ex)
+            {
+                throw new MobileHostedDiagnosticException(
+                    "REFRESH_TOKEN_REJECTED",
+                    "The expired access token could not be refreshed from the retained session.",
+                    innerException: ex);
+            }
         }
 
         var options = await GetConfigAsync(cancellationToken);

@@ -151,11 +151,13 @@ public sealed class PwaStaticAssetTests
             "ElectronicLogbookNativeFilesPlugin.java");
 
         Assert.Contains("AndroidKeyStore", plugin, StringComparison.Ordinal);
-        Assert.Contains("electronic-logbook.package-key-wrapper", plugin, StringComparison.Ordinal);
+        Assert.Contains("electronic-logbook.package-key-wrapper.v2", plugin, StringComparison.Ordinal);
         Assert.Contains("KeyGenParameterSpec.Builder", plugin, StringComparison.Ordinal);
         Assert.Contains("KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT", plugin, StringComparison.Ordinal);
         Assert.Contains("setBlockModes(KeyProperties.BLOCK_MODE_GCM)", plugin, StringComparison.Ordinal);
         Assert.Contains("setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)", plugin, StringComparison.Ordinal);
+        Assert.Contains("setRandomizedEncryptionRequired(false)", plugin, StringComparison.Ordinal);
+        Assert.Contains("new SecureRandom().nextBytes(nonce)", plugin, StringComparison.Ordinal);
         Assert.Contains("getSharedPreferences(NativeKeyPreferences", plugin, StringComparison.Ordinal);
         Assert.Contains("cipher.updateAAD(keyName.getBytes(StandardCharsets.UTF_8))", plugin, StringComparison.Ordinal);
         Assert.Contains("Arrays.fill(packageKey, (byte) 0)", plugin, StringComparison.Ordinal);

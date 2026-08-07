@@ -57,7 +57,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
-    public async Task RecoveryPreflightRejectsExpiredAccessWithoutUsingRefreshCredential()
+    public async Task RecoveryPreflightUsesRetainedRefreshCredentialOnlyWhenAccessIsExpired()
     {
         var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "pilot", exp = 4_102_444_800L })) };
         var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
@@ -65,15 +65,15 @@ public sealed class MobileSupabaseHostedSyncClientTests
             new HostedAccountId("acct_10000000000000000000000000000001"),
             new DeviceId("dev_40000000000000000000000000000001"),
             CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 1L }),
-            "wrong-refresh-token",
+            "retained-refresh-token",
             DateTimeOffset.Parse("2020-01-01T00:00:00Z")));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
         var client = new MobileSupabaseHostedSyncClient(http, store, new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
 
-        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () => await client.ValidateAccessTokenAsync());
+        await client.ValidateAccessTokenAsync();
 
-        Assert.Equal("ACCESS_TOKEN_EXPIRED", error.ErrorCode);
-        Assert.Empty(handler.Requests);
+        Assert.Single(handler.Requests, request => request.Path == "/auth/v1/token");
+        Assert.Equal("retained-refresh-token", (await store.LoadAsync())?.RefreshToken);
     }
 
     [Fact]
@@ -484,6 +484,13 @@ public sealed class MobileSupabaseHostedSyncClientTests
                       "refresh_token": "refresh-token",
                       "expires_in": 3600,
                       "user": { "id": "10000000-0000-0000-0000-000000000001" }
+                    }
+                    """,
+                "/auth/v1/token" => $$"""
+                    {
+                      "access_token": "{{CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L })}}",
+                      "refresh_token": "retained-refresh-token",
+                      "expires_in": 3600
                     }
                     """,
                 "/auth/v1/user" => """{ "id": "10000000-0000-0000-0000-000000000001" }""",

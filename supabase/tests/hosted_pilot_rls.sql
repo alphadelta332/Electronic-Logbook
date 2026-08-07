@@ -659,6 +659,39 @@ select elb_rls_test.assert_true(
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
 
+insert into public.logbooks (logbook_id, owner_account_id, display_name)
+values (
+    '20000000-0000-0000-0000-000000000004',
+    '10000000-0000-0000-0000-000000000001',
+    'Owner bootstrap logbook'
+);
+
+insert into public.logbook_memberships (
+    logbook_id,
+    account_id,
+    role,
+    granted_by_account_id,
+    accepted_at
+)
+values (
+    '20000000-0000-0000-0000-000000000004',
+    '10000000-0000-0000-0000-000000000001',
+    'owner',
+    '10000000-0000-0000-0000-000000000001',
+    now()
+);
+
+select elb_rls_test.assert_true(
+    'owner can bootstrap membership for a newly created logbook',
+    (
+        select count(*) = 1
+        from public.logbook_memberships
+        where logbook_id = '20000000-0000-0000-0000-000000000004'
+          and account_id = '10000000-0000-0000-0000-000000000001'
+          and role = 'owner'
+    )
+);
+
 select elb_rls_test.assert_true(
     'owner can create logical export manifest for restore rehearsal',
     (

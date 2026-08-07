@@ -34,7 +34,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     private static final int AesGcmNonceSizeBytes = 12;
     private static final int AesGcmTagSizeBytes = 16;
     private static final String AndroidKeyStore = "AndroidKeyStore";
-    private static final String WrapperKeyAlias = "electronic-logbook.package-key-wrapper";
+    private static final String WrapperKeyAlias = "electronic-logbook.package-key-wrapper.v2";
     private static final String NativeKeyPreferences = "electronic_logbook_native_keys";
 
     @PluginMethod
@@ -287,7 +287,10 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
             .setKeySize(256)
-            .setRandomizedEncryptionRequired(true)
+            // Package keys are wrapped with a fresh SecureRandom nonce that is stored
+            // beside the ciphertext. Android Keystore must therefore permit that
+            // caller-supplied nonce for this dedicated wrapper key.
+            .setRandomizedEncryptionRequired(false)
             .build());
         return generator.generateKey();
     }
