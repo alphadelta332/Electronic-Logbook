@@ -62,11 +62,16 @@ Configure Auth in the Supabase dashboard for each project:
 
 - Disable public self-registration.
 - Enable email sign-in only for invited users.
-- Use OTP or magic-link email as the pilot sign-in method.
+- Use the shared **Magic Link or OTP** email template for pilot sign-in. Include a visible
+  `{{ .Token }}` when practical. The Android pilot client accepts either the six-digit
+  code or an unused default Supabase confirmation-link address pasted into the sign-in
+  field; the link must belong to the configured pilot project and is exchanged as a
+  token hash without opening its redirect target.
 - Keep OAuth, phone, anonymous, and public signup providers disabled unless a later gate
   explicitly adds them.
-- Client sign-in calls must pass `shouldCreateUser: false` so an unknown email address
-  cannot create a new account from the app.
+- Client sign-in calls must pass the SDK option `shouldCreateUser: false`, which maps to
+  the REST field `create_user: false`, so an unknown email address cannot create a new
+  account from the app.
 - Unknown email, disabled account, and revoked-device paths must use generic user-facing
   language that does not reveal whether an address belongs to the pilot.
 
@@ -149,6 +154,53 @@ ELB_SUPABASE_PILOT_ANON_KEY
 
 Service-role keys are for administrative scripts only and must never be bundled into the
 Android app, workbook, updater, package exchange files, or diagnostics.
+
+For the Android owner-rehearsal build, create a local gitignored mobile runtime config:
+
+```powershell
+.\tools\New-MobileHostedSyncLocalConfig.ps1 `
+  -SupabaseUrl "https://<private-pilot-project-ref>.supabase.co" `
+  -AnonKey "<private-pilot-anon-key>" `
+  -PlatformLabel "Pixel 8 Pro" `
+  -DisplayName "Project owner"
+```
+
+This writes `mobile/src/ElectronicLogbook.Mobile/wwwroot/hosted-sync.local.json`, which
+is gitignored. Use the private-pilot project URL and anon key only. Re-run
+`npm.cmd run sync:android` or `npm.cmd run install:android:debug` from `mobile/` after
+creating or changing that file so the Capacitor assets include the pilot transport
+configuration.
+
+### Gate 1 clean-slate connection recovery
+
+Treat the current owner connection failure as an S2 blocked workflow. Preserve the
+retained credential and the single server device. The diagnostic build exposes a
+read-only/disposable preflight in Settings with the exact failing stage, a stable error
+code, expandable exception/HTTP details, and a **Copy redacted diagnostics** action.
+Only **Recover retained connection** may create the real app-only logbook, and it is
+enabled only after the same attempt has passed every remote and disposable local check.
+
+Before installing the acceptance build, configure desktop-only values without printing
+them:
+
+```text
+ELB_SUPABASE_PILOT_DB_URL
+ELB_SUPABASE_PILOT_ACCESS_TOKEN
+ELB_SUPABASE_PILOT_REFRESH_TOKEN       # only used when the access token is expired
+ELB_SUPABASE_PILOT_SERVICE_ROLE_KEY    # desktop administrative validation only
+ELB_SUPABASE_PILOT_DEVICE_ID
+```
+
+Then build/sync the isolated app so packaged config copies exist and run the preflight
+once. It verifies packaged-config parity, JWT project/role/expiry, the Auth endpoint,
+database access, a locally configured CLI/service credential, `/auth/v1/user`, the
+active account, the existing active device, and the absence of a hosted logbook. The
+report never writes the supplied secrets or full identifiers.
+
+Do not run recovery if any check fails. Fix only that subsystem, rebuild in place, and
+rerun preflight. Recovery never sends email or calls device registration; it imports the
+new app-only logbook key, saves IndexedDB state, reloads it, and compares account,
+device, and logbook identifiers before displaying Connected.
 
 ## Verification Before Pilot Use
 

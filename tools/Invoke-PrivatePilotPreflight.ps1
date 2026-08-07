@@ -3,7 +3,11 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
-    [string]$ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL,
+    [string]$ConnectionString,
+    [string]$AccessToken = $env:ELB_SUPABASE_PILOT_ACCESS_TOKEN,
+    [string]$RefreshToken = $env:ELB_SUPABASE_PILOT_REFRESH_TOKEN,
+    [string]$ServiceRoleKey = $env:ELB_SUPABASE_PILOT_SERVICE_ROLE_KEY,
+    [string]$ExpectedDeviceId = $env:ELB_SUPABASE_PILOT_DEVICE_ID,
     [string]$OutputPath,
     [switch]$RunRlsHarness
 )
@@ -11,6 +15,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL
+}
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = [Environment]::GetEnvironmentVariable("ELB_SUPABASE_PILOT_DB_URL", "User")
+}
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $repoRoot "artifacts\private-pilot-20260806\preflight.json"
 }
@@ -34,7 +44,109 @@ function New-Check {
     }
 }
 
+function Read-JwtPayload {
+    param([Parameter(Mandatory)][string]$Token)
+
+    $parts = $Token.Split('.')
+    if ($parts.Count -ne 3) {
+        throw "Credential is not a JWT."
+    }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    $payload = $payload.PadRight($payload.Length + ((4 - ($payload.Length % 4)) % 4), '=')
+    [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+}
+
+function Invoke-SecretSafeCheck {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][scriptblock]$Action
+    )
+
+    try {
+        & $Action
+        New-Check -Name $Name -Passed $true -Detail "validated without printing secrets"
+    } catch {
+        New-Check -Name $Name -Passed $false -Detail ("{0}: validation failed; secret-bearing exception text omitted" -f $_.Exception.GetType().Name)
+    }
+}
+
 $checks = New-Object System.Collections.Generic.List[object]
+
+$runtimeConfigPath = Join-Path $repoRoot "mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json"
+$runtimeConfig = $null
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "packaged runtime config copies match source" -Action {
+    if (-not (Test-Path -LiteralPath $runtimeConfigPath)) {
+        throw "source runtime config is missing"
+    }
+    $sourceHash = (Get-FileHash -LiteralPath $runtimeConfigPath -Algorithm SHA256).Hash
+    $copyRoots = @(
+        (Join-Path $repoRoot "mobile\src\ElectronicLogbook.Mobile\bin"),
+        (Join-Path $repoRoot "mobile\android\app\src\main\assets\public")
+    )
+    $copies = foreach ($copyRoot in $copyRoots) {
+        if (Test-Path -LiteralPath $copyRoot) {
+            Get-ChildItem -LiteralPath $copyRoot -Recurse -File -Filter "hosted-sync.local.json"
+        }
+    }
+    if (@($copies).Count -eq 0) {
+        throw "no packaged runtime-config copy was found; build the isolated acceptance app first"
+    }
+    if ($copies | Where-Object { (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash -ne $sourceHash }) {
+        throw "one or more packaged runtime-config copies differ from the source"
+    }
+    $script:runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+}))
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "project ref, anon-key role/ref/expiry, and Auth endpoint" -Action {
+    if ($null -eq $runtimeConfig) {
+        $script:runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    $uri = [Uri]$runtimeConfig.supabaseUrl
+    if ($uri.Scheme -ne "https" -or $uri.AbsolutePath.Trim('/') -ne "") {
+        throw "Supabase URL is not an HTTPS project root"
+    }
+    $projectRef = $uri.Host.Split('.')[0]
+    $claims = Read-JwtPayload -Token $runtimeConfig.anonKey
+    if ($claims.role -notin @("anon", "publishable")) { throw "anon-key role is invalid" }
+    if ($claims.ref -and $claims.ref -ne $projectRef) { throw "anon-key project ref does not match" }
+    if ($claims.exp -and [DateTimeOffset]::FromUnixTimeSeconds([long]$claims.exp) -le [DateTimeOffset]::UtcNow) { throw "anon key is expired" }
+    $authUri = [Uri]::new($uri, "/auth/v1/settings")
+    $response = Invoke-WebRequest -Uri $authUri -Headers @{ apikey = $runtimeConfig.anonKey } -Method Get -UseBasicParsing
+    if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) { throw "Auth endpoint rejected the packaged anon key" }
+}))
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "desktop CLI or service-role credential" -Action {
+    if ([string]::IsNullOrWhiteSpace($ServiceRoleKey)) {
+        $supabaseStatus = & supabase status --output json 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($supabaseStatus)) {
+            throw "no desktop service-role credential or readable local Supabase CLI status is configured"
+        }
+        return
+    }
+    $claims = Read-JwtPayload -Token $ServiceRoleKey
+    if ($claims.role -ne "service_role") { throw "configured desktop key is not a service-role credential" }
+    if ($null -ne $runtimeConfig) {
+        $projectRef = ([Uri]$runtimeConfig.supabaseUrl).Host.Split('.')[0]
+        if ($claims.ref -and $claims.ref -ne $projectRef) { throw "service-role project ref does not match" }
+    }
+}))
+
+$authUserId = $null
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "retained access token through auth user endpoint" -Action {
+    if ([string]::IsNullOrWhiteSpace($AccessToken)) { throw "retained access token is not configured on the desktop" }
+    $accessClaims = Read-JwtPayload -Token $AccessToken
+    if ($accessClaims.exp -and [DateTimeOffset]::FromUnixTimeSeconds([long]$accessClaims.exp) -le [DateTimeOffset]::UtcNow) {
+        if ([string]::IsNullOrWhiteSpace($RefreshToken)) { throw "access token is expired and no retained refresh token is configured" }
+        $refreshBody = @{ refresh_token = $RefreshToken } | ConvertTo-Json -Compress
+        $refreshed = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/token?grant_type=refresh_token")) `
+            -Headers @{ apikey = $runtimeConfig.anonKey } -Method Post -ContentType "application/json" -Body $refreshBody
+        $script:AccessToken = $refreshed.access_token
+    }
+    $user = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/user")) `
+        -Headers @{ apikey = $runtimeConfig.anonKey; Authorization = "Bearer $AccessToken" } -Method Get
+    if ([string]::IsNullOrWhiteSpace($user.id)) { throw "Auth user response did not contain an account identifier" }
+    $script:authUserId = $user.id
+}))
 
 $requiredFiles = @(
     "docs\private-pilot-runbook.md",
@@ -95,6 +207,30 @@ if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
         -Passed ($healthSnapshot.databaseSizeStatus -eq "ok" -and @($healthSnapshot.localReviewFindings).Count -eq 0) `
         -Detail "redacted health snapshot captured"))
 }
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "active account and existing registered device" -Action {
+    if ([string]::IsNullOrWhiteSpace($ConnectionString)) { throw "database connection is not configured" }
+    if ([string]::IsNullOrWhiteSpace($authUserId)) { throw "retained Auth user was not validated" }
+    $accountGuid = [Guid]::Parse($authUserId).ToString("D")
+    $devicePredicate = ""
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedDeviceId)) {
+        $deviceGuid = [Guid]::Parse($ExpectedDeviceId.Replace("dev_", "")).ToString("D")
+        $devicePredicate = " and device_id = '$deviceGuid'::uuid"
+    }
+    $query = @"
+select
+  (select count(*) from public.accounts where account_id = '$accountGuid'::uuid and status = 'active'),
+  (select count(*) from public.devices where account_id = '$accountGuid'::uuid and status = 'active'$devicePredicate),
+  (select count(*) from public.logbooks where owner_account_id = '$accountGuid'::uuid);
+"@
+    $psql = Get-Command psql -ErrorAction Stop
+    $row = & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -t -A -F '|' -c $query
+    if ($LASTEXITCODE -ne 0) { throw "database account/device read failed" }
+    $counts = ([string]$row).Trim().Split('|')
+    if ($counts.Count -ne 3 -or $counts[0] -ne '1' -or $counts[1] -ne '1' -or $counts[2] -ne '0') {
+        throw "expected one active account, one matching active device, and no hosted logbook"
+    }
+}))
 
 if ($RunRlsHarness) {
     if ([string]::IsNullOrWhiteSpace($ConnectionString)) {

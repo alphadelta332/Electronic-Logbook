@@ -47,6 +47,36 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task HostedInviteAcceptanceResumesLocalSetupAfterDeviceRegistrationSucceeded()
+    {
+        var jsRuntime = new JourneyJsRuntime { FailNextPackageKeyImport = true };
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-06T01:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock);
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await Assert.ThrowsAsync<JSException>(async () =>
+            await session.CompleteHostedInviteAcceptanceAsync("123456"));
+
+        Assert.NotNull(await authenticator.GetCurrentSessionAsync());
+        Assert.Null(session.HostedSync);
+        Assert.Equal(new LogbookId("log_mobile_preview"), session.DocumentV2.LogbookId);
+
+        await session.ResumeHostedInviteAcceptanceAsync();
+
+        Assert.NotNull(session.HostedSync);
+        Assert.Equal(new DeviceId("dev_android"), session.HostedSync.DeviceId);
+        Assert.Equal(session.DocumentV2.LogbookId, session.HostedSync.LogbookId);
+        Assert.Equal("Ready", session.PackageKeyStatus);
+        Assert.Equal("Account connected.", session.LastActionMessage);
+        Assert.Single(jsRuntime.ImportedPackageKeys);
+    }
+
+    [Fact]
     public async Task HostedInviteAcceptanceDoesNotReplaceExistingWorkbookPackageState()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -483,6 +513,8 @@ public sealed class MobileLogbookSessionJourneyTests
 
         public int SaveCount { get; private set; }
 
+        public bool FailNextPackageKeyImport { get; set; }
+
         public List<string> ImportedPackageKeys { get; } = [];
 
         private Dictionary<string, byte[]> PackageKeys { get; } = [];
@@ -530,6 +562,12 @@ public sealed class MobileLogbookSessionJourneyTests
 
         private ValueTask<TValue> ImportPackageKey<TValue>(object?[]? args)
         {
+            if (FailNextPackageKeyImport)
+            {
+                FailNextPackageKeyImport = false;
+                throw new JSException("Simulated interrupted local package-key setup.");
+            }
+
             Assert.NotNull(args);
             var keyName = Assert.IsType<string>(args[0]);
             PackageKeys[keyName] = Assert.IsType<byte[]>(args[1]).ToArray();

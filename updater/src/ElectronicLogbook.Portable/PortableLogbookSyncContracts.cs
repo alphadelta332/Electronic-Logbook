@@ -54,6 +54,8 @@ public interface IHostedLogbookAuthenticator
         string verificationCode,
         CancellationToken cancellationToken = default);
 
+    ValueTask<HostedSyncSession> ResumeEmailSignInAsync(CancellationToken cancellationToken = default);
+
     ValueTask<HostedSyncSession> RefreshAsync(CancellationToken cancellationToken = default);
 
     ValueTask SignOutAsync(CancellationToken cancellationToken = default);

@@ -1,0 +1,6 @@
+{
+  "supabaseUrl": "https://your-project-ref.supabase.co",
+  "anonKey": "your-pilot-anon-key",
+  "platformLabel": "Pixel 8 Pro",
+  "displayName": "Project owner"
+}

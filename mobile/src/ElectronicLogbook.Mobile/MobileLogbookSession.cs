@@ -10,7 +10,8 @@ public sealed class MobileLogbookSession(
     IHostedLogbookAuthenticator? hostedAuthenticator = null,
     IHostedLogbookLedger? hostedLedger = null,
     INetworkStatus? networkStatus = null,
-    ISyncClock? syncClock = null)
+    ISyncClock? syncClock = null,
+    MobileConnectionRecoveryWorkflow? connectionRecovery = null)
 {
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
@@ -59,6 +60,10 @@ public sealed class MobileLogbookSession(
     public BrowserHostedSyncState? HostedSync { get; private set; }
 
     public HostedSignInStart? PendingHostedSignIn { get; private set; }
+
+    public MobileConnectionDiagnosticReport? LastConnectionDiagnostics { get; private set; }
+
+    public IReadOnlyList<MobileConnectionDiagnosticReport> ConnectionDiagnosticHistory { get; private set; } = [];
 
     public EntryDraft Draft { get; private set; } = EntryDraft.Create();
 
@@ -270,6 +275,8 @@ public sealed class MobileLogbookSession(
         try
         {
             var state = await logbookStore.LoadStateV2Async();
+            ConnectionDiagnosticHistory = await logbookStore.LoadConnectionDiagnosticsAsync();
+            LastConnectionDiagnostics = ConnectionDiagnosticHistory.FirstOrDefault();
             if (state is not null)
             {
                 DocumentV2 = state.Document;
@@ -615,11 +622,78 @@ public sealed class MobileLogbookSession(
 
         ClearLastActionMessage();
         PendingHostedSignIn = await hostedAuthenticator.StartEmailSignInAsync(email, shouldCreateUser: false);
-        SetLastActionMessage("Verification code sent.");
+        SetLastActionMessage("Sign-in email sent.");
         return PendingHostedSignIn;
     }
 
     public async Task CompleteHostedInviteAcceptanceAsync(string verificationCode)
+    {
+        EnsureHostedInviteAcceptanceAvailable();
+        var session = await hostedAuthenticator!.CompleteEmailSignInAsync(verificationCode);
+        await CompleteHostedInviteSetupAsync(session);
+    }
+
+    public async Task ResumeHostedInviteAcceptanceAsync()
+    {
+        EnsureHostedInviteAcceptanceAvailable();
+        var session = await hostedAuthenticator!.ResumeEmailSignInAsync();
+        await CompleteHostedInviteSetupAsync(session);
+    }
+
+    public async Task<MobileConnectionDiagnosticReport> RunConnectionPreflightAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (connectionRecovery is null)
+        {
+            throw new InvalidOperationException("Connection diagnostics are not configured on this device.");
+        }
+
+        ClearLastActionMessage();
+        LastConnectionDiagnostics = await connectionRecovery.RunPreflightAsync(cancellationToken);
+        await RecordConnectionDiagnosticsAsync(LastConnectionDiagnostics);
+        SetLastActionMessage(LastConnectionDiagnostics.Passed
+            ? "Connection preflight passed. Recovery is ready."
+            : $"Connection preflight stopped at {LastConnectionDiagnostics.CurrentStage}: {LastConnectionDiagnostics.ErrorCode}.");
+        return LastConnectionDiagnostics;
+    }
+
+    public async Task<MobileConnectionDiagnosticReport> RecoverHostedConnectionAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (connectionRecovery is null)
+        {
+            throw new InvalidOperationException("Connection recovery is not configured on this device.");
+        }
+
+        EnsureHostedInviteAcceptanceAvailable();
+        var result = await connectionRecovery.RecoverAsync(LastConnectionDiagnostics, cancellationToken);
+        LastConnectionDiagnostics = result.Diagnostics;
+        await RecordConnectionDiagnosticsAsync(result.Diagnostics);
+        if (!result.Diagnostics.Passed || result.Document is null || result.HostedSync is null)
+        {
+            SetLastActionMessage($"Connection recovery stopped at {result.Diagnostics.CurrentStage}: {result.Diagnostics.ErrorCode}.");
+            return result.Diagnostics;
+        }
+
+        DocumentV2 = result.Document;
+        deviceId = result.HostedSync.DeviceId;
+        ImportReceipts = [];
+        LastSuccessfulExportAt = null;
+        LastSuccessfulExport = null;
+        HostedSync = result.HostedSync;
+        PendingHostedSignIn = null;
+        await RefreshPackageKeyStatusAsync(DocumentV2.LogbookId);
+        SetLastActionMessage("Account connected and local state verified.");
+        return result.Diagnostics;
+    }
+
+    private async Task RecordConnectionDiagnosticsAsync(MobileConnectionDiagnosticReport report)
+    {
+        await logbookStore.AppendConnectionDiagnosticsAsync(report);
+        ConnectionDiagnosticHistory = await logbookStore.LoadConnectionDiagnosticsAsync();
+    }
+
+    private void EnsureHostedInviteAcceptanceAvailable()
     {
         if (hostedAuthenticator is null)
         {
@@ -633,7 +707,10 @@ public sealed class MobileLogbookSession(
         }
 
         ClearLastActionMessage();
-        var session = await hostedAuthenticator.CompleteEmailSignInAsync(verificationCode);
+    }
+
+    private async Task CompleteHostedInviteSetupAsync(HostedSyncSession session)
+    {
         var plan = PortableLogbookSetup.CreateInitialSetupPlanV2(
             existingRows: [],
             customFieldDefinitions: CustomFields,

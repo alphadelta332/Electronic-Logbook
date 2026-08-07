@@ -69,6 +69,9 @@ public sealed class SupabaseHostedSyncClient(
         CancellationToken cancellationToken = default) =>
         throw new NotSupportedException("Interactive hosted sign-in is not available from the hidden workbook sync command.");
 
+    public ValueTask<HostedSyncSession> ResumeEmailSignInAsync(CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("Interactive hosted sign-in recovery is not available from the hidden workbook sync command.");
+
     public async ValueTask<HostedSyncSession> RefreshAsync(CancellationToken cancellationToken = default)
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/auth/v1/token?grant_type=refresh_token");

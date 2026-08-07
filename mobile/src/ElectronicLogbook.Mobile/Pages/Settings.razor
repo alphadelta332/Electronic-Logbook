@@ -2,6 +2,7 @@
 @inject MobileLogbookSession Session
 @inject MobileUiPreferenceState UiPreferences
 @inject BrowserFileStore FileStore
+@inject IJSRuntime JsRuntime
 
 <PageTitle>Account and sync</PageTitle>
 
@@ -114,11 +115,27 @@ else
                 <div class="field-grid">
                     <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
-                        Send sign-in code
+                        Send sign-in email
                     </MudButton>
-                    <MudTextField @bind-Value="HostedVerificationCode" InputType="InputType.Text" Label="Verification code" Disabled="@(IsAccountBusy || Session.PendingHostedSignIn is null)" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Link" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || Session.PendingHostedSignIn is null || string.IsNullOrWhiteSpace(HostedVerificationCode))">
+                    <MudTextField @bind-Value="HostedVerificationCode"
+                                  InputType="InputType.Text"
+                                  Label="Code or unused sign-in link"
+                                  HelperText="Copy a link address without opening it. Outlook Safe Links and unused direct links are supported."
+                                  Disabled="@IsAccountBusy" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Link" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
                         Connect account
+                    </MudButton>
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResumeHostedSignInAsync" Disabled="@IsAccountBusy">
+                        Resume verified sign-in
+                    </MudButton>
+                    <MudText Typo="Typo.caption">Recovery only: use after support confirms that email verification succeeded but device setup was interrupted.</MudText>
+                </div>
+                <div class="connection-diagnostic-actions">
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="RunConnectionPreflightAsync" Disabled="@IsConnectionDiagnosticBusy">
+                        Run connection preflight
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restore" OnClick="RecoverConnectionAsync" Disabled="@(!CanRecoverConnection)">
+                        Recover retained connection
                     </MudButton>
                 </div>
             }
@@ -132,6 +149,31 @@ else
             @if (!string.IsNullOrWhiteSpace(AccountError))
             {
                 <span class="settings-status-line settings-status-error" role="alert">@AccountError</span>
+            }
+            @if (Session.LastConnectionDiagnostics is { } diagnostics)
+            {
+                <article class="connection-diagnostic-report" role="status">
+                    <div>
+                        <span>Stage</span>
+                        <strong>@diagnostics.CurrentStage</strong>
+                    </div>
+                    <div>
+                        <span>Error code</span>
+                        <strong>@diagnostics.ErrorCode</strong>
+                    </div>
+                    <small>@ConnectionRecoveryGuidance(diagnostics)</small>
+                    <details>
+                        <summary>Technical details</summary>
+                        <pre>@diagnostics.ToRedactedJson()</pre>
+                    </details>
+                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CopyConnectionDiagnosticsAsync">
+                        Copy redacted diagnostics
+                    </MudButton>
+                    @if (!string.IsNullOrWhiteSpace(ConnectionDiagnosticMessage))
+                    {
+                        <small>@ConnectionDiagnosticMessage</small>
+                    }
+                </article>
             }
             @if (!string.IsNullOrWhiteSpace(SyncMessage))
             {
@@ -210,6 +252,7 @@ else
     private bool IsDeviceStateExportBusy { get; set; }
     private bool IsSyncBusy { get; set; }
     private bool IsAccountBusy { get; set; }
+    private bool IsConnectionDiagnosticBusy { get; set; }
     private string HostedEmail { get; set; } = string.Empty;
     private string HostedVerificationCode { get; set; } = string.Empty;
     private string? SupportSummaryMessage { get; set; }
@@ -220,6 +263,11 @@ else
     private string? SyncError { get; set; }
     private string? AccountMessage { get; set; }
     private string? AccountError { get; set; }
+    private string? ConnectionDiagnosticMessage { get; set; }
+
+    private bool CanRecoverConnection =>
+        !IsConnectionDiagnosticBusy
+        && Session.LastConnectionDiagnostics is { Passed: true, CurrentStage: MobileConnectionStage.LOCAL_PLAN_CREATE };
 
     protected override async Task OnInitializedAsync()
     {
@@ -270,7 +318,7 @@ else
     private string AttentionGuidance => Session.HostedSyncStatusLabel switch
     {
         "Needs attention" => "Resolve conflicts, reauthenticate, restore a lost key, or recover a revoked device from Advanced recovery/support.",
-        "Signing in" => "Finish sign-in with the verification code sent to the invited email.",
+        "Signing in" => "Finish sign-in with the code or unused sign-in link sent to the invited email.",
         "Offline" => "You can keep working; queued edits sync when the network returns.",
         _ => "Daily sync stays automatic. Package tools are only for Advanced recovery/support."
     };
@@ -288,11 +336,11 @@ else
         try
         {
             var signIn = await Session.StartHostedInviteAcceptanceAsync(HostedEmail);
-            AccountMessage = $"Code sent to {signIn.DeliveryHint}.";
+            AccountMessage = $"Sign-in email sent to {signIn.DeliveryHint}.";
         }
-        catch (Exception ex) when (ex is InvalidOperationException or HostedSignInException or JSException)
+        catch (Exception ex)
         {
-            AccountError = ex.Message;
+            AccountError = AccountFailureMessage(ex);
         }
         finally
         {
@@ -302,7 +350,7 @@ else
 
     private async Task CompleteHostedSignInAsync()
     {
-        if (IsAccountBusy || Session.PendingHostedSignIn is null || string.IsNullOrWhiteSpace(HostedVerificationCode))
+        if (IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))
         {
             return;
         }
@@ -316,15 +364,126 @@ else
             HostedVerificationCode = string.Empty;
             AccountMessage = Session.LastActionMessage ?? "Account connected.";
         }
-        catch (Exception ex) when (ex is InvalidOperationException or HostedSignInException or JSException)
+        catch (Exception ex)
         {
-            AccountError = ex.Message;
+            AccountError = AccountFailureMessage(ex);
         }
         finally
         {
             IsAccountBusy = false;
         }
     }
+
+    private async Task ResumeHostedSignInAsync()
+    {
+        if (IsAccountBusy)
+        {
+            return;
+        }
+
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            await Session.ResumeHostedInviteAcceptanceAsync();
+            HostedVerificationCode = string.Empty;
+            AccountMessage = Session.LastActionMessage ?? "Account connected.";
+        }
+        catch (Exception ex)
+        {
+            AccountError = AccountFailureMessage(ex);
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
+
+    private static string AccountFailureMessage(Exception exception) => exception switch
+    {
+        InvalidOperationException or HostedSignInException or JSException => exception.Message,
+        HostedLedgerException =>
+            "Account verification reached hosted sync, but device registration could not be completed. Do not request another email; report this message for recovery.",
+        HttpRequestException =>
+            "Hosted sync could not be reached. Check the connection and try again; do not request another email.",
+        _ => $"UNEXPECTED_{exception.GetType().Name}: {MobileDiagnosticRedactor.Redact(exception.Message)}"
+    };
+
+    private async Task RunConnectionPreflightAsync()
+    {
+        if (IsConnectionDiagnosticBusy)
+        {
+            return;
+        }
+
+        IsConnectionDiagnosticBusy = true;
+        ConnectionDiagnosticMessage = null;
+        try
+        {
+            var report = await Session.RunConnectionPreflightAsync();
+            ConnectionDiagnosticMessage = report.Passed
+                ? "All remote and disposable local checks passed. One retained-session recovery is now enabled."
+                : $"Stopped without changing the real local logbook. {ConnectionRecoveryGuidance(report)}";
+        }
+        finally
+        {
+            IsConnectionDiagnosticBusy = false;
+        }
+    }
+
+    private async Task RecoverConnectionAsync()
+    {
+        if (!CanRecoverConnection)
+        {
+            return;
+        }
+
+        IsConnectionDiagnosticBusy = true;
+        ConnectionDiagnosticMessage = null;
+        try
+        {
+            var report = await Session.RecoverHostedConnectionAsync();
+            ConnectionDiagnosticMessage = report.Passed
+                ? "Connected. The package key and local state matched after readback."
+                : $"Recovery stopped and incomplete local artifacts were removed. {ConnectionRecoveryGuidance(report)}";
+        }
+        finally
+        {
+            IsConnectionDiagnosticBusy = false;
+        }
+    }
+
+    private async Task CopyConnectionDiagnosticsAsync()
+    {
+        if (Session.LastConnectionDiagnostics is null)
+        {
+            return;
+        }
+
+        await JsRuntime.InvokeVoidAsync(
+            "electronicLogbookDiagnostics.copy",
+            Session.LastConnectionDiagnostics.ToRedactedJson());
+        ConnectionDiagnosticMessage = "Redacted diagnostics copied.";
+    }
+
+    private static string ConnectionRecoveryGuidance(MobileConnectionDiagnosticReport report) => report.CurrentStage switch
+    {
+        MobileConnectionStage.CONFIG_LOAD => "Fix only the packaged runtime configuration, then rerun preflight.",
+        MobileConnectionStage.CREDENTIAL_LOAD => "Preserve the server device. Restore or inspect only the retained local credential.",
+        MobileConnectionStage.ACCESS_TOKEN_VALIDATE or MobileConnectionStage.AUTH_USER_READ => "Do not send email. Inspect the retained session and refresh only if the access token is expired.",
+        MobileConnectionStage.ACCOUNT_READ => "Stop recovery and inspect the existing account match read-only.",
+        MobileConnectionStage.DEVICE_READ => "Do not register another device. Inspect the existing device match read-only.",
+        MobileConnectionStage.ANDROID_KEYSTORE_PROBE => "Fix Android Keystore access; the disposable probe key was cleaned up.",
+        MobileConnectionStage.INDEXEDDB_PROBE => "Fix IndexedDB access; the disposable probe value was cleaned up.",
+        MobileConnectionStage.LOCAL_PLAN_CREATE => report.Passed
+            ? "Preflight is green; recovery may reuse the existing credential and device."
+            : "Fix local plan serialization before touching real local state.",
+        MobileConnectionStage.PACKAGE_KEY_IMPORT => "Fix package-key import. The credential and server device were retained.",
+        MobileConnectionStage.LOCAL_STATE_SAVE or MobileConnectionStage.LOCAL_STATE_READBACK => "Fix local persistence. Incomplete local artifacts were removed or the prior state was restored.",
+        MobileConnectionStage.COMPLETE => "The retained connection and local state are verified.",
+        _ => "Stop and inspect this exact stage before retrying."
+    };
 
     private static string FormatTimestamp(DateTimeOffset value) => value.ToLocalTime().ToString("dd MMM yyyy, HH:mm");
 

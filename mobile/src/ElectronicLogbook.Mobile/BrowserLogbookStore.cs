@@ -8,6 +8,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
 {
     internal const int CurrentStoreVersion = 1;
     private const string DocumentKey = "portable-document";
+    private const string ConnectionDiagnosticsKey = "connection-diagnostics";
+    private const string DiagnosticProbeKeyPrefix = "diagnostic-probe:";
 
     public async ValueTask<PortableLogbookDocument?> LoadDocumentAsync()
     {
@@ -216,6 +218,85 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             "electronicLogbookStore.save",
             DocumentKey,
             JsonSerializer.Serialize(stored, PortableLogbookJson.SerializerOptions));
+    }
+
+    public async ValueTask RunDisposableProbeAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var key = DiagnosticProbeKeyPrefix + Guid.NewGuid().ToString("N");
+        var value = Guid.NewGuid().ToString("N");
+        try
+        {
+            await jsRuntime.InvokeVoidAsync("electronicLogbookStore.save", cancellationToken, key, value);
+            var reloaded = await jsRuntime.InvokeAsync<string?>("electronicLogbookStore.load", cancellationToken, key);
+            if (!string.Equals(value, reloaded, StringComparison.Ordinal))
+            {
+                throw new MobileHostedDiagnosticException("INDEXEDDB_READBACK_MISMATCH", "The disposable IndexedDB value did not match on readback.");
+            }
+        }
+        finally
+        {
+            await jsRuntime.InvokeVoidAsync("electronicLogbookStore.delete", CancellationToken.None, key);
+        }
+    }
+
+    public async ValueTask RestoreStateV2Async(BrowserLogbookStateV2? previous)
+    {
+        if (previous is null)
+        {
+            await jsRuntime.InvokeVoidAsync("electronicLogbookStore.delete", DocumentKey);
+            return;
+        }
+
+        var document = previous.Document;
+        var exportCheckpoint = previous.LastSuccessfulExport?.Covers(document) == true
+            ? previous.LastSuccessfulExport
+            : null;
+        var stored = new BrowserLogbookStoredDocument(
+            CurrentStoreVersion,
+            document.SchemaVersion,
+            PortableLogbookJson.SerializeV2(document),
+            previous.ImportReceipts,
+            previous.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
+            exportCheckpoint,
+            previous.HostedSync);
+        await jsRuntime.InvokeVoidAsync(
+            "electronicLogbookStore.save",
+            DocumentKey,
+            JsonSerializer.Serialize(stored, PortableLogbookJson.SerializerOptions));
+    }
+
+    public async ValueTask<IReadOnlyList<MobileConnectionDiagnosticReport>> LoadConnectionDiagnosticsAsync()
+    {
+        var json = await jsRuntime.InvokeAsync<string?>("electronicLogbookStore.load", ConnectionDiagnosticsKey);
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<MobileConnectionDiagnosticReport[]>(json, PortableLogbookJson.SerializerOptions) ?? [];
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    public async ValueTask AppendConnectionDiagnosticsAsync(MobileConnectionDiagnosticReport report)
+    {
+        ArgumentNullException.ThrowIfNull(report);
+        var history = (await LoadConnectionDiagnosticsAsync())
+            .Where(existing => !string.Equals(existing.AttemptId, report.AttemptId, StringComparison.Ordinal))
+            .Append(report)
+            .OrderByDescending(existing => existing.AttemptedAt)
+            .Take(20)
+            .ToArray();
+        await jsRuntime.InvokeVoidAsync(
+            "electronicLogbookStore.save",
+            ConnectionDiagnosticsKey,
+            JsonSerializer.Serialize(history, PortableLogbookJson.SerializerOptions));
     }
 
     public async ValueTask RecordImportReceiptAsync(PortableLogbookPackageReceipt receipt)

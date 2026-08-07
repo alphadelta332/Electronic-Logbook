@@ -2,7 +2,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL,
+    [string]$ConnectionString,
     [string]$OutputPath,
     [int]$AccountReviewThreshold = 25,
     [int64]$DatabaseBytesReviewThreshold = 250MB,
@@ -11,6 +11,14 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL
+}
+
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = [Environment]::GetEnvironmentVariable("ELB_SUPABASE_PILOT_DB_URL", "User")
+}
 
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     throw "Provide -ConnectionString or set ELB_SUPABASE_PILOT_DB_URL. The value is never printed."

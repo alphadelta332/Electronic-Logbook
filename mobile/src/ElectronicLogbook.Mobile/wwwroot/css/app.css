@@ -1706,6 +1706,35 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-error);
 }
 
+.connection-diagnostic-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.connection-diagnostic-report {
+    display: grid;
+    gap: 0.75rem;
+    padding: 1rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.9rem;
+    background: var(--surface-soft);
+}
+
+.connection-diagnostic-report > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.connection-diagnostic-report pre {
+    max-height: 22rem;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.72rem;
+}
+
 .device-health-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2632,10 +2661,13 @@ a.history-row {
 }
 
 #blazor-error-ui .dismiss {
-    position: absolute;
-    top: 10px;
-    right: 14px;
+    margin-left: 10px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    background: transparent;
     color: inherit;
+    padding: 4px 8px;
+    font: inherit;
 }
 
 .loading-progress {

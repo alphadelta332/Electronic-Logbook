@@ -31,10 +31,10 @@
         <div class="loading-progress-text"></div>
     </div>
 
-    <div id="blazor-error-ui">
-        An unhandled error has occurred.
-        <a href="" class="reload">Reload</a>
-        <a class="dismiss">x</a>
+    <div id="blazor-error-ui" role="alert" aria-live="assertive">
+        Something went wrong. Your saved logbook data remains on this device.
+        <a href="" class="reload">Restart app</a>
+        <button type="button" class="dismiss">Dismiss</button>
     </div>
     <script src="js/logbookStore.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>

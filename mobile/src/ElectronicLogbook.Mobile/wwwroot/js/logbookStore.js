@@ -71,7 +71,22 @@
 
     window.electronicLogbookStore = {
         load: (key) => withStore(documentStoreName, "readonly", (store) => store.get(key)),
-        save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key))
+        save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key)),
+        delete: (key) => withStore(documentStoreName, "readwrite", (store) => store.delete(key))
+    };
+
+    window.electronicLogbookNetwork = {
+        isOnline: () => navigator.onLine !== false
+    };
+
+    window.electronicLogbookDiagnostics = {
+        copy: async (redactedText) => {
+            if (!navigator.clipboard?.writeText) {
+                throw new Error("Clipboard access is not available.");
+            }
+
+            await navigator.clipboard.writeText(String(redactedText ?? ""));
+        }
     };
 
     function normalizePreferences(value) {

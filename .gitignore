@@ -16,6 +16,7 @@ mobile/artifacts/
 mobile/android/.gradle
 mobile/android/app/src/main/assets/public/
 mobile/src/ElectronicLogbook.Mobile/wwwroot/_framework/
+mobile/src/ElectronicLogbook.Mobile/wwwroot/hosted-sync.local.json
 mobile/android/app/src/main/res/drawable/splash.png
 mobile/android/app/src/main/res/drawable-land-*/splash.png
 mobile/android/app/src/main/res/drawable-port-*/splash.png

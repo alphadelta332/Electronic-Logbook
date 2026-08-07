@@ -260,11 +260,23 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Connection status", settings, StringComparison.Ordinal);
         Assert.Contains("Hosted sync", settings, StringComparison.Ordinal);
         Assert.Contains("Invited email", settings, StringComparison.Ordinal);
-        Assert.Contains("Verification code", settings, StringComparison.Ordinal);
-        Assert.Contains("Send sign-in code", settings, StringComparison.Ordinal);
+        Assert.Contains("Code or unused sign-in link", settings, StringComparison.Ordinal);
+        Assert.Contains("Outlook Safe Links and unused direct links are supported", settings, StringComparison.Ordinal);
+        Assert.Contains("Send sign-in email", settings, StringComparison.Ordinal);
         Assert.Contains("Connect account", settings, StringComparison.Ordinal);
+        Assert.Contains("Resume verified sign-in", settings, StringComparison.Ordinal);
+        Assert.Contains("ResumeHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
         Assert.Contains("StartHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
         Assert.Contains("CompleteHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("AccountFailureMessage", settings, StringComparison.Ordinal);
+        Assert.Contains("Do not request another email", settings, StringComparison.Ordinal);
+        Assert.Contains("Run connection preflight", settings, StringComparison.Ordinal);
+        Assert.Contains("Recover retained connection", settings, StringComparison.Ordinal);
+        Assert.Contains("Copy redacted diagnostics", settings, StringComparison.Ordinal);
+        Assert.Contains("Technical details", settings, StringComparison.Ordinal);
+        Assert.Contains("UNEXPECTED_", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileConnectionStage.ACCESS_TOKEN_VALIDATE", settings, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookDiagnostics.copy", settings, StringComparison.Ordinal);
         Assert.Contains("@Session.HostedSyncStatusLabel", settings, StringComparison.Ordinal);
         Assert.Contains("@Session.HostedSyncStatusDetail", settings, StringComparison.Ordinal);
         Assert.Contains("Sync now", settings, StringComparison.Ordinal);
@@ -274,6 +286,38 @@ public sealed class PwaPageWiringTests
         Assert.Contains("revoked device", settings, StringComparison.Ordinal);
         Assert.Contains("Needs attention", session, StringComparison.Ordinal);
         Assert.Contains("PendingLocalOperationCount", session, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GlobalErrorUiOffersExplicitDismissAndRestartActions()
+    {
+        var index = ReadMobileWebAsset("index.html");
+
+        Assert.Contains("Restart app", index, StringComparison.Ordinal);
+        Assert.Contains("class=\"dismiss\">Dismiss", index, StringComparison.Ordinal);
+        Assert.DoesNotContain("An unhandled error has occurred", index, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProgramWiresRealMobileHostedSyncTransportForPilotBuilds()
+    {
+        var program = ReadMobileSource("Program.cs");
+        var client = ReadMobileSource("MobileSupabaseHostedSyncClient.cs");
+        var gitignore = ReadProjectFile(".gitignore");
+
+        Assert.Contains("BrowserHostedCredentialStore", program, StringComparison.Ordinal);
+        Assert.Contains("MobileSupabaseHostedSyncClient", program, StringComparison.Ordinal);
+        Assert.Contains("IHostedLogbookAuthenticator", program, StringComparison.Ordinal);
+        Assert.Contains("IHostedLogbookLedger", program, StringComparison.Ordinal);
+        Assert.Contains("IMobileHostedRecoveryClient", program, StringComparison.Ordinal);
+        Assert.Contains("MobileConnectionRecoveryWorkflow", program, StringComparison.Ordinal);
+        Assert.Contains("hosted-sync.local.json", client, StringComparison.Ordinal);
+        Assert.Contains("create_user", client, StringComparison.Ordinal);
+        Assert.DoesNotContain("should_create_user", client, StringComparison.Ordinal);
+        Assert.Contains("token_hash", client, StringComparison.Ordinal);
+        Assert.Contains("accept_hosted_invitation", client, StringComparison.Ordinal);
+        Assert.Contains("append_hosted_operation", client, StringComparison.Ordinal);
+        Assert.Contains("hosted-sync.local.json", gitignore, StringComparison.Ordinal);
     }
 
     [Fact]

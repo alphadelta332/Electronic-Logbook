@@ -408,6 +408,16 @@ public sealed class InMemoryHostedLogbookAuthenticator(
         return ValueTask.FromResult(currentSession);
     }
 
+    public ValueTask<HostedSyncSession> ResumeEmailSignInAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfAccountOrDeviceBlocked();
+        return currentSession is null
+            ? ValueTask.FromException<HostedSyncSession>(new HostedSignInException(
+                HostedSignInFailureReason.SignedOut,
+                "No verified sign-in is available to resume."))
+            : ValueTask.FromResult(currentSession);
+    }
+
     public ValueTask<HostedSyncSession> RefreshAsync(CancellationToken cancellationToken = default)
     {
         if (currentSession is null)

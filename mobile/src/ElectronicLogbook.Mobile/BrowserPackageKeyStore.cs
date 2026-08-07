@@ -1,5 +1,7 @@
 using ElectronicLogbook.Portable;
 using Microsoft.JSInterop;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace ElectronicLogbook.Mobile;
 
@@ -29,6 +31,43 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
 
     public ValueTask DeletePackageKeyAsync(LogbookId logbookId) =>
         jsRuntime.InvokeVoidAsync("electronicLogbookKeys.deletePackageKey", KeyName(logbookId));
+
+    public async ValueTask RunDisposableProbeAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var probeId = new LogbookId("log_probe_" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var imported = await ImportRecoveryCodeAsync(probeId, PortableLogbookKey.Generate().ToRecoveryCode());
+            if (!imported || !await HasPackageKeyAsync(probeId))
+            {
+                throw new MobileHostedDiagnosticException("ANDROID_KEYSTORE_IMPORT_FAILED", "The disposable Android Keystore key was not retained.");
+            }
+
+            await VerifyPackageKeyAsync(probeId, "ANDROID_KEYSTORE_ROUNDTRIP_MISMATCH", cancellationToken);
+        }
+        finally
+        {
+            await DeletePackageKeyAsync(probeId);
+        }
+    }
+
+    public async ValueTask VerifyPackageKeyAsync(
+        LogbookId logbookId,
+        string errorCode = "PACKAGE_KEY_VERIFY_FAILED",
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var plaintext = Encoding.UTF8.GetBytes("electronic-logbook-keystore-probe");
+        var additionalData = Encoding.UTF8.GetBytes("disposable-probe");
+        var nonce = RandomNumberGenerator.GetBytes(AesGcmNonceSizeBytes);
+        var encrypted = await EncryptAsync(logbookId, nonce, plaintext, additionalData);
+        var decrypted = await DecryptAsync(logbookId, nonce, encrypted.Ciphertext, encrypted.Tag, additionalData);
+        if (!CryptographicOperations.FixedTimeEquals(plaintext, decrypted))
+        {
+            throw new MobileHostedDiagnosticException(errorCode, "The package-key encrypt/decrypt verification did not match.");
+        }
+    }
 
     public ValueTask<BrowserPackageCiphertext> EncryptAsync(
         LogbookId logbookId,
