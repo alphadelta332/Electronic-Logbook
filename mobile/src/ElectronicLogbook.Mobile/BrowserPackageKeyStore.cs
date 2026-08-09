@@ -32,6 +32,29 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
     public ValueTask DeletePackageKeyAsync(LogbookId logbookId) =>
         jsRuntime.InvokeVoidAsync("electronicLogbookKeys.deletePackageKey", KeyName(logbookId));
 
+    public ValueTask<BrowserRecoveryPublicKey> GetRecoveryPublicKeyAsync() =>
+        jsRuntime.InvokeAsync<BrowserRecoveryPublicKey>("electronicLogbookKeys.getRecoveryPublicKey");
+
+    public ValueTask<BrowserRecoveryWrappedKey> WrapPackageKeyForRecoveryServiceAsync(
+        LogbookId logbookId,
+        string servicePublicKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(servicePublicKey);
+        return jsRuntime.InvokeAsync<BrowserRecoveryWrappedKey>(
+            "electronicLogbookKeys.wrapPackageKeyForRecoveryService",
+            KeyName(logbookId),
+            servicePublicKey);
+    }
+
+    public ValueTask<bool> ImportRecoveryEnvelopeAsync(LogbookId logbookId, string wrappedKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(wrappedKey);
+        return jsRuntime.InvokeAsync<bool>(
+            "electronicLogbookKeys.importRecoveryEnvelope",
+            KeyName(logbookId),
+            wrappedKey);
+    }
+
     public async ValueTask RunDisposableProbeAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -128,3 +151,12 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
 public sealed record BrowserPackageCiphertext(
     byte[] Ciphertext,
     byte[] Tag);
+
+public sealed record BrowserRecoveryPublicKey(
+    string PublicKey,
+    string Fingerprint,
+    string Algorithm);
+
+public sealed record BrowserRecoveryWrappedKey(
+    string WrappedKey,
+    string Algorithm);

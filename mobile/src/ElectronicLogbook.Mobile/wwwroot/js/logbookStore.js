@@ -205,6 +205,30 @@
             await withStore(keyStoreName, "readwrite", (store) => store.put(key, keyName));
             return true;
         },
+        getRecoveryPublicKey: async () => {
+            const native = nativeKeyPlugin();
+            if (!native?.getRecoveryPublicKey) {
+                throw new Error("Account recovery keys are only available in the installed Android app.");
+            }
+
+            return await native.getRecoveryPublicKey();
+        },
+        wrapPackageKeyForRecoveryService: async (keyName, servicePublicKey) => {
+            const native = nativeKeyPlugin();
+            if (!native?.wrapPackageKeyForRecoveryService) {
+                throw new Error("Account recovery wrapping is only available in the installed Android app.");
+            }
+
+            return await native.wrapPackageKeyForRecoveryService({ keyName, servicePublicKey });
+        },
+        importRecoveryEnvelope: async (keyName, wrappedKey) => {
+            const native = nativeKeyPlugin();
+            if (!native?.importRecoveryEnvelope) {
+                throw new Error("Account recovery import is only available in the installed Android app.");
+            }
+
+            return Boolean((await native.importRecoveryEnvelope({ keyName, wrappedKey })).imported);
+        },
         deletePackageKey: async (keyName) => {
             const native = nativeKeyPlugin();
             if (native) {

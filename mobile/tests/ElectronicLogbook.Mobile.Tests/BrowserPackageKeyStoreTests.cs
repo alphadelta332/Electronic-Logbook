@@ -54,6 +54,56 @@ public sealed class BrowserPackageKeyStoreTests
     }
 
     [Fact]
+    public async Task GetRecoveryPublicKeyCallsNativeRecoveryBridge()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var recoveryKey = new BrowserRecoveryPublicKey("public-key", "fingerprint", "RSA-OAEP-256");
+        jsRuntime.Results.Enqueue(recoveryKey);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        var result = await store.GetRecoveryPublicKeyAsync();
+
+        Assert.Same(recoveryKey, result);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.getRecoveryPublicKey", call.Identifier);
+        Assert.Empty(call.Arguments);
+    }
+
+    [Fact]
+    public async Task WrapPackageKeyForRecoveryServiceUsesScopedKeyName()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var wrappedKey = new BrowserRecoveryWrappedKey("wrapped-key", "RSA-OAEP-256");
+        jsRuntime.Results.Enqueue(wrappedKey);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        var result = await store.WrapPackageKeyForRecoveryServiceAsync(
+            new LogbookId("log_mobile"),
+            "service-public-key");
+
+        Assert.Same(wrappedKey, result);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.wrapPackageKeyForRecoveryService", call.Identifier);
+        Assert.Equal("package-key:log_mobile", call.Arguments[0]);
+        Assert.Equal("service-public-key", call.Arguments[1]);
+    }
+
+    [Fact]
+    public async Task ImportRecoveryEnvelopeUsesScopedKeyName()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        Assert.True(await store.ImportRecoveryEnvelopeAsync(new LogbookId("log_mobile"), "wrapped-key"));
+
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.importRecoveryEnvelope", call.Identifier);
+        Assert.Equal("package-key:log_mobile", call.Arguments[0]);
+        Assert.Equal("wrapped-key", call.Arguments[1]);
+    }
+
+    [Fact]
     public async Task ImportRecoveryCodeValidatesCodeAndStoresScopedNonExtractableBrowserKey()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -139,8 +189,25 @@ public sealed class BrowserPackageKeyStoreTests
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.EnsurePackageKeyAsync(logbookId));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.DeletePackageKeyAsync(logbookId));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ImportRecoveryCodeAsync(logbookId, PortableLogbookKey.Generate().ToRecoveryCode()));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.WrapPackageKeyForRecoveryServiceAsync(logbookId, "service-public-key"));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.ImportRecoveryEnvelopeAsync(logbookId, "wrapped-key"));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.EncryptAsync(logbookId, new byte[12], [], []));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.DecryptAsync(logbookId, new byte[12], [], new byte[16], []));
+
+        Assert.Empty(jsRuntime.Calls);
+    }
+
+    [Fact]
+    public async Task RecoveryEnvelopeOperationsRejectBlankPayloadsBeforeCallingJavaScript()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var store = new BrowserPackageKeyStore(jsRuntime);
+        var logbookId = new LogbookId("log_mobile");
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await store.WrapPackageKeyForRecoveryServiceAsync(logbookId, " "));
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await store.ImportRecoveryEnvelopeAsync(logbookId, " "));
 
         Assert.Empty(jsRuntime.Calls);
     }

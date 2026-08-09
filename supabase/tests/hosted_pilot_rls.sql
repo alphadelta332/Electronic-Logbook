@@ -715,4 +715,142 @@ select elb_rls_test.assert_true(
     )
 );
 
+select elb_rls_test.expect_error(
+    'authenticated clients cannot call the managed recovery RPC directly',
+    $sql$
+        select public.elb_bind_device_recovery_key(
+            '10000000-0000-0000-0000-000000000001',
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000001',
+            repeat('A', 392),
+            repeat('a', 64),
+            'RSA-OAEP-256'
+        )
+    $sql$,
+    '%permission denied%'
+);
+
+select elb_rls_test.expect_error(
+    'authenticated clients cannot bind recovery keys through device update',
+    $sql$
+        update public.devices
+        set recovery_public_key = repeat('A', 392),
+            recovery_key_fingerprint = repeat('a', 64),
+            recovery_key_algorithm = 'RSA-OAEP-256'
+        where device_id = '40000000-0000-0000-0000-000000000001'
+    $sql$,
+    '%device recovery-key changes require managed service access%'
+);
+
+reset role;
+select set_config('request.jwt.claim.role', 'service_role', true);
+select set_config('request.jwt.claim.sub', '', true);
+
+select public.elb_bind_device_recovery_key(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    repeat('A', 392),
+    repeat('a', 64),
+    'RSA-OAEP-256'
+);
+
+select elb_rls_test.assert_true(
+    'managed recovery service binds the device public key without private material',
+    (
+        select recovery_key_fingerprint = repeat('a', 64)
+          and recovery_key_algorithm = 'RSA-OAEP-256'
+          and recovery_public_key = repeat('A', 392)
+        from public.devices
+        where device_id = '40000000-0000-0000-0000-000000000001'
+    )
+);
+
+select public.elb_upsert_managed_recovery_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'AES-256-GCM',
+    'pilot-kek-v1',
+    repeat('B', 64),
+    repeat('C', 16)
+);
+
+select public.elb_upsert_managed_recovery_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'AES-256-GCM',
+    'pilot-kek-v1',
+    repeat('X', 64),
+    repeat('Y', 16)
+);
+
+select elb_rls_test.assert_true(
+    'managed recovery enrollment is create-once and idempotent',
+    (
+        select count(*) = 1
+          and min(ciphertext) = repeat('B', 64)
+          and min(nonce) = repeat('C', 16)
+        from public.key_envelopes
+        where logbook_id = '20000000-0000-0000-0000-000000000001'
+          and recovery_method = 'managed-service-v1'
+          and recipient_device_id is null
+          and revoked_at is null
+    )
+);
+
+select elb_rls_test.assert_true(
+    'managed recovery enrollment emits one redacted audit event',
+    (
+        select count(*) = 1
+          and bool_and(source_metadata = '{"channel":"managed_recovery_service"}'::jsonb)
+          and bool_and(redacted_details::text not like '%BBBB%')
+        from public.security_events
+        where event_type = 'managed_recovery_envelope_created'
+          and logbook_id = '20000000-0000-0000-0000-000000000001'
+    )
+);
+
+select elb_rls_test.expect_error(
+    'managed recovery service rejects a writer membership',
+    $sql$
+        select public.elb_read_managed_recovery_envelope(
+            '10000000-0000-0000-0000-000000000002',
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000002'
+        )
+    $sql$,
+    '%managed recovery logbook access denied%'
+);
+
+select public.elb_upsert_device_recovery_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'pilot-kek-v1',
+    repeat('D', 344)
+);
+
+select public.elb_upsert_device_recovery_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'pilot-kek-v1',
+    repeat('E', 344)
+);
+
+select elb_rls_test.assert_true(
+    'device recovery envelope retries retain one short-lived row',
+    (
+        select count(*) = 1
+          and min(ciphertext) = repeat('E', 344)
+          and min(expires_at) > now()
+        from public.key_envelopes
+        where logbook_id = '20000000-0000-0000-0000-000000000001'
+          and recipient_device_id = '40000000-0000-0000-0000-000000000001'
+          and revoked_at is null
+    )
+);
+
 rollback;

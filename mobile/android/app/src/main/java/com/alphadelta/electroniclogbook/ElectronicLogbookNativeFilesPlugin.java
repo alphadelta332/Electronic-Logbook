@@ -18,12 +18,21 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
+import java.security.KeyFactory;
+import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.SecureRandom;
+import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.Arrays;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
 import javax.crypto.spec.SecretKeySpec;
 import org.json.JSONException;
 
@@ -35,7 +44,13 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     private static final int AesGcmTagSizeBytes = 16;
     private static final String AndroidKeyStore = "AndroidKeyStore";
     private static final String WrapperKeyAlias = "electronic-logbook.package-key-wrapper.v2";
+    private static final String RecoveryKeyAlias = "electronic-logbook.recovery-key.v1";
     private static final String NativeKeyPreferences = "electronic_logbook_native_keys";
+    private static final OAEPParameterSpec RecoveryOaepParameters = new OAEPParameterSpec(
+        "SHA-256",
+        "MGF1",
+        MGF1ParameterSpec.SHA256,
+        PSource.PSpecified.DEFAULT);
 
     @PluginMethod
     public void saveAndShare(PluginCall call) {
@@ -166,6 +181,87 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void getRecoveryPublicKey(PluginCall call) {
+        try {
+            PublicKey publicKey = getOrCreateRecoveryPublicKey();
+            byte[] encoded = publicKey.getEncoded();
+            JSObject result = new JSObject();
+            result.put("publicKey", android.util.Base64.encodeToString(encoded, android.util.Base64.NO_WRAP));
+            result.put("fingerprint", toLowerHex(MessageDigest.getInstance("SHA-256").digest(encoded)));
+            result.put("algorithm", "RSA-OAEP-256");
+            call.resolve(result);
+        } catch (GeneralSecurityException ex) {
+            call.reject("Could not create the Android Keystore recovery key.", "RECOVERY_KEY_CREATE_FAILED", ex);
+        }
+    }
+
+    @PluginMethod
+    public void wrapPackageKeyForRecoveryService(PluginCall call) {
+        String keyName = call.getString("keyName");
+        String servicePublicKey = call.getString("servicePublicKey");
+        if (!isValidKeyName(keyName, call) || servicePublicKey == null || servicePublicKey.isBlank()) {
+            if (servicePublicKey == null || servicePublicKey.isBlank()) {
+                call.reject("Recovery service public key is required.", "RECOVERY_SERVICE_KEY_MISSING");
+            }
+            return;
+        }
+
+        byte[] packageKey = null;
+        try {
+            packageKey = loadPackageKey(keyName);
+            PublicKey publicKey = KeyFactory.getInstance("RSA").generatePublic(
+                new X509EncodedKeySpec(android.util.Base64.decode(servicePublicKey, android.util.Base64.NO_WRAP)));
+            Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
+            cipher.init(Cipher.ENCRYPT_MODE, publicKey, RecoveryOaepParameters);
+            JSObject result = new JSObject();
+            result.put(
+                "wrappedKey",
+                android.util.Base64.encodeToString(cipher.doFinal(packageKey), android.util.Base64.NO_WRAP));
+            result.put("algorithm", "RSA-OAEP-256");
+            call.resolve(result);
+        } catch (GeneralSecurityException | IllegalArgumentException ex) {
+            call.reject("Could not wrap the package key for account recovery.", "RECOVERY_KEY_WRAP_FAILED", ex);
+        } finally {
+            if (packageKey != null) {
+                Arrays.fill(packageKey, (byte) 0);
+            }
+        }
+    }
+
+    @PluginMethod
+    public void importRecoveryEnvelope(PluginCall call) {
+        String keyName = call.getString("keyName");
+        String wrappedKey = call.getString("wrappedKey");
+        if (!isValidKeyName(keyName, call) || wrappedKey == null || wrappedKey.isBlank()) {
+            if (wrappedKey == null || wrappedKey.isBlank()) {
+                call.reject("Device-wrapped recovery envelope is required.", "RECOVERY_ENVELOPE_MISSING");
+            }
+            return;
+        }
+
+        byte[] packageKey = null;
+        try {
+            Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding");
+            cipher.init(Cipher.DECRYPT_MODE, getRecoveryPrivateKey(), RecoveryOaepParameters);
+            packageKey = cipher.doFinal(android.util.Base64.decode(wrappedKey, android.util.Base64.NO_WRAP));
+            if (packageKey.length != PackageKeySizeBytes) {
+                throw new GeneralSecurityException("Recovered package key has the wrong length.");
+            }
+
+            storePackageKey(keyName, packageKey);
+            JSObject result = new JSObject();
+            result.put("imported", true);
+            call.resolve(result);
+        } catch (GeneralSecurityException | IllegalArgumentException ex) {
+            call.reject("Could not import the device-wrapped recovery envelope.", "RECOVERY_ENVELOPE_IMPORT_FAILED", ex);
+        } finally {
+            if (packageKey != null) {
+                Arrays.fill(packageKey, (byte) 0);
+            }
+        }
+    }
+
+    @PluginMethod
     public void encryptPackagePayload(PluginCall call) {
         cryptPackagePayload(call, true);
     }
@@ -293,6 +389,57 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             .setRandomizedEncryptionRequired(false)
             .build());
         return generator.generateKey();
+    }
+
+    private PublicKey getOrCreateRecoveryPublicKey() throws GeneralSecurityException {
+        KeyStore keyStore = loadAndroidKeyStore();
+        java.security.cert.Certificate existing = keyStore.getCertificate(RecoveryKeyAlias);
+        if (existing != null) {
+            return existing.getPublicKey();
+        }
+
+        KeyPairGenerator generator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_RSA, AndroidKeyStore);
+        generator.initialize(new KeyGenParameterSpec.Builder(
+            RecoveryKeyAlias,
+            KeyProperties.PURPOSE_DECRYPT)
+            .setDigests(KeyProperties.DIGEST_SHA256)
+            .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
+            .setKeySize(2048)
+            .build());
+        return generator.generateKeyPair().getPublic();
+    }
+
+    private PrivateKey getRecoveryPrivateKey() throws GeneralSecurityException {
+        KeyStore keyStore = loadAndroidKeyStore();
+        if (keyStore.getCertificate(RecoveryKeyAlias) == null) {
+            getOrCreateRecoveryPublicKey();
+            keyStore = loadAndroidKeyStore();
+        }
+
+        PrivateKey privateKey = (PrivateKey) keyStore.getKey(RecoveryKeyAlias, null);
+        if (privateKey == null) {
+            throw new GeneralSecurityException("Android Keystore recovery key is unavailable.");
+        }
+
+        return privateKey;
+    }
+
+    private static KeyStore loadAndroidKeyStore() throws GeneralSecurityException {
+        KeyStore keyStore = KeyStore.getInstance(AndroidKeyStore);
+        try {
+            keyStore.load(null);
+        } catch (IOException | java.security.cert.CertificateException ex) {
+            throw new GeneralSecurityException("Could not load Android Keystore.", ex);
+        }
+        return keyStore;
+    }
+
+    private static String toLowerHex(byte[] bytes) {
+        StringBuilder result = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) {
+            result.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+        }
+        return result.toString();
     }
 
     private static boolean isValidKeyName(String keyName, PluginCall call) {
