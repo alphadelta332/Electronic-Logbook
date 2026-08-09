@@ -10,8 +10,9 @@ namespace ElectronicLogbook.Mobile;
 public sealed class MobileSupabaseHostedSyncClient(
     HttpClient http,
     BrowserHostedCredentialStore credentialStore,
-    ISyncClock clock)
-    : IHostedLogbookAuthenticator, IHostedLogbookLedger, IMobileHostedRecoveryClient
+    ISyncClock clock,
+    BrowserGoogleCredentialProvider? googleCredentialProvider = null)
+    : IHostedLogbookAuthenticator, IHostedLogbookLedger, IMobileHostedRecoveryClient, IMobileGoogleHostedAuthenticator
 {
     private const string ConfigPath = "hosted-sync.local.json";
     private const string PendingDeviceIdValue = "dev_pending";
@@ -270,6 +271,64 @@ public sealed class MobileSupabaseHostedSyncClient(
         return await CompletePendingDeviceRegistrationAsync(options, cancellationToken);
     }
 
+    public async ValueTask<HostedSyncSession> SignInWithGoogleAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var options = await GetConfigAsync(cancellationToken);
+        var googleCredential = await GetGoogleCredentialAsync(options, cancellationToken);
+        var verified = await ExchangeGoogleIdTokenAsync(
+            options,
+            googleCredential,
+            linkIdentity: false,
+            cancellationToken);
+        var accountId = new HostedAccountId("acct_" + ParseRequiredGuid(verified.User?.Id, "account id").ToString("N"));
+        credential = new BrowserHostedCredential(
+            accountId,
+            new DeviceId(PendingDeviceIdValue),
+            verified.AccessToken,
+            verified.RefreshToken,
+            clock.UtcNow.AddSeconds(Math.Max(verified.ExpiresIn, 60)));
+        await credentialStore.SaveAsync(credential);
+        return await CompletePendingDeviceRegistrationAsync(options, cancellationToken);
+    }
+
+    public async ValueTask<HostedSyncSession> LinkGoogleIdentityAsync(
+        CancellationToken cancellationToken = default)
+    {
+        credential ??= await credentialStore.LoadAsync();
+        if (credential is null || IsPendingCredential(credential))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.SignedOut,
+                "Connect the invited account before adding Google sign-in.");
+        }
+
+        var options = await GetConfigAsync(cancellationToken);
+        var googleCredential = await GetGoogleCredentialAsync(options, cancellationToken);
+        var linked = await ExchangeGoogleIdTokenAsync(
+            options,
+            googleCredential,
+            linkIdentity: true,
+            cancellationToken);
+        var linkedAccountId = new HostedAccountId(
+            "acct_" + ParseRequiredGuid(linked.User?.Id, "account id").ToString("N"));
+        if (linkedAccountId != credential.AccountId)
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.AccountDisabled,
+                "Google sign-in did not link to the connected invited account.");
+        }
+
+        credential = credential with
+        {
+            AccessToken = linked.AccessToken,
+            RefreshToken = string.IsNullOrWhiteSpace(linked.RefreshToken) ? credential.RefreshToken : linked.RefreshToken,
+            AccessTokenExpiresAt = clock.UtcNow.AddSeconds(Math.Max(linked.ExpiresIn, 60))
+        };
+        await credentialStore.SaveAsync(credential);
+        return new HostedSyncSession(credential.AccountId, credential.DeviceId, credential.AccessTokenExpiresAt);
+    }
+
     private async ValueTask<HostedSyncSession> CompletePendingDeviceRegistrationAsync(
         MobileHostedSyncConfig options,
         CancellationToken cancellationToken)
@@ -281,6 +340,14 @@ public sealed class MobileSupabaseHostedSyncClient(
                 "No verified sign-in is available to resume.");
         }
 
+        var existingLogbooks = await DiscoverActiveLogbooksAsync(cancellationToken);
+        if (existingLogbooks.Count > 0)
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.AccountRecoveryRequired,
+                "Your existing logbook cannot yet be opened on this phone. No new device or logbook was created.");
+        }
+
         var device = await AcceptInvitationAsync(options, cancellationToken);
         credential = credential with { DeviceId = device.DeviceId };
         await credentialStore.SaveAsync(credential);
@@ -290,6 +357,76 @@ public sealed class MobileSupabaseHostedSyncClient(
 
     private static bool IsPendingCredential(BrowserHostedCredential value) =>
         string.Equals(value.DeviceId.Value, PendingDeviceIdValue, StringComparison.Ordinal);
+
+    private async ValueTask<GoogleIdTokenCredential> GetGoogleCredentialAsync(
+        MobileHostedSyncConfig options,
+        CancellationToken cancellationToken)
+    {
+        if (googleCredentialProvider is null || string.IsNullOrWhiteSpace(options.GoogleWebClientId))
+        {
+            throw new InvalidOperationException("Google sign-in is not configured in this Android build.");
+        }
+
+        return await googleCredentialProvider.GetAsync(options.GoogleWebClientId, cancellationToken);
+    }
+
+    private async ValueTask<AuthSessionResponse> ExchangeGoogleIdTokenAsync(
+        MobileHostedSyncConfig options,
+        GoogleIdTokenCredential googleCredential,
+        bool linkIdentity,
+        CancellationToken cancellationToken)
+    {
+        using var request = NewRequest(
+            options,
+            HttpMethod.Post,
+            "/auth/v1/token?grant_type=id_token",
+            includeAuthorization: linkIdentity);
+        request.Content = JsonContent(new GoogleIdTokenRequest(
+            "google",
+            googleCredential.IdToken,
+            googleCredential.Nonce,
+            linkIdentity));
+        using var response = await http.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw ToSignInException(response.StatusCode, body);
+        }
+
+        return JsonSerializer.Deserialize<AuthSessionResponse>(body, WebJson)
+            ?? throw new HostedSignInException(
+                HostedSignInFailureReason.InvalidVerificationCode,
+                "Google sign-in returned no Supabase session.");
+    }
+
+    public async ValueTask<IReadOnlyList<MobileHostedLogbookMembership>> DiscoverActiveLogbooksAsync(
+        CancellationToken cancellationToken = default)
+    {
+        credential ??= await credentialStore.LoadAsync();
+        if (credential is null)
+        {
+            throw new HostedSignInException(HostedSignInFailureReason.SignedOut, "Hosted sync is signed out.");
+        }
+
+        var options = await GetConfigAsync(cancellationToken);
+        var accountUuid = FromHostedAccountId(credential.AccountId);
+        var rows = await GetRestAsync<HostedLogbookMembershipRow[]>(
+            options,
+            "/rest/v1/logbook_memberships"
+            + "?select=logbook_id,role,logbooks!inner(logbook_id,current_schema_version,operation_format_version,deletion_requested_at,deleted_at)"
+            + $"&account_id=eq.{accountUuid}"
+            + "&accepted_at=not.is.null&revoked_at=is.null"
+            + "&logbooks.deletion_requested_at=is.null&logbooks.deleted_at=is.null"
+            + "&order=granted_at.asc",
+            cancellationToken);
+        return rows
+            .Select(row => new MobileHostedLogbookMembership(
+                FromHostedLogbookUuid(row.LogbookId),
+                row.Role,
+                row.Logbook.CurrentSchemaVersion,
+                row.Logbook.OperationFormatVersion))
+            .ToArray();
+    }
 
     public async ValueTask<HostedSyncSession> RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -877,6 +1014,11 @@ public sealed class MobileSupabaseHostedSyncClient(
             ? new DeviceId(prefix + parsed.ToString("N"))
             : new DeviceId(value);
 
+    private static LogbookId FromHostedLogbookUuid(string value) =>
+        Guid.TryParse(value, out var parsed)
+            ? new LogbookId("log_" + parsed.ToString("N"))
+            : new LogbookId(value);
+
     private static Guid ParseRequiredGuid(string? value, string label) =>
         Guid.TryParse(value, out var parsed)
             ? parsed
@@ -898,7 +1040,8 @@ public sealed class MobileSupabaseHostedSyncClient(
         string SupabaseUrl,
         string AnonKey,
         string? PlatformLabel = null,
-        string? DisplayName = null);
+        string? DisplayName = null,
+        string? GoogleWebClientId = null);
 
     private sealed record OtpRequest(
         string Email,
@@ -915,6 +1058,14 @@ public sealed class MobileSupabaseHostedSyncClient(
 
     private sealed record RefreshRequest(
         [property: JsonPropertyName("refresh_token")] string RefreshToken);
+
+    private sealed record GoogleIdTokenRequest(
+        string Provider,
+        [property: JsonPropertyName("id_token")] string IdToken,
+        string Nonce,
+        [property: JsonPropertyName("link_identity")]
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        bool LinkIdentity);
 
     private sealed record AuthSessionResponse(
         [property: JsonPropertyName("access_token")] string AccessToken,
@@ -935,6 +1086,18 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonPropertyName("device_id")] string DeviceId,
         [property: JsonPropertyName("account_id")] string AccountId,
         string Status);
+
+    private sealed record HostedLogbookMembershipRow(
+        [property: JsonPropertyName("logbook_id")] string LogbookId,
+        string Role,
+        [property: JsonPropertyName("logbooks")] HostedLogbookRow Logbook);
+
+    private sealed record HostedLogbookRow(
+        [property: JsonPropertyName("logbook_id")] string LogbookId,
+        [property: JsonPropertyName("current_schema_version")] int CurrentSchemaVersion,
+        [property: JsonPropertyName("operation_format_version")] int OperationFormatVersion,
+        [property: JsonPropertyName("deletion_requested_at")] DateTimeOffset? DeletionRequestedAt,
+        [property: JsonPropertyName("deleted_at")] DateTimeOffset? DeletedAt);
 
     private sealed record AuthUserResponse(
         [property: JsonPropertyName("id")] string? Id);
@@ -1009,3 +1172,9 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonPropertyName("highest_revision")] long HighestRevision,
         [property: JsonPropertyName("has_more")] bool HasMore);
 }
+
+public sealed record MobileHostedLogbookMembership(
+    LogbookId LogbookId,
+    string Role,
+    int CurrentSchemaVersion,
+    int OperationFormatVersion);

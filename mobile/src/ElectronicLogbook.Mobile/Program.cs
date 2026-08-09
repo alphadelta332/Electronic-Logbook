@@ -12,6 +12,7 @@ builder.Services.AddScoped(sp => new HttpClient { BaseAddress = new Uri(builder.
 builder.Services.AddScoped<BrowserLogbookStore>();
 builder.Services.AddScoped<BrowserPackageKeyStore>();
 builder.Services.AddScoped<BrowserHostedCredentialStore>();
+builder.Services.AddScoped<BrowserGoogleCredentialProvider>();
 builder.Services.AddScoped<BrowserFileStore>();
 builder.Services.AddScoped<BrowserUiPreferencesStore>();
 builder.Services.AddScoped<MobileUiPreferenceState>();
@@ -20,6 +21,7 @@ builder.Services.AddScoped<BrowserNetworkStatus>();
 builder.Services.AddScoped<INetworkStatus>(sp => sp.GetRequiredService<BrowserNetworkStatus>());
 builder.Services.AddScoped<MobileSupabaseHostedSyncClient>();
 builder.Services.AddScoped<IHostedLogbookAuthenticator>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
+builder.Services.AddScoped<IMobileGoogleHostedAuthenticator>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
 builder.Services.AddScoped<IHostedLogbookLedger>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
 builder.Services.AddScoped<IMobileHostedRecoveryClient>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
 builder.Services.AddScoped<MobileConnectionRecoveryWorkflow>();

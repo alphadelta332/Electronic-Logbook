@@ -11,7 +11,8 @@ public sealed class MobileLogbookSession(
     IHostedLogbookLedger? hostedLedger = null,
     INetworkStatus? networkStatus = null,
     ISyncClock? syncClock = null,
-    MobileConnectionRecoveryWorkflow? connectionRecovery = null)
+    MobileConnectionRecoveryWorkflow? connectionRecovery = null,
+    IMobileGoogleHostedAuthenticator? googleAuthenticator = null)
 {
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
@@ -638,6 +639,35 @@ public sealed class MobileLogbookSession(
         EnsureHostedInviteAcceptanceAvailable();
         var session = await hostedAuthenticator!.ResumeEmailSignInAsync();
         await CompleteHostedInviteSetupAsync(session);
+    }
+
+    public async Task SignInWithGoogleAsync()
+    {
+        EnsureGoogleSignInAvailable();
+        EnsureHostedInviteAcceptanceAvailable();
+        var session = await googleAuthenticator!.SignInWithGoogleAsync();
+        await CompleteHostedInviteSetupAsync(session);
+    }
+
+    public async Task LinkGoogleIdentityAsync()
+    {
+        EnsureGoogleSignInAvailable();
+        if (!HasHostedSync)
+        {
+            throw new InvalidOperationException("Connect the invited account before adding Google sign-in.");
+        }
+
+        ClearLastActionMessage();
+        await googleAuthenticator!.LinkGoogleIdentityAsync();
+        SetLastActionMessage("Google sign-in added to this account.");
+    }
+
+    private void EnsureGoogleSignInAvailable()
+    {
+        if (googleAuthenticator is null)
+        {
+            throw new InvalidOperationException("Google sign-in is not configured on this device.");
+        }
     }
 
     public async Task<MobileConnectionDiagnosticReport> RunConnectionPreflightAsync(

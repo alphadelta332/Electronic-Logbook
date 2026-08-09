@@ -133,12 +133,79 @@ public sealed class MobileSupabaseHostedSyncClientTests
         "retained-refresh-token",
         DateTimeOffset.Parse("2099-01-01T00:00:00Z"));
 
+    [Fact]
+    public async Task GoogleSignInExchangesIdTokenWithRawNonceAndRegistersOnlyAfterMembershipDiscovery()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/auth/v1/token"] = (HttpStatusCode.OK, AuthSessionJson("google-refresh-token"));
+        var jsRuntime = new MemoryJsRuntime { GoogleIdToken = "google-id-token" };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            new BrowserHostedCredentialStore(jsRuntime),
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")),
+            new BrowserGoogleCredentialProvider(jsRuntime));
+
+        var session = await client.SignInWithGoogleAsync();
+
+        var tokenRequest = Assert.Single(handler.Requests, request => request.Path == "/auth/v1/token");
+        Assert.Equal("?grant_type=id_token", tokenRequest.Query);
+        Assert.Null(tokenRequest.Authorization);
+        Assert.Equal("google", tokenRequest.Body.GetProperty("provider").GetString());
+        Assert.Equal("google-id-token", tokenRequest.Body.GetProperty("id_token").GetString());
+        Assert.False(tokenRequest.Body.TryGetProperty("link_identity", out _));
+        var rawNonce = tokenRequest.Body.GetProperty("nonce").GetString();
+        Assert.NotNull(rawNonce);
+        var nativeOptions = Assert.IsType<JsonElement>(jsRuntime.LastGoogleOptions);
+        Assert.Equal("web-client-id.apps.googleusercontent.com", nativeOptions.GetProperty("webClientId").GetString());
+        var expectedHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(rawNonce))).ToLowerInvariant();
+        Assert.Equal(expectedHash, nativeOptions.GetProperty("nonce").GetString());
+        Assert.Equal(new DeviceId("dev_40000000000000000000000000000001"), session.DeviceId);
+        Assert.True(handler.Requests.FindIndex(request => request.Path == "/rest/v1/logbook_memberships")
+            < handler.Requests.FindIndex(request => request.Path == "/rest/v1/rpc/accept_hosted_invitation"));
+    }
+
+    [Fact]
+    public async Task GoogleIdentityLinkUsesExistingSessionAndKeepsRegisteredDevice()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/auth/v1/token"] = (HttpStatusCode.OK, AuthSessionJson("linked-refresh-token"));
+        var jsRuntime = new MemoryJsRuntime { GoogleIdToken = "google-id-token" };
+        var store = new BrowserHostedCredentialStore(jsRuntime);
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")),
+            new BrowserGoogleCredentialProvider(jsRuntime));
+
+        var session = await client.LinkGoogleIdentityAsync();
+
+        var tokenRequest = Assert.Single(handler.Requests, request => request.Path == "/auth/v1/token");
+        Assert.Equal("Bearer " + ValidCredential().AccessToken, tokenRequest.Authorization);
+        Assert.True(tokenRequest.Body.GetProperty("link_identity").GetBoolean());
+        Assert.Equal(ValidCredential().DeviceId, session.DeviceId);
+        Assert.Equal("linked-refresh-token", (await store.LoadAsync())?.RefreshToken);
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+    }
+
+    private static string AuthSessionJson(string refreshToken) => $$"""
+        {
+          "access_token": "linked-access-token",
+          "refresh_token": "{{refreshToken}}",
+          "expires_in": 3600,
+          "user": { "id": "10000000-0000-0000-0000-000000000001" }
+        }
+        """;
+
     private static string Config(string anonKey) => $$"""
         {
           "supabaseUrl": "https://pilot.supabase.co",
           "anonKey": "{{anonKey}}",
           "platformLabel": "Pixel 8 Pro",
-          "displayName": "Project owner"
+          "displayName": "Project owner",
+          "googleWebClientId": "web-client-id.apps.googleusercontent.com"
         }
         """;
 
@@ -265,6 +332,52 @@ public sealed class MobileSupabaseHostedSyncClientTests
         Assert.NotNull(await client.GetCurrentSessionAsync());
         Assert.Single(handler.Requests, request => request.Path == "/auth/v1/verify");
         Assert.Equal(2, handler.Requests.Count(request => request.Path == "/rest/v1/rpc/accept_hosted_invitation"));
+    }
+
+    [Fact]
+    public async Task ReturningUserDiscoveryStopsBeforeDuplicateDeviceOrLogbookCreation()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/rest/v1/logbook_memberships"] =
+            (HttpStatusCode.OK, """
+                [{
+                  "logbook_id": "20000000-0000-0000-0000-000000000001",
+                  "role": "owner",
+                  "logbooks": {
+                    "logbook_id": "20000000-0000-0000-0000-000000000001",
+                    "current_schema_version": 2,
+                    "operation_format_version": 1,
+                    "deletion_requested_at": null,
+                    "deleted_at": null
+                  }
+                }]
+                """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        await client.StartEmailSignInAsync("owner@example.com");
+        var error = await Assert.ThrowsAsync<HostedSignInException>(async () =>
+            await client.CompleteEmailSignInAsync("123456"));
+
+        Assert.Equal(HostedSignInFailureReason.AccountRecoveryRequired, error.Reason);
+        Assert.Contains("existing logbook", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("key", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("recovery", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post && request.Path == "/rest/v1/logbooks");
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post && request.Path == "/rest/v1/logbook_memberships");
+        Assert.Contains(handler.Requests, request =>
+            request.Method == HttpMethod.Get
+            && request.Path == "/rest/v1/logbook_memberships"
+            && request.Authorization == "Bearer access-token");
+
+        var pending = await store.LoadAsync();
+        Assert.NotNull(pending);
+        Assert.Equal(new DeviceId("dev_pending"), pending.DeviceId);
     }
 
     [Fact]
@@ -449,6 +562,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
             Requests.Add(new RecordedRequest(
                 request.Method,
                 request.RequestUri?.AbsolutePath ?? string.Empty,
+                request.RequestUri?.Query ?? string.Empty,
                 request.Headers.Authorization?.ToString(),
                 string.Join(",", request.Headers.Accept.Select(value => value.MediaType)),
                 parsedBody.RootElement.Clone()));
@@ -474,7 +588,8 @@ public sealed class MobileSupabaseHostedSyncClientTests
                       "supabaseUrl": "https://pilot.supabase.co",
                       "anonKey": "anon-key",
                       "platformLabel": "Pixel 8 Pro",
-                      "displayName": "Project owner"
+                      "displayName": "Project owner",
+                      "googleWebClientId": "web-client-id.apps.googleusercontent.com"
                     }
                     """,
                 "/auth/v1/otp" => "{}",
@@ -500,7 +615,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
                     { "device_id": "40000000-0000-0000-0000-000000000001" }
                     """,
                 "/rest/v1/logbooks" => "{}",
-                "/rest/v1/logbook_memberships" => "{}",
+                "/rest/v1/logbook_memberships" => "[]",
                 "/rest/v1/rpc/append_hosted_operation" => OperationJson,
                 "/rest/v1/rpc/read_missing_operations" => $"[{OperationJson}]",
                 "/rest/v1/rpc/record_operation_ack" => "{}",
@@ -535,6 +650,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
     private sealed record RecordedRequest(
         HttpMethod Method,
         string Path,
+        string Query,
         string? Authorization,
         string Accept,
         JsonElement Body);
@@ -542,6 +658,8 @@ public sealed class MobileSupabaseHostedSyncClientTests
     private sealed class MemoryJsRuntime : IJSRuntime
     {
         public Dictionary<string, string> StoredValues { get; } = [];
+        public string? GoogleIdToken { get; init; }
+        public object? LastGoogleOptions { get; private set; }
 
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
             InvokeAsync<TValue>(identifier, CancellationToken.None, args);
@@ -557,8 +675,20 @@ public sealed class MobileSupabaseHostedSyncClientTests
                 "electronicLogbookStore.load" => Load<TValue>(args),
                 "electronicLogbookStore.save" => Save<TValue>(args),
                 "electronicLogbookStore.delete" => Delete<TValue>(args),
+                "electronicLogbookCredentials.getGoogleIdToken" => GetGoogleIdToken<TValue>(args),
                 _ => throw new JSException($"Unexpected JS call: {identifier}")
             };
+        }
+
+        private ValueTask<TValue> GetGoogleIdToken<TValue>(object?[]? args)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(GoogleIdToken));
+            Assert.NotNull(args);
+            LastGoogleOptions = JsonSerializer.SerializeToElement(args[0]);
+            var result = JsonSerializer.Deserialize<TValue>(
+                JsonSerializer.Serialize(new { idToken = GoogleIdToken, email = "pilot@example.com" }),
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return new ValueTask<TValue>(Assert.IsType<TValue>(result));
         }
 
         private ValueTask<TValue> Load<TValue>(object?[]? args)

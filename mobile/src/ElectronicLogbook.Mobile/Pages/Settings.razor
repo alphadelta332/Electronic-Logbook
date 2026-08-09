@@ -113,6 +113,10 @@ else
             @if (!Session.HasHostedSync)
             {
                 <div class="field-grid">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AccountCircle" OnClick="SignInWithGoogleAsync" Disabled="@IsAccountBusy">
+                        Sign in with Google
+                    </MudButton>
+                    <MudText Typo="Typo.caption">Returning pilots: use the Google account previously added to your invited account.</MudText>
                     <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
                         Send sign-in email
@@ -138,6 +142,15 @@ else
                         Recover retained connection
                     </MudButton>
                 </div>
+            }
+            else
+            {
+                <div class="connection-diagnostic-actions">
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AddModerator" OnClick="LinkGoogleIdentityAsync" Disabled="@IsAccountBusy">
+                        Add Google sign-in
+                    </MudButton>
+                </div>
+                <MudText Typo="Typo.caption">Do this once after accepting the email invitation. It links Google to this existing account; it does not create another logbook.</MudText>
             }
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncNowAsync" Disabled="@(!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)">
                 Sync now
@@ -389,6 +402,56 @@ else
             await Session.ResumeHostedInviteAcceptanceAsync();
             HostedVerificationCode = string.Empty;
             AccountMessage = Session.LastActionMessage ?? "Account connected.";
+        }
+        catch (Exception ex)
+        {
+            AccountError = AccountFailureMessage(ex);
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
+
+    private async Task SignInWithGoogleAsync()
+    {
+        if (IsAccountBusy)
+        {
+            return;
+        }
+
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            await Session.SignInWithGoogleAsync();
+            AccountMessage = Session.LastActionMessage ?? "Account connected with Google.";
+        }
+        catch (Exception ex)
+        {
+            AccountError = AccountFailureMessage(ex);
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
+
+    private async Task LinkGoogleIdentityAsync()
+    {
+        if (IsAccountBusy)
+        {
+            return;
+        }
+
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            await Session.LinkGoogleIdentityAsync();
+            AccountMessage = Session.LastActionMessage ?? "Google sign-in added.";
         }
         catch (Exception ex)
         {

@@ -163,6 +163,7 @@ public enum HostedDeviceStatus
 public enum HostedSignInFailureReason
 {
     InvitationRequired,
+    AccountRecoveryRequired,
     VerificationExpired,
     InvalidVerificationCode,
     RefreshTokenRevoked,

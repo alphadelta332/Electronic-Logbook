@@ -268,6 +268,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("ResumeHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
         Assert.Contains("StartHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
         Assert.Contains("CompleteHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("Sign in with Google", settings, StringComparison.Ordinal);
+        Assert.Contains("Add Google sign-in", settings, StringComparison.Ordinal);
+        Assert.Contains("SignInWithGoogleAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("LinkGoogleIdentityAsync", settings, StringComparison.Ordinal);
         Assert.Contains("AccountFailureMessage", settings, StringComparison.Ordinal);
         Assert.Contains("Do not request another email", settings, StringComparison.Ordinal);
         Assert.Contains("Run connection preflight", settings, StringComparison.Ordinal);

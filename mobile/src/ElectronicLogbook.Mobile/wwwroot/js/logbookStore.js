@@ -69,6 +69,11 @@
         return globalThis.Capacitor?.isNativePlatform?.() && plugin?.hasPackageKey ? plugin : null;
     }
 
+    function nativeCredentialsPlugin() {
+        const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookCredentials;
+        return globalThis.Capacitor?.isNativePlatform?.() && plugin?.getGoogleIdToken ? plugin : null;
+    }
+
     window.electronicLogbookStore = {
         load: (key) => withStore(documentStoreName, "readonly", (store) => store.get(key)),
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key)),
@@ -86,6 +91,17 @@
             }
 
             await navigator.clipboard.writeText(String(redactedText ?? ""));
+        }
+    };
+
+    window.electronicLogbookCredentials = {
+        getGoogleIdToken: async (options) => {
+            const native = nativeCredentialsPlugin();
+            if (!native) {
+                throw new Error("Google sign-in is only available in the installed Android app.");
+            }
+
+            return await native.getGoogleIdToken(options);
         }
     };
 
