@@ -12,7 +12,8 @@ Install the following tools before working on the relevant area:
 - Microsoft Excel for Windows (Microsoft 365 on Windows 11 is the primary supported
   environment; Excel 2021 and newer perpetual editions are supported).
 - PowerShell 7 or Windows PowerShell for the repository scripts.
-- .NET 8 SDK for the updater, portable package logic, and Blazor mobile app.
+- .NET 10 SDK for the updater, portable package logic, tests, and Blazor mobile app.
+  Keep the .NET 8 SDK installed for the recovery-envelope secret generator.
 - Node.js with npm for the Capacitor Android shell. The committed
   `mobile/package-lock.json` pins its JavaScript dependencies.
 - Android tooling only when building, installing, or USB-debugging the Android package
@@ -29,7 +30,7 @@ normal Android behaviour over USB debugging requires all of the following on the
 - Java 21 JDK for the Android Gradle/Capacitor build. Temurin 21 is known to work:
   `winget install --id EclipseAdoptium.Temurin.21.JDK --exact`.
 - Android SDK command-line tools or Android Studio with the SDK Manager.
-- Android SDK Platform 35 and Android SDK Build-Tools 35.0.0, matching
+- Android SDK Platform 36 and Android SDK Build-Tools 35.0.0, matching
   `mobile/android/variables.gradle`.
 - Accepted Android SDK licenses. This is a one-time legal prompt; run it while online
   and accept only after reviewing the terms:
@@ -44,7 +45,7 @@ $env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
 $env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-21"
 $env:Path = "$env:JAVA_HOME\bin;$env:ANDROID_HOME\platform-tools;$env:ANDROID_HOME\cmdline-tools\latest\bin;$env:Path"
 
-sdkmanager --sdk_root="$env:ANDROID_HOME" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+sdkmanager --sdk_root="$env:ANDROID_HOME" "platform-tools" "platforms;android-36" "build-tools;35.0.0"
 sdkmanager --licenses
 ```
 
@@ -55,7 +56,7 @@ metadata and tool installers:
 | --- | ---: |
 | Android SDK Command-line Tools for Windows | 156 MB |
 | Android SDK Platform-Tools / `adb` | 18 MB installed; download is in the same small range |
-| Android SDK Platform 35 | 64 MB |
+| Android SDK Platform 36 | approximately 65-75 MB |
 | Android SDK Build-Tools 35.0.0 for Windows | 60 MB |
 | Temurin Java 21 JDK | roughly 170-220 MB |
 | Gradle wrapper distribution on first Android build | roughly 150-170 MB |

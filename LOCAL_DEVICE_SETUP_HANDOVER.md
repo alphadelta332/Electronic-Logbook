@@ -1,0 +1,329 @@
+# Electronic Logbook Development Device Setup and Handover
+
+This is the durable Windows setup guide for moving Electronic Logbook development to
+another trusted personal computer. It deliberately contains no passwords, tokens,
+private keys, user names, drive letters, or machine-specific paths.
+
+The public repository supplies the installer and transfer commands. Private project
+context, signing keys, OAuth files, hosted-pilot credentials, and local recovery state
+travel only inside an AES-256 encrypted 7-Zip archive.
+
+Never upload the encrypted archive to GitHub. Keep its password in a separate password
+manager or communicate it through a different channel.
+
+## The Four Commands
+
+Run these commands from the repository root in Windows PowerShell or PowerShell 7:
+
+```powershell
+# Inspect what would be exported; creates nothing.
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export -WhatIf
+
+# Create the encrypted operational archive.
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export
+
+# Install or update the supported toolchain on a new Windows device.
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Install
+
+# Restore a transferred archive over the new clone.
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Import `
+  -ArchivePath "C:\Path\To\ElectronicLogbook-LocalDevelopment-YYYYMMDD-HHMMSS.7z"
+
+# Check that the machine is ready.
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Verify
+```
+
+The same actions appear in VS Code under **Terminal > Run Task** as:
+
+- `Electronic Logbook: Export local development bundle`
+- `Electronic Logbook: Import local development bundle`
+- `Electronic Logbook: Install development prerequisites`
+- `Electronic Logbook: Verify development environment`
+
+The Import task asks for the archive path. Export and Import ask for the archive
+password in the integrated terminal.
+
+## What The Archive Contains
+
+The default archive is the small **operational** handover, not a backup of every build
+or conversation. Its exact allowlist lives in
+`tools/local-development-transfer.psd1`.
+
+It includes:
+
+- local `AGENTS.md`, `TODO.md`, `regulations.md`, and this guide;
+- `release.local.json` when it exists;
+- the mobile hosted-sync local JSON when configured;
+- private `.github/*.pem` material when present;
+- the reusable project-local `.codex` scripts, prompt, schema, and hooks;
+- `%LOCALAPPDATA%\ElectronicLogbook`, including durable Android signing, Google OAuth,
+  Supabase management/project configuration, recovery configuration, and the small
+  Android device-bridge records;
+- the custom Graphify skill when installed; and
+- a sanitized reference snapshot of stable Codex preferences.
+
+Every payload file is recorded with a SHA-256 hash, length, target root, relative path,
+and non-secret classification. The internal manifest also records the Git branch,
+commit, whether tracked/untracked repository state was clean, and redacted software
+versions.
+
+It explicitly excludes:
+
+- `.NET` `bin`/`obj`, `node_modules`, Android builds, Gradle caches, and generated PWA
+  or Capacitor assets;
+- `artifacts`, `mobile/artifacts`, and `graphify-out`;
+- Codex authentication, sessions, databases, plugin caches, logs, attachments,
+  generated images, and bounded-roadmap run history;
+- Android `local.properties` and other paths that belong to one machine; and
+- GitHub and Codex authentication, which must be established again.
+
+Do not broaden the archive by copying a whole user profile or a whole `.codex`
+directory. On the reference machine that would add roughly a gigabyte of sessions,
+cache, plugin binaries, and databases, including state that is unsafe or invalid on a
+different computer.
+
+## Original Device: Create The Archive
+
+1. Close applications that may be changing local credentials or signing metadata.
+2. Open the repository in VS Code.
+3. Open a terminal at the repository root.
+4. Run the dry run:
+
+   ```powershell
+   .\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export -WhatIf
+   ```
+
+5. Resolve every item labelled `REQUIRED missing`. Optional missing items are normal
+   when that workflow has never been configured.
+6. Create the archive:
+
+   ```powershell
+   .\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export
+   ```
+
+7. Enter a unique password of at least 12 characters and confirm it. The password is
+   not echoed, saved, or placed in the 7-Zip command line.
+8. The default output is:
+
+   ```text
+   %USERPROFILE%\Downloads\ElectronicLogbook-LocalDevelopment-YYYYMMDD-HHMMSS.7z
+   ```
+
+9. The command tests the finished archive before reporting success. Move it using a
+   trusted removable drive or encrypted file-transfer service. Store or communicate the
+   password separately.
+
+To choose another output path:
+
+```powershell
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export `
+  -OutputPath "D:\Secure Transfer\ElectronicLogbook-LocalDevelopment.7z"
+```
+
+## New Device: Bootstrap Windows
+
+The destination must be a trusted Windows 11 computer because the full workflow uses
+desktop Excel COM automation, Windows PowerShell, Android tooling, and WSL2/Docker.
+
+Before cloning the repository, open Windows PowerShell as the normal user and install
+the two bootstrap tools if necessary:
+
+```powershell
+winget install --id Git.Git --exact
+winget install --id Microsoft.VisualStudioCode --exact
+```
+
+Close and reopen the terminal after installers change `PATH`.
+
+Clone the public repository and select the development branch:
+
+```powershell
+New-Item -ItemType Directory -Path "$env:USERPROFILE\Documents\GitHub" -Force
+Set-Location "$env:USERPROFILE\Documents\GitHub"
+git clone https://github.com/alphadelta332/Electronic-Logbook.git
+Set-Location Electronic-Logbook
+git switch dev
+```
+
+The repository may live elsewhere. All project commands determine the root from the
+script location and do not assume a drive letter.
+
+## Install The Development Toolchain
+
+From the new clone:
+
+```powershell
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Install
+```
+
+Preview the actions without installing anything:
+
+```powershell
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Install -WhatIf
+```
+
+The manifest currently covers:
+
+| Area | Known-good requirement |
+| --- | --- |
+| Git | Git plus optional GitHub CLI |
+| Shell/editor | Windows PowerShell, PowerShell 7, VS Code |
+| .NET | SDK 10 for the main solution and SDK 8 for the recovery secret generator |
+| JavaScript | Current Node.js LTS; the repository lockfile pins mobile packages |
+| Archive | 7-Zip with AES-256 and encrypted-header support |
+| Android | Temurin JDK 21, Platform Tools, SDK Platform 36, Build-Tools 35.0.0 |
+| Hosted pilot | Docker Desktop, WSL2, Supabase CLI 2.111.0, PostgreSQL 17 client |
+| Agent tooling | Codex CLI/VS Code extension, Python/uv, Graphify |
+
+The installer also installs these VS Code extensions:
+
+- C# Dev Kit and C#;
+- PowerShell;
+- Codex; and
+- Markdown All in One.
+
+It creates user-level `JAVA_HOME`, `ANDROID_HOME`, and `ANDROID_SDK_ROOT`, and adds
+Java, Android Platform Tools, Android command-line tools, `%USERPROFILE%\.local\bin`,
+the npm global directory, and PostgreSQL 17 to the user `PATH` without duplicating
+entries.
+
+Some vendor installers or first launches cannot safely be automated. Complete every
+manual checkpoint printed by the command:
+
+1. Install/sign in to Microsoft 365 and confirm desktop Excel opens.
+2. In Excel, open **File > Options > Trust Center > Trust Center Settings**. For this
+   trusted development environment, configure macro trust and enable **Trust access to
+   the VBA project object model** so disposable VBA compilation/import tests can run.
+3. Launch Docker Desktop, accept its terms, enable WSL2 when prompted, and restart if
+   required.
+4. Run `gh auth login`. Never copy GitHub credential-manager or token state.
+5. Open the Codex sidebar in VS Code and sign in. Official OpenAI documentation places
+   user configuration at `~/.codex/config.toml`; authentication and session databases
+   are deliberately not restored.
+6. Open Android Studio's SDK Manager if `sdkmanager` was not available during Install.
+   Install Android SDK Platform 36, Build-Tools 35.0.0, Platform Tools, and the latest
+   command-line tools.
+7. Review and accept Android SDK licences:
+
+   ```powershell
+   & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" --licenses
+   ```
+
+8. Connect the retained Android device, unlock it, enable Developer options and USB
+   debugging, and approve the new computer's USB debugging key. Do not clear or
+   uninstall the retained debug app.
+
+## Restore The Encrypted Archive
+
+Copy the `.7z` file onto the new computer, keep it outside the repository, and run:
+
+```powershell
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Import `
+  -ArchivePath "C:\Path\To\ElectronicLogbook-LocalDevelopment-YYYYMMDD-HHMMSS.7z"
+```
+
+Import performs these safeguards before changing a destination:
+
+1. extracts into a uniquely named temporary directory;
+2. validates the bundle type and schema;
+3. rejects absolute paths, `..` traversal, forbidden Codex state, duplicate paths, and
+   undeclared payload files;
+4. verifies every payload SHA-256 hash;
+5. backs up every existing destination file under
+   `%LOCALAPPDATA%\ElectronicLogbook-DeviceTransfer\RestoreBackups\<timestamp>`;
+6. restores each file only to its declared `Repo`, `LocalAppData`, or `Codex` root;
+7. rewrites the durable Android keystore metadata for the new user profile;
+8. regenerates ignored Android `local.properties` from the new Android SDK path;
+9. runs `.NET` restore and `npm ci`; and
+10. runs the environment verifier.
+
+Use `-WhatIf` to validate and preview destination changes. It still needs the archive
+password and temporarily extracts the archive so hashes can be checked, but it does not
+restore or overwrite destination files:
+
+```powershell
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Import `
+  -ArchivePath "C:\Path\To\Bundle.7z" -WhatIf
+```
+
+Advanced recovery options exist for controlled troubleshooting:
+
+- `-SkipDependencyRestore` avoids `dotnet restore` and `npm ci`.
+- `-SkipPostImportVerify` avoids the final verifier.
+- `-BackupRoot` chooses another conflict-backup location.
+
+Do not use those switches for a normal device migration.
+
+## Verify The New Device
+
+Open a new terminal so user environment changes are loaded, then run:
+
+```powershell
+.\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Verify
+```
+
+The verifier checks:
+
+- Git, .NET SDK 10 and 8, Node/npm, Java 21, ADB, 7-Zip, Supabase, and VS Code;
+- optional GitHub CLI, PowerShell 7, Docker, PostgreSQL, Codex, and Graphify workflows;
+- Android environment variables, SDK Platform 36, and Build-Tools 35.0.0;
+- Excel COM activation;
+- required ignored project context and hosted-sync configuration;
+- durable Android keystore presence, rewritten path, and certificate fingerprint; and
+- required VS Code extensions and fresh GitHub authentication.
+
+`FAIL` blocks a fully supported setup. `WARN` identifies a manual or optional workflow
+that still needs attention.
+
+After Verify passes, run focused repository checks:
+
+```powershell
+.\tools\Test-ReleaseMetadata.ps1
+.\tools\Test-VbaSourceQuality.ps1
+dotnet test updater\tests\ElectronicLogbook.Updater.Tests\ElectronicLogbook.Updater.Tests.csproj --no-restore
+dotnet test mobile\tests\ElectronicLogbook.Mobile.Tests\ElectronicLogbook.Mobile.Tests.csproj --no-restore
+```
+
+For Excel-dependent validation, use only disposable workbook copies:
+
+```powershell
+.\tools\Test-WorkbookVbaParity.ps1
+.\tools\Test-VbaCompileDisposable.ps1
+.\tools\Invoke-Validation.ps1 -Tier Excel -SkipPublicReadinessCheck
+```
+
+For Android, preserve the single installed development application and its data:
+
+```powershell
+Set-Location mobile
+npm.cmd run install:android:debug
+```
+
+The installer uses the transferred durable signing identity and `adb install -r`.
+Never uninstall, clear, or replace the retained debug application as a setup shortcut.
+
+## Maintenance Rule
+
+The executable source of truth is `tools/local-development-transfer.psd1`. When a
+dependency, SDK, extension, local-state path, signing rule, or credential location
+changes, update all four surfaces together:
+
+1. the transfer manifest;
+2. `tools/Invoke-LocalDevelopmentTransfer.ps1`;
+3. this setup guide and relevant contribution guidance; and
+4. `tools/Test-LocalDevelopmentTransfer.ps1`.
+
+Local `AGENTS.md` instructs Codex to enforce this rule automatically. A newly discovered
+local file must be classified as encrypted transfer, regenerated output/dependency,
+fresh authentication, or deliberate exclusion. It must not be mentioned only in prose.
+
+Before reviewing or committing setup-system changes:
+
+```powershell
+.\tools\Test-LocalDevelopmentTransfer.ps1
+git status --short --ignored
+```
+
+Only the safe guide, manifest, scripts, tests, and VS Code tasks may be committed.
+`AGENTS.md`, `TODO.md`, secrets, local inventories, and generated archives remain
+ignored.

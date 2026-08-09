@@ -39,8 +39,8 @@ IMPROVEMENT_ROADMAP.md
 !updater/release-manifest-signing-public-key.pem
 # Generated mobile app icon assets. Keep img/icon.png tracked as the source.
 /mobile/src/ElectronicLogbook.Mobile/wwwroot/icon-*.png
-LOCAL_DEVICE_SETUP_HANDOVER.md
 /.codex-remote-attachments
 TODO.md
 /old-workbooks
 design-qa.md
+ElectronicLogbook-LocalDevelopment-*.7z

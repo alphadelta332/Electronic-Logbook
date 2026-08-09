@@ -1,0 +1,94 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Electronic Logbook: Export local development bundle",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\Invoke-LocalDevelopmentTransfer.ps1",
+        "-Action",
+        "Export"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
+    },
+    {
+      "label": "Electronic Logbook: Import local development bundle",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\Invoke-LocalDevelopmentTransfer.ps1",
+        "-Action",
+        "Import",
+        "-ArchivePath",
+        "${input:electronicLogbookArchivePath}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
+    },
+    {
+      "label": "Electronic Logbook: Install development prerequisites",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\Invoke-LocalDevelopmentTransfer.ps1",
+        "-Action",
+        "Install"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": true
+      }
+    },
+    {
+      "label": "Electronic Logbook: Verify development environment",
+      "type": "shell",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\tools\\Invoke-LocalDevelopmentTransfer.ps1",
+        "-Action",
+        "Verify"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "electronicLogbookArchivePath",
+      "type": "promptString",
+      "description": "Full path to the encrypted Electronic Logbook .7z archive"
+    }
+  ]
+}
