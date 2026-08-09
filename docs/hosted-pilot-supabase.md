@@ -173,6 +173,18 @@ configuration.
 
 ### Gate 1 clean-slate connection recovery
 
+> **Pre-cohort blocker (2026-08-09):** the retained-connection workflow below only
+> repairs an installation that still has its hosted credential. A full uninstall or app
+> data clear also removes the credential and Android Keystore logbook key. Although the
+> encrypted operations remain in Supabase, the current client has no populated hosted
+> key envelope with which to decrypt them; completing email sign-in registers a new
+> device and initializes a different app-only logbook. Do not present database cleanup
+> and re-enrolment as user recovery. Before cohort launch, implement and rehearse the
+> recovery-code or trusted-device key-envelope design in
+> `docs/hosted-sync-architecture.md`, proving that reinstall + one sign-in restores the
+> existing logbook without duplicate devices, manual package import, or administrator
+> intervention.
+
 Treat the current owner connection failure as an S2 blocked workflow. Preserve the
 retained credential and the single server device. The diagnostic build exposes a
 read-only/disposable preflight in Settings with the exact failing stage, a stable error
