@@ -12,11 +12,13 @@ public sealed class MobileLogbookSession(
     INetworkStatus? networkStatus = null,
     ISyncClock? syncClock = null,
     MobileConnectionRecoveryWorkflow? connectionRecovery = null,
-    IMobileGoogleHostedAuthenticator? googleAuthenticator = null)
+    IMobileGoogleHostedAuthenticator? googleAuthenticator = null,
+    IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null)
 {
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
     private readonly ISyncClock syncClock = syncClock ?? SystemSyncClock.Instance;
+    private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryEnrollments = [];
 
     public static readonly CustomFieldDefinition[] CustomFields =
     [
@@ -1164,10 +1166,52 @@ public sealed class MobileLogbookSession(
                 networkStatus,
                 syncClock)
             .SyncAsync(new PortableHostedSyncRequestContext(DocumentV2, HostedSync, reason));
+        var recoveryEnrollment = (result.Document.LogbookId, HostedSync.DeviceId);
+        if (result.Status == PortableHostedSyncStatus.Synced
+            && recoveryEnvelopeService is not null
+            && !verifiedRecoveryEnrollments.Contains(recoveryEnrollment))
+        {
+            try
+            {
+                _ = await packageKeyStore.EnrollRecoveryEnvelopeAsync(
+                    result.Document.LogbookId,
+                    HostedSync.DeviceId,
+                    recoveryEnvelopeService);
+                verifiedRecoveryEnrollments.Add(recoveryEnrollment);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result = result with
+                {
+                    Status = PortableHostedSyncStatus.NeedsAttention,
+                    AttentionRequiredReason = RecoveryEnrollmentAttention(ex)
+                };
+            }
+        }
+
         DocumentV2 = result.Document;
         HostedSync = HostedSync.WithResult(result, syncClock.UtcNow);
         await SaveStateV2Async();
         return result;
+    }
+
+    private static string RecoveryEnrollmentAttention(Exception exception)
+    {
+        var errorCode = exception is MobileHostedDiagnosticException diagnostic
+            ? MobileDiagnosticRedactor.Redact(diagnostic.ErrorCode)
+            : exception is JSException
+                ? "RECOVERY_DEVICE_BRIDGE_UNAVAILABLE"
+                : "RECOVERY_ENROLLMENT_FAILED";
+        if (string.IsNullOrWhiteSpace(errorCode))
+        {
+            errorCode = "RECOVERY_ENROLLMENT_FAILED";
+        }
+
+        return $"Account recovery setup needs attention ({errorCode}). Retry Sync now.";
     }
 
     private string[] ValidateDraft()

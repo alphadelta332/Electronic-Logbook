@@ -1,6 +1,7 @@
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 using Microsoft.JSInterop;
+using System.Security.Cryptography;
 
 namespace ElectronicLogbook.Mobile.Tests;
 
@@ -101,6 +102,141 @@ public sealed class BrowserPackageKeyStoreTests
         Assert.Equal("electronicLogbookKeys.importRecoveryEnvelope", call.Identifier);
         Assert.Equal("package-key:log_mobile", call.Arguments[0]);
         Assert.Equal("wrapped-key", call.Arguments[1]);
+    }
+
+    [Fact]
+    public async Task EnrollmentUsesExistingScopedKeyAndDeviceWithoutGeneratingIdentifiers()
+    {
+        var serviceKey = PublicMaterial(1);
+        var deviceKey = PublicMaterial(2);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        jsRuntime.Results.Enqueue(new BrowserRecoveryPublicKey(
+            deviceKey.PublicKey,
+            deviceKey.Fingerprint,
+            "RSA-OAEP-256"));
+        jsRuntime.Results.Enqueue(new BrowserRecoveryWrappedKey("wrapped-package-key", "RSA-OAEP-256"));
+        var service = new RecordingRecoveryEnvelopeService(serviceKey.PublicKey, serviceKey.Fingerprint);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+        var logbookId = new LogbookId("log_retained");
+        var deviceId = new DeviceId("dev_retained");
+
+        var result = await store.EnrollRecoveryEnvelopeAsync(logbookId, deviceId, service);
+
+        Assert.True(result.Enrolled);
+        Assert.Equal(
+            [
+                "electronicLogbookKeys.hasPackageKey",
+                "electronicLogbookKeys.getRecoveryPublicKey",
+                "electronicLogbookKeys.wrapPackageKeyForRecoveryService"
+            ],
+            jsRuntime.Calls.Select(call => call.Identifier));
+        Assert.Equal("package-key:log_retained", jsRuntime.Calls[0].Arguments[0]);
+        Assert.Equal("package-key:log_retained", jsRuntime.Calls[2].Arguments[0]);
+        Assert.Equal(serviceKey.PublicKey, jsRuntime.Calls[2].Arguments[1]);
+        var request = Assert.Single(service.EnrollmentRequests);
+        Assert.Equal(logbookId, request.LogbookId);
+        Assert.Equal(deviceId, request.DeviceId);
+        Assert.Equal(deviceKey.PublicKey, request.DeviceKey.PublicKey);
+        Assert.Equal("wrapped-package-key", request.WrappedPackageKey);
+        Assert.Equal("managed-key-v1", request.IngressKeyVersionId);
+    }
+
+    [Fact]
+    public async Task EnrollmentFailsClosedWhenLocalPackageKeyIsMissing()
+    {
+        var serviceKey = PublicMaterial(1);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(false);
+        var service = new RecordingRecoveryEnvelopeService(serviceKey.PublicKey, serviceKey.Fingerprint);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await store.EnrollRecoveryEnvelopeAsync(
+                new LogbookId("log_retained"),
+                new DeviceId("dev_retained"),
+                service));
+
+        Assert.Equal("RECOVERY_PACKAGE_KEY_MISSING", error.ErrorCode);
+        Assert.Empty(service.EnrollmentRequests);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookKeys.hasPackageKey", call.Identifier);
+    }
+
+    [Fact]
+    public async Task EnrollmentFailsClosedWhenServicePublicMaterialIsInvalid()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        var service = new RecordingRecoveryEnvelopeService("not-base64", new string('a', 64));
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await store.EnrollRecoveryEnvelopeAsync(
+                new LogbookId("log_retained"),
+                new DeviceId("dev_retained"),
+                service));
+
+        Assert.Equal("RECOVERY_SERVICE_KEY_INVALID", error.ErrorCode);
+        Assert.Empty(service.EnrollmentRequests);
+        Assert.Equal(["electronicLogbookKeys.hasPackageKey"], jsRuntime.Calls.Select(call => call.Identifier));
+    }
+
+    [Fact]
+    public async Task EnrollmentFailsClosedWhenNativeRecoveryBridgeIsUnsupported()
+    {
+        var serviceKey = PublicMaterial(1);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        jsRuntime.Exceptions["electronicLogbookKeys.getRecoveryPublicKey"] =
+            new JSException("Recovery bridge unavailable for this browser.");
+        var service = new RecordingRecoveryEnvelopeService(serviceKey.PublicKey, serviceKey.Fingerprint);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        await Assert.ThrowsAsync<JSException>(async () =>
+            await store.EnrollRecoveryEnvelopeAsync(
+                new LogbookId("log_retained"),
+                new DeviceId("dev_retained"),
+                service));
+
+        Assert.Empty(service.EnrollmentRequests);
+        Assert.Equal(
+            [
+                "electronicLogbookKeys.hasPackageKey",
+                "electronicLogbookKeys.getRecoveryPublicKey"
+            ],
+            jsRuntime.Calls.Select(call => call.Identifier));
+    }
+
+    [Theory]
+    [InlineData(false, "managed-key-v1")]
+    [InlineData(true, "wrong-key-version")]
+    public async Task EnrollmentRejectsInvalidServiceEnrollmentResponses(bool enrolled, string keyVersionId)
+    {
+        var serviceKey = PublicMaterial(1);
+        var deviceKey = PublicMaterial(2);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        jsRuntime.Results.Enqueue(new BrowserRecoveryPublicKey(
+            deviceKey.PublicKey,
+            deviceKey.Fingerprint,
+            "RSA-OAEP-256"));
+        jsRuntime.Results.Enqueue(new BrowserRecoveryWrappedKey("wrapped-package-key", "RSA-OAEP-256"));
+        var service = new RecordingRecoveryEnvelopeService(
+            serviceKey.PublicKey,
+            serviceKey.Fingerprint,
+            enrolled,
+            keyVersionId);
+        var store = new BrowserPackageKeyStore(jsRuntime);
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await store.EnrollRecoveryEnvelopeAsync(
+                new LogbookId("log_retained"),
+                new DeviceId("dev_retained"),
+                service));
+
+        Assert.Equal("RECOVERY_ENROLLMENT_INVALID", error.ErrorCode);
+        Assert.Single(service.EnrollmentRequests);
     }
 
     [Fact]
@@ -238,6 +374,8 @@ public sealed class BrowserPackageKeyStoreTests
 
         public List<JsCall> Calls { get; } = [];
 
+        public Dictionary<string, Exception> Exceptions { get; } = [];
+
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
         {
             return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
@@ -250,9 +388,53 @@ public sealed class BrowserPackageKeyStoreTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(new JsCall(identifier, args ?? []));
+            if (Exceptions.TryGetValue(identifier, out var exception))
+            {
+                throw exception;
+            }
+
             var result = Results.Count > 0 ? Results.Dequeue() : default;
             return new ValueTask<TValue>((TValue)result!);
         }
+    }
+
+    private static (string PublicKey, string Fingerprint) PublicMaterial(byte value)
+    {
+        var encoded = Enumerable.Repeat(value, 294).ToArray();
+        return (
+            Convert.ToBase64String(encoded),
+            Convert.ToHexString(SHA256.HashData(encoded)).ToLowerInvariant());
+    }
+
+    private sealed class RecordingRecoveryEnvelopeService(
+        string publicKey,
+        string fingerprint,
+        bool enrolled = true,
+        string enrollmentKeyVersionId = "managed-key-v1")
+        : IMobileRecoveryEnvelopeService
+    {
+        public List<MobileRecoveryEnvelopeEnrollmentRequest> EnrollmentRequests { get; } = [];
+
+        public ValueTask<MobileRecoveryEnvelopeConfiguration> GetConfigurationAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileRecoveryEnvelopeConfiguration(
+                publicKey,
+                fingerprint,
+                "RSA-OAEP-256",
+                "managed-key-v1"));
+
+        public ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollAsync(
+            MobileRecoveryEnvelopeEnrollmentRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            EnrollmentRequests.Add(request);
+            return ValueTask.FromResult(new MobileRecoveryEnvelopeEnrollmentResult(enrolled, enrollmentKeyVersionId));
+        }
+
+        public ValueTask<MobileRecoveryEnvelopeRestoreResult> RestoreAsync(
+            MobileRecoveryEnvelopeRestoreRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed record JsCall(string Identifier, IReadOnlyList<object?> Arguments);

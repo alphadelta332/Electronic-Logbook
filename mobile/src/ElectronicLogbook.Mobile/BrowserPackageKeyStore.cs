@@ -9,6 +9,7 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
 {
     private const int AesGcmNonceSizeBytes = 12;
     private const int AesGcmTagSizeBytes = 16;
+    private const string RecoveryKeyAlgorithm = "RSA-OAEP-256";
 
     public ValueTask<bool> IsSupportedAsync() =>
         jsRuntime.InvokeAsync<bool>("electronicLogbookKeys.isSupported");
@@ -53,6 +54,70 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
             "electronicLogbookKeys.importRecoveryEnvelope",
             KeyName(logbookId),
             wrappedKey);
+    }
+
+    public async ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollRecoveryEnvelopeAsync(
+        LogbookId logbookId,
+        DeviceId deviceId,
+        IMobileRecoveryEnvelopeService recoveryService,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(recoveryService);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!await HasPackageKeyAsync(logbookId))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_PACKAGE_KEY_MISSING",
+                "The local package key is unavailable for account recovery setup.");
+        }
+
+        var configuration = await recoveryService.GetConfigurationAsync(cancellationToken);
+        ValidateRecoveryPublicKey(
+            configuration.PublicKey,
+            configuration.Fingerprint,
+            configuration.Algorithm,
+            "RECOVERY_SERVICE_KEY_INVALID");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var deviceKey = await GetRecoveryPublicKeyAsync();
+        ValidateRecoveryPublicKey(
+            deviceKey.PublicKey,
+            deviceKey.Fingerprint,
+            deviceKey.Algorithm,
+            "RECOVERY_DEVICE_KEY_INVALID");
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var wrappedPackageKey = await WrapPackageKeyForRecoveryServiceAsync(
+            logbookId,
+            configuration.PublicKey);
+        if (!string.Equals(wrappedPackageKey.Algorithm, RecoveryKeyAlgorithm, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(wrappedPackageKey.WrappedKey))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_KEY_WRAP_INVALID",
+                "The Android recovery bridge returned an invalid package-key envelope.");
+        }
+
+        var result = await recoveryService.EnrollAsync(
+            new MobileRecoveryEnvelopeEnrollmentRequest(
+                logbookId,
+                deviceId,
+                new MobileRecoveryDeviceKey(
+                    deviceKey.PublicKey,
+                    deviceKey.Fingerprint,
+                    deviceKey.Algorithm),
+                wrappedPackageKey.WrappedKey,
+                configuration.KeyVersionId),
+            cancellationToken);
+        if (!result.Enrolled
+            || !string.Equals(result.KeyVersionId, configuration.KeyVersionId, StringComparison.Ordinal))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_ENROLLMENT_INVALID",
+                "Account recovery setup returned an invalid result.");
+        }
+
+        return result;
     }
 
     public async ValueTask RunDisposableProbeAsync(CancellationToken cancellationToken = default)
@@ -134,6 +199,39 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(logbookId.Value);
         return $"package-key:{logbookId.Value}";
+    }
+
+    private static void ValidateRecoveryPublicKey(
+        string publicKey,
+        string fingerprint,
+        string algorithm,
+        string errorCode)
+    {
+        if (!string.Equals(algorithm, RecoveryKeyAlgorithm, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(publicKey)
+            || string.IsNullOrWhiteSpace(fingerprint))
+        {
+            throw new MobileHostedDiagnosticException(errorCode, "Account recovery public-key material is invalid.");
+        }
+
+        byte[] encoded;
+        try
+        {
+            encoded = Convert.FromBase64String(publicKey);
+        }
+        catch (FormatException ex)
+        {
+            throw new MobileHostedDiagnosticException(
+                errorCode,
+                "Account recovery public-key material is invalid.",
+                innerException: ex);
+        }
+
+        var actualFingerprint = Convert.ToHexString(SHA256.HashData(encoded)).ToLowerInvariant();
+        if (!string.Equals(actualFingerprint, fingerprint, StringComparison.Ordinal))
+        {
+            throw new MobileHostedDiagnosticException(errorCode, "Account recovery public-key material is invalid.");
+        }
     }
 
     private static void ValidateAesGcmArguments(byte[] nonce, byte[] payload, byte[] additionalData)

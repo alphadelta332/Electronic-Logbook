@@ -77,6 +77,155 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task RetainedHostedSessionRetriesIdempotentRecoveryEnrollmentWithUnchangedIdentifiers()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-09T01:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var ledger = new InMemoryHostedLogbookLedger();
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+        await initial.EnsureLoadedWorkbookAsync();
+        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.CompleteHostedInviteAcceptanceAsync("123456");
+        var retainedLogbookId = initial.DocumentV2.LogbookId;
+        var retainedDeviceId = initial.HostedSync!.DeviceId;
+
+        var recoveryService = new RecordingRecoveryEnvelopeService();
+        var reloaded = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            ledger,
+            network,
+            recoveryEnvelopeService: recoveryService);
+        await reloaded.EnsureLoadedWorkbookAsync();
+        await reloaded.SyncHostedNowAsync();
+
+        var reloadedAgain = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            ledger,
+            network,
+            recoveryEnvelopeService: recoveryService);
+        await reloadedAgain.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.Synced, reloadedAgain.HostedSync!.LastStatus);
+        Assert.Equal(retainedLogbookId, reloadedAgain.DocumentV2.LogbookId);
+        Assert.Equal(retainedLogbookId, reloadedAgain.HostedSync.LogbookId);
+        Assert.Equal(retainedDeviceId, reloadedAgain.HostedSync.DeviceId);
+        Assert.Equal(2, recoveryService.EnrollmentRequests.Count);
+        Assert.All(recoveryService.EnrollmentRequests, request =>
+        {
+            Assert.Equal(retainedLogbookId, request.LogbookId);
+            Assert.Equal(retainedDeviceId, request.DeviceId);
+        });
+        Assert.Equal(2, jsRuntime.RecoveryWrapCount);
+    }
+
+    [Fact]
+    public async Task RecoveryEnrollmentFailurePersistsRedactedNeedsAttentionWithoutChangingLocalState()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-09T01:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var ledger = new InMemoryHostedLogbookLedger();
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+        await initial.EnsureLoadedWorkbookAsync();
+        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(initial.WorkbookDraft);
+        await initial.SaveWorkbookEntryAsync();
+        var retainedDocument = initial.DocumentV2;
+        var retainedHostedState = initial.HostedSync!;
+
+        var recoveryService = new RecordingRecoveryEnvelopeService(failEnrollment: true);
+        var reloaded = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            ledger,
+            network,
+            recoveryEnvelopeService: recoveryService);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.NeedsAttention, reloaded.HostedSync!.LastStatus);
+        Assert.Equal(retainedDocument.LogbookId, reloaded.DocumentV2.LogbookId);
+        Assert.Equal(
+            retainedDocument.Operations.Select(operation => operation.RevisionId),
+            reloaded.DocumentV2.Operations.Select(operation => operation.RevisionId));
+        Assert.Equal(retainedHostedState.AccountId, reloaded.HostedSync.AccountId);
+        Assert.Equal(retainedHostedState.LogbookId, reloaded.HostedSync.LogbookId);
+        Assert.Equal(retainedHostedState.DeviceId, reloaded.HostedSync.DeviceId);
+        Assert.Equal("Account recovery setup needs attention (RECOVERY_SERVICE_REJECTED). Retry Sync now.", reloaded.HostedSync.AttentionRequiredReason);
+        Assert.DoesNotContain("pilot@example.com", reloaded.HostedSync.AttentionRequiredReason, StringComparison.Ordinal);
+        Assert.DoesNotContain("secret", reloaded.HostedSync.AttentionRequiredReason, StringComparison.OrdinalIgnoreCase);
+        var persisted = await new BrowserLogbookStore(jsRuntime).LoadStateV2Async();
+        Assert.NotNull(persisted);
+        Assert.Equal(reloaded.DocumentV2.LogbookId, persisted.Document.LogbookId);
+        Assert.Equal(
+            reloaded.DocumentV2.Operations.Select(operation => operation.RevisionId),
+            persisted.Document.Operations.Select(operation => operation.RevisionId));
+        Assert.NotNull(persisted.HostedSync);
+        Assert.Equal(reloaded.HostedSync.AccountId, persisted.HostedSync.AccountId);
+        Assert.Equal(reloaded.HostedSync.LogbookId, persisted.HostedSync.LogbookId);
+        Assert.Equal(reloaded.HostedSync.DeviceId, persisted.HostedSync.DeviceId);
+        Assert.Equal(reloaded.HostedSync.LastAcknowledgedHostedRevision, persisted.HostedSync.LastAcknowledgedHostedRevision);
+        Assert.Equal(reloaded.HostedSync.LastStatus, persisted.HostedSync.LastStatus);
+        Assert.Equal(reloaded.HostedSync.AttentionRequiredReason, persisted.HostedSync.AttentionRequiredReason);
+        Assert.Equal(
+            reloaded.HostedSync.UploadedRevisionIds ?? [],
+            persisted.HostedSync.UploadedRevisionIds ?? []);
+    }
+
+    [Fact]
+    public async Task RecoveryEnrollmentUnsupportedBridgePersistsNeedsAttentionWithoutReplacingHostedIdentity()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-09T01:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var ledger = new InMemoryHostedLogbookLedger();
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+        await initial.EnsureLoadedWorkbookAsync();
+        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.CompleteHostedInviteAcceptanceAsync("123456");
+        var retainedLogbookId = initial.DocumentV2.LogbookId;
+        var retainedHostedState = initial.HostedSync!;
+
+        jsRuntime.FailRecoveryBridge = true;
+        var recoveryService = new RecordingRecoveryEnvelopeService();
+        var reloaded = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            ledger,
+            network,
+            recoveryEnvelopeService: recoveryService);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.NeedsAttention, reloaded.HostedSync!.LastStatus);
+        Assert.Equal("Account recovery setup needs attention (RECOVERY_DEVICE_BRIDGE_UNAVAILABLE). Retry Sync now.", reloaded.HostedSync.AttentionRequiredReason);
+        Assert.Equal(retainedLogbookId, reloaded.DocumentV2.LogbookId);
+        Assert.Equal(retainedHostedState.AccountId, reloaded.HostedSync.AccountId);
+        Assert.Equal(retainedHostedState.LogbookId, reloaded.HostedSync.LogbookId);
+        Assert.Equal(retainedHostedState.DeviceId, reloaded.HostedSync.DeviceId);
+        Assert.Empty(recoveryService.EnrollmentRequests);
+        Assert.Equal(0, jsRuntime.RecoveryWrapCount);
+    }
+
+    [Fact]
     public async Task HostedInviteAcceptanceDoesNotReplaceExistingWorkbookPackageState()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -421,14 +570,16 @@ public sealed class MobileLogbookSessionJourneyTests
         IHostedLogbookAuthenticator? hostedAuthenticator = null,
         ISyncClock? syncClock = null,
         IHostedLogbookLedger? hostedLedger = null,
-        INetworkStatus? networkStatus = null) =>
+        INetworkStatus? networkStatus = null,
+        IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null) =>
         new(
             new BrowserLogbookStore(jsRuntime),
             new BrowserPackageKeyStore(jsRuntime),
             hostedAuthenticator: hostedAuthenticator,
             hostedLedger: hostedLedger,
             networkStatus: networkStatus,
-            syncClock: syncClock);
+            syncClock: syncClock,
+            recoveryEnvelopeService: recoveryEnvelopeService);
 
     private static void FillDraft(EntryDraft draft, string registration, decimal hours)
     {
@@ -515,6 +666,10 @@ public sealed class MobileLogbookSessionJourneyTests
 
         public bool FailNextPackageKeyImport { get; set; }
 
+        public bool FailRecoveryBridge { get; set; }
+
+        public int RecoveryWrapCount { get; private set; }
+
         public List<string> ImportedPackageKeys { get; } = [];
 
         private Dictionary<string, byte[]> PackageKeys { get; } = [];
@@ -537,6 +692,8 @@ public sealed class MobileLogbookSessionJourneyTests
                 "electronicLogbookKeys.isSupported" => new ValueTask<TValue>((TValue)(object)true),
                 "electronicLogbookKeys.hasPackageKey" => new ValueTask<TValue>((TValue)(object)HasPackageKey(args)),
                 "electronicLogbookKeys.importPackageKey" => ImportPackageKey<TValue>(args),
+                "electronicLogbookKeys.getRecoveryPublicKey" => GetRecoveryPublicKey<TValue>(),
+                "electronicLogbookKeys.wrapPackageKeyForRecoveryService" => WrapPackageKeyForRecoveryService<TValue>(args),
                 "electronicLogbookKeys.encrypt" => Encrypt<TValue>(args),
                 "electronicLogbookKeys.decrypt" => Decrypt<TValue>(args),
                 _ => throw new JSException($"Unexpected JS call: {identifier}")
@@ -575,6 +732,31 @@ public sealed class MobileLogbookSessionJourneyTests
             return new ValueTask<TValue>((TValue)(object)true);
         }
 
+        private ValueTask<TValue> GetRecoveryPublicKey<TValue>()
+        {
+            if (FailRecoveryBridge)
+            {
+                throw new JSException("Recovery bridge unavailable. owner@example.com package_key=secret-value");
+            }
+
+            var material = PublicMaterial(4);
+            return new ValueTask<TValue>((TValue)(object)new BrowserRecoveryPublicKey(
+                material.PublicKey,
+                material.Fingerprint,
+                "RSA-OAEP-256"));
+        }
+
+        private ValueTask<TValue> WrapPackageKeyForRecoveryService<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            Assert.True(PackageKeys.ContainsKey(Assert.IsType<string>(args[0])));
+            Assert.Equal(PublicMaterial(3).PublicKey, Assert.IsType<string>(args[1]));
+            RecoveryWrapCount++;
+            return new ValueTask<TValue>((TValue)(object)new BrowserRecoveryWrappedKey(
+                "device-wrapped-package-key",
+                "RSA-OAEP-256"));
+        }
+
         private ValueTask<TValue> Encrypt<TValue>(object?[]? args)
         {
             Assert.NotNull(args);
@@ -602,5 +784,50 @@ public sealed class MobileLogbookSessionJourneyTests
             aes.Decrypt(nonce, ciphertext, tag, plaintext, additionalData);
             return new ValueTask<TValue>((TValue)(object)plaintext);
         }
+    }
+
+    private static (string PublicKey, string Fingerprint) PublicMaterial(byte value)
+    {
+        var encoded = Enumerable.Repeat(value, 294).ToArray();
+        return (
+            Convert.ToBase64String(encoded),
+            Convert.ToHexString(SHA256.HashData(encoded)).ToLowerInvariant());
+    }
+
+    private sealed class RecordingRecoveryEnvelopeService(bool failEnrollment = false)
+        : IMobileRecoveryEnvelopeService
+    {
+        public List<MobileRecoveryEnvelopeEnrollmentRequest> EnrollmentRequests { get; } = [];
+
+        public ValueTask<MobileRecoveryEnvelopeConfiguration> GetConfigurationAsync(
+            CancellationToken cancellationToken = default)
+        {
+            var material = PublicMaterial(3);
+            return ValueTask.FromResult(new MobileRecoveryEnvelopeConfiguration(
+                material.PublicKey,
+                material.Fingerprint,
+                "RSA-OAEP-256",
+                "managed-key-v1"));
+        }
+
+        public ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollAsync(
+            MobileRecoveryEnvelopeEnrollmentRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            EnrollmentRequests.Add(request);
+            if (failEnrollment)
+            {
+                throw new MobileHostedDiagnosticException(
+                    "RECOVERY_SERVICE_REJECTED",
+                    "pilot@example.com secret-token package_key=secret-value");
+            }
+
+            return ValueTask.FromResult(new MobileRecoveryEnvelopeEnrollmentResult(true, "managed-key-v1"));
+        }
+
+        public ValueTask<MobileRecoveryEnvelopeRestoreResult> RestoreAsync(
+            MobileRecoveryEnvelopeRestoreRequest request,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 }

@@ -24,6 +24,7 @@ builder.Services.AddScoped<IHostedLogbookAuthenticator>(sp => sp.GetRequiredServ
 builder.Services.AddScoped<IMobileGoogleHostedAuthenticator>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
 builder.Services.AddScoped<IHostedLogbookLedger>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
 builder.Services.AddScoped<IMobileHostedRecoveryClient>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
+builder.Services.AddScoped<IMobileRecoveryEnvelopeService>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());
 builder.Services.AddScoped<MobileConnectionRecoveryWorkflow>();
 builder.Services.AddScoped<MobileLogbookSession>();
 builder.Services.AddMudServices();

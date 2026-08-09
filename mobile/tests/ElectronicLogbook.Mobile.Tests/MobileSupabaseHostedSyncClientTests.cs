@@ -126,12 +126,215 @@ public sealed class MobileSupabaseHostedSyncClientTests
         Assert.NotNull(await store.LoadAsync());
     }
 
+    [Fact]
+    public async Task RecoveryEnvelopeContractMapsConfigurationEnrollmentAndRestore()
+    {
+        var handler = new RecordingHandler();
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        IMobileRecoveryEnvelopeService service = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+        var logbookId = new LogbookId("log_20000000000000000000000000000001");
+        var deviceId = new DeviceId("dev_40000000000000000000000000000001");
+        var deviceKey = new MobileRecoveryDeviceKey(
+            "device-public-key",
+            new string('a', 64),
+            "RSA-OAEP-256");
+
+        var configuration = await service.GetConfigurationAsync();
+        var enrollment = await service.EnrollAsync(new MobileRecoveryEnvelopeEnrollmentRequest(
+            logbookId,
+            deviceId,
+            deviceKey,
+            "ingress-wrapped-package-key",
+            configuration.KeyVersionId));
+        var restore = await service.RestoreAsync(new MobileRecoveryEnvelopeRestoreRequest(
+            logbookId,
+            deviceId,
+            deviceKey));
+
+        Assert.Equal("service-public-key", configuration.PublicKey);
+        Assert.True(enrollment.Enrolled);
+        Assert.Equal("device-wrapped-package-key", restore.WrappedKey);
+        var requests = handler.Requests
+            .Where(request => request.Path == "/functions/v1/recovery-envelope")
+            .ToArray();
+        Assert.Equal(["configuration", "enroll", "restore"], requests.Select(request => request.Body.GetProperty("action").GetString()));
+        Assert.All(requests, request =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("anon-key", request.ApiKey);
+            Assert.Equal("Bearer " + ValidCredential().AccessToken, request.Authorization);
+        });
+        Assert.False(requests[0].Body.TryGetProperty("logbookId", out _));
+        Assert.Equal("20000000-0000-0000-0000-000000000001", requests[1].Body.GetProperty("logbookId").GetString());
+        Assert.Equal("40000000-0000-0000-0000-000000000001", requests[1].Body.GetProperty("deviceId").GetString());
+        Assert.Equal("ingress-wrapped-package-key", requests[1].Body.GetProperty("wrappedPackageKey").GetString());
+        Assert.False(requests[2].Body.TryGetProperty("wrappedPackageKey", out _));
+    }
+
+    [Fact]
+    public async Task RecoveryEnvelopeContractRefreshesBeforeSendingUserAuthorization()
+    {
+        var handler = new RecordingHandler();
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        var expiring = ValidCredential() with
+        {
+            AccessToken = "expiring-access-token",
+            AccessTokenExpiresAt = DateTimeOffset.Parse("2026-08-07T00:01:00Z")
+        };
+        await store.SaveAsync(expiring);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        IMobileRecoveryEnvelopeService service = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        await service.GetConfigurationAsync();
+
+        var refresh = Assert.Single(handler.Requests, request => request.Path == "/auth/v1/token");
+        var envelope = Assert.Single(handler.Requests, request => request.Path == "/functions/v1/recovery-envelope");
+        var refreshedAccessToken = CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L });
+        Assert.Null(refresh.Authorization);
+        Assert.Equal("Bearer " + refreshedAccessToken, envelope.Authorization);
+        Assert.NotEqual("Bearer " + expiring.AccessToken, envelope.Authorization);
+        Assert.True(handler.Requests.IndexOf(refresh) < handler.Requests.IndexOf(envelope));
+    }
+
+    [Fact]
+    public async Task RecoveryEnvelopeContractRequiresRetainedCredentialBeforeNetworkRequest()
+    {
+        var handler = new RecordingHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        IMobileRecoveryEnvelopeService service = new MobileSupabaseHostedSyncClient(
+            http,
+            new BrowserHostedCredentialStore(new MemoryJsRuntime()),
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await service.GetConfigurationAsync());
+
+        Assert.Equal("RECOVERY_AUTH_REQUIRED", error.ErrorCode);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task RecoveryEnvelopeContractStopsBeforeFunctionWhenExpiredCredentialCannotRefresh()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/auth/v1/token"] = (HttpStatusCode.BadRequest, """{"error_code":"refresh_token_not_found","msg":"refresh token rejected"}""");
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential() with
+        {
+            AccessToken = "expired-access-token",
+            AccessTokenExpiresAt = DateTimeOffset.Parse("2020-01-01T00:00:00Z")
+        });
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        IMobileRecoveryEnvelopeService service = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await service.GetConfigurationAsync());
+
+        Assert.Equal("RECOVERY_AUTH_REQUIRED", error.ErrorCode);
+        Assert.IsType<HostedSignInException>(error.InnerException);
+        Assert.Single(handler.Requests, request => request.Path == "/auth/v1/token");
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/functions/v1/recovery-envelope");
+        Assert.NotNull(await store.LoadAsync());
+    }
+
+    [Theory]
+    [InlineData("configuration", "{ \"fingerprint\": \"service-key-fingerprint\", \"algorithm\": \"RSA-OAEP-256\", \"keyVersionId\": \"recovery-key-v1\" }")]
+    [InlineData("configuration", "{ not json")]
+    [InlineData("enroll", "{ \"enrolled\": false, \"keyVersionId\": \"recovery-key-v1\" }")]
+    [InlineData("restore", "{ \"algorithm\": \"RSA-OAEP-256\", \"keyVersionId\": \"recovery-key-v1\" }")]
+    public async Task RecoveryEnvelopeContractRejectsInvalidFunctionResponses(string action, string body)
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/functions/v1/recovery-envelope"] = (HttpStatusCode.OK, body);
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        IMobileRecoveryEnvelopeService service = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+        {
+            if (action == "configuration")
+            {
+                await service.GetConfigurationAsync();
+            }
+            else if (action == "enroll")
+            {
+                await service.EnrollAsync(new MobileRecoveryEnvelopeEnrollmentRequest(
+                    new LogbookId("log_20000000000000000000000000000001"),
+                    new DeviceId("dev_40000000000000000000000000000001"),
+                    ValidRecoveryDeviceKey(),
+                    "ingress-wrapped-package-key",
+                    "recovery-key-v1"));
+            }
+            else
+            {
+                await service.RestoreAsync(new MobileRecoveryEnvelopeRestoreRequest(
+                    new LogbookId("log_20000000000000000000000000000001"),
+                    new DeviceId("dev_40000000000000000000000000000001"),
+                    ValidRecoveryDeviceKey()));
+            }
+        });
+
+        Assert.Equal("RECOVERY_RESPONSE_INVALID", error.ErrorCode);
+        Assert.Single(handler.Requests, request => request.Path == "/functions/v1/recovery-envelope");
+    }
+
+    [Fact]
+    public async Task RecoveryEnvelopeContractRedactsRejectedServiceDetails()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/functions/v1/recovery-envelope"] = (HttpStatusCode.Forbidden, """
+            {
+              "error_code": "permission_denied",
+              "message": "owner@example.com https://pilot.supabase.co bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEifQ.signaturesig package_key=super-secret-value log_20000000000000000000000000000001"
+            }
+            """);
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        IMobileRecoveryEnvelopeService service = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await service.GetConfigurationAsync());
+
+        Assert.Equal("permission_denied", error.ErrorCode);
+        Assert.Equal(HttpStatusCode.Forbidden, error.HttpStatus);
+        Assert.Equal("permission_denied", error.SupabaseCode);
+        Assert.DoesNotContain("owner@example.com", error.SupabaseMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("pilot.supabase.co", error.SupabaseMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("eyJ", error.SupabaseMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("super-secret-value", error.SupabaseMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("log_20000000000000000000000000000001", error.SupabaseMessage, StringComparison.Ordinal);
+    }
+
     private static BrowserHostedCredential ValidCredential() => new(
         new HostedAccountId("acct_10000000000000000000000000000001"),
         new DeviceId("dev_40000000000000000000000000000001"),
         CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L }),
         "retained-refresh-token",
         DateTimeOffset.Parse("2099-01-01T00:00:00Z"));
+
+    private static MobileRecoveryDeviceKey ValidRecoveryDeviceKey() => new(
+        "device-public-key",
+        new string('a', 64),
+        "RSA-OAEP-256");
 
     [Fact]
     public async Task GoogleSignInExchangesIdTokenWithRawNonceAndRegistersOnlyAfterMembershipDiscovery()
@@ -564,6 +767,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
                 request.RequestUri?.AbsolutePath ?? string.Empty,
                 request.RequestUri?.Query ?? string.Empty,
                 request.Headers.Authorization?.ToString(),
+                request.Headers.TryGetValues("apikey", out var apiKeys) ? apiKeys.Single() : null,
                 string.Join(",", request.Headers.Accept.Select(value => value.MediaType)),
                 parsedBody.RootElement.Clone()));
 
@@ -619,6 +823,26 @@ public sealed class MobileSupabaseHostedSyncClientTests
                 "/rest/v1/rpc/append_hosted_operation" => OperationJson,
                 "/rest/v1/rpc/read_missing_operations" => $"[{OperationJson}]",
                 "/rest/v1/rpc/record_operation_ack" => "{}",
+                "/functions/v1/recovery-envelope" => Requests[^1].Body.GetProperty("action").GetString() switch
+                {
+                    "configuration" => """
+                        {
+                          "publicKey": "service-public-key",
+                          "fingerprint": "service-key-fingerprint",
+                          "algorithm": "RSA-OAEP-256",
+                          "keyVersionId": "recovery-key-v1"
+                        }
+                        """,
+                    "enroll" => """{ "enrolled": true, "keyVersionId": "recovery-key-v1" }""",
+                    "restore" => """
+                        {
+                          "wrappedKey": "device-wrapped-package-key",
+                          "algorithm": "RSA-OAEP-256",
+                          "keyVersionId": "recovery-key-v1"
+                        }
+                        """,
+                    _ => throw new InvalidOperationException("Unexpected recovery-envelope action.")
+                },
                 _ => throw new InvalidOperationException($"Unexpected request path: {path}")
             };
 
@@ -652,6 +876,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
         string Path,
         string Query,
         string? Authorization,
+        string? ApiKey,
         string Accept,
         JsonElement Body);
 

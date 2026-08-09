@@ -12,9 +12,11 @@ public sealed class MobileSupabaseHostedSyncClient(
     BrowserHostedCredentialStore credentialStore,
     ISyncClock clock,
     BrowserGoogleCredentialProvider? googleCredentialProvider = null)
-    : IHostedLogbookAuthenticator, IHostedLogbookLedger, IMobileHostedRecoveryClient, IMobileGoogleHostedAuthenticator
+    : IHostedLogbookAuthenticator, IHostedLogbookLedger, IMobileHostedRecoveryClient,
+      IMobileGoogleHostedAuthenticator, IMobileRecoveryEnvelopeService
 {
     private const string ConfigPath = "hosted-sync.local.json";
+    private const string RecoveryEnvelopePath = "/functions/v1/recovery-envelope";
     private const string PendingDeviceIdValue = "dev_pending";
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private readonly HashSet<LogbookId> ensuredLogbooks = [];
@@ -460,6 +462,58 @@ public sealed class MobileSupabaseHostedSyncClient(
         return new HostedSyncSession(credential.AccountId, credential.DeviceId, credential.AccessTokenExpiresAt);
     }
 
+    public ValueTask<MobileRecoveryEnvelopeConfiguration> GetConfigurationAsync(
+        CancellationToken cancellationToken = default) =>
+        SendRecoveryEnvelopeAsync<MobileRecoveryEnvelopeConfiguration>(
+            new RecoveryEnvelopeRequest("configuration"),
+            cancellationToken);
+
+    public ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollAsync(
+        MobileRecoveryEnvelopeEnrollmentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.DeviceKey);
+        ValidateRecoveryValue(request.DeviceKey.PublicKey, nameof(request.DeviceKey.PublicKey));
+        ValidateRecoveryValue(request.DeviceKey.Fingerprint, nameof(request.DeviceKey.Fingerprint));
+        ValidateRecoveryValue(request.DeviceKey.Algorithm, nameof(request.DeviceKey.Algorithm));
+        ValidateRecoveryValue(request.WrappedPackageKey, nameof(request.WrappedPackageKey));
+        ValidateRecoveryValue(request.IngressKeyVersionId, nameof(request.IngressKeyVersionId));
+
+        return SendRecoveryEnvelopeAsync<MobileRecoveryEnvelopeEnrollmentResult>(
+            new RecoveryEnvelopeRequest(
+                "enroll",
+                ToRecoveryUuid(request.LogbookId.Value, "log_"),
+                ToRecoveryUuid(request.DeviceId.Value, "dev_"),
+                request.DeviceKey.PublicKey,
+                request.DeviceKey.Fingerprint,
+                request.DeviceKey.Algorithm,
+                request.WrappedPackageKey,
+                request.IngressKeyVersionId),
+            cancellationToken);
+    }
+
+    public ValueTask<MobileRecoveryEnvelopeRestoreResult> RestoreAsync(
+        MobileRecoveryEnvelopeRestoreRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.DeviceKey);
+        ValidateRecoveryValue(request.DeviceKey.PublicKey, nameof(request.DeviceKey.PublicKey));
+        ValidateRecoveryValue(request.DeviceKey.Fingerprint, nameof(request.DeviceKey.Fingerprint));
+        ValidateRecoveryValue(request.DeviceKey.Algorithm, nameof(request.DeviceKey.Algorithm));
+
+        return SendRecoveryEnvelopeAsync<MobileRecoveryEnvelopeRestoreResult>(
+            new RecoveryEnvelopeRequest(
+                "restore",
+                ToRecoveryUuid(request.LogbookId.Value, "log_"),
+                ToRecoveryUuid(request.DeviceId.Value, "dev_"),
+                request.DeviceKey.PublicKey,
+                request.DeviceKey.Fingerprint,
+                request.DeviceKey.Algorithm),
+            cancellationToken);
+    }
+
     public async ValueTask SignOutAsync(CancellationToken cancellationToken = default)
     {
         await credentialStore.DeleteAsync();
@@ -671,6 +725,100 @@ public sealed class MobileSupabaseHostedSyncClient(
 
         return JsonSerializer.Deserialize<TResponse>(body, WebJson)
             ?? throw new HostedLedgerException(HostedLedgerFailureReason.InvalidPayloadEnvelope, $"Hosted RPC '{functionName}' returned no payload.");
+    }
+
+    private async ValueTask<TResponse> SendRecoveryEnvelopeAsync<TResponse>(
+        RecoveryEnvelopeRequest payload,
+        CancellationToken cancellationToken)
+    {
+        await EnsureFreshRecoveryCredentialAsync(cancellationToken);
+        var options = await GetConfigAsync(cancellationToken);
+        using var request = NewRequest(options, HttpMethod.Post, RecoveryEnvelopePath, includeAuthorization: true);
+        request.Content = JsonContent(payload);
+        using var response = await http.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var error = ReadError(body);
+            throw new MobileHostedDiagnosticException(
+                MobileDiagnosticRedactor.Redact(error?.ErrorCode) ?? "RECOVERY_SERVICE_REJECTED",
+                $"Account recovery service request failed with HTTP {(int)response.StatusCode}.",
+                response.StatusCode,
+                MobileDiagnosticRedactor.Redact(error?.ErrorCode),
+                MobileDiagnosticRedactor.Redact(error?.Message));
+        }
+
+        try
+        {
+            var result = JsonSerializer.Deserialize<TResponse>(body, WebJson);
+            ValidateRecoveryResponse(result);
+            return result!;
+        }
+        catch (JsonException ex)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_RESPONSE_INVALID",
+                "Account recovery returned an invalid response.",
+                response.StatusCode,
+                innerException: ex);
+        }
+    }
+
+    private async ValueTask EnsureFreshRecoveryCredentialAsync(CancellationToken cancellationToken)
+    {
+        credential ??= await credentialStore.LoadAsync();
+        if (credential is null)
+        {
+            throw new MobileHostedDiagnosticException("RECOVERY_AUTH_REQUIRED", "Sign in again to continue.");
+        }
+
+        if (credential.AccessTokenExpiresAt > clock.UtcNow.AddMinutes(2))
+        {
+            return;
+        }
+
+        try
+        {
+            await RefreshAsync(cancellationToken);
+        }
+        catch (HostedSignInException ex)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_AUTH_REQUIRED",
+                "Sign in again to continue.",
+                innerException: ex);
+        }
+    }
+
+    private static void ValidateRecoveryResponse<TResponse>(TResponse? response)
+    {
+        var valid = response switch
+        {
+            MobileRecoveryEnvelopeConfiguration value =>
+                RequiredRecoveryValues(value.PublicKey, value.Fingerprint, value.Algorithm, value.KeyVersionId),
+            MobileRecoveryEnvelopeEnrollmentResult value =>
+                value.Enrolled && RequiredRecoveryValues(value.KeyVersionId),
+            MobileRecoveryEnvelopeRestoreResult value =>
+                RequiredRecoveryValues(value.WrappedKey, value.Algorithm, value.KeyVersionId),
+            _ => response is not null
+        };
+        if (!valid)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_RESPONSE_INVALID",
+                "Account recovery returned an incomplete response.");
+        }
+    }
+
+    private static bool RequiredRecoveryValues(params string?[] values) =>
+        values.All(value => !string.IsNullOrWhiteSpace(value));
+
+    private static void ValidateRecoveryValue(string? value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new ArgumentException("Recovery key material is required.", parameterName);
+        }
     }
 
     private async ValueTask<TResponse> GetRestAsync<TResponse>(
@@ -1006,6 +1154,19 @@ public sealed class MobileSupabaseHostedSyncClient(
             $"Identifier '{value}' cannot be sent to hosted sync because it is not backed by a UUID.");
     }
 
+    private static string ToRecoveryUuid(string value, string prefix)
+    {
+        var raw = value.StartsWith(prefix, StringComparison.Ordinal) ? value[prefix.Length..] : value;
+        if (Guid.TryParseExact(raw, "N", out var compact) || Guid.TryParse(raw, out compact))
+        {
+            return compact.ToString("D");
+        }
+
+        throw new MobileHostedDiagnosticException(
+            "RECOVERY_REQUEST_INVALID",
+            "Account recovery identifiers are invalid.");
+    }
+
     private static string FromHostedAccountId(HostedAccountId accountId) =>
         ToHostedUuid(accountId.Value, "acct_");
 
@@ -1042,6 +1203,23 @@ public sealed class MobileSupabaseHostedSyncClient(
         string? PlatformLabel = null,
         string? DisplayName = null,
         string? GoogleWebClientId = null);
+
+    private sealed record RecoveryEnvelopeRequest(
+        string Action,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? LogbookId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DeviceId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DevicePublicKey = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DevicePublicKeyFingerprint = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DevicePublicKeyAlgorithm = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? WrappedPackageKey = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? IngressKeyVersionId = null);
 
     private sealed record OtpRequest(
         string Email,
