@@ -15,11 +15,33 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
+$localSupabaseRoot = Join-Path $env:LOCALAPPDATA "ElectronicLogbook\Supabase"
+$localSupabaseConfigPath = Join-Path $localSupabaseRoot "hosted-pilot-projects.local.json"
+$localSupabaseAccessTokenPath = Join-Path $localSupabaseRoot "access-token.txt"
+$localSupabaseConfig = $null
+$supabaseManagementToken = $null
+if (Test-Path -LiteralPath $localSupabaseConfigPath) {
+    $localSupabaseConfig = Get-Content -LiteralPath $localSupabaseConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+if (Test-Path -LiteralPath $localSupabaseAccessTokenPath) {
+    $supabaseManagementToken = (Get-Content -LiteralPath $localSupabaseAccessTokenPath -Raw -Encoding UTF8).Trim()
+}
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     $ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL
 }
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     $ConnectionString = [Environment]::GetEnvironmentVariable("ELB_SUPABASE_PILOT_DB_URL", "User")
+}
+if ([string]::IsNullOrWhiteSpace($ConnectionString) -and $null -ne $localSupabaseConfig) {
+    $privatePilot = $localSupabaseConfig.privatePilot
+    if ($null -ne $privatePilot -and
+        -not [string]::IsNullOrWhiteSpace($privatePilot.project_ref) -and
+        -not [string]::IsNullOrWhiteSpace($privatePilot.region) -and
+        -not [string]::IsNullOrWhiteSpace($privatePilot.db_password)) {
+        $encodedPassword = [Uri]::EscapeDataString($privatePilot.db_password)
+        $poolerHost = "aws-0-{0}.pooler.supabase.com" -f $privatePilot.region
+        $ConnectionString = "postgresql://postgres.{0}:{1}@{2}:5432/postgres" -f $privatePilot.project_ref, $encodedPassword, $poolerHost
+    }
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $repoRoot "artifacts\private-pilot-20260806\preflight.json"
@@ -70,6 +92,21 @@ function Invoke-SecretSafeCheck {
     }
 }
 
+function Get-PilotDbHost {
+    param([string]$DatabaseConnectionString)
+
+    if ([string]::IsNullOrWhiteSpace($DatabaseConnectionString)) {
+        return $null
+    }
+
+    $hostMatch = [regex]::Match($DatabaseConnectionString, "@([^:/?\s]+)")
+    if ($hostMatch.Success) {
+        return $hostMatch.Groups[1].Value
+    }
+
+    return $null
+}
+
 $checks = New-Object System.Collections.Generic.List[object]
 
 $runtimeConfigPath = Join-Path $repoRoot "mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json"
@@ -115,11 +152,82 @@ $runtimeConfig = $null
     if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) { throw "Auth endpoint rejected the packaged anon key" }
 }))
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "desktop CLI or service-role credential" -Action {
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "private-pilot database region is ap-southeast-2" -Action {
+    $databaseHost = Get-PilotDbHost -DatabaseConnectionString $ConnectionString
+    if ([string]::IsNullOrWhiteSpace($databaseHost)) {
+        throw "pilot database host could not be read from the configured connection string"
+    }
+    if ($databaseHost -notmatch "(^|[.-])ap-southeast-2([.-]|$)") {
+        throw "pilot database host does not identify ap-southeast-2"
+    }
+}))
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Supabase management token sees private-pilot project in ap-southeast-2" -Action {
+    if ([string]::IsNullOrWhiteSpace($supabaseManagementToken)) {
+        throw "Supabase management access token is not configured"
+    }
+    if ($null -eq $localSupabaseConfig -or $null -eq $localSupabaseConfig.privatePilot) {
+        throw "local private-pilot project metadata is not configured"
+    }
+    $projectRef = $localSupabaseConfig.privatePilot.project_ref
+    if ([string]::IsNullOrWhiteSpace($projectRef)) {
+        throw "local private-pilot project ref is not configured"
+    }
+
+    $previousToken = $env:SUPABASE_ACCESS_TOKEN
+    $previousTelemetry = $env:SUPABASE_TELEMETRY_DISABLED
+    try {
+        $env:SUPABASE_ACCESS_TOKEN = $supabaseManagementToken
+        $env:SUPABASE_TELEMETRY_DISABLED = "1"
+        $projectsJson = & supabase projects list --output json 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($projectsJson)) {
+            throw "Supabase projects list failed"
+        }
+        $projects = $projectsJson | ConvertFrom-Json
+        $pilot = @($projects | Where-Object { $_.id -eq $projectRef -or $_.ref -eq $projectRef })[0]
+        if ($null -eq $pilot) {
+            throw "private-pilot project was not returned by Supabase projects list"
+        }
+        if ($pilot.region -ne "ap-southeast-2") {
+            throw "private-pilot project is not in ap-southeast-2"
+        }
+    }
+    finally {
+        $env:SUPABASE_ACCESS_TOKEN = $previousToken
+        $env:SUPABASE_TELEMETRY_DISABLED = $previousTelemetry
+    }
+}))
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Auth signup disabled with invited-user email sign-in only" -Action {
+    if ($null -eq $runtimeConfig) {
+        $script:runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    $settings = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/settings")) `
+        -Headers @{ apikey = $runtimeConfig.anonKey } -Method Get
+    if ($settings.disable_signup -ne $true) {
+        throw "public Auth signup is not disabled"
+    }
+    if ($settings.external.email -ne $true) {
+        throw "email sign-in is not enabled"
+    }
+    $enabledExternalProviders = @(
+        $settings.external.PSObject.Properties |
+            Where-Object { $_.Name -ne "email" -and $_.Value -eq $true } |
+            Select-Object -ExpandProperty Name
+    )
+    if (@($enabledExternalProviders).Count -gt 0) {
+        throw "one or more non-email Auth providers are enabled"
+    }
+}))
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "desktop CLI management token, local Supabase, or service-role credential" -Action {
+    if (-not [string]::IsNullOrWhiteSpace($supabaseManagementToken)) {
+        return
+    }
     if ([string]::IsNullOrWhiteSpace($ServiceRoleKey)) {
         $supabaseStatus = & supabase status --output json 2>$null
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($supabaseStatus)) {
-            throw "no desktop service-role credential or readable local Supabase CLI status is configured"
+            throw "no desktop management token, service-role credential, or readable local Supabase CLI status is configured"
         }
         return
     }

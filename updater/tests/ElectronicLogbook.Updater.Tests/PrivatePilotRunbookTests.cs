@@ -26,6 +26,12 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("docs\\private-pilot-runbook.md", preflightScript, StringComparison.Ordinal);
         Assert.Contains("supabase\\tests\\hosted_pilot_rls.sql", preflightScript, StringComparison.Ordinal);
         Assert.Contains("Invoke-PrivatePilotHealthCheck.ps1", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("ElectronicLogbook\\Supabase", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("hosted-pilot-projects.local.json", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("access-token.txt", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("private-pilot database region is ap-southeast-2", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Supabase management token sees private-pilot project in ap-southeast-2", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Auth signup disabled with invited-user email sign-in only", preflightScript, StringComparison.Ordinal);
         Assert.Contains("secretHandling", preflightScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Host $ConnectionString", preflightScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Output $ConnectionString", preflightScript, StringComparison.Ordinal);
