@@ -6,10 +6,11 @@ private keys, user names, drive letters, or machine-specific paths.
 
 The public repository supplies the installer and transfer commands. Private project
 context, signing keys, OAuth files, hosted-pilot credentials, and local recovery state
-travel only inside an AES-256 encrypted 7-Zip archive.
+travel inside a local 7-Zip archive.
 
-Never upload the encrypted archive to GitHub. Keep its password in a separate password
-manager or communicate it through a different channel.
+The archive is intentionally unencrypted for direct transfer between trusted personal
+devices. It contains credentials and signing material: never upload it to GitHub, place
+it in shared storage, or send it to another person. Delete surplus copies after import.
 
 ## The Four Commands
 
@@ -19,7 +20,7 @@ Run these commands from the repository root in Windows PowerShell or PowerShell 
 # Inspect what would be exported; creates nothing.
 .\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export -WhatIf
 
-# Create the encrypted operational archive.
+# Create the operational archive.
 .\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export
 
 # Install or update the supported toolchain on a new Windows device.
@@ -40,8 +41,7 @@ The same actions appear in VS Code under **Terminal > Run Task** as:
 - `Electronic Logbook: Install development prerequisites`
 - `Electronic Logbook: Verify development environment`
 
-The Import task asks for the archive path. Export and Import ask for the archive
-password in the integrated terminal.
+The Import task asks for the archive path. No archive password is used.
 
 ## What The Archive Contains
 
@@ -101,17 +101,15 @@ different computer.
    .\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Export
    ```
 
-7. Enter a unique password of at least 12 characters and confirm it. The password is
-   not echoed, saved, or placed in the 7-Zip command line.
-8. The default output is:
+7. The default output is:
 
    ```text
    %USERPROFILE%\Downloads\ElectronicLogbook-LocalDevelopment-YYYYMMDD-HHMMSS.7z
    ```
 
-9. The command tests the finished archive before reporting success. Move it using a
-   trusted removable drive or encrypted file-transfer service. Store or communicate the
-   password separately.
+8. The command tests the finished archive before reporting success. Move it directly to
+   the trusted destination device. Because it is unencrypted, do not use shared storage
+   or leave surplus copies behind.
 
 To choose another output path:
 
@@ -170,7 +168,7 @@ The manifest currently covers:
 | Shell/editor | Windows PowerShell, PowerShell 7, VS Code |
 | .NET | SDK 10 for the main solution and SDK 8 for the recovery secret generator |
 | JavaScript | Current Node.js LTS; the repository lockfile pins mobile packages |
-| Archive | 7-Zip with AES-256 and encrypted-header support |
+| Archive | 7-Zip |
 | Android | Temurin JDK 21, Platform Tools, SDK Platform 36, Build-Tools 35.0.0 |
 | Hosted pilot | Docker Desktop, WSL2, Supabase CLI 2.111.0, PostgreSQL 17 client |
 | Agent tooling | Codex CLI/VS Code extension, Python/uv, Graphify |
@@ -213,7 +211,7 @@ manual checkpoint printed by the command:
    debugging, and approve the new computer's USB debugging key. Do not clear or
    uninstall the retained debug app.
 
-## Restore The Encrypted Archive
+## Restore The Archive
 
 Copy the `.7z` file onto the new computer, keep it outside the repository, and run:
 
@@ -237,9 +235,8 @@ Import performs these safeguards before changing a destination:
 9. runs `.NET` restore and `npm ci`; and
 10. runs the environment verifier.
 
-Use `-WhatIf` to validate and preview destination changes. It still needs the archive
-password and temporarily extracts the archive so hashes can be checked, but it does not
-restore or overwrite destination files:
+Use `-WhatIf` to validate and preview destination changes. It temporarily extracts the
+archive so hashes can be checked, but it does not restore or overwrite destination files:
 
 ```powershell
 .\tools\Invoke-LocalDevelopmentTransfer.ps1 -Action Import `
@@ -314,7 +311,7 @@ changes, update all four surfaces together:
 4. `tools/Test-LocalDevelopmentTransfer.ps1`.
 
 Local `AGENTS.md` instructs Codex to enforce this rule automatically. A newly discovered
-local file must be classified as encrypted transfer, regenerated output/dependency,
+local file must be classified as local transfer, regenerated output/dependency,
 fresh authentication, or deliberate exclusion. It must not be mentioned only in prose.
 
 Before reviewing or committing setup-system changes:

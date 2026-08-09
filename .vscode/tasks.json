@@ -88,7 +88,7 @@
     {
       "id": "electronicLogbookArchivePath",
       "type": "promptString",
-      "description": "Full path to the encrypted Electronic Logbook .7z archive"
+      "description": "Full path to the Electronic Logbook .7z archive"
     }
   ]
 }

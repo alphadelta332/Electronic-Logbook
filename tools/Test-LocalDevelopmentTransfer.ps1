@@ -9,7 +9,6 @@ $entrypoint = Join-Path $PSScriptRoot 'Invoke-LocalDevelopmentTransfer.ps1'
 $manifestPath = Join-Path $PSScriptRoot 'local-development-transfer.psd1'
 $config = Import-PowerShellDataFile -LiteralPath $manifestPath
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("ElectronicLogbookTransferTests-" + [Guid]::NewGuid().ToString('N'))
-$testPassword = 'Synthetic-Test-Password-Only-2026!'
 $passed = 0
 
 function Assert-True {
@@ -32,10 +31,7 @@ function Get-TestHash {
 }
 
 function Invoke-TransferProcess {
-    param(
-        [string[]]$Arguments,
-        [string]$SyntheticPassword
-    )
+    param([string[]]$Arguments)
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = 'powershell.exe'
@@ -45,9 +41,6 @@ function Invoke-TransferProcess {
     $startInfo.CreateNoWindow = $true
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
-    if (-not [string]::IsNullOrWhiteSpace($SyntheticPassword)) {
-        $startInfo.EnvironmentVariables['ELB_TRANSFER_SYNTHETIC_PASSWORD'] = $SyntheticPassword
-    }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
     [void]$process.Start()
@@ -102,8 +95,8 @@ function New-SyntheticBundle {
 
     Push-Location $SourceRoot
     try {
-        & $script:sevenZip a -t7z $Archive '.\*' -mx=1 -mhe=on "-p$testPassword" -bb0 -bd | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Could not create the synthetic encrypted archive.' }
+        & $script:sevenZip a -t7z $Archive '.\*' -mx=1 -bb0 -bd | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not create the synthetic archive.' }
     }
     finally { Pop-Location }
 }
@@ -119,8 +112,8 @@ try {
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*sessions*' }).Count -eq 1) 'Codex sessions must be forbidden'
 
     $entrypointText = Get-Content -LiteralPath $entrypoint -Raw -Encoding UTF8
-    Assert-True ($entrypointText -match "@\('a'.*'-mhe=on'.*'-p'") 'real export must request encrypted headers and the native password prompt'
-    Assert-True ($entrypointText -notmatch '(?m)^\s*\[string\]\$ArchivePassword') 'real workflow must not accept a command-line password parameter'
+    Assert-True ($entrypointText -match "@\('a'.*'-t7z'.*'-mx=9'.*'-bb0'") 'real export must create a 7-Zip archive'
+    Assert-True ($entrypointText -notmatch "'-mhe=on'|Read-ArchivePassword|Archive password") 'workflow must not encrypt or request an archive password'
 
     $ignored = & git -C $repoRoot check-ignore 'LOCAL_DEVICE_SETUP_HANDOVER.md' 2>$null
     Assert-True ($LASTEXITCODE -ne 0) 'the sanitized handover must be trackable'
@@ -147,10 +140,10 @@ try {
     $mainExport = Invoke-TransferProcess -Arguments @(
         '-Action', 'Export', '-RepoRoot', $syntheticRepo, '-LocalAppDataRoot', $syntheticLocal,
         '-CodexHome', $syntheticCodex, '-OutputPath', $mainExportArchive, '-TestMode'
-    ) -SyntheticPassword $testPassword
+    )
     Assert-True ($mainExport.ExitCode -eq 0) "main exporter failed against synthetic roots: $($mainExport.Error)"
-    Assert-True (Test-Path -LiteralPath $mainExportArchive -PathType Leaf) 'main exporter must create the requested encrypted archive'
-    & $script:sevenZip t $mainExportArchive "-p$testPassword" -bb0 -bd | Out-Null
+    Assert-True (Test-Path -LiteralPath $mainExportArchive -PathType Leaf) 'main exporter must create the requested archive'
+    & $script:sevenZip t $mainExportArchive -bb0 -bd | Out-Null
     Assert-True ($LASTEXITCODE -eq 0) 'main exporter archive must pass 7-Zip integrity testing'
 
     $bundleSource = Join-Path $temporaryRoot 'valid-source'
@@ -158,14 +151,14 @@ try {
     New-SyntheticBundle -SourceRoot $bundleSource -Archive $validArchive
     $previousPreference = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & $script:sevenZip l $validArchive -bb0 -bd *> (Join-Path $temporaryRoot 'listing-without-password.txt')
+    & $script:sevenZip l $validArchive -bb0 -bd *> (Join-Path $temporaryRoot 'archive-listing.txt')
     $listingExitCode = $LASTEXITCODE
     $ErrorActionPreference = $previousPreference
-    Assert-True ($listingExitCode -ne 0) 'encrypted headers must prevent listing without a password'
-    $unauthorizedListing = Get-Content -LiteralPath (Join-Path $temporaryRoot 'listing-without-password.txt') -Raw
-    Assert-True ($unauthorizedListing -notmatch 'AGENTS\.md') 'encrypted headers must hide payload filenames'
-    & $script:sevenZip t $validArchive "-p$testPassword" -bb0 -bd | Out-Null
-    Assert-True ($LASTEXITCODE -eq 0) 'synthetic encrypted archive must pass 7-Zip integrity testing'
+    Assert-True ($listingExitCode -eq 0) 'unencrypted archive must be readable without a password'
+    $publicListing = Get-Content -LiteralPath (Join-Path $temporaryRoot 'archive-listing.txt') -Raw
+    Assert-True ($publicListing -match 'AGENTS\.md') 'unencrypted archive must expose payload filenames'
+    & $script:sevenZip t $validArchive -bb0 -bd | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) 'synthetic archive must pass 7-Zip integrity testing'
 
     $previewRepo = Join-Path $temporaryRoot 'preview-repo'
     New-Item -ItemType Directory -Path $previewRepo -Force | Out-Null
@@ -174,7 +167,7 @@ try {
         '-LocalAppDataRoot', (Join-Path $temporaryRoot 'preview-local'),
         '-CodexHome', (Join-Path $temporaryRoot 'preview-codex'),
         '-SkipDependencyRestore', '-SkipPostImportVerify', '-TestMode', '-WhatIf'
-    ) -SyntheticPassword $testPassword
+    )
     Assert-True ($previewImport.ExitCode -eq 0) "import WhatIf validation failed: $($previewImport.Error)"
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $previewRepo 'AGENTS.md'))) 'import WhatIf must not write destinations'
 
@@ -188,7 +181,7 @@ try {
         '-Action', 'Import', '-ArchivePath', $validArchive, '-RepoRoot', $restoreRepo,
         '-LocalAppDataRoot', $restoreLocal, '-CodexHome', $restoreCodex,
         '-BackupRoot', $restoreBackup, '-SkipDependencyRestore', '-SkipPostImportVerify', '-TestMode'
-    ) -SyntheticPassword $testPassword
+    )
     Assert-True ($import.ExitCode -eq 0) "synthetic import failed: $($import.Error)"
     Assert-True ((Get-Content -LiteralPath (Join-Path $restoreRepo 'AGENTS.md') -Raw) -match 'synthetic restored context') 'import must restore the declared file'
     Assert-True ((Get-Content -LiteralPath (Join-Path $restoreBackup 'Repo\AGENTS.md') -Raw) -match 'existing context') 'import must back up a conflicting file'
@@ -203,7 +196,7 @@ try {
         '-LocalAppDataRoot', (Join-Path $temporaryRoot 'tamper-local'),
         '-CodexHome', (Join-Path $temporaryRoot 'tamper-codex'),
         '-SkipDependencyRestore', '-SkipPostImportVerify', '-TestMode'
-    ) -SyntheticPassword $testPassword
+    )
     Assert-True ($tamperedImport.ExitCode -ne 0) 'hash mismatch must reject the archive'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $tamperRepo 'AGENTS.md'))) 'hash rejection must happen before destination writes'
 
@@ -217,20 +210,9 @@ try {
         '-LocalAppDataRoot', (Join-Path $temporaryRoot 'undeclared-local'),
         '-CodexHome', (Join-Path $temporaryRoot 'undeclared-codex'),
         '-SkipDependencyRestore', '-SkipPostImportVerify', '-TestMode'
-    ) -SyntheticPassword $testPassword
+    )
     Assert-True ($undeclaredImport.ExitCode -ne 0) 'undeclared archive files must be rejected'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $undeclaredRepo 'AGENTS.md'))) 'undeclared-file rejection must happen before destination writes'
-
-    $wrongPasswordRepo = Join-Path $temporaryRoot 'wrong-password-repo'
-    New-Item -ItemType Directory -Path $wrongPasswordRepo -Force | Out-Null
-    $wrongPassword = Invoke-TransferProcess -Arguments @(
-        '-Action', 'Import', '-ArchivePath', $validArchive, '-RepoRoot', $wrongPasswordRepo,
-        '-LocalAppDataRoot', (Join-Path $temporaryRoot 'wrong-local'),
-        '-CodexHome', (Join-Path $temporaryRoot 'wrong-codex'),
-        '-SkipDependencyRestore', '-SkipPostImportVerify', '-TestMode'
-    ) -SyntheticPassword 'Wrong-Synthetic-Password!'
-    Assert-True ($wrongPassword.ExitCode -ne 0) 'wrong password must fail import'
-    Assert-True (-not (Test-Path -LiteralPath (Join-Path $wrongPasswordRepo 'AGENTS.md'))) 'wrong password must not change destinations'
 
     $corruptArchive = Join-Path $temporaryRoot 'corrupt.7z'
     [IO.File]::Copy($validArchive, $corruptArchive)
@@ -245,7 +227,7 @@ try {
         '-LocalAppDataRoot', (Join-Path $temporaryRoot 'corrupt-local'),
         '-CodexHome', (Join-Path $temporaryRoot 'corrupt-codex'),
         '-SkipDependencyRestore', '-SkipPostImportVerify', '-TestMode'
-    ) -SyntheticPassword $testPassword
+    )
     Assert-True ($corruptImport.ExitCode -ne 0) 'corrupted archive must fail import'
     Assert-True (-not (Test-Path -LiteralPath (Join-Path $corruptRepo 'AGENTS.md'))) 'corrupted archive must not change destinations'
 

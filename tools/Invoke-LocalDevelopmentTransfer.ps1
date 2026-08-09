@@ -61,7 +61,6 @@ function Invoke-SevenZip {
         [string[]]$Arguments
     )
 
-    $effectiveArguments = @($Arguments)
     if ($TestMode) {
         $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
         foreach ($root in @($script:RepoRoot, $LocalAppDataRoot, $CodexHome)) {
@@ -69,15 +68,18 @@ function Invoke-SevenZip {
                 throw 'TestMode is allowed only when every destination root is under the Windows temporary directory.'
             }
         }
-        if ([string]::IsNullOrWhiteSpace($env:ELB_TRANSFER_SYNTHETIC_PASSWORD)) {
-            throw 'TestMode requires ELB_TRANSFER_SYNTHETIC_PASSWORD.'
-        }
-        $effectiveArguments = @($effectiveArguments | Where-Object { $_ -ne '-p' }) + "-p$env:ELB_TRANSFER_SYNTHETIC_PASSWORD"
     }
 
-    & $SevenZip @effectiveArguments | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "7-Zip exited with code $LASTEXITCODE. The password may be wrong or the archive may be damaged."
+    if ($TestMode) {
+        & $SevenZip @Arguments | Out-Null
+        $exitCode = $LASTEXITCODE
+    }
+    else {
+        & $SevenZip @Arguments
+        $exitCode = $LASTEXITCODE
+    }
+    if ($exitCode -ne 0) {
+        throw "7-Zip exited with code $exitCode. The archive may be damaged."
     }
 }
 
@@ -354,19 +356,17 @@ function Invoke-ExportAction {
         if (Test-Path -LiteralPath $archive) { throw "Archive already exists: $archive" }
 
         $sevenZip = Resolve-SevenZip
-        Write-Step 'Creating AES-256 archive with encrypted filenames'
-        Write-Host '7-Zip will ask for the archive password and confirmation in this terminal.' -ForegroundColor Yellow
+        Write-Step 'Creating unencrypted 7-Zip archive'
+        Write-Warning 'This archive contains private credentials and signing material. Keep it on trusted storage and delete transfer copies when finished.'
         Push-Location $stageRoot
         try {
-            Invoke-SevenZip -SevenZip $sevenZip -Arguments @('a', '-t7z', $archive, '.\*', '-mx=9', '-mhe=on', '-p', '-bb0', '-bd')
+            Invoke-SevenZip -SevenZip $sevenZip -Arguments @('a', '-t7z', $archive, '.\*', '-mx=9', '-bb0', '-bd')
         }
         finally { Pop-Location }
 
-        Write-Step 'Testing encrypted archive integrity'
-        Write-Host 'Enter the same password once more for the integrity test.' -ForegroundColor Yellow
-        Invoke-SevenZip -SevenZip $sevenZip -Arguments @('t', $archive, '-p', '-bb0', '-bd')
-        Write-Host "Encrypted handover created: $archive" -ForegroundColor Green
-        Write-Host 'Keep the password separate from the archive.' -ForegroundColor Yellow
+        Write-Step 'Testing archive integrity'
+        Invoke-SevenZip -SevenZip $sevenZip -Arguments @('t', $archive, '-bb0', '-bd')
+        Write-Host "Local development handover created: $archive" -ForegroundColor Green
     }
     finally {
         if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
@@ -439,9 +439,8 @@ function Invoke-ImportAction {
     [void][IO.Directory]::CreateDirectory($stageRoot)
 
     try {
-        Write-Step 'Extracting encrypted archive into temporary staging'
-        Write-Host '7-Zip will ask for the archive password in this terminal.' -ForegroundColor Yellow
-        Invoke-SevenZip -SevenZip $sevenZip -Arguments @('x', $archive, "-o$stageRoot", '-y', '-p', '-bb0', '-bd')
+        Write-Step 'Extracting archive into temporary staging'
+        Invoke-SevenZip -SevenZip $sevenZip -Arguments @('x', $archive, "-o$stageRoot", '-y', '-bb0', '-bd')
 
         $manifestPath = Join-Path $stageRoot 'metadata\bundle-manifest.json'
         if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw 'Archive does not contain bundle-manifest.json.' }
@@ -710,8 +709,8 @@ function Invoke-VerifyAction {
     $hostedConfig = Join-Path $script:RepoRoot 'mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json'
     Add-CheckResult $results 'Hosted sync local config' (Test-Path -LiteralPath $hostedConfig -PathType Leaf) $false 'required only for hosted private-pilot work'
     $electronicLogbookLocalRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook'
-    Add-CheckResult $results 'Supabase management token' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\access-token.txt') -PathType Leaf) $true 'encrypted transfer asset; value is never printed'
-    Add-CheckResult $results 'Hosted project metadata' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\hosted-pilot-projects.local.json') -PathType Leaf) $true 'encrypted transfer asset; values are never printed'
+    Add-CheckResult $results 'Supabase management token' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\access-token.txt') -PathType Leaf) $true 'private transfer asset; value is never printed'
+    Add-CheckResult $results 'Hosted project metadata' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\hosted-pilot-projects.local.json') -PathType Leaf) $true 'private transfer asset; values are never printed'
     Add-CheckResult $results 'Google Auth local state' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Google Auth\webclientid.txt') -PathType Leaf) $false 'required for Android hosted Google sign-in work'
 
     $signingRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook\AndroidSigning'
