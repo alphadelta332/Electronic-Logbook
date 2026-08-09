@@ -77,6 +77,128 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task GoogleSignInAutomaticallyRestoresTheOnlyExistingLogbook()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-10T01:00:00Z"));
+        var accountId = new HostedAccountId("acct_private");
+        var logbookId = new LogbookId("log_existing");
+        var deviceId = new DeviceId("dev_replacement");
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        var hosted = new BrowserHostedSyncState(
+            accountId,
+            logbookId,
+            deviceId,
+            LastAcknowledgedHostedRevision: 7,
+            PortableHostedSyncStatus.Synced,
+            LastAttemptedAt: clock.UtcNow,
+            LastSyncedAt: clock.UtcNow);
+        var recovery = new RecordingReplacementRecoveryWorkflow(
+            new MobileReplacementRecoveryResult(document, hosted));
+        var google = new RecordingGoogleAuthenticator(
+            new HostedSignInException(
+                HostedSignInFailureReason.AccountRecoveryRequired,
+                "Existing account recovery is required."));
+        await new BrowserPackageKeyStore(jsRuntime).ImportRecoveryCodeAsync(
+            logbookId,
+            PortableLogbookKey.Generate().ToRecoveryCode());
+        var session = CreateSession(
+            jsRuntime,
+            hostedAuthenticator: new InMemoryHostedLogbookAuthenticator(accountId, deviceId, clock),
+            syncClock: clock,
+            googleAuthenticator: google,
+            replacementRecovery: recovery);
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.SignInWithGoogleAsync();
+
+        Assert.Equal(1, google.SignInCount);
+        Assert.Equal(1, recovery.AutomaticRecoveryCount);
+        Assert.Equal(logbookId, session.DocumentV2.LogbookId);
+        Assert.Equal(deviceId, session.HostedSync?.DeviceId);
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync?.LastStatus);
+        Assert.Equal(7, session.HostedSync?.LastAcknowledgedHostedRevision);
+        Assert.Equal("Ready", session.PackageKeyStatus);
+        Assert.Equal("Existing logbook restored and synced.", session.LastActionMessage);
+    }
+
+    [Fact]
+    public async Task EmailOtpSignInAutomaticallyRestoresTheOnlyExistingLogbook()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-10T01:00:00Z"));
+        var accountId = new HostedAccountId("acct_private");
+        var logbookId = new LogbookId("log_existing");
+        var deviceId = new DeviceId("dev_replacement");
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        var hosted = new BrowserHostedSyncState(
+            accountId,
+            logbookId,
+            deviceId,
+            LastAcknowledgedHostedRevision: 7,
+            PortableHostedSyncStatus.Synced,
+            LastAttemptedAt: clock.UtcNow,
+            LastSyncedAt: clock.UtcNow);
+        var recovery = new RecordingReplacementRecoveryWorkflow(
+            new MobileReplacementRecoveryResult(document, hosted));
+        var authenticator = new RecoveryRequiredEmailAuthenticator(accountId, clock);
+        await new BrowserPackageKeyStore(jsRuntime).ImportRecoveryCodeAsync(
+            logbookId,
+            PortableLogbookKey.Generate().ToRecoveryCode());
+        var session = CreateSession(
+            jsRuntime,
+            hostedAuthenticator: authenticator,
+            syncClock: clock,
+            replacementRecovery: recovery);
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+
+        Assert.Equal(1, authenticator.CompleteCount);
+        Assert.Equal(1, recovery.AutomaticRecoveryCount);
+        Assert.Equal(logbookId, session.DocumentV2.LogbookId);
+        Assert.Equal(deviceId, session.HostedSync?.DeviceId);
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync?.LastStatus);
+        Assert.Equal("Existing logbook restored and synced.", session.LastActionMessage);
+    }
+
+    [Fact]
+    public async Task GoogleSignInDoesNotStartRecoveryForUnrelatedAuthenticationFailure()
+    {
+        var recovery = new RecordingReplacementRecoveryWorkflow();
+        var google = new RecordingGoogleAuthenticator(
+            new HostedSignInException(
+                HostedSignInFailureReason.AccountDisabled,
+                "This account is disabled."));
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-10T01:00:00Z"));
+        var session = CreateSession(
+            new JourneyJsRuntime(),
+            hostedAuthenticator: new InMemoryHostedLogbookAuthenticator(
+                new HostedAccountId("acct_private"),
+                new DeviceId("dev_android"),
+                clock),
+            syncClock: clock,
+            googleAuthenticator: google,
+            replacementRecovery: recovery);
+
+        await session.EnsureLoadedWorkbookAsync();
+        var error = await Assert.ThrowsAsync<HostedSignInException>(session.SignInWithGoogleAsync);
+
+        Assert.Equal(HostedSignInFailureReason.AccountDisabled, error.Reason);
+        Assert.Equal(0, recovery.AutomaticRecoveryCount);
+        Assert.False(session.HasHostedSync);
+    }
+
+    [Fact]
     public async Task RetainedHostedSessionRetriesIdempotentRecoveryEnrollmentWithUnchangedIdentifiers()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -223,6 +345,54 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(retainedHostedState.DeviceId, reloaded.HostedSync.DeviceId);
         Assert.Empty(recoveryService.EnrollmentRequests);
         Assert.Equal(0, jsRuntime.RecoveryWrapCount);
+    }
+
+    [Fact]
+    public async Task FirstInitializationRequiresRecoveryCodeRoundTripBeforeUploadingCodeEnvelope()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-09T02:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var recoveryService = new RecordingRecoveryEnvelopeService();
+        var session = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            new InMemoryHostedLogbookLedger(),
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+            recoveryEnvelopeService: recoveryService);
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+
+        Assert.True(session.IsRecoveryCodeConfirmationPending);
+        Assert.Equal(jsRuntime.GeneratedRecoveryCode, session.PendingRecoveryCode);
+        var abandonedCode = session.PendingRecoveryCode;
+        Assert.Single(recoveryService.EnrollmentRequests);
+        Assert.Empty(recoveryService.RecoveryCodeEnrollmentRequests);
+        Assert.False(await session.ConfirmRecoveryCodeAsync("wrong-recovery-code-that-is-long-enough"));
+        Assert.Empty(recoveryService.RecoveryCodeEnrollmentRequests);
+
+        var resumed = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            new InMemoryHostedLogbookLedger(),
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+            recoveryEnvelopeService: recoveryService);
+        await resumed.EnsureLoadedWorkbookAsync();
+        Assert.True(resumed.IsRecoveryCodeConfirmationPending);
+        Assert.NotEqual(abandonedCode, resumed.PendingRecoveryCode);
+
+        Assert.True(await resumed.ConfirmRecoveryCodeAsync(resumed.PendingRecoveryCode!));
+        Assert.False(resumed.IsRecoveryCodeConfirmationPending);
+        Assert.Null(resumed.PendingRecoveryCode);
+        Assert.Single(recoveryService.RecoveryCodeEnrollmentRequests);
+        Assert.Equal("Recovery code confirmed. Account connected and synced.", resumed.LastActionMessage);
     }
 
     [Fact]
@@ -571,7 +741,9 @@ public sealed class MobileLogbookSessionJourneyTests
         ISyncClock? syncClock = null,
         IHostedLogbookLedger? hostedLedger = null,
         INetworkStatus? networkStatus = null,
-        IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null) =>
+        IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
+        IMobileGoogleHostedAuthenticator? googleAuthenticator = null,
+        IMobileReplacementRecoveryWorkflow? replacementRecovery = null) =>
         new(
             new BrowserLogbookStore(jsRuntime),
             new BrowserPackageKeyStore(jsRuntime),
@@ -579,7 +751,9 @@ public sealed class MobileLogbookSessionJourneyTests
             hostedLedger: hostedLedger,
             networkStatus: networkStatus,
             syncClock: syncClock,
-            recoveryEnvelopeService: recoveryEnvelopeService);
+            recoveryEnvelopeService: recoveryEnvelopeService,
+            googleAuthenticator: googleAuthenticator,
+            replacementRecovery: replacementRecovery);
 
     private static void FillDraft(EntryDraft draft, string registration, decimal hours)
     {
@@ -670,6 +844,8 @@ public sealed class MobileLogbookSessionJourneyTests
 
         public int RecoveryWrapCount { get; private set; }
 
+        public string? GeneratedRecoveryCode { get; private set; }
+
         public List<string> ImportedPackageKeys { get; } = [];
 
         private Dictionary<string, byte[]> PackageKeys { get; } = [];
@@ -694,6 +870,9 @@ public sealed class MobileLogbookSessionJourneyTests
                 "electronicLogbookKeys.importPackageKey" => ImportPackageKey<TValue>(args),
                 "electronicLogbookKeys.getRecoveryPublicKey" => GetRecoveryPublicKey<TValue>(),
                 "electronicLogbookKeys.wrapPackageKeyForRecoveryService" => WrapPackageKeyForRecoveryService<TValue>(args),
+                "electronicLogbookKeys.wrapPackageKeyForRecoveryCode" => WrapPackageKeyForRecoveryCode<TValue>(args),
+                "electronicLogbookKeys.testRecoveryCodeEnvelope" => TestRecoveryCodeEnvelope<TValue>(args),
+                "electronicLogbookKeys.importRecoveryCodeEnvelope" => new ValueTask<TValue>((TValue)(object)true),
                 "electronicLogbookKeys.encrypt" => Encrypt<TValue>(args),
                 "electronicLogbookKeys.decrypt" => Decrypt<TValue>(args),
                 _ => throw new JSException($"Unexpected JS call: {identifier}")
@@ -757,6 +936,27 @@ public sealed class MobileLogbookSessionJourneyTests
                 "RSA-OAEP-256"));
         }
 
+        private ValueTask<TValue> WrapPackageKeyForRecoveryCode<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            GeneratedRecoveryCode = Assert.IsType<string>(args[1]);
+            return new ValueTask<TValue>((TValue)(object)new MobileRecoveryCodeEnvelopePayload(
+                Convert.ToBase64String(new byte[48]),
+                Convert.ToBase64String(new byte[12]),
+                Convert.ToBase64String(new byte[16]),
+                MobileRecoveryCodeEnvelope.Algorithm,
+                MobileRecoveryCodeEnvelope.KeyVersionId));
+        }
+
+        private ValueTask<TValue> TestRecoveryCodeEnvelope<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            return new ValueTask<TValue>((TValue)(object)string.Equals(
+                GeneratedRecoveryCode,
+                Assert.IsType<string>(args[1]),
+                StringComparison.Ordinal));
+        }
+
         private ValueTask<TValue> Encrypt<TValue>(object?[]? args)
         {
             Assert.NotNull(args);
@@ -794,10 +994,99 @@ public sealed class MobileLogbookSessionJourneyTests
             Convert.ToHexString(SHA256.HashData(encoded)).ToLowerInvariant());
     }
 
+    private sealed class RecordingGoogleAuthenticator(Exception? signInException = null)
+        : IMobileGoogleHostedAuthenticator
+    {
+        public int SignInCount { get; private set; }
+
+        public ValueTask<HostedSyncSession> SignInWithGoogleAsync(
+            CancellationToken cancellationToken = default)
+        {
+            SignInCount++;
+            return signInException is null
+                ? ValueTask.FromResult(new HostedSyncSession(
+                    new HostedAccountId("acct_private"),
+                    new DeviceId("dev_android"),
+                    DateTimeOffset.Parse("2099-01-01T00:00:00Z")))
+                : ValueTask.FromException<HostedSyncSession>(signInException);
+        }
+
+        public ValueTask<HostedSyncSession> LinkGoogleIdentityAsync(
+            CancellationToken cancellationToken = default) =>
+            SignInWithGoogleAsync(cancellationToken);
+    }
+
+    private sealed class RecoveryRequiredEmailAuthenticator(
+        HostedAccountId accountId,
+        ISyncClock clock) : IHostedLogbookAuthenticator
+    {
+        public int CompleteCount { get; private set; }
+
+        public ValueTask<HostedSyncSession?> GetCurrentSessionAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<HostedSyncSession?>(null);
+
+        public ValueTask<HostedSignInStart> StartEmailSignInAsync(
+            string email,
+            bool shouldCreateUser = false,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new HostedSignInStart(
+                accountId,
+                "p***@example.com",
+                clock.UtcNow.AddMinutes(10)));
+
+        public ValueTask<HostedSyncSession> CompleteEmailSignInAsync(
+            string verificationCode,
+            CancellationToken cancellationToken = default)
+        {
+            CompleteCount++;
+            return ValueTask.FromException<HostedSyncSession>(new HostedSignInException(
+                HostedSignInFailureReason.AccountRecoveryRequired,
+                "Existing account recovery is required."));
+        }
+
+        public ValueTask<HostedSyncSession> ResumeEmailSignInAsync(
+            CancellationToken cancellationToken = default) =>
+            CompleteEmailSignInAsync(string.Empty, cancellationToken);
+
+        public ValueTask<HostedSyncSession> RefreshAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<HostedSyncSession>(new NotSupportedException());
+
+        public ValueTask SignOutAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+    }
+
+    private sealed class RecordingReplacementRecoveryWorkflow(
+        MobileReplacementRecoveryResult? result = null) : IMobileReplacementRecoveryWorkflow
+    {
+        public int AutomaticRecoveryCount { get; private set; }
+
+        public ValueTask<MobileReplacementRecoveryResult> RecoverOnlyLogbookAsync(
+            CancellationToken cancellationToken = default)
+        {
+            AutomaticRecoveryCount++;
+            return ValueTask.FromResult(result
+                ?? throw new InvalidOperationException("No replacement recovery result was configured."));
+        }
+
+        public ValueTask<MobileReplacementRecoveryResult> RecoverAsync(
+            LogbookId logbookId,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(result
+                ?? throw new InvalidOperationException("No replacement recovery result was configured."));
+
+        public ValueTask<MobileReplacementRecoveryResult> RecoverOnlyLogbookWithCodeAsync(
+            string recoveryCode,
+            CancellationToken cancellationToken = default) =>
+            RecoverOnlyLogbookAsync(cancellationToken);
+    }
+
     private sealed class RecordingRecoveryEnvelopeService(bool failEnrollment = false)
         : IMobileRecoveryEnvelopeService
     {
         public List<MobileRecoveryEnvelopeEnrollmentRequest> EnrollmentRequests { get; } = [];
+        public List<MobileRecoveryCodeEnrollmentRequest> RecoveryCodeEnrollmentRequests { get; } = [];
 
         public ValueTask<MobileRecoveryEnvelopeConfiguration> GetConfigurationAsync(
             CancellationToken cancellationToken = default)
@@ -809,6 +1098,13 @@ public sealed class MobileLogbookSessionJourneyTests
                 "RSA-OAEP-256",
                 "managed-key-v1"));
         }
+
+        public ValueTask<MobileRecoverySetupStatus> GetRecoverySetupStatusAsync(
+            MobileRecoverySetupStatusRequest request,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileRecoverySetupStatus(
+                EnrollmentRequests.Count > 0,
+                RecoveryCodeEnrollmentRequests.Count > 0));
 
         public ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollAsync(
             MobileRecoveryEnvelopeEnrollmentRequest request,
@@ -829,5 +1125,22 @@ public sealed class MobileLogbookSessionJourneyTests
             MobileRecoveryEnvelopeRestoreRequest request,
             CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+
+        public ValueTask<MobileRecoveryCodeEnrollmentResult> EnrollRecoveryCodeAsync(
+            MobileRecoveryCodeEnrollmentRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            RecoveryCodeEnrollmentRequests.Add(request);
+            return ValueTask.FromResult(new MobileRecoveryCodeEnrollmentResult(true));
+        }
+
+        public ValueTask<MobileRecoveryCodeEnvelopePayload> RestoreWithRecoveryCodeAsync(
+            MobileRecoveryCodeRestoreRequest request,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<MobileRecoveryDeviceActivationResult> ActivateAsync(
+            MobileRecoveryDeviceActivationRequest request,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileRecoveryDeviceActivationResult(true));
     }
 }

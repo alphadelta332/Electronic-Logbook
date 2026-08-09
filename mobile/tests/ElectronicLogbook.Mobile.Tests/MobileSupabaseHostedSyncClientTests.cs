@@ -151,18 +151,36 @@ public sealed class MobileSupabaseHostedSyncClientTests
             deviceKey,
             "ingress-wrapped-package-key",
             configuration.KeyVersionId));
+        var setupStatus = await service.GetRecoverySetupStatusAsync(
+            new MobileRecoverySetupStatusRequest(logbookId, deviceId));
         var restore = await service.RestoreAsync(new MobileRecoveryEnvelopeRestoreRequest(
             logbookId,
             deviceId,
-            deviceKey));
+            deviceKey,
+            "Pixel 8 Pro"));
+        var codeEnvelope = new MobileRecoveryCodeEnvelopePayload(
+            "code-ciphertext",
+            "code-nonce",
+            "code-salt",
+            MobileRecoveryCodeEnvelope.Algorithm,
+            MobileRecoveryCodeEnvelope.KeyVersionId);
+        var codeEnrollment = await service.EnrollRecoveryCodeAsync(
+            new MobileRecoveryCodeEnrollmentRequest(logbookId, deviceId, codeEnvelope));
+        var codeRestore = await service.RestoreWithRecoveryCodeAsync(
+            new MobileRecoveryCodeRestoreRequest(logbookId, deviceId, "Pixel 8 Pro", deviceKey));
+        var activation = await service.ActivateAsync(new MobileRecoveryDeviceActivationRequest(logbookId, deviceId));
 
         Assert.Equal("service-public-key", configuration.PublicKey);
         Assert.True(enrollment.Enrolled);
+        Assert.True(setupStatus.ManagedEnvelopeConfigured);
         Assert.Equal("device-wrapped-package-key", restore.WrappedKey);
+        Assert.True(codeEnrollment.Enrolled);
+        Assert.Equal("code-ciphertext", codeRestore.Ciphertext);
+        Assert.True(activation.Activated);
         var requests = handler.Requests
             .Where(request => request.Path == "/functions/v1/recovery-envelope")
             .ToArray();
-        Assert.Equal(["configuration", "enroll", "restore"], requests.Select(request => request.Body.GetProperty("action").GetString()));
+        Assert.Equal(["configuration", "enroll", "status", "restore", "enroll-code", "restore-code", "activate"], requests.Select(request => request.Body.GetProperty("action").GetString()));
         Assert.All(requests, request =>
         {
             Assert.Equal(HttpMethod.Post, request.Method);
@@ -174,6 +192,12 @@ public sealed class MobileSupabaseHostedSyncClientTests
         Assert.Equal("40000000-0000-0000-0000-000000000001", requests[1].Body.GetProperty("deviceId").GetString());
         Assert.Equal("ingress-wrapped-package-key", requests[1].Body.GetProperty("wrappedPackageKey").GetString());
         Assert.False(requests[2].Body.TryGetProperty("wrappedPackageKey", out _));
+        Assert.Equal("Pixel 8 Pro", requests[3].Body.GetProperty("platformLabel").GetString());
+        Assert.Equal("code-ciphertext", requests[4].Body.GetProperty("recoveryCiphertext").GetString());
+        Assert.False(requests[4].Body.TryGetProperty("recoveryCode", out _));
+        Assert.Equal("Pixel 8 Pro", requests[5].Body.GetProperty("platformLabel").GetString());
+        Assert.Equal("device-public-key", requests[5].Body.GetProperty("devicePublicKey").GetString());
+        Assert.False(requests[6].Body.TryGetProperty("devicePublicKey", out _));
     }
 
     [Fact]
@@ -285,7 +309,8 @@ public sealed class MobileSupabaseHostedSyncClientTests
                 await service.RestoreAsync(new MobileRecoveryEnvelopeRestoreRequest(
                     new LogbookId("log_20000000000000000000000000000001"),
                     new DeviceId("dev_40000000000000000000000000000001"),
-                    ValidRecoveryDeviceKey()));
+                    ValidRecoveryDeviceKey(),
+                    "Pixel 8 Pro"));
             }
         });
 
@@ -391,6 +416,27 @@ public sealed class MobileSupabaseHostedSyncClientTests
         Assert.Equal(ValidCredential().DeviceId, session.DeviceId);
         Assert.Equal("linked-refresh-token", (await store.LoadAsync())?.RefreshToken);
         Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+    }
+
+    [Fact]
+    public async Task GoogleSignInFailsBeforeOAuthExchangeWhenPlatformCredentialProviderIsUnavailable()
+    {
+        var handler = new RecordingHandler();
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await client.SignInWithGoogleAsync());
+
+        Assert.Contains("not configured", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/auth/v1/token");
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+        Assert.Equal(ValidCredential(), await store.LoadAsync());
     }
 
     private static string AuthSessionJson(string refreshToken) => $$"""
@@ -581,6 +627,58 @@ public sealed class MobileSupabaseHostedSyncClientTests
         var pending = await store.LoadAsync();
         Assert.NotNull(pending);
         Assert.Equal(new DeviceId("dev_pending"), pending.DeviceId);
+    }
+
+    [Fact]
+    public async Task ReplacementRecoveryReusesStablePendingDeviceAndActivatesOnlyAfterCompletion()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/rest/v1/logbook_memberships"] =
+            (HttpStatusCode.OK, """
+                [{
+                  "logbook_id": "20000000-0000-0000-0000-000000000001",
+                  "role": "owner",
+                  "logbooks": {
+                    "logbook_id": "20000000-0000-0000-0000-000000000001",
+                    "current_schema_version": 2,
+                    "operation_format_version": 1,
+                    "deletion_requested_at": null,
+                    "deleted_at": null
+                  }
+                }]
+                """);
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(new BrowserHostedCredential(
+            new HostedAccountId("acct_10000000000000000000000000000001"),
+            new DeviceId("dev_pending"),
+            "access-token",
+            "refresh-token",
+            DateTimeOffset.Parse("2099-01-01T00:00:00Z"),
+            DeviceRegistrationPending: true));
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
+        var logbookId = new LogbookId("log_20000000000000000000000000000001");
+
+        var first = await client.PrepareReplacementRecoveryAsync(logbookId);
+        var retry = await client.PrepareReplacementRecoveryAsync(logbookId);
+
+        Assert.Equal(first.Session.DeviceId, retry.Session.DeviceId);
+        Assert.StartsWith("dev_", first.Session.DeviceId.Value, StringComparison.Ordinal);
+        Assert.Equal(36, first.Session.DeviceId.Value.Length);
+        Assert.Null(await client.GetCurrentSessionAsync());
+
+        await client.CompleteReplacementRecoveryAsync(logbookId, first.Session.DeviceId);
+
+        Assert.Equal(first.Session.DeviceId, (await client.GetCurrentSessionAsync())?.DeviceId);
+        var activation = Assert.Single(handler.Requests, request =>
+            request.Path == "/functions/v1/recovery-envelope"
+            && request.Body.GetProperty("action").GetString() == "activate");
+        Assert.Equal(
+            first.Session.DeviceId.Value[4..].Insert(8, "-").Insert(13, "-").Insert(18, "-").Insert(23, "-"),
+            activation.Body.GetProperty("deviceId").GetString());
     }
 
     [Fact]
@@ -834,6 +932,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
                         }
                         """,
                     "enroll" => """{ "enrolled": true, "keyVersionId": "recovery-key-v1" }""",
+                    "status" => """{ "managedEnvelopeConfigured": true, "recoveryCodeConfigured": true }""",
                     "restore" => """
                         {
                           "wrappedKey": "device-wrapped-package-key",
@@ -841,6 +940,17 @@ public sealed class MobileSupabaseHostedSyncClientTests
                           "keyVersionId": "recovery-key-v1"
                         }
                         """,
+                    "enroll-code" => """{ "enrolled": true }""",
+                    "restore-code" => """
+                        {
+                          "ciphertext": "code-ciphertext",
+                          "nonce": "code-nonce",
+                          "salt": "code-salt",
+                          "algorithm": "PBKDF2-SHA256-600000+A256GCM",
+                          "keyVersionId": "recovery-code-v1"
+                        }
+                        """,
+                    "activate" => """{ "activated": true }""",
                     _ => throw new InvalidOperationException("Unexpected recovery-envelope action.")
                 },
                 _ => throw new InvalidOperationException($"Unexpected request path: {path}")

@@ -13,12 +13,15 @@ public sealed class MobileLogbookSession(
     ISyncClock? syncClock = null,
     MobileConnectionRecoveryWorkflow? connectionRecovery = null,
     IMobileGoogleHostedAuthenticator? googleAuthenticator = null,
-    IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null)
+    IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
+    IMobileReplacementRecoveryWorkflow? replacementRecovery = null)
 {
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
     private readonly ISyncClock syncClock = syncClock ?? SystemSyncClock.Instance;
     private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryEnrollments = [];
+    private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryCodeConfigurations = [];
+    private MobileRecoveryCodeSetup? pendingRecoveryCodeSetup;
 
     public static readonly CustomFieldDefinition[] CustomFields =
     [
@@ -97,6 +100,10 @@ public sealed class MobileLogbookSession(
     public string PackageKeyStatus { get; private set; } = "Checking";
 
     public bool HasHostedSync => HostedSync is not null;
+
+    public string? PendingRecoveryCode => pendingRecoveryCodeSetup?.RecoveryCode;
+
+    public bool IsRecoveryCodeConfirmationPending => pendingRecoveryCodeSetup is not null;
 
     public string HostedSyncStatusLabel =>
         HostedSync?.LastStatus switch
@@ -632,23 +639,139 @@ public sealed class MobileLogbookSession(
     public async Task CompleteHostedInviteAcceptanceAsync(string verificationCode)
     {
         EnsureHostedInviteAcceptanceAvailable();
-        var session = await hostedAuthenticator!.CompleteEmailSignInAsync(verificationCode);
-        await CompleteHostedInviteSetupAsync(session);
+        await CompleteEmailSignInOrRecoverAsync(
+            () => hostedAuthenticator!.CompleteEmailSignInAsync(verificationCode));
     }
 
     public async Task ResumeHostedInviteAcceptanceAsync()
     {
         EnsureHostedInviteAcceptanceAvailable();
-        var session = await hostedAuthenticator!.ResumeEmailSignInAsync();
-        await CompleteHostedInviteSetupAsync(session);
+        await CompleteEmailSignInOrRecoverAsync(
+            () => hostedAuthenticator!.ResumeEmailSignInAsync());
+    }
+
+    private async Task CompleteEmailSignInOrRecoverAsync(
+        Func<ValueTask<HostedSyncSession>> completeSignIn)
+    {
+        try
+        {
+            await CompleteHostedInviteSetupAsync(await completeSignIn());
+        }
+        catch (HostedSignInException exception)
+            when (exception.Reason == HostedSignInFailureReason.AccountRecoveryRequired)
+        {
+            if (replacementRecovery is null)
+            {
+                throw new InvalidOperationException(
+                    "Automatic account recovery is not configured on this device.",
+                    exception);
+            }
+
+            await ApplyReplacementRecoveryAsync(
+                await replacementRecovery.RecoverOnlyLogbookAsync());
+        }
     }
 
     public async Task SignInWithGoogleAsync()
     {
         EnsureGoogleSignInAvailable();
         EnsureHostedInviteAcceptanceAvailable();
-        var session = await googleAuthenticator!.SignInWithGoogleAsync();
-        await CompleteHostedInviteSetupAsync(session);
+        try
+        {
+            var session = await googleAuthenticator!.SignInWithGoogleAsync();
+            await CompleteHostedInviteSetupAsync(session);
+        }
+        catch (HostedSignInException exception)
+            when (exception.Reason == HostedSignInFailureReason.AccountRecoveryRequired)
+        {
+            if (replacementRecovery is null)
+            {
+                throw new InvalidOperationException(
+                    "Automatic account recovery is not configured on this device.",
+                    exception);
+            }
+
+            await ApplyReplacementRecoveryAsync(
+                await replacementRecovery.RecoverOnlyLogbookAsync());
+        }
+    }
+
+    public async Task RecoverReplacementDeviceAsync(
+        LogbookId logbookId,
+        CancellationToken cancellationToken = default)
+    {
+        if (replacementRecovery is null)
+        {
+            throw new InvalidOperationException("Replacement-device recovery is not configured on this device.");
+        }
+
+        ClearLastActionMessage();
+        await ApplyReplacementRecoveryAsync(
+            await replacementRecovery.RecoverAsync(logbookId, cancellationToken));
+    }
+
+    public async Task RecoverReplacementDeviceWithCodeAsync(
+        string recoveryCode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(recoveryCode);
+        if (replacementRecovery is null)
+        {
+            throw new InvalidOperationException("Replacement-device recovery is not configured on this device.");
+        }
+
+        ClearLastActionMessage();
+        await ApplyReplacementRecoveryAsync(
+            await replacementRecovery.RecoverOnlyLogbookWithCodeAsync(recoveryCode, cancellationToken));
+    }
+
+    public async Task<bool> ConfirmRecoveryCodeAsync(string enteredCode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(enteredCode);
+        if (pendingRecoveryCodeSetup is null || HostedSync is null)
+        {
+            throw new InvalidOperationException("No new recovery code is awaiting confirmation.");
+        }
+        if (!await packageKeyStore.TestRecoveryCodeEnvelopeAsync(
+            DocumentV2.LogbookId,
+            enteredCode,
+            pendingRecoveryCodeSetup.Envelope))
+        {
+            return false;
+        }
+        if (recoveryEnvelopeService is null)
+        {
+            throw new InvalidOperationException("Account recovery is not configured on this device.");
+        }
+
+        var result = await recoveryEnvelopeService.EnrollRecoveryCodeAsync(
+            new MobileRecoveryCodeEnrollmentRequest(
+                DocumentV2.LogbookId,
+                HostedSync.DeviceId,
+                pendingRecoveryCodeSetup.Envelope));
+        if (!result.Enrolled)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_CODE_ENROLLMENT_INVALID",
+                "Recovery-code setup returned an invalid result.");
+        }
+        pendingRecoveryCodeSetup = null;
+        verifiedRecoveryCodeConfigurations.Add((DocumentV2.LogbookId, HostedSync.DeviceId));
+        SetLastActionMessage("Recovery code confirmed. Account connected and synced.");
+        return true;
+    }
+
+    private async Task ApplyReplacementRecoveryAsync(MobileReplacementRecoveryResult restored)
+    {
+        DocumentV2 = restored.Document;
+        HostedSync = restored.HostedSync;
+        deviceId = restored.HostedSync.DeviceId;
+        ImportReceipts = [];
+        LastSuccessfulExportAt = null;
+        LastSuccessfulExport = null;
+        PendingHostedSignIn = null;
+        await RefreshPackageKeyStatusAsync(restored.Document.LogbookId);
+        SetLastActionMessage("Existing logbook restored and synced.");
     }
 
     public async Task LinkGoogleIdentityAsync()
@@ -761,7 +884,25 @@ public sealed class MobileLogbookSession(
         PendingHostedSignIn = null;
         await SaveStateV2Async();
         await RefreshPackageKeyStatusAsync(DocumentV2.LogbookId);
-        SetLastActionMessage("Account connected.");
+        if (recoveryEnvelopeService is not null
+            && hostedLedger is not null
+            && networkStatus is not null)
+        {
+            var sync = await SyncHostedAsync(BackgroundSyncReason.ManualRefresh);
+            if (sync?.Status != PortableHostedSyncStatus.Synced)
+            {
+                throw new MobileHostedDiagnosticException(
+                    "RECOVERY_INITIALIZATION_INCOMPLETE",
+                    "Account recovery could not be initialized. Retry Sync now before recording flights.");
+            }
+            SetLastActionMessage(IsRecoveryCodeConfirmationPending
+                ? "Save the recovery code and enter it again to confirm recovery setup."
+                : "Account connected and synced.");
+        }
+        else
+        {
+            SetLastActionMessage("Account connected.");
+        }
     }
 
     public Task<PortableHostedSyncResult?> SyncHostedNowAsync() =>
@@ -1178,6 +1319,50 @@ public sealed class MobileLogbookSession(
                     HostedSync.DeviceId,
                     recoveryEnvelopeService);
                 verifiedRecoveryEnrollments.Add(recoveryEnrollment);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                result = result with
+                {
+                    Status = PortableHostedSyncStatus.NeedsAttention,
+                    AttentionRequiredReason = RecoveryEnrollmentAttention(ex)
+                };
+            }
+        }
+        if (result.Status == PortableHostedSyncStatus.Synced
+            && recoveryEnvelopeService is not null
+            && !verifiedRecoveryCodeConfigurations.Contains(recoveryEnrollment)
+            && pendingRecoveryCodeSetup is null)
+        {
+            try
+            {
+                var status = await recoveryEnvelopeService.GetRecoverySetupStatusAsync(
+                    new MobileRecoverySetupStatusRequest(
+                        result.Document.LogbookId,
+                        HostedSync.DeviceId));
+                if (!status.ManagedEnvelopeConfigured)
+                {
+                    throw new MobileHostedDiagnosticException(
+                        "RECOVERY_ENROLLMENT_MISSING",
+                        "Managed account recovery was not retained by the service.");
+                }
+                if (status.RecoveryCodeConfigured)
+                {
+                    verifiedRecoveryCodeConfigurations.Add(recoveryEnrollment);
+                }
+                else
+                {
+                    var recoveryCode = MobileRecoveryCodeEnvelope.GenerateRecoveryCode();
+                    pendingRecoveryCodeSetup = new MobileRecoveryCodeSetup(
+                        recoveryCode,
+                        await packageKeyStore.WrapPackageKeyForRecoveryCodeAsync(
+                            result.Document.LogbookId,
+                            recoveryCode));
+                }
             }
             catch (OperationCanceledException)
             {

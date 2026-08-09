@@ -812,6 +812,124 @@ select elb_rls_test.assert_true(
     )
 );
 
+select public.elb_upsert_recovery_code_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000001',
+    'PBKDF2-SHA256-600000+A256GCM',
+    'recovery-code-v1',
+    repeat('R', 64),
+    repeat('N', 16),
+    repeat('S', 24)
+);
+
+select elb_rls_test.assert_true(
+    'recovery-code enrollment stores only the client-encrypted envelope',
+    (
+        select count(*) = 1
+          and min(ciphertext) = repeat('R', 64)
+          and min(nonce) = repeat('S', 24) || '.' || repeat('N', 16)
+        from public.key_envelopes
+        where logbook_id = '20000000-0000-0000-0000-000000000001'
+          and recovery_method = 'recovery-code-v1'
+          and recipient_device_id is null
+          and revoked_at is null
+    )
+);
+
+select elb_rls_test.assert_true(
+    'recovery setup status reports both envelopes without returning key material',
+    public.elb_get_recovery_setup_status(
+        '10000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000001'
+    ) = '{"managed_envelope_configured":true,"recovery_code_configured":true}'::jsonb
+);
+
+select elb_rls_test.assert_true(
+    'recovery-code envelope read separates salt and nonce without secret material',
+    public.elb_read_recovery_code_envelope(
+        '10000000-0000-0000-0000-000000000001',
+        '20000000-0000-0000-0000-000000000001',
+        '40000000-0000-0000-0000-000000000001'
+    ) = jsonb_build_object(
+        'ciphertext', repeat('R', 64),
+        'nonce', repeat('N', 16),
+        'recovery_salt', repeat('S', 24),
+        'key_version_id', 'recovery-code-v1',
+        'wrapping_algorithm', 'PBKDF2-SHA256-600000+A256GCM'
+    )
+);
+
+select elb_rls_test.assert_true(
+    'recovery-code access is redacted and audited',
+    (
+        select count(*) = 1
+          and bool_and(source_metadata = '{"channel":"recovery_code"}'::jsonb)
+          and bool_and(redacted_details = '{}'::jsonb)
+        from public.security_events
+        where event_type = 'recovery_code_envelope_requested'
+          and logbook_id = '20000000-0000-0000-0000-000000000001'
+    )
+);
+
+select public.elb_register_pending_recovery_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000008',
+    'android',
+    'Recovery Code Replacement'
+);
+select public.elb_bind_device_recovery_key(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000008',
+    repeat('H', 392),
+    repeat('b', 64),
+    'RSA-OAEP-256'
+);
+select public.elb_read_recovery_code_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000008'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+select public.record_operation_ack(
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000008',
+    2,
+    0,
+    2,
+    'synced'
+);
+
+reset role;
+select set_config('request.jwt.claim.role', 'service_role', true);
+select set_config('request.jwt.claim.sub', '', true);
+select public.elb_activate_recovered_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000008'
+);
+
+select elb_rls_test.assert_true(
+    'recovery-code replacement activates only after key binding, audited envelope read, and complete acknowledgement',
+    (
+        select status = 'active'
+          and recovery_key_fingerprint = repeat('b', 64)
+        from public.devices
+        where device_id = '40000000-0000-0000-0000-000000000008'
+    ) and (
+        select count(*) = 1
+        from public.security_events
+        where event_type = 'replacement_device_activated'
+          and device_id = '40000000-0000-0000-0000-000000000008'
+    )
+);
+
 select elb_rls_test.expect_error(
     'managed recovery service rejects a writer membership',
     $sql$
@@ -850,6 +968,99 @@ select elb_rls_test.assert_true(
         where logbook_id = '20000000-0000-0000-0000-000000000001'
           and recipient_device_id = '40000000-0000-0000-0000-000000000001'
           and revoked_at is null
+    )
+);
+
+select public.elb_register_pending_recovery_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006',
+    'android',
+    'Replacement Pixel'
+);
+select public.elb_register_pending_recovery_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006',
+    'android',
+    'Replacement Pixel'
+);
+select public.elb_register_pending_recovery_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000007',
+    'android',
+    'Interrupted Replacement'
+);
+select public.elb_bind_device_recovery_key(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006',
+    repeat('F', 392),
+    repeat('f', 64),
+    'RSA-OAEP-256'
+);
+select public.elb_upsert_device_recovery_envelope(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006',
+    'pilot-kek-v1',
+    repeat('G', 344)
+);
+
+select elb_rls_test.expect_error(
+    'replacement device cannot activate before acknowledging complete history',
+    $sql$
+        select public.elb_activate_recovered_device(
+            '10000000-0000-0000-0000-000000000001',
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000006'
+        )
+    $sql$,
+    '%has not acknowledged complete hosted history%'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+select public.record_operation_ack(
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006',
+    2,
+    0,
+    2,
+    'synced'
+);
+
+reset role;
+select set_config('request.jwt.claim.role', 'service_role', true);
+select set_config('request.jwt.claim.sub', '', true);
+select public.elb_activate_recovered_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006'
+);
+select public.elb_activate_recovered_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006'
+);
+
+select elb_rls_test.assert_true(
+    'replacement recovery is idempotent, audited, acknowledged, and supersedes stale attempts',
+    (
+        select (select count(*) from public.devices where device_id = '40000000-0000-0000-0000-000000000006') = 1
+          and (select status = 'active' from public.devices where device_id = '40000000-0000-0000-0000-000000000006')
+          and (select status = 'superseded' from public.devices where device_id = '40000000-0000-0000-0000-000000000007')
+          and (select highest_contiguous_revision = 2 from public.operation_acks
+               where logbook_id = '20000000-0000-0000-0000-000000000001'
+                 and device_id = '40000000-0000-0000-0000-000000000006')
+          and (select count(*) = 1 from public.security_events
+               where event_type = 'replacement_device_registered_pending'
+                 and device_id = '40000000-0000-0000-0000-000000000006')
+          and (select count(*) = 1 from public.security_events
+               where event_type = 'replacement_device_activated'
+                 and device_id = '40000000-0000-0000-0000-000000000006')
     )
 );
 

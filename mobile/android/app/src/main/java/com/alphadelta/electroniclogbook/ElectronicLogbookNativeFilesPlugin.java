@@ -26,13 +26,16 @@ import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
+import java.security.spec.KeySpec;
 import java.util.Arrays;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.OAEPParameterSpec;
 import javax.crypto.spec.PSource;
+import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
 import org.json.JSONException;
 
@@ -46,6 +49,9 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     private static final String WrapperKeyAlias = "electronic-logbook.package-key-wrapper.v2";
     private static final String RecoveryKeyAlias = "electronic-logbook.recovery-key.v1";
     private static final String NativeKeyPreferences = "electronic_logbook_native_keys";
+    private static final String RecoveryCodeAlgorithm = "PBKDF2-SHA256-600000+A256GCM";
+    private static final String RecoveryCodeKeyVersion = "recovery-code-v1";
+    private static final int RecoveryCodeIterations = 600000;
     private static final OAEPParameterSpec RecoveryOaepParameters = new OAEPParameterSpec(
         "SHA-256",
         "MGF1",
@@ -262,6 +268,95 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void wrapPackageKeyForRecoveryCode(PluginCall call) {
+        String keyName = call.getString("keyName");
+        String recoveryCode = call.getString("recoveryCode");
+        if (!isValidKeyName(keyName, call) || !isValidRecoveryCode(recoveryCode, call)) {
+            return;
+        }
+
+        byte[] packageKey = null;
+        byte[] derivedKey = null;
+        try {
+            packageKey = loadPackageKey(keyName);
+            byte[] salt = new byte[16];
+            byte[] nonce = new byte[AesGcmNonceSizeBytes];
+            SecureRandom random = new SecureRandom();
+            random.nextBytes(salt);
+            random.nextBytes(nonce);
+            derivedKey = deriveRecoveryCodeKey(recoveryCode, salt);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(derivedKey, "AES"), new GCMParameterSpec(128, nonce));
+            cipher.updateAAD(keyName.getBytes(StandardCharsets.UTF_8));
+
+            JSObject result = new JSObject();
+            result.put("ciphertext", android.util.Base64.encodeToString(cipher.doFinal(packageKey), android.util.Base64.NO_WRAP));
+            result.put("nonce", android.util.Base64.encodeToString(nonce, android.util.Base64.NO_WRAP));
+            result.put("salt", android.util.Base64.encodeToString(salt, android.util.Base64.NO_WRAP));
+            result.put("algorithm", RecoveryCodeAlgorithm);
+            result.put("keyVersionId", RecoveryCodeKeyVersion);
+            call.resolve(result);
+        } catch (GeneralSecurityException | IllegalArgumentException ex) {
+            call.reject("Could not create the recovery-code envelope.", "RECOVERY_CODE_WRAP_FAILED", ex);
+        } finally {
+            if (packageKey != null) Arrays.fill(packageKey, (byte) 0);
+            if (derivedKey != null) Arrays.fill(derivedKey, (byte) 0);
+        }
+    }
+
+    @PluginMethod
+    public void testRecoveryCodeEnvelope(PluginCall call) {
+        String keyName = call.getString("keyName");
+        String recoveryCode = call.getString("recoveryCode");
+        JSObject envelope = call.getObject("envelope");
+        if (!isValidKeyName(keyName, call) || !isValidRecoveryCode(recoveryCode, call) || envelope == null) {
+            if (envelope == null) call.reject("Recovery-code envelope is required.", "RECOVERY_CODE_ENVELOPE_MISSING");
+            return;
+        }
+
+        byte[] expected = null;
+        byte[] recovered = null;
+        try {
+            expected = loadPackageKey(keyName);
+            recovered = unwrapRecoveryCodeEnvelope(keyName, recoveryCode, envelope);
+            JSObject result = new JSObject();
+            result.put("confirmed", MessageDigest.isEqual(expected, recovered));
+            call.resolve(result);
+        } catch (GeneralSecurityException | IllegalArgumentException ex) {
+            JSObject result = new JSObject();
+            result.put("confirmed", false);
+            call.resolve(result);
+        } finally {
+            if (expected != null) Arrays.fill(expected, (byte) 0);
+            if (recovered != null) Arrays.fill(recovered, (byte) 0);
+        }
+    }
+
+    @PluginMethod
+    public void importRecoveryCodeEnvelope(PluginCall call) {
+        String keyName = call.getString("keyName");
+        String recoveryCode = call.getString("recoveryCode");
+        JSObject envelope = call.getObject("envelope");
+        if (!isValidKeyName(keyName, call) || !isValidRecoveryCode(recoveryCode, call) || envelope == null) {
+            if (envelope == null) call.reject("Recovery-code envelope is required.", "RECOVERY_CODE_ENVELOPE_MISSING");
+            return;
+        }
+
+        byte[] packageKey = null;
+        try {
+            packageKey = unwrapRecoveryCodeEnvelope(keyName, recoveryCode, envelope);
+            storePackageKey(keyName, packageKey);
+            JSObject result = new JSObject();
+            result.put("imported", true);
+            call.resolve(result);
+        } catch (GeneralSecurityException | IllegalArgumentException ex) {
+            call.reject("Recovery code is incorrect or unavailable.", "RECOVERY_CODE_INVALID", ex);
+        } finally {
+            if (packageKey != null) Arrays.fill(packageKey, (byte) 0);
+        }
+    }
+
+    @PluginMethod
     public void encryptPackagePayload(PluginCall call) {
         cryptPackagePayload(call, true);
     }
@@ -361,6 +456,53 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             new GCMParameterSpec(128, android.util.Base64.decode(nonce, android.util.Base64.NO_WRAP)));
         cipher.updateAAD(keyName.getBytes(StandardCharsets.UTF_8));
         return cipher.doFinal(android.util.Base64.decode(ciphertext, android.util.Base64.NO_WRAP));
+    }
+
+    private static byte[] unwrapRecoveryCodeEnvelope(String keyName, String recoveryCode, JSObject envelope)
+        throws GeneralSecurityException {
+        if (!RecoveryCodeAlgorithm.equals(envelope.getString("algorithm"))
+            || !RecoveryCodeKeyVersion.equals(envelope.getString("keyVersionId"))) {
+            throw new GeneralSecurityException("Recovery-code envelope format is unsupported.");
+        }
+        byte[] salt = android.util.Base64.decode(envelope.getString("salt"), android.util.Base64.NO_WRAP);
+        byte[] nonce = android.util.Base64.decode(envelope.getString("nonce"), android.util.Base64.NO_WRAP);
+        byte[] ciphertext = android.util.Base64.decode(envelope.getString("ciphertext"), android.util.Base64.NO_WRAP);
+        if (salt.length != 16 || nonce.length != AesGcmNonceSizeBytes || ciphertext.length != PackageKeySizeBytes + AesGcmTagSizeBytes) {
+            throw new GeneralSecurityException("Recovery-code envelope has an invalid length.");
+        }
+        byte[] derivedKey = deriveRecoveryCodeKey(recoveryCode, salt);
+        try {
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(derivedKey, "AES"), new GCMParameterSpec(128, nonce));
+            cipher.updateAAD(keyName.getBytes(StandardCharsets.UTF_8));
+            byte[] packageKey = cipher.doFinal(ciphertext);
+            if (packageKey.length != PackageKeySizeBytes) {
+                Arrays.fill(packageKey, (byte) 0);
+                throw new GeneralSecurityException("Recovered package key has the wrong length.");
+            }
+            return packageKey;
+        } finally {
+            Arrays.fill(derivedKey, (byte) 0);
+        }
+    }
+
+    private static byte[] deriveRecoveryCodeKey(String recoveryCode, byte[] salt) throws GeneralSecurityException {
+        char[] normalized = recoveryCode.trim().replace(" ", "").toCharArray();
+        KeySpec spec = new PBEKeySpec(normalized, salt, RecoveryCodeIterations, 256);
+        try {
+            return SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).getEncoded();
+        } finally {
+            Arrays.fill(normalized, '\0');
+            ((PBEKeySpec) spec).clearPassword();
+        }
+    }
+
+    private static boolean isValidRecoveryCode(String recoveryCode, PluginCall call) {
+        if (recoveryCode == null || recoveryCode.trim().replace(" ", "").length() < 32) {
+            call.reject("Recovery code is invalid.", "RECOVERY_CODE_INVALID");
+            return false;
+        }
+        return true;
     }
 
     private SecretKey getOrCreateWrapperKey() throws GeneralSecurityException {

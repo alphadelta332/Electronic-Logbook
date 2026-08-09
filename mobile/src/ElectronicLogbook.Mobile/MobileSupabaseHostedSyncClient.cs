@@ -13,7 +13,8 @@ public sealed class MobileSupabaseHostedSyncClient(
     ISyncClock clock,
     BrowserGoogleCredentialProvider? googleCredentialProvider = null)
     : IHostedLogbookAuthenticator, IHostedLogbookLedger, IMobileHostedRecoveryClient,
-      IMobileGoogleHostedAuthenticator, IMobileRecoveryEnvelopeService
+      IMobileGoogleHostedAuthenticator, IMobileRecoveryEnvelopeService,
+      IMobileReplacementRecoveryClient
 {
     private const string ConfigPath = "hosted-sync.local.json";
     private const string RecoveryEnvelopePath = "/functions/v1/recovery-envelope";
@@ -238,7 +239,8 @@ public sealed class MobileSupabaseHostedSyncClient(
             new DeviceId(PendingDeviceIdValue),
             verified.AccessToken,
             verified.RefreshToken,
-            expiresAt);
+            expiresAt,
+            DeviceRegistrationPending: true);
         credential = temporaryCredential;
         await credentialStore.SaveAsync(temporaryCredential);
 
@@ -289,7 +291,8 @@ public sealed class MobileSupabaseHostedSyncClient(
             new DeviceId(PendingDeviceIdValue),
             verified.AccessToken,
             verified.RefreshToken,
-            clock.UtcNow.AddSeconds(Math.Max(verified.ExpiresIn, 60)));
+            clock.UtcNow.AddSeconds(Math.Max(verified.ExpiresIn, 60)),
+            DeviceRegistrationPending: true);
         await credentialStore.SaveAsync(credential);
         return await CompletePendingDeviceRegistrationAsync(options, cancellationToken);
     }
@@ -351,14 +354,83 @@ public sealed class MobileSupabaseHostedSyncClient(
         }
 
         var device = await AcceptInvitationAsync(options, cancellationToken);
-        credential = credential with { DeviceId = device.DeviceId };
+        credential = credential with { DeviceId = device.DeviceId, DeviceRegistrationPending = false };
         await credentialStore.SaveAsync(credential);
         pendingEmail = null;
         return new HostedSyncSession(credential.AccountId, device.DeviceId, credential.AccessTokenExpiresAt);
     }
 
     private static bool IsPendingCredential(BrowserHostedCredential value) =>
-        string.Equals(value.DeviceId.Value, PendingDeviceIdValue, StringComparison.Ordinal);
+        value.DeviceRegistrationPending
+        || string.Equals(value.DeviceId.Value, PendingDeviceIdValue, StringComparison.Ordinal);
+
+    public async ValueTask<MobileReplacementRecoveryContext> PrepareReplacementRecoveryAsync(
+        LogbookId logbookId,
+        CancellationToken cancellationToken = default)
+    {
+        credential = await credentialStore.LoadAsync();
+        if (credential is null || !IsPendingCredential(credential))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_REGISTRATION_NOT_PENDING",
+                "No authenticated replacement-device recovery is pending.");
+        }
+
+        var memberships = await DiscoverActiveLogbooksAsync(cancellationToken);
+        var membership = memberships.SingleOrDefault(value => value.LogbookId == logbookId)
+            ?? throw new MobileHostedDiagnosticException(
+                "RECOVERY_LOGBOOK_ACCESS_DENIED",
+                "The selected logbook is not available to this account.");
+        if (memberships.Count != 1)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_LOGBOOK_SELECTION_REQUIRED",
+                "Select exactly one logbook before continuing account recovery.");
+        }
+
+        if (string.Equals(credential.DeviceId.Value, PendingDeviceIdValue, StringComparison.Ordinal))
+        {
+            credential = credential with
+            {
+                DeviceId = DeviceId.New(),
+                DeviceRegistrationPending = true
+            };
+            await credentialStore.SaveAsync(credential);
+        }
+
+        var options = await GetConfigAsync(cancellationToken);
+        return new MobileReplacementRecoveryContext(
+            new HostedSyncSession(credential.AccountId, credential.DeviceId, credential.AccessTokenExpiresAt),
+            membership,
+            options.PlatformLabel ?? "Android");
+    }
+
+    public async ValueTask CompleteReplacementRecoveryAsync(
+        LogbookId logbookId,
+        DeviceId deviceId,
+        CancellationToken cancellationToken = default)
+    {
+        credential = await credentialStore.LoadAsync();
+        if (credential is null || credential.DeviceId != deviceId)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_DEVICE_MISMATCH",
+                "The recovered device does not match the authenticated recovery attempt.");
+        }
+
+        var activated = await ActivateAsync(
+            new MobileRecoveryDeviceActivationRequest(logbookId, deviceId),
+            cancellationToken);
+        if (!activated.Activated)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_ACTIVATION_INCOMPLETE",
+                "Account recovery is not complete.");
+        }
+
+        credential = credential with { DeviceRegistrationPending = false };
+        await credentialStore.SaveAsync(credential);
+    }
 
     private async ValueTask<GoogleIdTokenCredential> GetGoogleCredentialAsync(
         MobileHostedSyncConfig options,
@@ -468,6 +540,19 @@ public sealed class MobileSupabaseHostedSyncClient(
             new RecoveryEnvelopeRequest("configuration"),
             cancellationToken);
 
+    public ValueTask<MobileRecoverySetupStatus> GetRecoverySetupStatusAsync(
+        MobileRecoverySetupStatusRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendRecoveryEnvelopeAsync<MobileRecoverySetupStatus>(
+            new RecoveryEnvelopeRequest(
+                "status",
+                ToRecoveryUuid(request.LogbookId.Value, "log_"),
+                ToRecoveryUuid(request.DeviceId.Value, "dev_")),
+            cancellationToken);
+    }
+
     public ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollAsync(
         MobileRecoveryEnvelopeEnrollmentRequest request,
         CancellationToken cancellationToken = default)
@@ -502,6 +587,7 @@ public sealed class MobileSupabaseHostedSyncClient(
         ValidateRecoveryValue(request.DeviceKey.PublicKey, nameof(request.DeviceKey.PublicKey));
         ValidateRecoveryValue(request.DeviceKey.Fingerprint, nameof(request.DeviceKey.Fingerprint));
         ValidateRecoveryValue(request.DeviceKey.Algorithm, nameof(request.DeviceKey.Algorithm));
+        ValidateRecoveryValue(request.PlatformLabel, nameof(request.PlatformLabel));
 
         return SendRecoveryEnvelopeAsync<MobileRecoveryEnvelopeRestoreResult>(
             new RecoveryEnvelopeRequest(
@@ -510,7 +596,67 @@ public sealed class MobileSupabaseHostedSyncClient(
                 ToRecoveryUuid(request.DeviceId.Value, "dev_"),
                 request.DeviceKey.PublicKey,
                 request.DeviceKey.Fingerprint,
-                request.DeviceKey.Algorithm),
+                request.DeviceKey.Algorithm,
+                PlatformLabel: request.PlatformLabel),
+            cancellationToken);
+    }
+
+    public ValueTask<MobileRecoveryCodeEnrollmentResult> EnrollRecoveryCodeAsync(
+        MobileRecoveryCodeEnrollmentRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Envelope);
+        ValidateRecoveryValue(request.Envelope.Ciphertext, nameof(request.Envelope.Ciphertext));
+        ValidateRecoveryValue(request.Envelope.Nonce, nameof(request.Envelope.Nonce));
+        ValidateRecoveryValue(request.Envelope.Salt, nameof(request.Envelope.Salt));
+        ValidateRecoveryValue(request.Envelope.Algorithm, nameof(request.Envelope.Algorithm));
+        ValidateRecoveryValue(request.Envelope.KeyVersionId, nameof(request.Envelope.KeyVersionId));
+        return SendRecoveryEnvelopeAsync<MobileRecoveryCodeEnrollmentResult>(
+            new RecoveryEnvelopeRequest(
+                "enroll-code",
+                ToRecoveryUuid(request.LogbookId.Value, "log_"),
+                ToRecoveryUuid(request.DeviceId.Value, "dev_"),
+                RecoveryCiphertext: request.Envelope.Ciphertext,
+                RecoveryNonce: request.Envelope.Nonce,
+                RecoverySalt: request.Envelope.Salt,
+                RecoveryAlgorithm: request.Envelope.Algorithm,
+                RecoveryKeyVersionId: request.Envelope.KeyVersionId),
+            cancellationToken);
+    }
+
+    public ValueTask<MobileRecoveryCodeEnvelopePayload> RestoreWithRecoveryCodeAsync(
+        MobileRecoveryCodeRestoreRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.DeviceKey);
+        ValidateRecoveryValue(request.PlatformLabel, nameof(request.PlatformLabel));
+        ValidateRecoveryValue(request.DeviceKey.PublicKey, nameof(request.DeviceKey.PublicKey));
+        ValidateRecoveryValue(request.DeviceKey.Fingerprint, nameof(request.DeviceKey.Fingerprint));
+        ValidateRecoveryValue(request.DeviceKey.Algorithm, nameof(request.DeviceKey.Algorithm));
+        return SendRecoveryEnvelopeAsync<MobileRecoveryCodeEnvelopePayload>(
+            new RecoveryEnvelopeRequest(
+                "restore-code",
+                ToRecoveryUuid(request.LogbookId.Value, "log_"),
+                ToRecoveryUuid(request.DeviceId.Value, "dev_"),
+                request.DeviceKey.PublicKey,
+                request.DeviceKey.Fingerprint,
+                request.DeviceKey.Algorithm,
+                PlatformLabel: request.PlatformLabel),
+            cancellationToken);
+    }
+
+    public ValueTask<MobileRecoveryDeviceActivationResult> ActivateAsync(
+        MobileRecoveryDeviceActivationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return SendRecoveryEnvelopeAsync<MobileRecoveryDeviceActivationResult>(
+            new RecoveryEnvelopeRequest(
+                "activate",
+                ToRecoveryUuid(request.LogbookId.Value, "log_"),
+                ToRecoveryUuid(request.DeviceId.Value, "dev_")),
             cancellationToken);
     }
 
@@ -796,10 +942,15 @@ public sealed class MobileSupabaseHostedSyncClient(
         {
             MobileRecoveryEnvelopeConfiguration value =>
                 RequiredRecoveryValues(value.PublicKey, value.Fingerprint, value.Algorithm, value.KeyVersionId),
+            MobileRecoverySetupStatus => true,
             MobileRecoveryEnvelopeEnrollmentResult value =>
                 value.Enrolled && RequiredRecoveryValues(value.KeyVersionId),
             MobileRecoveryEnvelopeRestoreResult value =>
                 RequiredRecoveryValues(value.WrappedKey, value.Algorithm, value.KeyVersionId),
+            MobileRecoveryCodeEnrollmentResult value => value.Enrolled,
+            MobileRecoveryCodeEnvelopePayload value => RequiredRecoveryValues(
+                value.Ciphertext, value.Nonce, value.Salt, value.Algorithm, value.KeyVersionId),
+            MobileRecoveryDeviceActivationResult value => value.Activated,
             _ => response is not null
         };
         if (!valid)
@@ -1219,7 +1370,19 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? WrappedPackageKey = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        string? IngressKeyVersionId = null);
+        string? IngressKeyVersionId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? PlatformLabel = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? RecoveryCiphertext = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? RecoveryNonce = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? RecoverySalt = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? RecoveryAlgorithm = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? RecoveryKeyVersionId = null);
 
     private sealed record OtpRequest(
         string Email,

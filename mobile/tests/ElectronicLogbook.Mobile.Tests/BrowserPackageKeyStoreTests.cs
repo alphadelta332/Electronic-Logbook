@@ -2,6 +2,7 @@ using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 using Microsoft.JSInterop;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace ElectronicLogbook.Mobile.Tests;
 
@@ -315,6 +316,43 @@ public sealed class BrowserPackageKeyStoreTests
     }
 
     [Fact]
+    public async Task RestoreRecoveryEnvelopeImportsAndVerifiesKeyInsideCryptoBridge()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        var deviceKey = PublicMaterial(7);
+        var plaintext = Encoding.UTF8.GetBytes("electronic-logbook-keystore-probe");
+        jsRuntime.Results.Enqueue(new BrowserRecoveryPublicKey(
+            deviceKey.PublicKey,
+            deviceKey.Fingerprint,
+            "RSA-OAEP-256"));
+        jsRuntime.Results.Enqueue(true);
+        jsRuntime.Results.Enqueue(true);
+        jsRuntime.Results.Enqueue(new BrowserPackageCiphertext([1, 2, 3], new byte[16]));
+        jsRuntime.Results.Enqueue(plaintext);
+        var service = new RecordingRecoveryEnvelopeService(
+            deviceKey.PublicKey,
+            deviceKey.Fingerprint,
+            restoredWrappedKey: "device-wrapped-key");
+        var store = new BrowserPackageKeyStore(jsRuntime);
+        var logbookId = new LogbookId("log_mobile");
+        var deviceId = new DeviceId("dev_mobile");
+
+        await store.RestoreRecoveryEnvelopeAsync(
+            logbookId,
+            deviceId,
+            "Pixel 8 Pro",
+            service);
+
+        var request = Assert.Single(service.RestoreRequests);
+        Assert.Equal(logbookId, request.LogbookId);
+        Assert.Equal(deviceId, request.DeviceId);
+        Assert.Equal("Pixel 8 Pro", request.PlatformLabel);
+        Assert.Contains(jsRuntime.Calls, call => call.Identifier == "electronicLogbookKeys.importRecoveryEnvelope");
+        Assert.Contains(jsRuntime.Calls, call => call.Identifier == "electronicLogbookKeys.encrypt");
+        Assert.Contains(jsRuntime.Calls, call => call.Identifier == "electronicLogbookKeys.decrypt");
+    }
+
+    [Fact]
     public async Task PackageKeyOperationsRejectBlankLogbookIdsBeforeCallingJavaScript()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -410,10 +448,12 @@ public sealed class BrowserPackageKeyStoreTests
         string publicKey,
         string fingerprint,
         bool enrolled = true,
-        string enrollmentKeyVersionId = "managed-key-v1")
+        string enrollmentKeyVersionId = "managed-key-v1",
+        string? restoredWrappedKey = null)
         : IMobileRecoveryEnvelopeService
     {
         public List<MobileRecoveryEnvelopeEnrollmentRequest> EnrollmentRequests { get; } = [];
+        public List<MobileRecoveryEnvelopeRestoreRequest> RestoreRequests { get; } = [];
 
         public ValueTask<MobileRecoveryEnvelopeConfiguration> GetConfigurationAsync(
             CancellationToken cancellationToken = default) =>
@@ -422,6 +462,11 @@ public sealed class BrowserPackageKeyStoreTests
                 fingerprint,
                 "RSA-OAEP-256",
                 "managed-key-v1"));
+
+        public ValueTask<MobileRecoverySetupStatus> GetRecoverySetupStatusAsync(
+            MobileRecoverySetupStatusRequest request,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileRecoverySetupStatus(true, false));
 
         public ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollAsync(
             MobileRecoveryEnvelopeEnrollmentRequest request,
@@ -433,8 +478,29 @@ public sealed class BrowserPackageKeyStoreTests
 
         public ValueTask<MobileRecoveryEnvelopeRestoreResult> RestoreAsync(
             MobileRecoveryEnvelopeRestoreRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            RestoreRequests.Add(request);
+            return restoredWrappedKey is null
+                ? throw new NotSupportedException()
+                : ValueTask.FromResult(new MobileRecoveryEnvelopeRestoreResult(
+                    restoredWrappedKey,
+                    "RSA-OAEP-256",
+                    "managed-key-v1"));
+        }
+
+        public ValueTask<MobileRecoveryCodeEnrollmentResult> EnrollRecoveryCodeAsync(
+            MobileRecoveryCodeEnrollmentRequest request,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<MobileRecoveryCodeEnvelopePayload> RestoreWithRecoveryCodeAsync(
+            MobileRecoveryCodeRestoreRequest request,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+
+        public ValueTask<MobileRecoveryDeviceActivationResult> ActivateAsync(
+            MobileRecoveryDeviceActivationRequest request,
             CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            ValueTask.FromResult(new MobileRecoveryDeviceActivationResult(true));
     }
 
     private sealed record JsCall(string Identifier, IReadOnlyList<object?> Arguments);

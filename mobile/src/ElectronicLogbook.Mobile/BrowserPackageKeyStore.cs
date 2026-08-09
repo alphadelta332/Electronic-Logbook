@@ -56,6 +56,34 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
             wrappedKey);
     }
 
+    public ValueTask<MobileRecoveryCodeEnvelopePayload> WrapPackageKeyForRecoveryCodeAsync(
+        LogbookId logbookId,
+        string recoveryCode) =>
+        jsRuntime.InvokeAsync<MobileRecoveryCodeEnvelopePayload>(
+            "electronicLogbookKeys.wrapPackageKeyForRecoveryCode",
+            KeyName(logbookId),
+            recoveryCode);
+
+    public ValueTask<bool> TestRecoveryCodeEnvelopeAsync(
+        LogbookId logbookId,
+        string recoveryCode,
+        MobileRecoveryCodeEnvelopePayload envelope) =>
+        jsRuntime.InvokeAsync<bool>(
+            "electronicLogbookKeys.testRecoveryCodeEnvelope",
+            KeyName(logbookId),
+            recoveryCode,
+            envelope);
+
+    public ValueTask<bool> ImportRecoveryCodeEnvelopeAsync(
+        LogbookId logbookId,
+        string recoveryCode,
+        MobileRecoveryCodeEnvelopePayload envelope) =>
+        jsRuntime.InvokeAsync<bool>(
+            "electronicLogbookKeys.importRecoveryCodeEnvelope",
+            KeyName(logbookId),
+            recoveryCode,
+            envelope);
+
     public async ValueTask<MobileRecoveryEnvelopeEnrollmentResult> EnrollRecoveryEnvelopeAsync(
         LogbookId logbookId,
         DeviceId deviceId,
@@ -118,6 +146,51 @@ public sealed class BrowserPackageKeyStore(IJSRuntime jsRuntime)
         }
 
         return result;
+    }
+
+    public async ValueTask RestoreRecoveryEnvelopeAsync(
+        LogbookId logbookId,
+        DeviceId deviceId,
+        string platformLabel,
+        IMobileRecoveryEnvelopeService recoveryService,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(platformLabel);
+        ArgumentNullException.ThrowIfNull(recoveryService);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var deviceKey = await GetRecoveryPublicKeyAsync();
+        ValidateRecoveryPublicKey(
+            deviceKey.PublicKey,
+            deviceKey.Fingerprint,
+            deviceKey.Algorithm,
+            "RECOVERY_DEVICE_KEY_INVALID");
+        var restored = await recoveryService.RestoreAsync(
+            new MobileRecoveryEnvelopeRestoreRequest(
+                logbookId,
+                deviceId,
+                new MobileRecoveryDeviceKey(
+                    deviceKey.PublicKey,
+                    deviceKey.Fingerprint,
+                    deviceKey.Algorithm),
+                platformLabel),
+            cancellationToken);
+        if (!string.Equals(restored.Algorithm, RecoveryKeyAlgorithm, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(restored.WrappedKey))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_ENVELOPE_INVALID",
+                "Account recovery returned an invalid device envelope.");
+        }
+
+        if (!await ImportRecoveryEnvelopeAsync(logbookId, restored.WrappedKey)
+            || !await HasPackageKeyAsync(logbookId))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_KEY_IMPORT_FAILED",
+                "The recovered logbook could not be retained by Android Keystore.");
+        }
+        await VerifyPackageKeyAsync(logbookId, "RECOVERY_KEY_READBACK_FAILED", cancellationToken);
     }
 
     public async ValueTask RunDisposableProbeAsync(CancellationToken cancellationToken = default)

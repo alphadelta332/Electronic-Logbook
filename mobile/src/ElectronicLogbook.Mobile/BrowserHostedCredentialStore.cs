@@ -37,4 +37,5 @@ public sealed record BrowserHostedCredential(
     DeviceId DeviceId,
     string AccessToken,
     string RefreshToken,
-    DateTimeOffset AccessTokenExpiresAt);
+    DateTimeOffset AccessTokenExpiresAt,
+    bool DeviceRegistrationPending = false);

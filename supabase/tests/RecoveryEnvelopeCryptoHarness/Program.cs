@@ -158,6 +158,7 @@ try
             action = "restore",
             logbookId,
             deviceId = ownerDeviceId,
+            platformLabel = "Recovery Harness Owner Device",
             devicePublicKey = Convert.ToBase64String(devicePublic),
             devicePublicKeyFingerprint = deviceFingerprint,
             devicePublicKeyAlgorithm = "RSA-OAEP-256"
@@ -183,6 +184,7 @@ try
             action = "restore",
             logbookId,
             deviceId = outsiderDeviceId,
+            platformLabel = "Recovery Harness Outsider Device",
             devicePublicKey = Convert.ToBase64String(devicePublic),
             devicePublicKeyFingerprint = deviceFingerprint,
             devicePublicKeyAlgorithm = "RSA-OAEP-256"
@@ -199,6 +201,7 @@ try
             action = "restore",
             logbookId,
             deviceId = outsiderDeviceId,
+            platformLabel = "Recovery Harness Outsider Device",
             devicePublicKey = Convert.ToBase64String(devicePublic),
             devicePublicKeyFingerprint = deviceFingerprint,
             devicePublicKeyAlgorithm = "RSA-OAEP-256"

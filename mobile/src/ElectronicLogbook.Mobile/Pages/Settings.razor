@@ -133,6 +133,11 @@ else
                         Resume verified sign-in
                     </MudButton>
                     <MudText Typo="Typo.caption">Recovery only: use after support confirms that email verification succeeded but device setup was interrupted.</MudText>
+                    <MudTextField @bind-Value="AccountRecoveryCode" InputType="InputType.Password" Label="Recovery code" Disabled="@IsAccountBusy" />
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RecoverWithCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(AccountRecoveryCode))">
+                        Recover with code
+                    </MudButton>
+                    <MudText Typo="Typo.caption">Fallback only: sign in first, then use the code saved when this logbook was created.</MudText>
                 </div>
                 <div class="connection-diagnostic-actions">
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="RunConnectionPreflightAsync" Disabled="@IsConnectionDiagnosticBusy">
@@ -151,6 +156,21 @@ else
                     </MudButton>
                 </div>
                 <MudText Typo="Typo.caption">Do this once after accepting the email invitation. It links Google to this existing account; it does not create another logbook.</MudText>
+                @if (Session.IsRecoveryCodeConfirmationPending)
+                {
+                    <section class="notice-panel" role="status" aria-live="polite">
+                        <MudIcon Icon="@Icons.Material.Filled.Key" />
+                        <div>
+                            <strong>Save your recovery code</strong>
+                            <span class="recovery-code-value">@Session.PendingRecoveryCode</span>
+                            <span>Store it away from this phone. Enter it below to prove the saved copy works.</span>
+                        </div>
+                    </section>
+                    <MudTextField @bind-Value="RecoveryCodeConfirmation" InputType="InputType.Password" Label="Enter saved recovery code" Disabled="@IsAccountBusy" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.VerifiedUser" OnClick="ConfirmRecoveryCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(RecoveryCodeConfirmation))">
+                        Confirm recovery code
+                    </MudButton>
+                }
             }
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncNowAsync" Disabled="@(!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)">
                 Sync now
@@ -268,6 +288,8 @@ else
     private bool IsConnectionDiagnosticBusy { get; set; }
     private string HostedEmail { get; set; } = string.Empty;
     private string HostedVerificationCode { get; set; } = string.Empty;
+    private string AccountRecoveryCode { get; set; } = string.Empty;
+    private string RecoveryCodeConfirmation { get; set; } = string.Empty;
     private string? SupportSummaryMessage { get; set; }
     private string? SupportSummaryError { get; set; }
     private string? DeviceStateExportMessage { get; set; }
@@ -452,6 +474,60 @@ else
         {
             await Session.LinkGoogleIdentityAsync();
             AccountMessage = Session.LastActionMessage ?? "Google sign-in added.";
+        }
+        catch (Exception ex)
+        {
+            AccountError = AccountFailureMessage(ex);
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
+
+    private async Task ConfirmRecoveryCodeAsync()
+    {
+        if (IsAccountBusy || string.IsNullOrWhiteSpace(RecoveryCodeConfirmation))
+        {
+            return;
+        }
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            if (!await Session.ConfirmRecoveryCodeAsync(RecoveryCodeConfirmation))
+            {
+                AccountError = "That recovery code did not unlock the test envelope. Check the saved code and try again.";
+                return;
+            }
+            RecoveryCodeConfirmation = string.Empty;
+            AccountMessage = Session.LastActionMessage;
+        }
+        catch (Exception ex)
+        {
+            AccountError = AccountFailureMessage(ex);
+        }
+        finally
+        {
+            IsAccountBusy = false;
+        }
+    }
+
+    private async Task RecoverWithCodeAsync()
+    {
+        if (IsAccountBusy || string.IsNullOrWhiteSpace(AccountRecoveryCode))
+        {
+            return;
+        }
+        IsAccountBusy = true;
+        AccountMessage = null;
+        AccountError = null;
+        try
+        {
+            await Session.RecoverReplacementDeviceWithCodeAsync(AccountRecoveryCode);
+            AccountRecoveryCode = string.Empty;
+            AccountMessage = Session.LastActionMessage;
         }
         catch (Exception ex)
         {

@@ -229,6 +229,27 @@
 
             return Boolean((await native.importRecoveryEnvelope({ keyName, wrappedKey })).imported);
         },
+        wrapPackageKeyForRecoveryCode: async (keyName, recoveryCode) => {
+            const native = nativeKeyPlugin();
+            if (!native?.wrapPackageKeyForRecoveryCode) {
+                throw new Error("Recovery-code setup is only available in the installed Android app.");
+            }
+            return await native.wrapPackageKeyForRecoveryCode({ keyName, recoveryCode });
+        },
+        testRecoveryCodeEnvelope: async (keyName, recoveryCode, envelope) => {
+            const native = nativeKeyPlugin();
+            if (!native?.testRecoveryCodeEnvelope) {
+                throw new Error("Recovery-code confirmation is only available in the installed Android app.");
+            }
+            return Boolean((await native.testRecoveryCodeEnvelope({ keyName, recoveryCode, envelope })).confirmed);
+        },
+        importRecoveryCodeEnvelope: async (keyName, recoveryCode, envelope) => {
+            const native = nativeKeyPlugin();
+            if (!native?.importRecoveryCodeEnvelope) {
+                throw new Error("Recovery-code restore is only available in the installed Android app.");
+            }
+            return Boolean((await native.importRecoveryCodeEnvelope({ keyName, recoveryCode, envelope })).imported);
+        },
         deletePackageKey: async (keyName) => {
             const native = nativeKeyPlugin();
             if (native) {

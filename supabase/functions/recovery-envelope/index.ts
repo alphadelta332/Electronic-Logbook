@@ -28,6 +28,12 @@ type RequestBody = {
   devicePublicKeyAlgorithm?: unknown;
   wrappedPackageKey?: unknown;
   ingressKeyVersionId?: unknown;
+  platformLabel?: unknown;
+  recoveryCiphertext?: unknown;
+  recoveryNonce?: unknown;
+  recoverySalt?: unknown;
+  recoveryAlgorithm?: unknown;
+  recoveryKeyVersionId?: unknown;
 };
 
 type ManagedEnvelope = {
@@ -36,6 +42,8 @@ type ManagedEnvelope = {
   key_version_id: string;
   wrapping_algorithm: string;
 };
+
+type RecoveryCodeEnvelope = ManagedEnvelope & { recovery_salt: string };
 
 function requiredEnvironment(name: string): string {
   const value = Deno.env.get(name)?.trim();
@@ -362,9 +370,22 @@ async function enroll(accountId: string, body: RequestBody): Promise<Response> {
 async function restore(accountId: string, body: RequestBody): Promise<Response> {
   const logbookId = requiredUuid(body.logbookId, "Logbook");
   const deviceId = requiredUuid(body.deviceId, "Device");
+  const platformLabel = requiredString(body.platformLabel, "Platform label", 128);
   const publicKey = requiredString(body.devicePublicKey, "Device recovery key");
   const fingerprint = requiredString(body.devicePublicKeyFingerprint, "Device recovery fingerprint", 64);
   const algorithm = requiredString(body.devicePublicKeyAlgorithm, "Device recovery algorithm", 64);
+  if (algorithm !== "RSA-OAEP-256") {
+    throw new RecoveryError(400, "RECOVERY_DEVICE_KEY_INVALID", "This device could not prepare account recovery.");
+  }
+  await verifyDevicePublicKey(publicKey, fingerprint);
+  await importDevicePublicKey(publicKey);
+  await serviceRpc("elb_register_pending_recovery_device", {
+    p_actor_account_id: accountId,
+    p_logbook_id: logbookId,
+    p_device_id: deviceId,
+    p_device_type: "android",
+    p_platform_label: platformLabel,
+  });
   await bindDeviceRecoveryKey(accountId, logbookId, deviceId, publicKey, fingerprint, algorithm);
 
   const envelope = await serviceRpc<ManagedEnvelope>("elb_read_managed_recovery_envelope", {
@@ -396,6 +417,90 @@ async function restore(accountId: string, body: RequestBody): Promise<Response> 
   }
 }
 
+async function enrollRecoveryCode(accountId: string, body: RequestBody): Promise<Response> {
+  const logbookId = requiredUuid(body.logbookId, "Logbook");
+  const deviceId = requiredUuid(body.deviceId, "Device");
+  const algorithm = requiredString(body.recoveryAlgorithm, "Recovery-code algorithm", 64);
+  const keyVersionId = requiredString(body.recoveryKeyVersionId, "Recovery-code key version", 64);
+  if (algorithm !== "PBKDF2-SHA256-600000+A256GCM" || keyVersionId !== "recovery-code-v1") {
+    throw new RecoveryError(400, "RECOVERY_CODE_ENVELOPE_INVALID", "The recovery-code envelope is invalid.");
+  }
+  await serviceRpc("elb_upsert_recovery_code_envelope", {
+    p_actor_account_id: accountId,
+    p_logbook_id: logbookId,
+    p_device_id: deviceId,
+    p_wrapping_algorithm: algorithm,
+    p_key_version_id: keyVersionId,
+    p_ciphertext: requiredString(body.recoveryCiphertext, "Recovery-code ciphertext", 512),
+    p_nonce: requiredString(body.recoveryNonce, "Recovery-code nonce", 64),
+    p_salt: requiredString(body.recoverySalt, "Recovery-code salt", 64),
+  });
+  return jsonResponse(200, { enrolled: true });
+}
+
+async function recoverySetupStatus(accountId: string, body: RequestBody): Promise<Response> {
+  const status = await serviceRpc<{ managed_envelope_configured?: unknown; recovery_code_configured?: unknown }>(
+    "elb_get_recovery_setup_status",
+    {
+      p_actor_account_id: accountId,
+      p_logbook_id: requiredUuid(body.logbookId, "Logbook"),
+      p_device_id: requiredUuid(body.deviceId, "Device"),
+    },
+  );
+  return jsonResponse(200, {
+    managedEnvelopeConfigured: status.managed_envelope_configured === true,
+    recoveryCodeConfigured: status.recovery_code_configured === true,
+  });
+}
+
+async function restoreWithRecoveryCode(accountId: string, body: RequestBody): Promise<Response> {
+  const logbookId = requiredUuid(body.logbookId, "Logbook");
+  const deviceId = requiredUuid(body.deviceId, "Device");
+  const platformLabel = requiredString(body.platformLabel, "Platform label", 128);
+  const publicKey = requiredString(body.devicePublicKey, "Device recovery key");
+  const fingerprint = requiredString(body.devicePublicKeyFingerprint, "Device recovery fingerprint", 64);
+  const algorithm = requiredString(body.devicePublicKeyAlgorithm, "Device recovery algorithm", 64);
+  if (algorithm !== "RSA-OAEP-256") {
+    throw new RecoveryError(400, "RECOVERY_DEVICE_KEY_INVALID", "This device could not prepare account recovery.");
+  }
+  await verifyDevicePublicKey(publicKey, fingerprint);
+  await importDevicePublicKey(publicKey);
+  await serviceRpc("elb_register_pending_recovery_device", {
+    p_actor_account_id: accountId,
+    p_logbook_id: logbookId,
+    p_device_id: deviceId,
+    p_device_type: "android",
+    p_platform_label: platformLabel,
+  });
+  await bindDeviceRecoveryKey(accountId, logbookId, deviceId, publicKey, fingerprint, algorithm);
+  const envelope = await serviceRpc<RecoveryCodeEnvelope>("elb_read_recovery_code_envelope", {
+    p_actor_account_id: accountId,
+    p_logbook_id: logbookId,
+    p_device_id: deviceId,
+  });
+  return jsonResponse(200, {
+    ciphertext: envelope.ciphertext,
+    nonce: envelope.nonce,
+    salt: envelope.recovery_salt,
+    algorithm: envelope.wrapping_algorithm,
+    keyVersionId: envelope.key_version_id,
+  });
+}
+
+async function activate(accountId: string, body: RequestBody): Promise<Response> {
+  const logbookId = requiredUuid(body.logbookId, "Logbook");
+  const deviceId = requiredUuid(body.deviceId, "Device");
+  const device = await serviceRpc<{ status?: unknown }>("elb_activate_recovered_device", {
+    p_actor_account_id: accountId,
+    p_logbook_id: logbookId,
+    p_device_id: deviceId,
+  });
+  if (device.status !== "active") {
+    throw new RecoveryError(409, "RECOVERY_ACTIVATION_INCOMPLETE", "Account recovery is not complete.");
+  }
+  return jsonResponse(200, { activated: true });
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: corsHeaders });
@@ -419,8 +524,20 @@ Deno.serve(async (request) => {
     if (action === "enroll") {
       return await enroll(accountId, body);
     }
+    if (action === "status") {
+      return await recoverySetupStatus(accountId, body);
+    }
     if (action === "restore") {
       return await restore(accountId, body);
+    }
+    if (action === "enroll-code") {
+      return await enrollRecoveryCode(accountId, body);
+    }
+    if (action === "restore-code") {
+      return await restoreWithRecoveryCode(accountId, body);
+    }
+    if (action === "activate") {
+      return await activate(accountId, body);
     }
     throw new RecoveryError(400, "RECOVERY_ACTION_INVALID", "The recovery action is invalid.");
   } catch (error) {

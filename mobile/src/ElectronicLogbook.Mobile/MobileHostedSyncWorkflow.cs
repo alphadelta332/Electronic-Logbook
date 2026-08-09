@@ -16,7 +16,19 @@ public sealed class MobileHostedSyncWorkflow(
 
     public async ValueTask<PortableHostedSyncResult> SyncAsync(
         PortableHostedSyncRequestContext request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        await SyncAsync(request, null, cancellationToken);
+
+    public async ValueTask<PortableHostedSyncResult> SyncRecoveryAsync(
+        PortableHostedSyncRequestContext request,
+        HostedSyncSession pendingSession,
+        CancellationToken cancellationToken = default) =>
+        await SyncAsync(request, pendingSession, cancellationToken);
+
+    private async ValueTask<PortableHostedSyncResult> SyncAsync(
+        PortableHostedSyncRequestContext request,
+        HostedSyncSession? sessionOverride,
+        CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(request.Document);
@@ -36,7 +48,7 @@ public sealed class MobileHostedSyncWorkflow(
 
         try
         {
-            var session = await authenticator.GetCurrentSessionAsync(cancellationToken);
+            var session = sessionOverride ?? await authenticator.GetCurrentSessionAsync(cancellationToken);
             if (session is null)
             {
                 return PortableHostedSyncResult.SigningIn(
