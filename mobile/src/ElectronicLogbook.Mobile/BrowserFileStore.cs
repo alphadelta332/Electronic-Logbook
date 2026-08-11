@@ -102,6 +102,18 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
             JsonContentType);
     }
 
+    public ValueTask<BrowserFileTransferResult> ShareJsonOrDownloadAsync(string fileName, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        return ShareJsonOrDownloadAsync(fileName, Encoding.UTF8.GetBytes(json));
+    }
+
+    public ValueTask<BrowserFileTransferResult> ShareJsonOrDownloadAsync(string fileName, byte[] bytes)
+    {
+        ValidateJsonDownloadArguments(fileName, bytes);
+        return ShareOrDownloadValidatedAsync(fileName, bytes, JsonContentType);
+    }
+
     public ValueTask ShareAsync(
         string fileName,
         byte[] bytes,
@@ -136,19 +148,43 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
         string contentType = ElogbookContentType)
     {
         ValidateExportArguments(fileName, bytes, contentType);
-        var nativeTransfer = await TryNativeShareOrDownloadAsync(fileName, bytes, contentType).ConfigureAwait(false);
+        return await ShareOrDownloadValidatedAsync(fileName, bytes, contentType).ConfigureAwait(false);
+    }
+
+    private async ValueTask<BrowserFileTransferResult> ShareOrDownloadValidatedAsync(
+        string fileName,
+        byte[] bytes,
+        string contentType)
+    {
+        var nativeTransfer = await jsRuntime.InvokeAsync<BrowserFileTransferResult?>(
+            "electronicLogbookFiles.nativeShareOrDownload",
+            fileName,
+            bytes,
+            contentType).ConfigureAwait(false);
         if (nativeTransfer is not null)
         {
             return nativeTransfer;
         }
 
-        if (await CanShareAsync(fileName, bytes, contentType).ConfigureAwait(false))
+        if (await jsRuntime.InvokeAsync<bool>(
+                "electronicLogbookFiles.canShare",
+                fileName,
+                bytes,
+                contentType).ConfigureAwait(false))
         {
-            await ShareAsync(fileName, bytes, contentType).ConfigureAwait(false);
+            await jsRuntime.InvokeVoidAsync(
+                "electronicLogbookFiles.share",
+                fileName,
+                bytes,
+                contentType).ConfigureAwait(false);
             return new BrowserFileTransferResult(fileName, null, null, true);
         }
 
-        await DownloadAsync(fileName, bytes, contentType).ConfigureAwait(false);
+        await jsRuntime.InvokeVoidAsync(
+            "electronicLogbookFiles.download",
+            fileName,
+            bytes,
+            contentType).ConfigureAwait(false);
         return new BrowserFileTransferResult(fileName, null, null, false);
     }
 

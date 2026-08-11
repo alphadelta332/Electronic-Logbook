@@ -1000,6 +1000,30 @@ select public.elb_bind_device_recovery_key(
     repeat('f', 64),
     'RSA-OAEP-256'
 );
+select public.elb_bind_device_recovery_key(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000006',
+    repeat('R', 392),
+    repeat('d', 64),
+    'RSA-OAEP-256'
+);
+select elb_rls_test.assert_true(
+    'a pending replacement can rotate a defective recovery key before activation',
+    (
+        select status = 'pending'
+          and recovery_key_fingerprint = repeat('d', 64)
+        from public.devices
+        where device_id = '40000000-0000-0000-0000-000000000006'
+    ) and (
+        select count(*) = 1
+        from public.security_events
+        where event_type = 'pending_device_recovery_key_rebound'
+          and device_id = '40000000-0000-0000-0000-000000000006'
+          and redacted_details->>'previous_fingerprint_suffix' = repeat('f', 8)
+          and redacted_details->>'fingerprint_suffix' = repeat('d', 8)
+    )
+);
 select public.elb_upsert_device_recovery_envelope(
     '10000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000001',
@@ -1044,6 +1068,21 @@ select public.elb_activate_recovered_device(
     '10000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000006'
+);
+
+select elb_rls_test.expect_error(
+    'an active recovered device cannot rotate its recovery key',
+    $sql$
+        select public.elb_bind_device_recovery_key(
+            '10000000-0000-0000-0000-000000000001',
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000006',
+            repeat('S', 392),
+            repeat('e', 64),
+            'RSA-OAEP-256'
+        )
+    $sql$,
+    '%managed recovery key replacement requires device rotation%'
 );
 
 select elb_rls_test.assert_true(

@@ -152,15 +152,59 @@ public sealed class PwaStaticAssetTests
 
         Assert.Contains("AndroidKeyStore", plugin, StringComparison.Ordinal);
         Assert.Contains("electronic-logbook.package-key-wrapper.v2", plugin, StringComparison.Ordinal);
+        Assert.Contains("electronic-logbook.recovery-key.rsa-oaep-sha256-mgf1-sha256.v2", plugin, StringComparison.Ordinal);
         Assert.Contains("KeyGenParameterSpec.Builder", plugin, StringComparison.Ordinal);
         Assert.Contains("KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT", plugin, StringComparison.Ordinal);
         Assert.Contains("setBlockModes(KeyProperties.BLOCK_MODE_GCM)", plugin, StringComparison.Ordinal);
         Assert.Contains("setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)", plugin, StringComparison.Ordinal);
         Assert.Contains("setRandomizedEncryptionRequired(false)", plugin, StringComparison.Ordinal);
+        Assert.Contains("setMgf1Digests(KeyProperties.DIGEST_SHA256)", plugin, StringComparison.Ordinal);
         Assert.Contains("new SecureRandom().nextBytes(nonce)", plugin, StringComparison.Ordinal);
         Assert.Contains("getSharedPreferences(NativeKeyPreferences", plugin, StringComparison.Ordinal);
         Assert.Contains("cipher.updateAAD(keyName.getBytes(StandardCharsets.UTF_8))", plugin, StringComparison.Ordinal);
         Assert.Contains("Arrays.fill(packageKey, (byte) 0)", plugin, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidShellExcludesLocalLogbookCredentialsAndWrappedKeysFromSystemBackup()
+    {
+        var manifest = ReadRepositoryFile("android", "app", "src", "main", "AndroidManifest.xml");
+        var legacyRules = ReadRepositoryFile("android", "app", "src", "main", "res", "xml", "backup_rules.xml");
+        var extractionRules = ReadRepositoryFile("android", "app", "src", "main", "res", "xml", "data_extraction_rules.xml");
+
+        Assert.Contains("android:allowBackup=\"false\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("android:fullBackupContent=\"@xml/backup_rules\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("android:dataExtractionRules=\"@xml/data_extraction_rules\"", manifest, StringComparison.Ordinal);
+
+        foreach (var domain in new[] { "root", "file", "database", "sharedpref", "external" })
+        {
+            var exclusion = $"<exclude domain=\"{domain}\" path=\".\" />";
+            Assert.Contains(exclusion, legacyRules, StringComparison.Ordinal);
+            Assert.Equal(2, Regex.Matches(extractionRules, Regex.Escape(exclusion)).Count);
+        }
+
+        Assert.Contains("<cloud-backup>", extractionRules, StringComparison.Ordinal);
+        Assert.Contains("<device-transfer>", extractionRules, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidNativeFileBridgeSavesPlainJsonBackupsWithoutAllowingPathTraversal()
+    {
+        var plugin = ReadRepositoryFile(
+            "android",
+            "app",
+            "src",
+            "main",
+            "java",
+            "com",
+            "alphadelta",
+            "electroniclogbook",
+            "ElectronicLogbookNativeFilesPlugin.java");
+
+        Assert.Contains("lowerName.endsWith(\".elogbook\") || lowerName.endsWith(\".json\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("fileName.contains(\"/\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("fileName.contains(\"\\\\\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("new File(exportDirectory, fileName)", plugin, StringComparison.Ordinal);
     }
 
     [Fact]

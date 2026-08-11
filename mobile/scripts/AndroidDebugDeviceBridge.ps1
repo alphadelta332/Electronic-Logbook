@@ -102,6 +102,19 @@ function Get-InstalledPackageCertificateSha256 {
         [Parameter(Mandatory = $true)] [string] $ApkSigner
     )
 
+    $listResult = Invoke-NativeCapture -FilePath $Adb -Arguments @(
+        "-s", $DeviceSerial, "shell", "pm", "list", "packages", "--user", "0", $PackageName)
+    if ($listResult.ExitCode -ne 0) {
+        throw "Could not query installed packages for $PackageName."
+    }
+
+    $installedPackageLine = $listResult.Output |
+        Where-Object { ([string] $_).Trim() -eq "package:$PackageName" } |
+        Select-Object -First 1
+    if ($null -eq $installedPackageLine) {
+        return $null
+    }
+
     $pathResult = Invoke-NativeCapture -FilePath $Adb -Arguments @(
         "-s", $DeviceSerial, "shell", "pm", "path", $PackageName)
     if ($pathResult.ExitCode -ne 0) {
@@ -403,7 +416,8 @@ function Invoke-DataPreservingDebugInstall {
         [Parameter(Mandatory = $true)] [string] $SdkRoot,
         [Parameter(Mandatory = $true)] [string] $DeviceSerial,
         [Parameter(Mandatory = $true)] [string] $PackageName,
-        [Parameter(Mandatory = $true)] [string] $ApkPath
+        [Parameter(Mandatory = $true)] [string] $ApkPath,
+        [switch] $SkipLaunch
     )
 
     Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @("get-state") | Out-Null
@@ -455,18 +469,22 @@ function Invoke-DataPreservingDebugInstall {
     if ($null -eq $installedCertificate) {
         Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @(
             "install", $ApkPath) | Out-Null
-        Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @(
-            "shell", "monkey", "-p", $PackageName, "-c",
-            "android.intent.category.LAUNCHER", "1") | Out-Null
+        if (-not $SkipLaunch) {
+            Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @(
+                "shell", "monkey", "-p", $PackageName, "-c",
+                "android.intent.category.LAUNCHER", "1") | Out-Null
+        }
         return [pscustomobject]@{ Mode = "new-install"; BackupPath = $null }
     }
 
     if ($installedCertificate -eq $targetCertificate) {
         Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @(
             "install", "-r", $ApkPath) | Out-Null
-        Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @(
-            "shell", "monkey", "-p", $PackageName, "-c",
-            "android.intent.category.LAUNCHER", "1") | Out-Null
+        if (-not $SkipLaunch) {
+            Invoke-AdbChecked -Adb $Adb -DeviceSerial $DeviceSerial -Arguments @(
+                "shell", "monkey", "-p", $PackageName, "-c",
+                "android.intent.category.LAUNCHER", "1") | Out-Null
+        }
         return [pscustomobject]@{ Mode = "in-place-update"; BackupPath = $null }
     }
 

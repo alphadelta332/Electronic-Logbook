@@ -1,5 +1,6 @@
 param(
     [switch] $SkipSync,
+    [switch] $SkipLaunch,
     [string] $DeviceSerial
 )
 
@@ -112,7 +113,8 @@ if (-not (Test-Path -LiteralPath $apkPath -PathType Leaf)) {
 }
 
 $result = Invoke-DataPreservingDebugInstall -Adb $adb -SdkRoot $sdkRoot `
-    -DeviceSerial $resolvedDeviceSerial -PackageName $packageName -ApkPath $apkPath
+    -DeviceSerial $resolvedDeviceSerial -PackageName $packageName -ApkPath $apkPath `
+    -SkipLaunch:$SkipLaunch
 
 switch ($result.Mode) {
     "new-install" {

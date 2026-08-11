@@ -702,7 +702,9 @@ else
                     Session.HostedSync),
                 FileStore,
                 DateTimeOffset.UtcNow);
-            DeviceStateExportMessage = $"Exported {result.FileName}.";
+            DeviceStateExportMessage = result.Transfer.Shared
+                ? $"Backup saved for sharing as {result.FileName}. Complete the Android share action before uninstalling."
+                : $"Downloaded {result.FileName}.";
         }
         catch (Exception ex) when (ex is BrowserFileStoreException or JSException)
         {

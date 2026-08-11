@@ -69,6 +69,9 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("adb devices failed", installScript, StringComparison.Ordinal);
         Assert.Contains("$ErrorActionPreference = \"Continue\"", installScript, StringComparison.Ordinal);
         Assert.Contains("\"install\", \"-r\"", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("\"pm\", \"list\", \"packages\"", bridgeScript, StringComparison.Ordinal);
+        Assert.Contains("[switch] $SkipLaunch", installScript, StringComparison.Ordinal);
+        Assert.Contains("if (-not $SkipLaunch)", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("android.intent.category.LAUNCHER", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("New-VerifiedIndexedDbSnapshot", bridgeScript, StringComparison.Ordinal);
         Assert.Contains("app_webview/Default/IndexedDB", bridgeScript, StringComparison.Ordinal);

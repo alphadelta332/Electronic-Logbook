@@ -37,6 +37,28 @@ public sealed class BrowserFileStoreTests
     }
 
     [Fact]
+    public async Task ShareJsonOrDownloadAsyncUsesNativeTransferWhenAvailable()
+    {
+        var nativeResult = new BrowserFileTransferResult(
+            "summary.json",
+            "/storage/emulated/0/Android/data/com.alphadelta.electroniclogbook.dev/files/exports/summary.json",
+            "/sdcard/Android/data/com.alphadelta.electroniclogbook.dev/files/exports/summary.json",
+            true);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(nativeResult);
+        var store = new BrowserFileStore(jsRuntime);
+
+        var result = await store.ShareJsonOrDownloadAsync("summary.json", "{\"operationCount\":1}");
+
+        Assert.Equal(nativeResult, result);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookFiles.nativeShareOrDownload", call.Identifier);
+        Assert.Equal("summary.json", call.Arguments[0]);
+        Assert.Equal(System.Text.Encoding.UTF8.GetBytes("{\"operationCount\":1}"), Assert.IsType<byte[]>(call.Arguments[1]));
+        Assert.Equal(BrowserFileStore.JsonContentType, call.Arguments[2]);
+    }
+
+    [Fact]
     public async Task CanShareAsyncCallsBrowserShareCapabilityBridge()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -206,6 +228,8 @@ public sealed class BrowserFileStoreTests
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", [], " "));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.DownloadJsonAsync(" ", "{}"));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.DownloadJsonAsync("summary.json", (string)null!));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareJsonOrDownloadAsync(" ", "{}"));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.ShareJsonOrDownloadAsync("summary.json", (string)null!));
 
         Assert.Empty(jsRuntime.Calls);
     }
@@ -252,6 +276,11 @@ public sealed class BrowserFileStoreTests
         await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadJsonAsync("summary.elogbook", "{}"));
         await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadJsonAsync("summary.json", []));
         await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.DownloadJsonAsync(
+            "summary.json",
+            new byte[BrowserFileStore.MaxJsonDownloadBytes + 1]));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareJsonOrDownloadAsync("summary.elogbook", "{}"));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareJsonOrDownloadAsync("summary.json", []));
+        await Assert.ThrowsAsync<BrowserFileStoreException>(async () => await store.ShareJsonOrDownloadAsync(
             "summary.json",
             new byte[BrowserFileStore.MaxJsonDownloadBytes + 1]));
 

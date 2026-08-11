@@ -3,6 +3,7 @@ package com.alphadelta.electroniclogbook;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
+import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import androidx.core.content.FileProvider;
@@ -47,7 +48,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     private static final int AesGcmTagSizeBytes = 16;
     private static final String AndroidKeyStore = "AndroidKeyStore";
     private static final String WrapperKeyAlias = "electronic-logbook.package-key-wrapper.v2";
-    private static final String RecoveryKeyAlias = "electronic-logbook.recovery-key.v1";
+    private static final String RecoveryKeyAlias = "electronic-logbook.recovery-key.rsa-oaep-sha256-mgf1-sha256.v2";
     private static final String NativeKeyPreferences = "electronic_logbook_native_keys";
     private static final String RecoveryCodeAlgorithm = "PBKDF2-SHA256-600000+A256GCM";
     private static final String RecoveryCodeKeyVersion = "recovery-code-v1";
@@ -64,8 +65,8 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
         String contentType = call.getString("contentType", "application/octet-stream");
         JSArray bytes = call.getArray("bytes");
 
-        if (fileName == null || !fileName.endsWith(".elogbook")) {
-            call.reject("Exported package file names must use the .elogbook extension.");
+        if (!isSupportedExportFileName(fileName)) {
+            call.reject("Exported file names must be a plain .elogbook or .json file name.");
             return;
         }
 
@@ -101,7 +102,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
             shareIntent.putExtra(Intent.EXTRA_TITLE, fileName);
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            getActivity().startActivity(Intent.createChooser(shareIntent, "Export package"));
+            getActivity().startActivity(Intent.createChooser(shareIntent, "Export file"));
 
             JSObject result = new JSObject();
             result.put("fileName", fileName);
@@ -112,6 +113,15 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
         } catch (JSONException | IOException ex) {
             call.reject(ex.getMessage(), ex);
         }
+    }
+
+    private static boolean isSupportedExportFileName(String fileName) {
+        if (fileName == null || fileName.isBlank() || fileName.contains("/") || fileName.contains("\\")) {
+            return false;
+        }
+
+        String lowerName = fileName.toLowerCase(java.util.Locale.ROOT);
+        return lowerName.endsWith(".elogbook") || lowerName.endsWith(".json");
     }
 
     @PluginMethod
@@ -534,6 +544,11 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
     }
 
     private PublicKey getOrCreateRecoveryPublicKey() throws GeneralSecurityException {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            throw new GeneralSecurityException(
+                "Managed account recovery requires Android 15 or newer for RSA-OAEP SHA-256 Keystore support.");
+        }
+
         KeyStore keyStore = loadAndroidKeyStore();
         java.security.cert.Certificate existing = keyStore.getCertificate(RecoveryKeyAlias);
         if (existing != null) {
@@ -545,6 +560,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             RecoveryKeyAlias,
             KeyProperties.PURPOSE_DECRYPT)
             .setDigests(KeyProperties.DIGEST_SHA256)
+            .setMgf1Digests(KeyProperties.DIGEST_SHA256)
             .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_RSA_OAEP)
             .setKeySize(2048)
             .build());

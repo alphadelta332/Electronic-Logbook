@@ -9,9 +9,15 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobileDeviceStateExportWorkflowTests
 {
     [Fact]
-    public async Task ExportAsyncDownloadsCurrentStoredStateJson()
+    public async Task ExportAsyncUsesNativeShareForCurrentStoredStateJson()
     {
         var jsRuntime = new RecordingJsRuntime();
+        var expectedTransfer = new BrowserFileTransferResult(
+            "electronic-logbook-device-state-log-mobile-test-20260724T030405Z.json",
+            "/storage/emulated/0/Android/data/com.alphadelta.electroniclogbook.dev/files/exports/electronic-logbook-device-state-log-mobile-test-20260724T030405Z.json",
+            "/sdcard/Android/data/com.alphadelta.electroniclogbook.dev/files/exports/electronic-logbook-device-state-log-mobile-test-20260724T030405Z.json",
+            true);
+        jsRuntime.Results.Enqueue(expectedTransfer);
         var fileStore = new BrowserFileStore(jsRuntime);
         var exportedAt = DateTimeOffset.Parse("2026-07-24T03:04:05Z");
         var document = PortableLogbookDocument.CreateAustraliaFirst(
@@ -23,8 +29,9 @@ public sealed class MobileDeviceStateExportWorkflowTests
         var result = await MobileDeviceStateExportWorkflow.ExportAsync(state, fileStore, exportedAt);
 
         Assert.Equal("electronic-logbook-device-state-log-mobile-test-20260724T030405Z.json", result.FileName);
+        Assert.Equal(expectedTransfer, result.Transfer);
         var call = Assert.Single(jsRuntime.Calls);
-        Assert.Equal("electronicLogbookFiles.download", call.Identifier);
+        Assert.Equal("electronicLogbookFiles.nativeShareOrDownload", call.Identifier);
         Assert.Equal(result.FileName, call.Arguments[0]);
         Assert.Equal(BrowserFileStore.JsonContentType, call.Arguments[2]);
 
@@ -56,6 +63,8 @@ public sealed class MobileDeviceStateExportWorkflowTests
 
     private sealed class RecordingJsRuntime : IJSRuntime
     {
+        public Queue<object?> Results { get; } = [];
+
         public List<JsCall> Calls { get; } = [];
 
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
@@ -70,7 +79,8 @@ public sealed class MobileDeviceStateExportWorkflowTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Calls.Add(new JsCall(identifier, args ?? []));
-            return new ValueTask<TValue>(default(TValue)!);
+            var result = Results.Count > 0 ? Results.Dequeue() : default;
+            return new ValueTask<TValue>((TValue)result!);
         }
     }
 
