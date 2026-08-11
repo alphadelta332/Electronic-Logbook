@@ -57,7 +57,8 @@ It includes:
 - private `.github/*.pem` material when present;
 - the reusable project-local `.codex` scripts, prompt, schema, and hooks;
 - `%LOCALAPPDATA%\ElectronicLogbook`, including durable Android signing, Google OAuth,
-  Supabase management/project configuration, recovery configuration, and the small
+  Supabase management/project configuration, separate `development.env` and
+  `private-pilot.env` recovery configurations, and the small
   Android device-bridge records;
 - the custom Graphify skill when installed; and
 - a sanitized reference snapshot of stable Codex preferences.
@@ -170,7 +171,7 @@ The manifest currently covers:
 | JavaScript | Current Node.js LTS; the repository lockfile pins mobile packages |
 | Archive | 7-Zip |
 | Android | Temurin JDK 21, Platform Tools, SDK Platform 36, Build-Tools 35.0.0 |
-| Hosted pilot | Docker Desktop, WSL2, Supabase CLI 2.111.0, PostgreSQL 17 client |
+| Hosted pilot | Docker Desktop, WSL2, Supabase CLI 2.111.0, required PostgreSQL 17 client |
 | Agent tooling | Codex CLI/VS Code extension, Python/uv, Graphify |
 
 The installer also installs these VS Code extensions:
@@ -262,10 +263,12 @@ Open a new terminal so user environment changes are loaded, then run:
 The verifier checks:
 
 - Git, .NET SDK 10 and 8, Node/npm, Java 21, ADB, 7-Zip, Supabase, and VS Code;
-- optional GitHub CLI, PowerShell 7, Docker, PostgreSQL, Codex, and Graphify workflows;
+- required PostgreSQL 17 plus optional GitHub CLI, PowerShell 7, Docker, Codex, and Graphify workflows;
 - Android environment variables, SDK Platform 36, and Build-Tools 35.0.0;
 - Excel COM activation;
 - required ignored project context and hosted-sync configuration;
+- both project-specific recovery secret files, including an RSA-OAEP round trip and
+  32-byte KEK check without printing any value;
 - durable Android keystore presence, rewritten path, and certificate fingerprint; and
 - required VS Code extensions and fresh GitHub authentication.
 

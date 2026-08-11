@@ -155,6 +155,19 @@ ELB_SUPABASE_PILOT_ANON_KEY
 Service-role keys are for administrative scripts only and must never be bundled into the
 Android app, workbook, updater, package exchange files, or diagnostics.
 
+Managed recovery uses a different local secret file for each hosted project:
+
+```text
+%LOCALAPPDATA%\ElectronicLogbook\Supabase\recovery-envelope\development.env
+%LOCALAPPDATA%\ElectronicLogbook\Supabase\recovery-envelope\private-pilot.env
+```
+
+Never reuse one project's ingress key pair or KEK in the other project. Create a missing
+file with `tools\RecoveryEnvelopeSecretGenerator`, deploy it with `supabase secrets set
+--env-file <path> --project-ref <ref>`, and retain it only through the trusted local
+development transfer workflow. `Invoke-LocalDevelopmentTransfer.ps1 -Action Verify`
+confirm-tests the RSA pair and KEK length without printing secret material.
+
 For the Android owner-rehearsal build, create a local gitignored mobile runtime config:
 
 ```powershell
@@ -236,6 +249,19 @@ psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=
 
 The harness is `supabase/tests/hosted_pilot_rls.sql`. It seeds synthetic
 `example.invalid` users and rolls its transaction back.
+
+Run the hosted managed/recovery-code rehearsal only against the development project:
+
+```powershell
+.\tools\Invoke-HostedRecoveryRehearsal.ps1
+```
+
+It obtains project credentials from the private local configuration, uses an
+administrator-generated email OTP without sending mail, exercises both replacement
+paths against a non-empty encrypted ledger, and removes the disposable Auth identity
+and hosted rows. PostgreSQL 17 is required because the append-only operation trigger is
+bypassed only inside the narrowly scoped cleanup transaction; normal API deletion
+remains blocked.
 
 ## References
 

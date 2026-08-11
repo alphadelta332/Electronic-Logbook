@@ -548,10 +548,20 @@ function Invoke-InstallAction {
     Write-Step 'Installing Windows packages'
     foreach ($package in $script:TransferConfig.WingetPackages) {
         if ($PSCmdlet.ShouldProcess($package.Id, "Install $($package.Name) with winget")) {
-            & winget.exe install --id $package.Id --exact --accept-package-agreements --accept-source-agreements --silent
+            $listOutput = & winget.exe list --id $package.Id --exact --accept-source-agreements 2>&1 | Out-String
+            $installed = $LASTEXITCODE -eq 0 -and $listOutput -match [regex]::Escape($package.Id)
+            $wingetAction = if ($installed) { 'upgrade' } else { 'install' }
+            & winget.exe $wingetAction --id $package.Id --exact --accept-package-agreements --accept-source-agreements --silent
             if ($LASTEXITCODE -ne 0) {
-                $message = "winget could not install $($package.Name) ($($package.Id))."
-                if ($package.Required) { throw $message } else { Write-Warning $message }
+                $verifyOutput = & winget.exe list --id $package.Id --exact --accept-source-agreements 2>&1 | Out-String
+                $stillInstalled = $LASTEXITCODE -eq 0 -and $verifyOutput -match [regex]::Escape($package.Id)
+                if ($installed -and $stillInstalled) {
+                    Write-Host "$($package.Name) is already installed; no applicable Winget upgrade was found."
+                }
+                else {
+                    $message = "winget could not install $($package.Name) ($($package.Id))."
+                    if ($package.Required) { throw $message } else { Write-Warning $message }
+                }
             }
         }
     }
@@ -646,15 +656,74 @@ function Add-CheckResult {
     $Results.Add([pscustomobject]@{ Check = $Name; Status = if ($Passed) { 'PASS' } elseif ($Required) { 'FAIL' } else { 'WARN' }; Detail = $Detail })
 }
 
+function Test-RecoveryEnvelopeSecretFile {
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ Passed = $false; Detail = 'missing private recovery configuration' }
+    }
+
+    try {
+        $values = @{}
+        foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
+            if ($line -match '^([^#=]+)=(.*)$') { $values[$Matches[1].Trim()] = $Matches[2].Trim() }
+        }
+        $required = @(
+            'RECOVERY_INGRESS_PUBLIC_KEY_SPKI_BASE64',
+            'RECOVERY_INGRESS_PRIVATE_KEY_PKCS8_BASE64',
+            'RECOVERY_KEK_BASE64',
+            'RECOVERY_KEY_VERSION_ID'
+        )
+        if (@($required | Where-Object { [string]::IsNullOrWhiteSpace([string]$values[$_]) }).Count -gt 0) {
+            return [pscustomobject]@{ Passed = $false; Detail = 'required recovery variable missing' }
+        }
+
+        $publicBytes = [Convert]::FromBase64String($values.RECOVERY_INGRESS_PUBLIC_KEY_SPKI_BASE64)
+        $privateBytes = [Convert]::FromBase64String($values.RECOVERY_INGRESS_PRIVATE_KEY_PKCS8_BASE64)
+        $kek = [Convert]::FromBase64String($values.RECOVERY_KEK_BASE64)
+        if ($kek.Length -ne 32) {
+            return [pscustomobject]@{ Passed = $false; Detail = 'recovery KEK is not 32 bytes' }
+        }
+
+        $publicRsa = [Security.Cryptography.RSA]::Create()
+        $privateRsa = [Security.Cryptography.RSA]::Create()
+        $probe = [Security.Cryptography.RandomNumberGenerator]::GetBytes(32)
+        $unwrapped = $null
+        $bytesRead = 0
+        try {
+            $publicRsa.ImportSubjectPublicKeyInfo($publicBytes, [ref]$bytesRead)
+            $bytesRead = 0
+            $privateRsa.ImportPkcs8PrivateKey($privateBytes, [ref]$bytesRead)
+            $wrapped = $publicRsa.Encrypt($probe, [Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
+            $unwrapped = $privateRsa.Decrypt($wrapped, [Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
+            if (-not [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($probe, $unwrapped)) {
+                return [pscustomobject]@{ Passed = $false; Detail = 'recovery ingress public/private keys do not match' }
+            }
+        }
+        finally {
+            if ($probe) { [Security.Cryptography.CryptographicOperations]::ZeroMemory($probe) }
+            if ($null -ne $unwrapped) { [Security.Cryptography.CryptographicOperations]::ZeroMemory($unwrapped) }
+            $publicRsa.Dispose()
+            $privateRsa.Dispose()
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory($privateBytes)
+            [Security.Cryptography.CryptographicOperations]::ZeroMemory($kek)
+        }
+        return [pscustomobject]@{ Passed = $true; Detail = 'required values present; RSA pair and 32-byte KEK verified' }
+    }
+    catch {
+        return [pscustomobject]@{ Passed = $false; Detail = 'private recovery configuration is invalid' }
+    }
+}
+
 function Invoke-VerifyAction {
     Write-Step 'Verifying development environment'
     $results = [Collections.Generic.List[object]]::new()
 
-    foreach ($name in @('git', 'dotnet', 'node', 'npm.cmd', 'java', 'adb', 'supabase', 'code')) {
+    foreach ($name in @('git', 'dotnet', 'node', 'npm.cmd', 'java', 'adb', 'supabase', 'psql', 'code')) {
         $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
         Add-CheckResult $results $name ($null -ne $command) $true $(if ($command) { $command.Source } else { 'not found on PATH' })
     }
-    foreach ($name in @('gh', 'pwsh', 'docker', 'psql', 'codex', 'graphify')) {
+    foreach ($name in @('gh', 'pwsh', 'docker', 'codex', 'graphify')) {
         $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
         Add-CheckResult $results $name ($null -ne $command) $false $(if ($command) { $command.Source } else { 'not found on PATH; install if that workflow is needed' })
     }
@@ -681,7 +750,7 @@ function Invoke-VerifyAction {
     $supabaseVersion = Get-NativeCommandOutput -Name 'supabase' -Arguments @('--version')
     Add-CheckResult $results 'Supabase CLI version' ($supabaseVersion -eq $script:TransferConfig.Expected.SupabaseVersion) $true $supabaseVersion
     $psqlVersion = Get-NativeCommandOutput -Name 'psql' -Arguments @('--version')
-    Add-CheckResult $results 'PostgreSQL client 17' ($psqlVersion -match ' 17\.') $false $(if ($psqlVersion) { $psqlVersion } else { 'not found' })
+    Add-CheckResult $results 'PostgreSQL client 17' ($psqlVersion -match ' 17\.') $true $(if ($psqlVersion) { $psqlVersion } else { 'not found' })
 
     $dockerInfo = Get-NativeCommandOutput -Name 'docker' -Arguments @('info', '--format', '{{.ServerVersion}}')
     Add-CheckResult $results 'Docker Desktop engine' ($dockerInfo -match '^\d+\.\d+') $false $(if ($dockerInfo -match '^\d+\.\d+') { $dockerInfo } else { 'not running; launch Docker Desktop when hosted tests are needed' })
@@ -711,6 +780,11 @@ function Invoke-VerifyAction {
     $electronicLogbookLocalRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook'
     Add-CheckResult $results 'Supabase management token' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\access-token.txt') -PathType Leaf) $true 'private transfer asset; value is never printed'
     Add-CheckResult $results 'Hosted project metadata' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\hosted-pilot-projects.local.json') -PathType Leaf) $true 'private transfer asset; values are never printed'
+    $recoveryRoot = Join-Path $electronicLogbookLocalRoot 'Supabase\recovery-envelope'
+    foreach ($fileName in $script:TransferConfig.Expected.RecoveryEnvelopeSecretFiles) {
+        $secretCheck = Test-RecoveryEnvelopeSecretFile -Path (Join-Path $recoveryRoot $fileName)
+        Add-CheckResult $results "Recovery envelope secrets: $fileName" $secretCheck.Passed $true $secretCheck.Detail
+    }
     Add-CheckResult $results 'Google Auth local state' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Google Auth\webclientid.txt') -PathType Leaf) $false 'required for Android hosted Google sign-in work'
 
     $signingRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook\AndroidSigning'

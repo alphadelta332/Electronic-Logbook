@@ -65,7 +65,7 @@
         @{ Id = 'EclipseAdoptium.Temurin.21.JDK'; Name = 'Temurin JDK 21'; Required = $true }
         @{ Id = 'Google.PlatformTools'; Name = 'Android Platform Tools'; Required = $true }
         @{ Id = 'Google.AndroidStudio'; Name = 'Android Studio'; Required = $false }
-        @{ Id = 'PostgreSQL.PostgreSQL.17'; Name = 'PostgreSQL 17'; Required = $false }
+        @{ Id = 'PostgreSQL.PostgreSQL.17'; Name = 'PostgreSQL 17'; Required = $true }
         @{ Id = 'astral-sh.uv'; Name = 'uv'; Required = $false }
         @{ Id = 'Python.Python.3.14'; Name = 'Python 3.14'; Required = $false }
     )
@@ -109,6 +109,7 @@
         AndroidBuildTools = '35.0.0'
         SupabaseVersion = '2.111.0'
         PostgreSqlMajor = 17
+        RecoveryEnvelopeSecretFiles = @('development.env', 'private-pilot.env')
         DebugPackageId = 'com.alphadelta.electroniclogbook.dev'
     }
 

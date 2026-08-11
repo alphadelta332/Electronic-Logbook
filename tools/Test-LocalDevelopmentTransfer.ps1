@@ -34,7 +34,7 @@ function Invoke-TransferProcess {
     param([string[]]$Arguments)
 
     $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = 'powershell.exe'
+    $startInfo.FileName = (Get-Process -Id $PID).Path
     $quoted = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $entrypoint) + $Arguments
     $startInfo.Arguments = (($quoted | ForEach-Object { '"' + $_.Replace('"', '\"') + '"' }) -join ' ')
     $startInfo.UseShellExecute = $false
@@ -110,10 +110,16 @@ try {
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'TODO.md' -and $_.Required }).Count -eq 1) 'TODO.md must be required'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*auth.json*' }).Count -eq 1) 'Codex auth must be forbidden'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*sessions*' }).Count -eq 1) 'Codex sessions must be forbidden'
+    Assert-True (@($config.WingetPackages | Where-Object { $_.Id -eq 'PostgreSQL.PostgreSQL.17' -and $_.Required }).Count -eq 1) 'PostgreSQL 17 must be required for hosted cleanup and SQL evidence'
+    Assert-True (@($config.Expected.RecoveryEnvelopeSecretFiles).Count -eq 2) 'development and private-pilot recovery secret files must be verified'
 
     $entrypointText = Get-Content -LiteralPath $entrypoint -Raw -Encoding UTF8
     Assert-True ($entrypointText -match "@\('a'.*'-t7z'.*'-mx=9'.*'-bb0'") 'real export must create a 7-Zip archive'
     Assert-True ($entrypointText -notmatch "'-mhe=on'|Read-ArchivePassword|Archive password") 'workflow must not encrypt or request an archive password'
+    Assert-True ($entrypointText -match 'Test-RecoveryEnvelopeSecretFile') 'verifier must validate recovery secret structure and key pairing'
+    Assert-True ($entrypointText.Contains("Add-CheckResult `$results 'PostgreSQL client 17' (`$psqlVersion -match ' 17\.') `$true")) 'PostgreSQL 17 version must be a required verification check'
+    Assert-True ($entrypointText -match 'winget\.exe list' -and $entrypointText -match "wingetAction = if.*'upgrade'") 'installer must distinguish installed Winget packages from missing packages'
+    Assert-True ($entrypointText -match 'stillInstalled') 'installer must re-verify a package after a nonzero Winget upgrade result'
 
     $ignored = & git -C $repoRoot check-ignore 'LOCAL_DEVICE_SETUP_HANDOVER.md' 2>$null
     Assert-True ($LASTEXITCODE -ne 0) 'the sanitized handover must be trackable'
