@@ -467,6 +467,53 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task UnreachableHostedTransportPersistsOfflineStateAndQueuedEditAcrossReload()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-11T10:00:00Z"));
+        var ledger = new TransportFailingLedger(new InMemoryHostedLogbookLedger());
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync?.LastStatus);
+
+        ledger.FailTransport = true;
+        FillWorkbookDraft(session.WorkbookDraft);
+        session.WorkbookDraft.Reg = "VH-OFF";
+
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.Offline, session.HostedSync?.LastStatus);
+        Assert.Equal(1, session.HostedSync?.PendingLocalOperationCount);
+
+        var reloaded = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        Assert.True(reloaded.IsLoaded);
+        Assert.Equal(2, reloaded.DocumentV2.Operations.Count);
+        Assert.Equal(PortableHostedSyncStatus.Offline, reloaded.HostedSync?.LastStatus);
+        Assert.Contains(reloaded.CurrentEntriesV2, entry => entry.Entry?.Reg == "VH-OFF");
+
+        ledger.FailTransport = false;
+        var hostedSyncChangeCount = 0;
+        reloaded.HostedSyncChanged += () => hostedSyncChangeCount++;
+        var restored = await reloaded.SyncHostedAfterNetworkRestoredAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.Synced, restored?.Status);
+        Assert.Equal(2, reloaded.HostedSync?.LastAcknowledgedHostedRevision);
+        Assert.Equal(1, hostedSyncChangeCount);
+    }
+
+    [Fact]
     public async Task WorkbookFaithfulJourneySavesCanonicalV2EntryAndReloadsFromBrowserStorage()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -984,6 +1031,38 @@ public sealed class MobileLogbookSessionJourneyTests
             aes.Decrypt(nonce, ciphertext, tag, plaintext, additionalData);
             return new ValueTask<TValue>((TValue)(object)plaintext);
         }
+    }
+
+    private sealed class TransportFailingLedger(IHostedLogbookLedger inner) : IHostedLogbookLedger
+    {
+        public bool FailTransport { get; set; }
+
+        public ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            FailTransport
+                ? ValueTask.FromException<HostedOperationPage>(new HttpRequestException("Simulated unreachable hosted transport."))
+                : inner.ReadMissingOperationsAsync(logbookId, afterHostedRevision, pageSize, cancellationToken);
+
+        public ValueTask<HostedAppendResult> AppendOperationsAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            IReadOnlyList<HostedOperationUpload> operations,
+            CancellationToken cancellationToken = default) =>
+            FailTransport
+                ? ValueTask.FromException<HostedAppendResult>(new HttpRequestException("Simulated unreachable hosted transport."))
+                : inner.AppendOperationsAsync(logbookId, deviceId, operations, cancellationToken);
+
+        public ValueTask RecordAcknowledgementAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            long throughHostedRevision,
+            CancellationToken cancellationToken = default) =>
+            FailTransport
+                ? ValueTask.FromException(new HttpRequestException("Simulated unreachable hosted transport."))
+                : inner.RecordAcknowledgementAsync(logbookId, deviceId, throughHostedRevision, cancellationToken);
     }
 
     private static (string PublicKey, string Fingerprint) PublicMaterial(byte value)

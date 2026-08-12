@@ -134,6 +134,20 @@ public sealed class MobileHostedSyncWorkflow(
                     downloaded,
                     appendResult.AcceptedOperations.Select(operation => operation.RevisionId).ToArray());
         }
+        catch (HttpRequestException ex) when (ex.StatusCode is null)
+        {
+            return PortableHostedSyncResult.Offline(
+                request.Document,
+                request.HostedSync.LastAcknowledgedHostedRevision,
+                pendingLocalOperationCount);
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return PortableHostedSyncResult.Offline(
+                request.Document,
+                request.HostedSync.LastAcknowledgedHostedRevision,
+                pendingLocalOperationCount);
+        }
         catch (Exception ex) when (ex is HostedSignInException or HostedLedgerException or CryptographicException or FormatException)
         {
             return PortableHostedSyncResult.NeedsAttention(

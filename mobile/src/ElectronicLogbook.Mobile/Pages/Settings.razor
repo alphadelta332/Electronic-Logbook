@@ -1,4 +1,5 @@
 @page "/settings"
+@implements IDisposable
 @inject MobileLogbookSession Session
 @inject MobileUiPreferenceState UiPreferences
 @inject BrowserFileStore FileStore
@@ -306,9 +307,14 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        Session.HostedSyncChanged += OnHostedSyncChanged;
         await Session.EnsureLoadedWorkbookAsync();
         await UiPreferences.EnsureLoadedAsync();
     }
+
+    public void Dispose() => Session.HostedSyncChanged -= OnHostedSyncChanged;
+
+    private void OnHostedSyncChanged() => _ = InvokeAsync(StateHasChanged);
 
     private Task SetSystemThemeModeAsync() => UiPreferences.SetThemeModeAsync("System");
 

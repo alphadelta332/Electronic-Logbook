@@ -4,6 +4,8 @@
     const keyStoreName = "portable-keys";
     const version = 2;
     const maxElogbookBytes = 64 * 1024 * 1024;
+    const networkRestoredHandlers = new Map();
+    let nextNetworkRestoredHandlerId = 1;
 
     function openDatabase() {
         return new Promise((resolve, reject) => {
@@ -81,7 +83,25 @@
     };
 
     window.electronicLogbookNetwork = {
-        isOnline: () => navigator.onLine !== false
+        isOnline: () => navigator.onLine !== false,
+        subscribe: (dotNetReference) => {
+            const subscriptionId = nextNetworkRestoredHandlerId++;
+            const handler = () => {
+                dotNetReference.invokeMethodAsync("HandleNetworkRestoredAsync").catch(() => { });
+            };
+            networkRestoredHandlers.set(subscriptionId, handler);
+            window.addEventListener("online", handler);
+            return subscriptionId;
+        },
+        unsubscribe: (subscriptionId) => {
+            const handler = networkRestoredHandlers.get(subscriptionId);
+            if (!handler) {
+                return;
+            }
+
+            window.removeEventListener("online", handler);
+            networkRestoredHandlers.delete(subscriptionId);
+        }
     };
 
     window.electronicLogbookDiagnostics = {

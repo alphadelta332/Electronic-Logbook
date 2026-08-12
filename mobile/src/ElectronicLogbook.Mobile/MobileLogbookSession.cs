@@ -16,6 +16,8 @@ public sealed class MobileLogbookSession(
     IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
     IMobileReplacementRecoveryWorkflow? replacementRecovery = null)
 {
+    public event Action? HostedSyncChanged;
+
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
     private readonly ISyncClock syncClock = syncClock ?? SystemSyncClock.Instance;
@@ -1297,6 +1299,7 @@ public sealed class MobileLogbookSession(
                 "Hosted sync is not configured on this device.");
             HostedSync = HostedSync.WithResult(unavailable, syncClock.UtcNow);
             await SaveStateV2Async();
+            HostedSyncChanged?.Invoke();
             return unavailable;
         }
 
@@ -1381,6 +1384,7 @@ public sealed class MobileLogbookSession(
         DocumentV2 = result.Document;
         HostedSync = HostedSync.WithResult(result, syncClock.UtcNow);
         await SaveStateV2Async();
+        HostedSyncChanged?.Invoke();
         return result;
     }
 

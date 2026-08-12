@@ -166,6 +166,17 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void BrowserNetworkBridgeSubscribesAndUnsubscribesFromConnectivityRestoration()
+    {
+        var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
+
+        Assert.Contains("window.electronicLogbookNetwork", bridge, StringComparison.Ordinal);
+        Assert.Contains("window.addEventListener(\"online\", handler)", bridge, StringComparison.Ordinal);
+        Assert.Contains("invokeMethodAsync(\"HandleNetworkRestoredAsync\")", bridge, StringComparison.Ordinal);
+        Assert.Contains("window.removeEventListener(\"online\", handler)", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidShellExcludesLocalLogbookCredentialsAndWrappedKeysFromSystemBackup()
     {
         var manifest = ReadRepositoryFile("android", "app", "src", "main", "AndroidManifest.xml");

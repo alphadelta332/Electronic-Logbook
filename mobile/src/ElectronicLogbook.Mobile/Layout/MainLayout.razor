@@ -1,7 +1,8 @@
 @inherits LayoutComponentBase
-@implements IDisposable
+@implements IAsyncDisposable
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
+@inject MobileLogbookSession Session
 @inject MobileUiPreferenceState UiPreferences
 
 <MudThemeProvider Theme="@Theme" IsDarkMode="@UiPreferences.IsDarkMode" />
@@ -72,6 +73,8 @@
 
     private readonly MudTheme Theme = MobileTheme.Create();
     private CancellationTokenSource? navigationFeedbackCancellation;
+    private DotNetObjectReference<MainLayout>? networkRestoredCallback;
+    private int? networkRestoredSubscriptionId;
     private bool IsNavigationPending { get; set; }
     private string PendingNavigationLabel { get; set; } = "page";
 
@@ -82,12 +85,58 @@
         await UiPreferences.EnsureLoadedAsync();
     }
 
-    public void Dispose()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        networkRestoredCallback = DotNetObjectReference.Create(this);
+        try
+        {
+            networkRestoredSubscriptionId = await JS.InvokeAsync<int>(
+                "electronicLogbookNetwork.subscribe",
+                networkRestoredCallback);
+        }
+        catch (JSException)
+        {
+            networkRestoredCallback.Dispose();
+            networkRestoredCallback = null;
+        }
+    }
+
+    [JSInvokable]
+    public async Task HandleNetworkRestoredAsync()
+    {
+        if (!Session.IsLoaded)
+        {
+            return;
+        }
+
+        await Session.SyncHostedAfterNetworkRestoredAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public async ValueTask DisposeAsync()
     {
         navigationFeedbackCancellation?.Cancel();
         navigationFeedbackCancellation?.Dispose();
         UiPreferences.Changed -= OnUiPreferencesChanged;
         Navigation.LocationChanged -= OnLocationChanged;
+
+        if (networkRestoredSubscriptionId is int subscriptionId)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("electronicLogbookNetwork.unsubscribe", subscriptionId);
+            }
+            catch (JSException)
+            {
+            }
+        }
+
+        networkRestoredCallback?.Dispose();
     }
 
     private void OnUiPreferencesChanged()

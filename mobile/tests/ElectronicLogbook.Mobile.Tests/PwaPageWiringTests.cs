@@ -285,6 +285,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@Session.HostedSyncStatusDetail", settings, StringComparison.Ordinal);
         Assert.Contains("Sync now", settings, StringComparison.Ordinal);
         Assert.Contains("SyncHostedNowAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.HostedSyncChanged += OnHostedSyncChanged", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.HostedSyncChanged -= OnHostedSyncChanged", settings, StringComparison.Ordinal);
         Assert.Contains("reauthenticate", settings, StringComparison.Ordinal);
         Assert.Contains("restore a lost key", settings, StringComparison.Ordinal);
         Assert.Contains("revoked device", settings, StringComparison.Ordinal);
@@ -880,6 +882,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("_ = ScrollMainToTopAsync();", layout, StringComparison.Ordinal);
         Assert.Contains("electronicLogbookNavigation.scrollMainToTop", layout, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(250, cancellationToken)", layout, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookNetwork.subscribe", layout, StringComparison.Ordinal);
+        Assert.Contains("HandleNetworkRestoredAsync", layout, StringComparison.Ordinal);
+        Assert.Contains("SyncHostedAfterNetworkRestoredAsync", layout, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookNetwork.unsubscribe", layout, StringComparison.Ordinal);
         Assert.Contains("nav-pending-link", css, StringComparison.Ordinal);
         Assert.DoesNotContain(".bottom-nav::before", css, StringComparison.Ordinal);
         Assert.Matches(
