@@ -15,14 +15,85 @@
 else
 {
     <section class="flight-entry-page">
-        @if (ShowSaveConfirmation)
+        <a class="page-back-link"
+           href="/"
+           @onclick="RequestCancel"
+           @onclick:preventDefault="true"
+           aria-label="Back to dashboard">
+            <MudIcon Icon="@Icons.Material.Filled.ArrowBack" />
+            <span>Back to dashboard</span>
+        </a>
+
+        @if (PendingAction is not null)
         {
-            <section class="save-confirmation" role="status" aria-live="assertive">
-                <span class="save-confirmation-icon">
-                    <MudIcon Icon="@Icons.Material.Filled.Check" />
-                </span>
-                <strong>@SaveConfirmationMessage</strong>
-            </section>
+            <div class="entry-action-dialog-backdrop" @onclick="DismissPendingAction">
+                <section class="entry-action-dialog"
+                         role="dialog"
+                         aria-modal="true"
+                         aria-labelledby="entry-action-dialog-title"
+                         @onclick:stopPropagation="true">
+                    @if (PendingAction == DraftAction.ReviewSave)
+                    {
+                        <header class="entry-action-dialog-header">
+                            <span class="entry-action-dialog-icon entry-action-dialog-icon-review">
+                                <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
+                            </span>
+                            <div>
+                                <span class="eyebrow">Review before saving</span>
+                                <h2 id="entry-action-dialog-title">@(Session.EditingEntryId is null ? "Add this flight?" : "Save this correction?")</h2>
+                            </div>
+                        </header>
+                        <div class="entry-review-values" tabindex="0" aria-label="Flight values to save">
+                            @foreach (var group in ReviewDetails.GroupBy(detail => detail.Group))
+                            {
+                                <section class="entry-review-group">
+                                    <h3>@ReviewGroupLabel(group.Key)</h3>
+                                    <dl>
+                                        @foreach (var detail in group)
+                                        {
+                                            <div>
+                                                <dt>@detail.Label</dt>
+                                                <dd>@detail.Value</dd>
+                                            </div>
+                                        }
+                                    </dl>
+                                </section>
+                            }
+                        </div>
+                        <footer class="entry-action-dialog-actions">
+                            <MudButton Variant="Variant.Text" OnClick="DismissPendingAction" Disabled="@IsActionPending">
+                                Keep editing
+                            </MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConfirmSaveAsync" Disabled="@IsActionPending" StartIcon="@Icons.Material.Filled.Done">
+                                @Session.SaveLabel
+                            </MudButton>
+                        </footer>
+                    }
+                    else
+                    {
+                        <header class="entry-action-dialog-header">
+                            <span class="entry-action-dialog-icon entry-action-dialog-icon-warning">
+                                <MudIcon Icon="@Icons.Material.Filled.WarningAmber" />
+                            </span>
+                            <div>
+                                <span class="eyebrow">Unsaved changes</span>
+                                <h2 id="entry-action-dialog-title">@(PendingAction == DraftAction.Clear ? "Clear this form?" : "Discard this draft?")</h2>
+                                <p>@(PendingAction == DraftAction.Clear
+                                    ? "Every value in the form will be cleared. This cannot be undone."
+                                    : "Your changes will not be saved before returning to the dashboard.")</p>
+                            </div>
+                        </header>
+                        <footer class="entry-action-dialog-actions">
+                            <MudButton Variant="Variant.Text" OnClick="DismissPendingAction">
+                                Keep editing
+                            </MudButton>
+                            <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ConfirmDestructiveAction" StartIcon="@Icons.Material.Filled.DeleteOutline">
+                                @(PendingAction == DraftAction.Clear ? "Clear form" : "Discard draft")
+                            </MudButton>
+                        </footer>
+                    }
+                </section>
+            </div>
         }
 
         <header class="entry-header">
@@ -114,22 +185,22 @@ else
                 </div>
             </div>
             <div class="field-grid numeric-grid">
-                <label>SE ICUS day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.SeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.SeIcusDay, value => Session.WorkbookDraft.SeIcusDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.SeIcusDay, value => Session.WorkbookDraft.SeIcusDay = value)" /></label>
-                <label>SE ICUS night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.SeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.SeIcusNight, value => Session.WorkbookDraft.SeIcusNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.SeIcusNight, value => Session.WorkbookDraft.SeIcusNight = value)" /></label>
-                <label>SE dual day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.SeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.SeDualDay, value => Session.WorkbookDraft.SeDualDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.SeDualDay, value => Session.WorkbookDraft.SeDualDay = value)" /></label>
-                <label>SE dual night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.SeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.SeDualNight, value => Session.WorkbookDraft.SeDualNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.SeDualNight, value => Session.WorkbookDraft.SeDualNight = value)" /></label>
-                <label>SE command day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.SeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.SeCommandDay, value => Session.WorkbookDraft.SeCommandDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.SeCommandDay, value => Session.WorkbookDraft.SeCommandDay = value)" /></label>
-                <label>SE command night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.SeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.SeCommandNight, value => Session.WorkbookDraft.SeCommandNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.SeCommandNight, value => Session.WorkbookDraft.SeCommandNight = value)" /></label>
-                <label>ME ICUS day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.MeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.MeIcusDay, value => Session.WorkbookDraft.MeIcusDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.MeIcusDay, value => Session.WorkbookDraft.MeIcusDay = value)" /></label>
-                <label>ME ICUS night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.MeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.MeIcusNight, value => Session.WorkbookDraft.MeIcusNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.MeIcusNight, value => Session.WorkbookDraft.MeIcusNight = value)" /></label>
-                <label>ME dual day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.MeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.MeDualDay, value => Session.WorkbookDraft.MeDualDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.MeDualDay, value => Session.WorkbookDraft.MeDualDay = value)" /></label>
-                <label>ME dual night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.MeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.MeDualNight, value => Session.WorkbookDraft.MeDualNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.MeDualNight, value => Session.WorkbookDraft.MeDualNight = value)" /></label>
-                <label>ME command day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.MeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.MeCommandDay, value => Session.WorkbookDraft.MeCommandDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.MeCommandDay, value => Session.WorkbookDraft.MeCommandDay = value)" /></label>
-                <label>ME command night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.MeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.MeCommandNight, value => Session.WorkbookDraft.MeCommandNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.MeCommandNight, value => Session.WorkbookDraft.MeCommandNight = value)" /></label>
-                <label>Copilot day <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.CopilotDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotDay = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.CopilotDay, value => Session.WorkbookDraft.CopilotDay = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.CopilotDay, value => Session.WorkbookDraft.CopilotDay = value)" /></label>
-                <label>Copilot night <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.CopilotNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotNight = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.CopilotNight, value => Session.WorkbookDraft.CopilotNight = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.CopilotNight, value => Session.WorkbookDraft.CopilotNight = value)" /></label>
-                <label>IFR IF <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.IfrIf)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrIf = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.IfrIf, value => Session.WorkbookDraft.IfrIf = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.IfrIf, value => Session.WorkbookDraft.IfrIf = value)" /></label>
-                <label>IFR sim <input type="number" step="0.1" min="0" inputmode="decimal" value="@FormatHour(Session.WorkbookDraft.IfrSim)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrSim = value)" @onfocus="() => ShowHourDefault(() => Session.WorkbookDraft.IfrSim, value => Session.WorkbookDraft.IfrSim = value)" @onblur="() => ClearUntouchedHour(() => Session.WorkbookDraft.IfrSim, value => Session.WorkbookDraft.IfrSim = value)" /></label>
+                <label>SE ICUS day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusDay = value)" /></label>
+                <label>SE ICUS night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusNight = value)" /></label>
+                <label>SE dual day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualDay = value)" /></label>
+                <label>SE dual night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualNight = value)" /></label>
+                <label>SE command day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandDay = value)" /></label>
+                <label>SE command night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandNight = value)" /></label>
+                <label>ME ICUS day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusDay = value)" /></label>
+                <label>ME ICUS night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusNight = value)" /></label>
+                <label>ME dual day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualDay = value)" /></label>
+                <label>ME dual night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualNight = value)" /></label>
+                <label>ME command day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandDay = value)" /></label>
+                <label>ME command night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandNight = value)" /></label>
+                <label>Copilot day <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.CopilotDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotDay = value)" /></label>
+                <label>Copilot night <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.CopilotNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotNight = value)" /></label>
+                <label>IFR IF <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.IfrIf)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrIf = value)" /></label>
+                <label>IFR sim <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.IfrSim)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrSim = value)" /></label>
             </div>
         </section>
 
@@ -165,9 +236,11 @@ else
         </section>
 
         <aside class="persistent-action-bar">
-            <div class="action-buttons">
-                <MudIconButton Icon="@Icons.Material.Filled.Refresh" OnClick="Session.ResetWorkbookDraft" Disabled="@Session.IsStorageBlocked" aria-label="Clear draft" />
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="@Session.IsStorageBlocked" StartIcon="@Icons.Material.Filled.Done">
+            <div class="action-buttons" role="group" aria-label="Flight form actions">
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="RequestClear" Disabled="@Session.IsStorageBlocked" StartIcon="@Icons.Material.Filled.DeleteSweep" aria-label="Clear form" title="Clear form">
+                    Clear form
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="ReviewSave" Disabled="@Session.IsStorageBlocked" StartIcon="@Icons.Material.Filled.Done" aria-label="@Session.SaveLabel" title="@Session.SaveLabel">
                     @Session.SaveLabel
                 </MudButton>
             </div>
@@ -180,9 +253,10 @@ else
     public string? EntryId { get; set; }
 
     private static string TodayIso => DateOnly.FromDateTime(DateTime.Today).ToString("yyyy-MM-dd");
-    private bool ShowSaveConfirmation { get; set; }
-    private string SaveConfirmationMessage { get; set; } = "Saved";
     private string? LoadedEditEntryId { get; set; }
+    private DraftAction? PendingAction { get; set; }
+    private IReadOnlyList<EntryDetail> ReviewDetails { get; set; } = [];
+    private bool IsActionPending { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
@@ -198,47 +272,102 @@ else
         }
     }
 
-    private async Task SaveAsync()
+    private void ReviewSave()
     {
-        var confirmationMessage = Session.EditingEntryId is null ? "Flight added" : "Correction saved";
-        await Session.SaveWorkbookEntryAsync();
-        if (!Session.ShouldShowWorkbookDraftErrors)
+        if (!Session.PrepareWorkbookDraftForReview())
         {
-            SaveConfirmationMessage = confirmationMessage;
-            ShowSaveConfirmation = true;
-            await Task.Delay(650);
-            Navigation.NavigateTo("/");
-        }
-    }
-
-    private static void ShowHourDefault(Func<decimal?> getValue, Action<decimal?> setValue)
-    {
-        if (!getValue().HasValue)
-        {
-            setValue(0m);
-        }
-    }
-
-    private static string FormatHour(decimal? value) => value?.ToString("0.0") ?? string.Empty;
-
-    private static void UpdateHour(ChangeEventArgs args, Action<decimal?> setValue)
-    {
-        if (decimal.TryParse(args.Value?.ToString(), out var value))
-        {
-            setValue(value);
             return;
         }
 
-        setValue(null);
+        ReviewDetails = Session
+            .EntryDetails(Session.WorkbookDraft.ToEntry(Session.WorkbookCustomFields))
+            .ToArray();
+        PendingAction = DraftAction.ReviewSave;
     }
 
-    private static void ClearUntouchedHour(Func<decimal?> getValue, Action<decimal?> setValue)
+    private async Task ConfirmSaveAsync()
     {
-        if (getValue().GetValueOrDefault() == 0m)
+        if (IsActionPending)
         {
-            setValue(null);
+            return;
+        }
+
+        IsActionPending = true;
+        try
+        {
+            await Session.SaveWorkbookEntryAsync();
+            if (!Session.ShouldShowWorkbookDraftErrors)
+            {
+                PendingAction = null;
+                Navigation.NavigateTo("/");
+            }
+        }
+        finally
+        {
+            IsActionPending = false;
         }
     }
+
+    private void RequestClear()
+    {
+        PendingAction = DraftAction.Clear;
+    }
+
+    private void RequestCancel()
+    {
+        if (Session.HasEditedDraft)
+        {
+            PendingAction = DraftAction.Cancel;
+            return;
+        }
+
+        ReturnToDashboard();
+    }
+
+    private void ConfirmDestructiveAction()
+    {
+        var action = PendingAction;
+        PendingAction = null;
+        if (action == DraftAction.Clear)
+        {
+            Session.ResetWorkbookDraft();
+            return;
+        }
+
+        if (action == DraftAction.Cancel)
+        {
+            ReturnToDashboard();
+        }
+    }
+
+    private void DismissPendingAction()
+    {
+        if (!IsActionPending)
+        {
+            PendingAction = null;
+        }
+    }
+
+    private static void UpdateHour(ChangeEventArgs args, Action<decimal?> setValue)
+    {
+        setValue(MobileHourField.Parse(args.Value?.ToString()));
+    }
+
+    private void ReturnToDashboard()
+    {
+        Navigation.NavigateTo("/", replace: true);
+    }
+
+    private static string ReviewGroupLabel(EntryDetailGroup group) => group switch
+    {
+        EntryDetailGroup.Flight => "Flight",
+        EntryDetailGroup.CrewAndRoute => "Crew and route",
+        EntryDetailGroup.Checks => "Checks",
+        EntryDetailGroup.LoggedTime => "Logged time",
+        EntryDetailGroup.CustomFields => "Custom fields",
+        EntryDetailGroup.LandingsAndApproaches => "Landings and approaches",
+        _ => "Other"
+    };
 
     private void LoadEditRoute()
     {
@@ -256,5 +385,12 @@ else
 
         Session.EditWorkbookEntry(entry);
         LoadedEditEntryId = EntryId;
+    }
+
+    private enum DraftAction
+    {
+        ReviewSave,
+        Clear,
+        Cancel
     }
 }

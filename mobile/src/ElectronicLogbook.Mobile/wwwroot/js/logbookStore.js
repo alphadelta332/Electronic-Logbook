@@ -171,6 +171,14 @@
                 return false;
             }
 
+            const isFlightEntryPath = path === "/flights/new"
+                || /^\/flights\/[^/]+\/edit$/.test(path);
+            if (isFlightEntryPath) {
+                history.replaceState(history.state, "", "/");
+                globalThis.dispatchEvent(new PopStateEvent("popstate", { state: history.state }));
+                return true;
+            }
+
             if (history.length > 1) {
                 history.back();
             } else {
@@ -178,6 +186,70 @@
             }
 
             return true;
+        }
+    };
+
+    const flightEntryControlSelector = ".flight-entry-page input, .flight-entry-page select, .flight-entry-page textarea";
+    const keyboardViewportMargin = 16;
+    let focusedFlightEntryControl = null;
+    let keyboardFocusTimer = null;
+    let nativeKeyboardInset = 0;
+
+    function keepFocusedFlightEntryControlVisible() {
+        const viewport = globalThis.visualViewport;
+        const main = document.querySelector(".app-main");
+        const control = focusedFlightEntryControl;
+        if (!main || !control?.isConnected) {
+            return;
+        }
+
+        const controlBounds = control.getBoundingClientRect();
+        const viewportTop = viewport?.offsetTop ?? 0;
+        const viewportBottom = viewportTop + (viewport?.height ?? globalThis.innerHeight);
+        const keyboardTop = globalThis.innerHeight - nativeKeyboardInset;
+        const visibleTop = viewportTop + keyboardViewportMargin;
+        const visibleBottom = Math.min(viewportBottom, keyboardTop) - keyboardViewportMargin;
+        let scrollDelta = 0;
+
+        if (controlBounds.bottom > visibleBottom) {
+            scrollDelta = controlBounds.bottom - visibleBottom;
+        } else if (controlBounds.top < visibleTop) {
+            scrollDelta = controlBounds.top - visibleTop;
+        }
+
+        if (scrollDelta !== 0) {
+            main.scrollBy({ top: scrollDelta, behavior: "smooth" });
+        }
+    }
+
+    function scheduleFocusedFlightEntryControlVisibilityCheck() {
+        globalThis.cancelAnimationFrame?.(keyboardFocusTimer);
+        keyboardFocusTimer = globalThis.requestAnimationFrame?.(keepFocusedFlightEntryControlVisible);
+    }
+
+    document.addEventListener("focusin", (event) => {
+        if (!event.target?.matches?.(flightEntryControlSelector)) {
+            return;
+        }
+
+        focusedFlightEntryControl = event.target;
+        scheduleFocusedFlightEntryControlVisibilityCheck();
+    });
+
+    document.addEventListener("focusout", (event) => {
+        if (event.target === focusedFlightEntryControl) {
+            focusedFlightEntryControl = null;
+        }
+    });
+
+    globalThis.visualViewport?.addEventListener("resize", scheduleFocusedFlightEntryControlVisibilityCheck);
+    globalThis.visualViewport?.addEventListener("scroll", scheduleFocusedFlightEntryControlVisibilityCheck);
+
+    window.electronicLogbookKeyboard = {
+        setInset: (keyboardHeightPixels) => {
+            const pixelRatio = Math.max(1, globalThis.devicePixelRatio || 1);
+            nativeKeyboardInset = Math.max(0, Number(keyboardHeightPixels) || 0) / pixelRatio;
+            scheduleFocusedFlightEntryControlVisibilityCheck();
         }
     };
 

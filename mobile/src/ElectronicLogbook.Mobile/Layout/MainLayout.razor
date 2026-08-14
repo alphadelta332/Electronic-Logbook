@@ -23,6 +23,8 @@
         @Body
     </main>
 
+    <MobileActionFeedback />
+
     <nav class="bottom-nav" aria-label="Primary" aria-busy="@IsNavigationPending">
         <NavLink href="/" Match="NavLinkMatch.All" aria-label="Dashboard" class="@NavPendingClass(DashboardNavigationLabel)" @onclick="ShowDashboardNavigationPending">
             <MudIcon Icon="@Icons.Material.Filled.SpaceDashboard" />

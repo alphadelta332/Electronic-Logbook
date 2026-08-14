@@ -16,7 +16,10 @@ public sealed class MobileLogbookSession(
     IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
     IMobileReplacementRecoveryWorkflow? replacementRecovery = null)
 {
+    public static readonly TimeSpan ActionFeedbackWindow = TimeSpan.FromSeconds(5);
+
     public event Action? HostedSyncChanged;
+    public event Action? ActionFeedbackChanged;
 
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
@@ -24,6 +27,7 @@ public sealed class MobileLogbookSession(
     private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryEnrollments = [];
     private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryCodeConfigurations = [];
     private MobileRecoveryCodeSetup? pendingRecoveryCodeSetup;
+    private PendingWorkbookActionFeedback? pendingWorkbookActionFeedback;
 
     public static readonly CustomFieldDefinition[] CustomFields =
     [
@@ -145,9 +149,22 @@ public sealed class MobileLogbookSession(
 
     public string? LastActionMessage { get; private set; }
 
+    public string? ActionFeedbackMessage => pendingWorkbookActionFeedback?.Message;
+
+    public TimeSpan? ActionFeedbackRemaining => pendingWorkbookActionFeedback is null
+        ? null
+        : pendingWorkbookActionFeedback.ExpiresAt - syncClock.UtcNow;
+
+    public bool HasPendingActionFeedback => pendingWorkbookActionFeedback is not null;
+
+    public bool CanUndoLastWorkbookAction =>
+        pendingWorkbookActionFeedback is { UndoKind: not WorkbookActionUndoKind.None } pending &&
+        syncClock.UtcNow < pending.ExpiresAt;
+
     private MobileActionMessageScope LastActionMessageScope { get; set; } = MobileActionMessageScope.Global;
 
     public bool ShouldShowLastActionMessage(MobileActionMessageSurface surface) =>
+        !HasPendingActionFeedback &&
         !string.IsNullOrWhiteSpace(LastActionMessage) &&
         (LastActionMessageScope == MobileActionMessageScope.Global ||
             surface == MobileActionMessageSurface.Draft);
@@ -219,7 +236,7 @@ public sealed class MobileLogbookSession(
 
     public bool ShouldShowDraftErrors => DraftErrors.Count > 0 && (HasAttemptedSubmit || HasEditedDraft);
 
-    public bool ShouldShowWorkbookDraftErrors => WorkbookDraftErrors.Count > 0 && (HasAttemptedSubmit || HasEditedDraft);
+    public bool ShouldShowWorkbookDraftErrors => WorkbookDraftErrors.Count > 0 && HasAttemptedSubmit;
 
     public string DraftModeLabel => EditingEntryId is null ? "New flight" : "Correction";
 
@@ -353,20 +370,17 @@ public sealed class MobileLogbookSession(
 
     public async Task SaveWorkbookEntryAsync()
     {
-        if (IsStorageBlocked)
+        if (!PrepareWorkbookDraftForReview())
         {
             return;
         }
 
-        HasAttemptedSubmit = true;
-        ClearLastActionMessage();
+        var previousEntry = EditingEntryId is null || EditingRevisionId is null
+            ? null
+            : FindCurrentEntryV2(EditingEntryId.Value.Value)?.Entry;
+        var isModification = previousEntry is not null;
 
-        if (WorkbookDraftErrors.Count > 0)
-        {
-            return;
-        }
-
-        PortableLogbookOperationV2 operation = EditingEntryId is null || EditingRevisionId is null
+        PortableLogbookOperationV2 operation = !isModification
             ? PortableLogbookOperationV2.Create(
                 DocumentV2.LogbookId,
                 portableIdFactory.NewEntryIdExcluding(DocumentV2.Operations.Select(operation => operation.EntryId).ToHashSet()),
@@ -376,9 +390,9 @@ public sealed class MobileLogbookSession(
                 WorkbookDraft.ToEntry(WorkbookCustomFields))
             : PortableLogbookOperationV2.Correct(
                 DocumentV2.LogbookId,
-                EditingEntryId.Value,
+                EditingEntryId.GetValueOrDefault(),
                 RevisionId.New(),
-                [EditingRevisionId.Value],
+                [EditingRevisionId.GetValueOrDefault()],
                 deviceId,
                 DateTimeOffset.UtcNow,
                 WorkbookDraft.ToEntry(WorkbookCustomFields));
@@ -386,8 +400,24 @@ public sealed class MobileLogbookSession(
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
-        SetLastActionMessage(EditingEntryId is null ? "Flight added." : "Correction saved.");
+        SetWorkbookActionFeedback(
+            isModification ? "Entry modified." : "Entry added.",
+            isModification ? WorkbookActionUndoKind.RestoreModifiedEntry : WorkbookActionUndoKind.None,
+            operation,
+            previousEntry);
         ResetWorkbookDraft();
+    }
+
+    public bool PrepareWorkbookDraftForReview()
+    {
+        if (IsStorageBlocked)
+        {
+            return false;
+        }
+
+        HasAttemptedSubmit = true;
+        ClearLastActionMessage();
+        return WorkbookDraftErrors.Count == 0;
     }
 
     public void ResetDraft()
@@ -506,7 +536,7 @@ public sealed class MobileLogbookSession(
 
     public async Task DeleteWorkbookEntryAsync(PortableLogbookMaterializedEntryV2 entry)
     {
-        if (IsStorageBlocked)
+        if (IsStorageBlocked || entry.Entry is null)
         {
             return;
         }
@@ -527,7 +557,65 @@ public sealed class MobileLogbookSession(
             ResetWorkbookDraft();
         }
 
-        SetLastActionMessage("Entry deleted.");
+        SetWorkbookActionFeedback(
+            "Entry deleted.",
+            WorkbookActionUndoKind.RestoreDeletedEntry,
+            operation,
+            entry.Entry);
+    }
+
+    public async Task<bool> UndoLastWorkbookActionAsync()
+    {
+        ExpireLastWorkbookActionFeedback();
+        if (IsStorageBlocked || pendingWorkbookActionFeedback is not { } pending ||
+            pending.UndoKind == WorkbookActionUndoKind.None ||
+            pending.PreviousEntry is null)
+        {
+            return false;
+        }
+
+        var currentEntry = FindCurrentEntryV2(pending.EntryId.Value);
+        var currentStateMatches = pending.UndoKind switch
+        {
+            WorkbookActionUndoKind.RestoreDeletedEntry => currentEntry is { IsDeleted: true } &&
+                currentEntry.CurrentRevisionId == pending.ActionRevisionId,
+            WorkbookActionUndoKind.RestoreModifiedEntry => currentEntry is { IsDeleted: false, Entry: not null } &&
+                currentEntry.CurrentRevisionId == pending.ActionRevisionId,
+            _ => false
+        };
+        if (!currentStateMatches)
+        {
+            ClearWorkbookActionFeedback(pending);
+            return false;
+        }
+
+        pendingWorkbookActionFeedback = null;
+        var operation = PortableLogbookOperationV2.Correct(
+            DocumentV2.LogbookId,
+            pending.EntryId,
+            RevisionId.New(),
+            [pending.ActionRevisionId],
+            deviceId,
+            DateTimeOffset.UtcNow,
+            pending.PreviousEntry);
+
+        DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
+        await SaveStateV2Async();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
+        SetLastActionMessage(pending.UndoKind == WorkbookActionUndoKind.RestoreDeletedEntry
+            ? "Deletion undone."
+            : "Modification undone.");
+        return true;
+    }
+
+    public void ExpireLastWorkbookActionFeedback()
+    {
+        if (pendingWorkbookActionFeedback is null || syncClock.UtcNow < pendingWorkbookActionFeedback.ExpiresAt)
+        {
+            return;
+        }
+
+        ClearWorkbookActionFeedback(pendingWorkbookActionFeedback);
     }
 
     public async Task ResolveConflictAsync(PortableLogbookConflict conflict, RevisionId selectedRevisionId)
@@ -990,6 +1078,52 @@ public sealed class MobileLogbookSession(
         currencyRecencySummaryDate = null;
     }
 
+    private void SetWorkbookActionFeedback(
+        string message,
+        WorkbookActionUndoKind undoKind,
+        PortableLogbookOperationV2 operation,
+        PortableLogbookWorkbookEntry? previousEntry)
+    {
+        pendingWorkbookActionFeedback = new(
+            message,
+            undoKind,
+            operation.EntryId,
+            operation.RevisionId,
+            previousEntry,
+            syncClock.UtcNow.Add(ActionFeedbackWindow));
+        SetLastActionMessage(message);
+        ActionFeedbackChanged?.Invoke();
+    }
+
+    private void ClearWorkbookActionFeedback(PendingWorkbookActionFeedback feedback)
+    {
+        if (!ReferenceEquals(pendingWorkbookActionFeedback, feedback))
+        {
+            return;
+        }
+
+        pendingWorkbookActionFeedback = null;
+        if (string.Equals(LastActionMessage, feedback.Message, StringComparison.Ordinal))
+        {
+            ClearLastActionMessage();
+        }
+    }
+
+    private sealed record PendingWorkbookActionFeedback(
+        string Message,
+        WorkbookActionUndoKind UndoKind,
+        EntryId EntryId,
+        RevisionId ActionRevisionId,
+        PortableLogbookWorkbookEntry? PreviousEntry,
+        DateTimeOffset ExpiresAt);
+
+    private enum WorkbookActionUndoKind
+    {
+        None,
+        RestoreModifiedEntry,
+        RestoreDeletedEntry
+    }
+
     public PortableLogbookMaterializedEntry? FindCurrentEntry(string? entryId)
     {
         if (string.IsNullOrWhiteSpace(entryId))
@@ -1425,32 +1559,32 @@ public sealed class MobileLogbookSession(
         var errors = new List<string>();
         if (entry.Date is null || entry.Date > DateOnly.FromDateTime(DateTime.Today))
         {
-            errors.Add("Year, Month, and Day must form a non-future date.");
+            errors.Add("Date cannot be in the future.");
         }
 
         if (string.IsNullOrWhiteSpace(entry.Type))
         {
-            errors.Add("Type is required before this entry can be added.");
+            errors.Add("Missing Aircraft Type.");
         }
 
         if (string.IsNullOrWhiteSpace(entry.Reg))
         {
-            errors.Add("Reg is required before this entry can be added.");
+            errors.Add("Missing Aircraft Registration.");
         }
 
         if (string.IsNullOrWhiteSpace(entry.From))
         {
-            errors.Add("From is required before this entry can be added.");
+            errors.Add("Missing Departure Airport.");
         }
 
         if (string.IsNullOrWhiteSpace(entry.To))
         {
-            errors.Add("To is required before this entry can be added.");
+            errors.Add("Missing Destination Airport.");
         }
 
         if (WorkbookFlightTime(entry) + (entry.IfrSim ?? 0) <= 0)
         {
-            errors.Add("Workbook flight or simulator time cannot be zero.");
+            errors.Add("Flight and/or Sim Time cannot be zero.");
         }
 
         return errors.ToArray();

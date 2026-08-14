@@ -1,0 +1,159 @@
+@implements IAsyncDisposable
+@inject MobileLogbookSession Session
+
+@if (AnimationState != ActionFeedbackAnimation.Hidden && !string.IsNullOrWhiteSpace(DisplayedMessage))
+{
+    <section @key="FeedbackVersion" class="action-feedback-message @AnimationClass" role="status" aria-live="assertive">
+        <span>@DisplayedMessage</span>
+        @if (ShowUndo)
+        {
+            <MudButton Variant="Variant.Text"
+                       Color="Color.Primary"
+                       OnClick="UndoAsync"
+                       Disabled="@(IsUndoPending || AnimationState == ActionFeedbackAnimation.Exiting)">
+                Undo
+            </MudButton>
+        }
+    </section>
+}
+
+@code {
+    private CancellationTokenSource? feedbackCancellation;
+    private ActionFeedbackAnimation AnimationState { get; set; } = ActionFeedbackAnimation.Hidden;
+    private string? DisplayedMessage { get; set; }
+    private bool ShowUndo { get; set; }
+    private bool IsUndoPending { get; set; }
+    private int FeedbackVersion { get; set; }
+    private string AnimationClass => AnimationState == ActionFeedbackAnimation.Exiting
+        ? "action-feedback-message-exit"
+        : "action-feedback-message-enter";
+
+    protected override void OnInitialized()
+    {
+        Session.ActionFeedbackChanged += OnActionFeedbackChanged;
+        Session.ExpireLastWorkbookActionFeedback();
+        ShowLatestFeedback();
+    }
+
+    private void OnActionFeedbackChanged()
+    {
+        _ = InvokeAsync(() =>
+        {
+            ShowLatestFeedback();
+            StateHasChanged();
+        });
+    }
+
+    private void ShowLatestFeedback()
+    {
+        feedbackCancellation?.Cancel();
+        feedbackCancellation?.Dispose();
+        feedbackCancellation = null;
+
+        if (!Session.HasPendingActionFeedback || string.IsNullOrWhiteSpace(Session.ActionFeedbackMessage))
+        {
+            AnimationState = ActionFeedbackAnimation.Hidden;
+            DisplayedMessage = null;
+            ShowUndo = false;
+            return;
+        }
+
+        DisplayedMessage = Session.ActionFeedbackMessage;
+        ShowUndo = Session.CanUndoLastWorkbookAction;
+        AnimationState = ActionFeedbackAnimation.Shown;
+        FeedbackVersion++;
+        feedbackCancellation = new CancellationTokenSource();
+        _ = ExpireFeedbackAsync(feedbackCancellation.Token);
+    }
+
+    private async Task UndoAsync()
+    {
+        if (IsUndoPending)
+        {
+            return;
+        }
+
+        IsUndoPending = true;
+        try
+        {
+            if (await Session.UndoLastWorkbookActionAsync())
+            {
+                feedbackCancellation?.Cancel();
+                await PlayExitAsync(expireFeedback: false, CancellationToken.None);
+            }
+        }
+        finally
+        {
+            IsUndoPending = false;
+        }
+    }
+
+    private async Task ExpireFeedbackAsync(CancellationToken cancellationToken)
+    {
+        var remaining = Session.ActionFeedbackRemaining;
+        if (remaining is null)
+        {
+            return;
+        }
+
+        if (remaining.Value > TimeSpan.Zero)
+        {
+            try
+            {
+                await Task.Delay(remaining.Value, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+        }
+
+        await PlayExitAsync(expireFeedback: true, cancellationToken);
+    }
+
+    private async Task PlayExitAsync(bool expireFeedback, CancellationToken cancellationToken)
+    {
+        await InvokeAsync(() =>
+        {
+            AnimationState = ActionFeedbackAnimation.Exiting;
+            StateHasChanged();
+        });
+
+        try
+        {
+            await Task.Delay(240, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await InvokeAsync(() =>
+        {
+            if (expireFeedback)
+            {
+                Session.ExpireLastWorkbookActionFeedback();
+            }
+
+            AnimationState = ActionFeedbackAnimation.Hidden;
+            DisplayedMessage = null;
+            ShowUndo = false;
+            StateHasChanged();
+        });
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        Session.ActionFeedbackChanged -= OnActionFeedbackChanged;
+        feedbackCancellation?.Cancel();
+        feedbackCancellation?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private enum ActionFeedbackAnimation
+    {
+        Hidden,
+        Shown,
+        Exiting
+    }
+}

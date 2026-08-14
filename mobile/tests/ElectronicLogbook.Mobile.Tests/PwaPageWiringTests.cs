@@ -211,7 +211,7 @@ public sealed class PwaPageWiringTests
         var settings = ReadMobilePage("Settings.razor");
         var css = ReadMobileAsset("css", "app.css");
 
-        Assert.Contains("Color=\"Color.Primary\" OnClick=\"SaveAsync\"", newFlight, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Success\" OnClick=\"ReviewSave\"", newFlight, StringComparison.Ordinal);
         Assert.Contains("@Session.SaveLabel", newFlight, StringComparison.Ordinal);
         Assert.Contains("Color=\"Color.Primary\" StartIcon=\"@Icons.Material.Filled.Edit\" OnClick=\"EditEntry\"", flightDetail, StringComparison.Ordinal);
         Assert.Contains("Href=\"/exchange\" Variant=\"Variant.Outlined\"", settings, StringComparison.Ordinal);
@@ -492,11 +492,39 @@ public sealed class PwaPageWiringTests
         var activity = ReadProjectFile("mobile", "android", "app", "src", "main", "java", "com", "alphadelta", "electroniclogbook", "MainActivity.java");
         var bridge = ReadMobileAsset("js", "logbookStore.js");
 
-        Assert.Contains("public void onBackPressed()", activity, StringComparison.Ordinal);
+        Assert.Contains("OnBackPressedCallback", activity, StringComparison.Ordinal);
+        Assert.Contains("getOnBackPressedDispatcher().addCallback(this, callback)", activity, StringComparison.Ordinal);
+        Assert.Contains("public void handleOnBackPressed()", activity, StringComparison.Ordinal);
+        Assert.Contains("dispatchBackToWebView(this)", activity, StringComparison.Ordinal);
+        Assert.Contains("callback.setEnabled(false)", activity, StringComparison.Ordinal);
+        Assert.Contains("getOnBackPressedDispatcher().onBackPressed()", activity, StringComparison.Ordinal);
+        Assert.Contains("callback.setEnabled(true)", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("public void onBackPressed()", activity, StringComparison.Ordinal);
         Assert.Contains("handleAndroidBack", activity, StringComparison.Ordinal);
         Assert.Contains("window.electronicLogbookNavigation", bridge, StringComparison.Ordinal);
         Assert.Contains("history.back()", bridge, StringComparison.Ordinal);
         Assert.Contains("path === \"/\"", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate2NewFlightBackAlwaysReturnsToTheDashboardWithAVisibleFallback()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var activity = ReadProjectFile("mobile", "android", "app", "src", "main", "java", "com", "alphadelta", "electroniclogbook", "MainActivity.java");
+        var bridge = ReadMobileAsset("js", "logbookStore.js");
+
+        Assert.Contains("class=\"page-back-link\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Back to dashboard\"", page, StringComparison.Ordinal);
+        Assert.Contains("Icons.Material.Filled.ArrowBack", page, StringComparison.Ordinal);
+        Assert.Contains("<span>Back to dashboard</span>", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick=\"RequestCancel\"", page, StringComparison.Ordinal);
+        Assert.Contains("@onclick:preventDefault=\"true\"", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/\", replace: true);", page, StringComparison.Ordinal);
+        Assert.Contains("handleAndroidBack", activity, StringComparison.Ordinal);
+        Assert.Contains("path === \"/flights/new\"", bridge, StringComparison.Ordinal);
+        Assert.Contains("/^\\/flights\\/[^/]+\\/edit$/.test(path)", bridge, StringComparison.Ordinal);
+        Assert.Contains("history.replaceState(history.state, \"\", \"/\")", bridge, StringComparison.Ordinal);
+        Assert.Contains("new PopStateEvent(\"popstate\"", bridge, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -810,6 +838,12 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Immutable history", page, StringComparison.Ordinal);
         Assert.Contains("Session.EntryDetails(CurrentEntry.Entry)", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeleteWorkbookEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"RequestDeleteEntry\"", page, StringComparison.Ordinal);
+        Assert.Contains("ShowDeleteConfirmation", page, StringComparison.Ordinal);
+        Assert.Contains("Confirm deletion", page, StringComparison.Ordinal);
+        Assert.Contains("Delete this flight?", page, StringComparison.Ordinal);
+        Assert.Contains("Delete flight", page, StringComparison.Ordinal);
+        Assert.Contains("you can undo this deletion for about five seconds", page, StringComparison.Ordinal);
         Assert.Contains("History?.IsDeleted == true", page, StringComparison.Ordinal);
         Assert.Contains("Deleted entry", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
@@ -836,6 +870,39 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("entry-details detail-grid", page, StringComparison.Ordinal);
         Assert.Contains("color: var(--app-text);", css, StringComparison.Ordinal);
         Assert.Contains("color: var(--app-text-muted);", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate2LayoutShowsSharedAnimatedFeedbackForAddedModifiedAndDeletedEntries()
+    {
+        var feedback = ReadMobileSource(Path.Combine("Layout", "MobileActionFeedback.razor"));
+        var layout = ReadMobileSource(Path.Combine("Layout", "MainLayout.razor"));
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Contains("<MobileActionFeedback />", layout, StringComparison.Ordinal);
+        Assert.Contains("class=\"action-feedback-message @AnimationClass\"", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.ActionFeedbackMessage", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.CanUndoLastWorkbookAction", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.UndoLastWorkbookActionAsync()", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.ActionFeedbackRemaining", feedback, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(remaining.Value, cancellationToken)", feedback, StringComparison.Ordinal);
+        Assert.Contains("PlayExitAsync", feedback, StringComparison.Ordinal);
+        Assert.Contains("action-feedback-message-enter", feedback, StringComparison.Ordinal);
+        Assert.Contains("action-feedback-message-exit", feedback, StringComparison.Ordinal);
+        Assert.Contains("Task.Delay(240, cancellationToken)", feedback, StringComparison.Ordinal);
+        Assert.Contains("\"Entry added.\"", session, StringComparison.Ordinal);
+        Assert.Contains("\"Entry modified.\"", session, StringComparison.Ordinal);
+        Assert.Contains("\"Entry deleted.\"", session, StringComparison.Ordinal);
+        Assert.Contains("WorkbookActionUndoKind.None", session, StringComparison.Ordinal);
+        Assert.Contains("WorkbookActionUndoKind.RestoreModifiedEntry", session, StringComparison.Ordinal);
+        Assert.Contains(".action-feedback-message", css, StringComparison.Ordinal);
+        Assert.Contains("bottom: calc(78px + var(--native-safe-bottom));", css, StringComparison.Ordinal);
+        Assert.Contains("z-index: 25;", css, StringComparison.Ordinal);
+        Assert.Contains("--action-feedback-hidden-offset: calc(100% + 88px + var(--native-safe-bottom));", css, StringComparison.Ordinal);
+        Assert.Contains("animation: action-feedback-message-enter 300ms", css, StringComparison.Ordinal);
+        Assert.Contains("animation: action-feedback-message-exit 240ms", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes action-feedback-message-exit", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -999,41 +1066,69 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3NewFlightShowsBlankHourFieldsUntilFocused()
+    public void Gate2NewFlightKeepsZeroHourFieldsBlankUntilTypedTextIsCommitted()
     {
         var page = ReadMobilePage("NewFlight.razor");
 
-        Assert.Equal(16, page.Split("value=\"@FormatHour(", StringSplitOptions.None).Length - 1);
-        Assert.Equal(16, page.Split("@onfocus=\"() => ShowHourDefault", StringSplitOptions.None).Length - 1);
-        Assert.Equal(16, page.Split("@onblur=\"() => ClearUntouchedHour", StringSplitOptions.None).Length - 1);
+        Assert.Equal(16, CountOccurrences(page, "value=\"@MobileHourField.Format("));
+        Assert.Equal(16, CountOccurrences(page, "@onchange=\"args => UpdateHour(args,"));
+        Assert.DoesNotContain("ShowHourDefault", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("@onfocus", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("@onblur", page, StringComparison.Ordinal);
+        Assert.Contains("MobileHourField.Parse(args.Value?.ToString())", page, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Gate3NewFlightShowsReducedMotionAwareSaveConfirmationBeforeDashboardReturn()
+    public void Gate2NewFlightUsesExplicitActionsAndReviewsValuesBeforeSaving()
     {
         var page = ReadMobilePage("NewFlight.razor");
-        var css = File.ReadAllText(Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,
-            "..",
-            "..",
-            "..",
-            "..",
-            "..",
-            "src",
-            "ElectronicLogbook.Mobile",
-            "wwwroot",
-            "css",
-            "app.css")));
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var css = ReadMobileWebAsset("css/app.css");
 
-        Assert.Contains("ShowSaveConfirmation", page, StringComparison.Ordinal);
-        Assert.Contains("class=\"save-confirmation\"", page, StringComparison.Ordinal);
-        Assert.Contains("aria-live=\"assertive\"", page, StringComparison.Ordinal);
-        Assert.Contains("Icons.Material.Filled.Check", page, StringComparison.Ordinal);
-        Assert.Contains("await Task.Delay(650);", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"group\" aria-label=\"Flight form actions\"", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"RequestClear\"", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
+        Assert.Contains("Clear form", page, StringComparison.Ordinal);
+        Assert.Contains("@Session.SaveLabel", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Icons.Material.Filled.Refresh", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("MudIconButton", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Color=\"Color.Default\" OnClick=\"RequestCancel\"", page, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Error\" OnClick=\"RequestClear\"", page, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Success\" OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
+        Assert.Contains("Icons.Material.Filled.DeleteSweep", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"@Session.SaveLabel\"", page, StringComparison.Ordinal);
+        Assert.Contains("white-space: nowrap;", css, StringComparison.Ordinal);
+
+        Assert.Contains("Session.PrepareWorkbookDraftForReview()", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookDraft.ToEntry(Session.WorkbookCustomFields)", page, StringComparison.Ordinal);
+        Assert.Contains(".EntryDetails(", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"dialog\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-modal=\"true\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Flight values to save\"", page, StringComparison.Ordinal);
+        Assert.Contains("Review before saving", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"ConfirmSaveAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("public bool PrepareWorkbookDraftForReview()", session, StringComparison.Ordinal);
+        Assert.Contains("return WorkbookDraftErrors.Count == 0;", session, StringComparison.Ordinal);
+
+        Assert.Contains("PendingAction = DraftAction.Clear;", page, StringComparison.Ordinal);
+        Assert.Contains("PendingAction = DraftAction.Cancel;", page, StringComparison.Ordinal);
+        Assert.Contains("Session.ResetWorkbookDraft();", page, StringComparison.Ordinal);
+        Assert.Contains("This cannot be undone.", page, StringComparison.Ordinal);
+        Assert.Contains("Your changes will not be saved", page, StringComparison.Ordinal);
+        Assert.Contains(".entry-action-dialog-backdrop", css, StringComparison.Ordinal);
+        Assert.Contains(".entry-review-values", css, StringComparison.Ordinal);
+        Assert.Contains("overflow-y: auto;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3NewFlightReturnsToDashboardAfterTheReviewedSave()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+
+        Assert.Contains("await Session.SaveWorkbookEntryAsync();", page, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo(\"/\");", page, StringComparison.Ordinal);
-        Assert.Contains("@media (prefers-reduced-motion: reduce)", css, StringComparison.Ordinal);
-        Assert.Contains(".save-confirmation-icon", css, StringComparison.Ordinal);
-        Assert.Contains("animation: none;", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("ShowSaveConfirmation", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("await Task.Delay(650);", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1043,7 +1138,7 @@ public sealed class PwaPageWiringTests
         var css = ReadMobileWebAsset("css/app.css");
 
         Assert.Contains("class=\"persistent-action-bar\"", page, StringComparison.Ordinal);
-        Assert.Contains("OnClick=\"SaveAsync\"", page, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.flight-entry-page\s*\{[^}]*padding-bottom:\s*76px", css);
         Assert.Matches(@"(?s)\.persistent-action-bar\s*\{[^}]*position:\s*fixed", css);
         Assert.Matches(@"(?s)\.persistent-action-bar\s*\{[^}]*bottom:\s*calc\(74px \+ var\(--native-safe-bottom\)\)", css);
@@ -1070,7 +1165,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@oninput=\"Session.MarkDraftEdited\"", page, StringComparison.Ordinal);
         Assert.Contains("@onchange=\"Session.MarkDraftEdited\"", page, StringComparison.Ordinal);
         Assert.Contains("public bool HasEditedDraft", session, StringComparison.Ordinal);
-        Assert.Contains("HasAttemptedSubmit || HasEditedDraft", session, StringComparison.Ordinal);
+        Assert.Contains("public bool ShouldShowWorkbookDraftErrors => WorkbookDraftErrors.Count > 0 && HasAttemptedSubmit;", session, StringComparison.Ordinal);
         Assert.Contains("cache.addAll(assetsRequests)", offlineWorker, StringComparison.Ordinal);
         Assert.Contains("return cachedResponse || fetch(event.request);", offlineWorker, StringComparison.Ordinal);
         Assert.Contains(".app-main", css, StringComparison.Ordinal);

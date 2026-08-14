@@ -177,6 +177,38 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void Gate2NewFlightKeyboardOverlaysFixedActionsAndKeepsTheFocusedFieldVisible()
+    {
+        var manifest = ReadRepositoryFile("android", "app", "src", "main", "AndroidManifest.xml");
+        var activity = ReadRepositoryFile(
+            "android",
+            "app",
+            "src",
+            "main",
+            "java",
+            "com",
+            "alphadelta",
+            "electroniclogbook",
+            "MainActivity.java");
+        var css = ReadMobileAsset(Path.Combine("css", "app.css"));
+        var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
+
+        Assert.Contains("android:windowSoftInputMode=\"adjustNothing\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("WindowCompat.setDecorFitsSystemWindows(getWindow(), true)", activity, StringComparison.Ordinal);
+        Assert.Contains("WindowInsetsCompat.Type.ime()", activity, StringComparison.Ordinal);
+        Assert.Contains("imeInsets.bottom - systemBarInsets.bottom", activity, StringComparison.Ordinal);
+        Assert.Contains("window.electronicLogbookKeyboard?.setInset", activity, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)html\.capacitor-native\s*\{[^}]*--native-safe-top:\s*26px", css);
+        Assert.Contains(".flight-entry-page input, .flight-entry-page select, .flight-entry-page textarea", bridge, StringComparison.Ordinal);
+        Assert.Contains("window.electronicLogbookKeyboard", bridge, StringComparison.Ordinal);
+        Assert.Contains("globalThis.innerHeight - nativeKeyboardInset", bridge, StringComparison.Ordinal);
+        Assert.Contains("globalThis.visualViewport?.addEventListener(\"resize\"", bridge, StringComparison.Ordinal);
+        Assert.Contains("globalThis.visualViewport?.addEventListener(\"scroll\"", bridge, StringComparison.Ordinal);
+        Assert.Contains("control.getBoundingClientRect()", bridge, StringComparison.Ordinal);
+        Assert.Contains("main.scrollBy({ top: scrollDelta, behavior: \"smooth\" })", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AndroidShellExcludesLocalLogbookCredentialsAndWrappedKeysFromSystemBackup()
     {
         var manifest = ReadRepositoryFile("android", "app", "src", "main", "AndroidManifest.xml");

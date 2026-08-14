@@ -70,6 +70,36 @@ else if (CurrentEntry?.Entry is null)
 }
 else
 {
+    @if (ShowDeleteConfirmation)
+    {
+        <div class="entry-action-dialog-backdrop" @onclick="DismissDeleteConfirmation">
+            <section class="entry-action-dialog"
+                     role="dialog"
+                     aria-modal="true"
+                     aria-labelledby="delete-flight-dialog-title"
+                     @onclick:stopPropagation="true">
+                <header class="entry-action-dialog-header">
+                    <span class="entry-action-dialog-icon entry-action-dialog-icon-warning">
+                        <MudIcon Icon="@Icons.Material.Filled.WarningAmber" />
+                    </span>
+                    <div>
+                        <span class="eyebrow">Confirm deletion</span>
+                        <h2 id="delete-flight-dialog-title">Delete this flight?</h2>
+                        <p>The flight will leave your active logbook. Its audit history will remain, and you can undo this deletion for about five seconds.</p>
+                    </div>
+                </header>
+                <footer class="entry-action-dialog-actions">
+                    <MudButton Variant="Variant.Text" OnClick="DismissDeleteConfirmation" Disabled="@IsDeletePending">
+                        Keep flight
+                    </MudButton>
+                    <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ConfirmDeleteEntryAsync" Disabled="@IsDeletePending" StartIcon="@Icons.Material.Filled.DeleteOutline">
+                        Delete flight
+                    </MudButton>
+                </footer>
+            </section>
+        </div>
+    }
+
     <section class="flight-detail-page">
         <NavLink class="page-back-link" href="/flights?view=entries">
             <MudIcon Icon="@Icons.Material.Filled.ArrowBack" />
@@ -124,7 +154,7 @@ else
             </div>
             <div class="row-actions">
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CloneEntry">Clone</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="DeleteEntry" Disabled="@Session.IsStorageBlocked">Delete</MudButton>
+                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="RequestDeleteEntry" Disabled="@Session.IsStorageBlocked">Delete</MudButton>
             </div>
         </section>
 
@@ -156,6 +186,10 @@ else
 @code {
     [Parameter]
     public string? EntryId { get; set; }
+
+    private bool ShowDeleteConfirmation { get; set; }
+
+    private bool IsDeletePending { get; set; }
 
     private PortableLogbookMaterializedEntryV2? CurrentEntry => Session.FindCurrentEntryV2(EntryId);
 
@@ -220,15 +254,39 @@ else
         Navigation.NavigateTo("/flights/new");
     }
 
-    private async Task DeleteEntry()
+    private void RequestDeleteEntry()
     {
-        if (CurrentEntry is null)
+        if (CurrentEntry is not null && !Session.IsStorageBlocked)
+        {
+            ShowDeleteConfirmation = true;
+        }
+    }
+
+    private void DismissDeleteConfirmation()
+    {
+        if (!IsDeletePending)
+        {
+            ShowDeleteConfirmation = false;
+        }
+    }
+
+    private async Task ConfirmDeleteEntryAsync()
+    {
+        if (CurrentEntry is null || IsDeletePending || Session.IsStorageBlocked)
         {
             return;
         }
 
-        await Session.DeleteWorkbookEntryAsync(CurrentEntry);
-        Navigation.NavigateTo("/flights");
+        IsDeletePending = true;
+        try
+        {
+            await Session.DeleteWorkbookEntryAsync(CurrentEntry);
+            Navigation.NavigateTo("/flights?view=entries", replace: true);
+        }
+        finally
+        {
+            IsDeletePending = false;
+        }
     }
 
     private sealed record DetailGroup(

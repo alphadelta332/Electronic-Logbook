@@ -439,7 +439,7 @@ public sealed class MobileLogbookSessionJourneyTests
 
         await session.SaveWorkbookEntryAsync();
 
-        Assert.Equal("Flight added.", session.LastActionMessage);
+        Assert.Equal("Entry added.", session.LastActionMessage);
         Assert.NotNull(session.HostedSync);
         Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync.LastStatus);
         Assert.Equal(1, session.HostedSync.LastAcknowledgedHostedRevision);
@@ -536,7 +536,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(1.1m, added.Entry.SeCommandDay);
         Assert.Equal(0.4m, added.Entry.IfrIf);
         Assert.Equal(2, added.Entry.Ils);
-        Assert.Equal("Flight added.", session.LastActionMessage);
+        Assert.Equal("Entry added.", session.LastActionMessage);
         Assert.Equal(1, jsRuntime.SaveCount);
         Assert.True(session.ExchangeStatus.HasUnexportedChanges);
         Assert.Equal(1, session.ExchangeStatus.PendingOperationCount);
@@ -590,6 +590,45 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task WorkbookDraftErrorsRemainHiddenUntilTheUserAttemptsToSave()
+    {
+        var session = CreateSession(new JourneyJsRuntime());
+        await session.EnsureLoadedWorkbookAsync();
+
+        Assert.NotEmpty(session.WorkbookDraftErrors);
+        Assert.False(session.ShouldShowWorkbookDraftErrors);
+
+        session.WorkbookDraft.Type = "C172";
+        session.MarkDraftEdited();
+
+        Assert.True(session.HasEditedDraft);
+        Assert.False(session.HasAttemptedSubmit);
+        Assert.False(session.ShouldShowWorkbookDraftErrors);
+
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.True(session.HasAttemptedSubmit);
+        Assert.True(session.ShouldShowWorkbookDraftErrors);
+    }
+
+    [Fact]
+    public async Task PreparingAValidWorkbookDraftForReviewDoesNotPersistIt()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+
+        var isReadyForReview = session.PrepareWorkbookDraftForReview();
+
+        Assert.True(isReadyForReview);
+        Assert.True(session.HasAttemptedSubmit);
+        Assert.False(session.ShouldShowWorkbookDraftErrors);
+        Assert.Empty(session.DocumentV2.Operations);
+        Assert.Equal(0, jsRuntime.SaveCount);
+    }
+
+    [Fact]
     public async Task WorkbookFaithfulEntryIdIsAllocatedOnlyWhenSavePersistsCreateOperation()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -633,6 +672,120 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableOperationKind.Deletion, deletion.Kind);
         Assert.Equal(savedEntryId, deletion.EntryId);
         Assert.Equal(correction.RevisionId, Assert.Single(deletion.ParentRevisionIds));
+        Assert.Equal(3, jsRuntime.SaveCount);
+    }
+
+    [Fact]
+    public async Task WorkbookDeletionCanBeUndoneWithinFiveSecondsWithoutRemovingAuditHistory()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-08-14T02:00:00Z"));
+        var session = CreateSession(jsRuntime, syncClock: clock);
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        var original = Assert.Single(session.CurrentEntriesV2);
+
+        await session.DeleteWorkbookEntryAsync(original);
+
+        Assert.Equal("Entry deleted.", session.ActionFeedbackMessage);
+        Assert.True(session.CanUndoLastWorkbookAction);
+        Assert.Equal(MobileLogbookSession.ActionFeedbackWindow, session.ActionFeedbackRemaining);
+        var deletion = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Deletion, deletion.Kind);
+        Assert.Empty(session.CurrentEntriesV2);
+        Assert.Single(session.DeletedEntriesV2);
+
+        Assert.True(await session.UndoLastWorkbookActionAsync());
+
+        var restored = Assert.Single(session.CurrentEntriesV2);
+        Assert.Equal(original.EntryId, restored.EntryId);
+        Assert.Equal(original.Entry, restored.Entry);
+        Assert.Empty(session.DeletedEntriesV2);
+        Assert.False(session.CanUndoLastWorkbookAction);
+        Assert.Equal("Deletion undone.", session.LastActionMessage);
+        Assert.Equal(3, session.DocumentV2.Operations.Count);
+        Assert.Contains(deletion, session.DocumentV2.Operations);
+        var restoration = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Correction, restoration.Kind);
+        Assert.Equal(deletion.RevisionId, Assert.Single(restoration.ParentRevisionIds));
+        Assert.Equal(3, jsRuntime.SaveCount);
+    }
+
+    [Fact]
+    public async Task WorkbookDeletionCannotBeUndoneAfterFiveSeconds()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-08-14T02:00:00Z"));
+        var session = CreateSession(jsRuntime, syncClock: clock);
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        await session.DeleteWorkbookEntryAsync(Assert.Single(session.CurrentEntriesV2));
+
+        clock.Advance(MobileLogbookSession.ActionFeedbackWindow);
+
+        Assert.False(session.CanUndoLastWorkbookAction);
+        Assert.False(await session.UndoLastWorkbookActionAsync());
+        Assert.Null(session.LastActionMessage);
+        Assert.Empty(session.CurrentEntriesV2);
+        Assert.Single(session.DeletedEntriesV2);
+        Assert.Equal(2, session.DocumentV2.Operations.Count);
+        Assert.Equal(2, jsRuntime.SaveCount);
+    }
+
+    [Fact]
+    public async Task WorkbookAddFeedbackDoesNotOfferUndo()
+    {
+        var session = CreateSession(new JourneyJsRuntime());
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Equal("Entry added.", session.ActionFeedbackMessage);
+        Assert.Equal("Entry added.", session.LastActionMessage);
+        Assert.True(session.HasPendingActionFeedback);
+        Assert.False(session.CanUndoLastWorkbookAction);
+        Assert.False(await session.UndoLastWorkbookActionAsync());
+        Assert.Single(session.CurrentEntriesV2);
+        Assert.Single(session.DocumentV2.Operations);
+    }
+
+    [Fact]
+    public async Task WorkbookModificationCanBeUndoneWithoutRemovingAuditHistory()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-08-14T02:00:00Z"));
+        var session = CreateSession(jsRuntime, syncClock: clock);
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        var original = Assert.Single(session.CurrentEntriesV2);
+
+        session.EditWorkbookEntry(original);
+        session.WorkbookDraft.Reg = "VH-MOD";
+        await session.SaveWorkbookEntryAsync();
+
+        var modification = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Correction, modification.Kind);
+        Assert.Equal("VH-MOD", Assert.Single(session.CurrentEntriesV2).Entry?.Reg);
+        Assert.Equal("Entry modified.", session.ActionFeedbackMessage);
+        Assert.True(session.CanUndoLastWorkbookAction);
+        Assert.Equal(MobileLogbookSession.ActionFeedbackWindow, session.ActionFeedbackRemaining);
+
+        Assert.True(await session.UndoLastWorkbookActionAsync());
+
+        var restored = Assert.Single(session.CurrentEntriesV2);
+        Assert.Equal(original.EntryId, restored.EntryId);
+        Assert.Equal(original.Entry, restored.Entry);
+        Assert.Equal("Modification undone.", session.LastActionMessage);
+        Assert.False(session.CanUndoLastWorkbookAction);
+        Assert.Equal(3, session.DocumentV2.Operations.Count);
+        Assert.Contains(modification, session.DocumentV2.Operations);
+        var undo = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Correction, undo.Kind);
+        Assert.Equal(modification.RevisionId, Assert.Single(undo.ParentRevisionIds));
         Assert.Equal(3, jsRuntime.SaveCount);
     }
 
@@ -1134,6 +1287,13 @@ public sealed class MobileLogbookSessionJourneyTests
 
         public ValueTask SignOutAsync(CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
+    }
+
+    private sealed class MutableSyncClock(DateTimeOffset utcNow) : ISyncClock
+    {
+        public DateTimeOffset UtcNow { get; private set; } = utcNow;
+
+        public void Advance(TimeSpan duration) => UtcNow = UtcNow.Add(duration);
     }
 
     private sealed class RecordingReplacementRecoveryWorkflow(
