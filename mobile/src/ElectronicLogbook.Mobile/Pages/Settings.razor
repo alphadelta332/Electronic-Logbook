@@ -217,6 +217,86 @@ else
             {
                 <span class="settings-status-line settings-status-error" role="alert">@SyncError</span>
             }
+            @if (Session.HostedSync is { } hostedSync && Session.HostedSyncDiagnostics is { } syncDiagnostics)
+            {
+                <details class="sync-diagnostics">
+                    <summary>Sync diagnostics</summary>
+                    <div class="device-health-grid">
+                        <article class="device-health-item">
+                            <span>Pending uploads</span>
+                            <strong>@syncDiagnostics.PendingUploadCount</strong>
+                            <small>Operations created on this device that have not been uploaded.</small>
+                        </article>
+                        <article class="device-health-item">
+                            <span>Hosted position</span>
+                            <strong>Revision @hostedSync.LastAcknowledgedHostedRevision</strong>
+                            <small>Last attempted @FormatOptionalTimestamp(hostedSync.LastAttemptedAt); last synced @FormatOptionalTimestamp(hostedSync.LastSyncedAt).</small>
+                        </article>
+                        <article class="device-health-item">
+                            <span>Current-device history</span>
+                            <strong>@FormatOperationCount(syncDiagnostics.CurrentDeviceOperationCount)</strong>
+                            <small>@syncDiagnostics.UploadedCurrentDeviceOperationCount are recorded as uploaded by this device.</small>
+                        </article>
+                        <article class="device-health-item">
+                            <span>Other-device history</span>
+                            <strong>@FormatOperationCount(syncDiagnostics.OtherDeviceHistory.Count)</strong>
+                            <small>Downloaded or imported history is kept locally but is not part of this device's upload queue.</small>
+                        </article>
+                    </div>
+
+                    <section class="sync-diagnostic-group">
+                        <h3>Pending upload details</h3>
+                        @if (syncDiagnostics.PendingUploads.Count == 0)
+                        {
+                            <small>No operations are waiting to upload.</small>
+                        }
+                        else
+                        {
+                            @foreach (var operation in syncDiagnostics.PendingUploads)
+                            {
+                                <article class="sync-operation-detail">
+                                    <strong>@operation.KindLabel · @operation.FlightId</strong>
+                                    <span>@FormatTimestamp(operation.CreatedAt)</span>
+                                    @if (!string.IsNullOrWhiteSpace(operation.Detail))
+                                    {
+                                        <span>@operation.Detail</span>
+                                    }
+                                    <code>Revision @operation.RevisionId</code>
+                                    <code>Device @operation.DeviceId</code>
+                                </article>
+                            }
+                        }
+                    </section>
+
+                    <section class="sync-diagnostic-group">
+                        <h3>Other-device history excluded from uploads</h3>
+                        @if (syncDiagnostics.OtherDeviceHistory.Count == 0)
+                        {
+                            <small>No other-device operations are stored locally.</small>
+                        }
+                        else
+                        {
+                            @foreach (var operation in syncDiagnostics.OtherDeviceHistory.Take(10))
+                            {
+                                <article class="sync-operation-detail">
+                                    <strong>@operation.KindLabel · @operation.FlightId</strong>
+                                    <span>@FormatTimestamp(operation.CreatedAt)</span>
+                                    @if (!string.IsNullOrWhiteSpace(operation.Detail))
+                                    {
+                                        <span>@operation.Detail</span>
+                                    }
+                                    <code>Revision @operation.RevisionId</code>
+                                    <code>Device @operation.DeviceId</code>
+                                </article>
+                            }
+                            @if (syncDiagnostics.OtherDeviceHistory.Count > 10)
+                            {
+                                <small>Showing the 10 most recent of @syncDiagnostics.OtherDeviceHistory.Count operations.</small>
+                            }
+                        }
+                    </section>
+                </details>
+            }
         </section>
 
         <section class="form-section">
@@ -631,6 +711,13 @@ else
     };
 
     private static string FormatTimestamp(DateTimeOffset value) => value.ToLocalTime().ToString("dd MMM yyyy, HH:mm");
+
+    private static string FormatOptionalTimestamp(DateTimeOffset? value) => value is { } timestamp
+        ? FormatTimestamp(timestamp)
+        : "never";
+
+    private static string FormatOperationCount(int count) =>
+        $"{count} operation{(count == 1 ? string.Empty : "s")}";
 
     private async Task SyncNowAsync()
     {

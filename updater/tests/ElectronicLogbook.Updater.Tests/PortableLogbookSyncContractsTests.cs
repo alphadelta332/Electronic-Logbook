@@ -39,6 +39,10 @@ public sealed class PortableLogbookSyncContractsTests
             clock);
 
         var result = await sync.SyncAsync(new PortableHostedSyncRequest(document, key, LastAcknowledgedHostedRevision: 0));
+        var idempotentRetry = await sync.SyncAsync(new PortableHostedSyncRequest(
+            result.Document,
+            key,
+            result.LastAcknowledgedHostedRevision));
 
         Assert.Equal(PortableHostedSyncStatus.Synced, result.Status);
         Assert.Equal(2, result.LastAcknowledgedHostedRevision);
@@ -48,6 +52,8 @@ public sealed class PortableLogbookSyncContractsTests
         Assert.Contains(result.Document.Operations, operation => operation.RevisionId == remoteOperation.RevisionId);
         Assert.Equal(2, ledger.Acknowledgements[(logbookId, androidDeviceId)]);
         var hostedOperations = await ledger.ReadMissingOperationsAsync(logbookId, afterHostedRevision: 0, pageSize: 10);
+        Assert.Equal(PortableHostedSyncStatus.Synced, idempotentRetry.Status);
+        Assert.Equal(2, hostedOperations.Operations.Count);
         Assert.DoesNotContain("\"entry\"", hostedOperations.Operations[0].PayloadCiphertext, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -114,6 +120,29 @@ public sealed class PortableLogbookSyncContractsTests
 
         Assert.Contains("authentication failed", wrongKeyError.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("hash", tamperedHashError.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void HostedOperationCipherProducesStableEnvelopeForIdempotentRetries()
+    {
+        var logbookId = new LogbookId("log_sync");
+        var deviceId = new DeviceId("dev_android");
+        var operation = CreateWorkbookOperation(logbookId, "ent_001", "rev_001", deviceId);
+        var otherRevision = CreateWorkbookOperation(logbookId, "ent_002", "rev_002", deviceId);
+        var changedPayload = CreateWorkbookOperation(logbookId, "ent_changed", "rev_001", deviceId);
+        var key = PortableLogbookKey.Generate();
+
+        var first = HostedOperationCipher.Encrypt(operation, key);
+        var retry = HostedOperationCipher.Encrypt(operation, key);
+        var other = HostedOperationCipher.Encrypt(otherRevision, key);
+        var changed = HostedOperationCipher.Encrypt(changedPayload, key);
+
+        Assert.Equal(first.PayloadNonce, retry.PayloadNonce);
+        Assert.Equal(first.PayloadCiphertext, retry.PayloadCiphertext);
+        Assert.Equal(first.PayloadTag, retry.PayloadTag);
+        Assert.Equal(first.PayloadHash, retry.PayloadHash);
+        Assert.NotEqual(first.PayloadNonce, other.PayloadNonce);
+        Assert.NotEqual(first.PayloadNonce, changed.PayloadNonce);
     }
 
     [Fact]

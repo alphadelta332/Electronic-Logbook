@@ -467,6 +467,150 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task ConcurrentNetworkRestoredCallbacksSerializeOnePendingUpload()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-15T00:55:00+10:00"));
+        var ledger = new InMemoryHostedLogbookLedger();
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+        await initial.EnsureLoadedWorkbookAsync();
+        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(initial.WorkbookDraft);
+        await initial.SaveWorkbookEntryAsync();
+
+        network.Availability = new NetworkAvailability(IsOnline: false);
+        FillWorkbookDraft(initial.WorkbookDraft);
+        initial.WorkbookDraft.Reg = "VH-OFF";
+        await initial.SaveWorkbookEntryAsync();
+
+        var blockingLedger = new BlockingAppendLedger(ledger);
+        var reloaded = CreateSession(jsRuntime, authenticator, clock, blockingLedger, network);
+        await reloaded.EnsureLoadedWorkbookAsync();
+        network.Availability = new NetworkAvailability(IsOnline: true);
+
+        var first = reloaded.SyncHostedAfterNetworkRestoredAsync();
+        await blockingLedger.FirstAppendStarted;
+        var second = reloaded.SyncHostedAfterNetworkRestoredAsync();
+
+        Assert.Equal(1, blockingLedger.AppendCallCount);
+        blockingLedger.ReleaseFirstAppend();
+        var results = await Task.WhenAll(first, second);
+
+        Assert.All(results, result => Assert.Equal(PortableHostedSyncStatus.Synced, result?.Status));
+        Assert.Equal(1, blockingLedger.AppendCallCount);
+        Assert.Equal(PortableHostedSyncStatus.Synced, reloaded.HostedSync?.LastStatus);
+        Assert.Equal(2, reloaded.HostedSync?.LastAcknowledgedHostedRevision);
+        Assert.Equal(2, (await ledger.ReadMissingOperationsAsync(reloaded.DocumentV2.LogbookId, 0, 10)).Operations.Count);
+    }
+
+    [Fact]
+    public async Task LostAppendResponseRetriesTheSameEncryptedPayloadWithoutDuplicatingTheOperation()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-15T01:05:00+10:00"));
+        var innerLedger = new InMemoryHostedLogbookLedger();
+        var ledger = new AppendThenLoseResponseLedger(innerLedger);
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock, ledger, network);
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(session.WorkbookDraft);
+
+        await session.SaveWorkbookEntryAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.Offline, session.HostedSync?.LastStatus);
+        Assert.Equal(1, session.HostedSync?.PendingLocalOperationCount);
+        Assert.Single((await innerLedger.ReadMissingOperationsAsync(session.DocumentV2.LogbookId, 0, 10)).Operations);
+
+        var retry = await session.SyncHostedNowAsync();
+
+        Assert.NotNull(retry);
+        Assert.Equal(PortableHostedSyncStatus.Synced, retry.Status);
+        Assert.Equal(0, retry.PendingLocalOperationCount);
+        Assert.Equal(1, retry.LastAcknowledgedHostedRevision);
+        Assert.Single((await innerLedger.ReadMissingOperationsAsync(session.DocumentV2.LogbookId, 0, 10)).Operations);
+    }
+
+    [Fact]
+    public async Task OfflinePendingCountExcludesDownloadedOtherDeviceHistoryAndDiagnosticsExplainBoth()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-15T00:20:00+10:00"));
+        var logbookId = new LogbookId("log_retained");
+        var currentDeviceId = new DeviceId("dev_retained");
+        var otherDeviceId = new DeviceId("dev_previous");
+        var entryId = new EntryId("ent_offline_retest");
+        var hostedCreate = PortableLogbookOperationV2.Create(
+            logbookId,
+            entryId,
+            new RevisionId("rev_recovery_hosted"),
+            otherDeviceId,
+            DateTimeOffset.Parse("2026-08-11T13:30:12.783+10:00"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                FlightId = "RECOVERY-0811"
+            });
+        var offlineCorrection = PortableLogbookOperationV2.Correct(
+            logbookId,
+            entryId,
+            new RevisionId("rev_offline_correction"),
+            [hostedCreate.RevisionId],
+            currentDeviceId,
+            DateTimeOffset.Parse("2026-08-15T00:16:50.275+10:00"),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                FlightId = "OFFLINE-0811",
+                Remarks = "GATE1 OFFLINE RETEST"
+            });
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [hostedCreate, offlineCorrection]);
+        var hosted = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            logbookId,
+            currentDeviceId,
+            LastAcknowledgedHostedRevision: 1,
+            PortableHostedSyncStatus.Synced,
+            UploadedRevisionIds: []);
+        await new BrowserLogbookStore(jsRuntime).SaveStateAsync(
+            new BrowserLogbookStateV2(document, [], null, HostedSync: hosted));
+        var session = CreateSession(
+            jsRuntime,
+            new InMemoryHostedLogbookAuthenticator(new HostedAccountId("acct_private"), currentDeviceId, clock),
+            clock,
+            new InMemoryHostedLogbookLedger(),
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: false)));
+
+        await session.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.Offline, session.HostedSync?.LastStatus);
+        Assert.Equal(1, session.HostedSync?.PendingLocalOperationCount);
+        Assert.Equal("1 local operation will sync when the network returns.", session.HostedSyncStatusDetail);
+        var diagnostics = Assert.IsType<MobileHostedSyncDiagnosticSummary>(session.HostedSyncDiagnostics);
+        var pending = Assert.Single(diagnostics.PendingUploads);
+        Assert.Equal("Correction", pending.KindLabel);
+        Assert.Equal("OFFLINE-0811", pending.FlightId);
+        Assert.Equal("GATE1 OFFLINE RETEST", pending.Detail);
+        var excluded = Assert.Single(diagnostics.OtherDeviceHistory);
+        Assert.Equal("Create", excluded.KindLabel);
+        Assert.Equal("RECOVERY-0811", excluded.FlightId);
+        Assert.Equal(otherDeviceId.Value, excluded.DeviceId);
+    }
+
+    [Fact]
     public async Task UnreachableHostedTransportPersistsOfflineStateAndQueuedEditAcrossReload()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -1216,6 +1360,83 @@ public sealed class MobileLogbookSessionJourneyTests
             FailTransport
                 ? ValueTask.FromException(new HttpRequestException("Simulated unreachable hosted transport."))
                 : inner.RecordAcknowledgementAsync(logbookId, deviceId, throughHostedRevision, cancellationToken);
+    }
+
+    private sealed class BlockingAppendLedger(IHostedLogbookLedger inner) : IHostedLogbookLedger
+    {
+        private readonly TaskCompletionSource firstAppendStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource releaseFirstAppend = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int AppendCallCount { get; private set; }
+
+        public Task FirstAppendStarted => firstAppendStarted.Task;
+
+        public void ReleaseFirstAppend() => releaseFirstAppend.TrySetResult();
+
+        public ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            inner.ReadMissingOperationsAsync(logbookId, afterHostedRevision, pageSize, cancellationToken);
+
+        public async ValueTask<HostedAppendResult> AppendOperationsAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            IReadOnlyList<HostedOperationUpload> operations,
+            CancellationToken cancellationToken = default)
+        {
+            AppendCallCount++;
+            if (AppendCallCount == 1)
+            {
+                firstAppendStarted.TrySetResult();
+                await releaseFirstAppend.Task.WaitAsync(cancellationToken);
+            }
+
+            return await inner.AppendOperationsAsync(logbookId, deviceId, operations, cancellationToken);
+        }
+
+        public ValueTask RecordAcknowledgementAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            long throughHostedRevision,
+            CancellationToken cancellationToken = default) =>
+            inner.RecordAcknowledgementAsync(logbookId, deviceId, throughHostedRevision, cancellationToken);
+    }
+
+    private sealed class AppendThenLoseResponseLedger(IHostedLogbookLedger inner) : IHostedLogbookLedger
+    {
+        private bool loseNextAppendResponse = true;
+
+        public ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            inner.ReadMissingOperationsAsync(logbookId, afterHostedRevision, pageSize, cancellationToken);
+
+        public async ValueTask<HostedAppendResult> AppendOperationsAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            IReadOnlyList<HostedOperationUpload> operations,
+            CancellationToken cancellationToken = default)
+        {
+            var result = await inner.AppendOperationsAsync(logbookId, deviceId, operations, cancellationToken);
+            if (loseNextAppendResponse)
+            {
+                loseNextAppendResponse = false;
+                throw new HttpRequestException("Simulated response loss after the server committed the operation.");
+            }
+
+            return result;
+        }
+
+        public ValueTask RecordAcknowledgementAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            long throughHostedRevision,
+            CancellationToken cancellationToken = default) =>
+            inner.RecordAcknowledgementAsync(logbookId, deviceId, throughHostedRevision, cancellationToken);
     }
 
     private static (string PublicKey, string Fingerprint) PublicMaterial(byte value)

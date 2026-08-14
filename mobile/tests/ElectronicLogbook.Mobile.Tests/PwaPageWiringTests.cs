@@ -285,6 +285,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@Session.HostedSyncStatusDetail", settings, StringComparison.Ordinal);
         Assert.Contains("Sync now", settings, StringComparison.Ordinal);
         Assert.Contains("SyncHostedNowAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("Sync diagnostics", settings, StringComparison.Ordinal);
+        Assert.Contains("Pending upload details", settings, StringComparison.Ordinal);
+        Assert.Contains("Other-device history excluded from uploads", settings, StringComparison.Ordinal);
+        Assert.Contains("HostedSyncDiagnostics", settings, StringComparison.Ordinal);
         Assert.Contains("Session.HostedSyncChanged += OnHostedSyncChanged", settings, StringComparison.Ordinal);
         Assert.Contains("Session.HostedSyncChanged -= OnHostedSyncChanged", settings, StringComparison.Ordinal);
         Assert.Contains("reauthenticate", settings, StringComparison.Ordinal);

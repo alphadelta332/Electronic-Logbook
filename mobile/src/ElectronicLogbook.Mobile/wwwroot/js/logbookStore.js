@@ -76,6 +76,19 @@
         return globalThis.Capacitor?.isNativePlatform?.() && plugin?.getGoogleIdToken ? plugin : null;
     }
 
+    function nativeNetworkPlugin() {
+        const plugin = globalThis.Capacitor?.Plugins?.Network;
+        return globalThis.Capacitor?.isNativePlatform?.() && plugin?.getStatus ? plugin : null;
+    }
+
+    async function notifyNetworkRestored(dotNetReference) {
+        try {
+            await dotNetReference.invokeMethodAsync("HandleNetworkRestoredAsync");
+        } catch {
+            console.warn("Electronic Logbook network-restored callback failed.");
+        }
+    }
+
     window.electronicLogbookStore = {
         load: (key) => withStore(documentStoreName, "readonly", (store) => store.get(key)),
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key)),
@@ -83,23 +96,48 @@
     };
 
     window.electronicLogbookNetwork = {
-        isOnline: () => navigator.onLine !== false,
-        subscribe: (dotNetReference) => {
+        isOnline: async () => {
+            const plugin = nativeNetworkPlugin();
+            if (plugin) {
+                const status = await plugin.getStatus();
+                return status?.connected === true;
+            }
+
+            return navigator.onLine !== false;
+        },
+        subscribe: async (dotNetReference) => {
             const subscriptionId = nextNetworkRestoredHandlerId++;
-            const handler = () => {
-                dotNetReference.invokeMethodAsync("HandleNetworkRestoredAsync").catch(() => { });
-            };
-            networkRestoredHandlers.set(subscriptionId, handler);
+            const plugin = nativeNetworkPlugin();
+            if (plugin?.addListener) {
+                const initialStatus = await plugin.getStatus();
+                let wasConnected = initialStatus?.connected === true;
+                const listener = await plugin.addListener("networkStatusChange", (status) => {
+                    const connected = status?.connected === true;
+                    if (connected && !wasConnected) {
+                        void notifyNetworkRestored(dotNetReference);
+                    }
+                    wasConnected = connected;
+                });
+                networkRestoredHandlers.set(subscriptionId, { kind: "native", listener });
+                return subscriptionId;
+            }
+
+            const handler = () => void notifyNetworkRestored(dotNetReference);
+            networkRestoredHandlers.set(subscriptionId, { kind: "browser", handler });
             window.addEventListener("online", handler);
             return subscriptionId;
         },
-        unsubscribe: (subscriptionId) => {
-            const handler = networkRestoredHandlers.get(subscriptionId);
-            if (!handler) {
+        unsubscribe: async (subscriptionId) => {
+            const subscription = networkRestoredHandlers.get(subscriptionId);
+            if (!subscription) {
                 return;
             }
 
-            window.removeEventListener("online", handler);
+            if (subscription.kind === "native") {
+                await subscription.listener.remove();
+            } else {
+                window.removeEventListener("online", subscription.handler);
+            }
             networkRestoredHandlers.delete(subscriptionId);
         }
     };

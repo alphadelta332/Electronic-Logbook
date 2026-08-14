@@ -36,8 +36,9 @@ public sealed class MobileHostedSyncWorkflow(
 
         var network = await networkStatus.GetAvailabilityAsync(cancellationToken);
         var uploadedRevisionIds = (request.HostedSync.UploadedRevisionIds ?? []).ToHashSet();
-        var pendingLocalOperationCount = request.Document.Operations.Count(operation =>
-            !uploadedRevisionIds.Contains(operation.RevisionId));
+        var pendingLocalOperationCount = MobileHostedSyncDiagnosticSummary
+            .Create(request.Document, request.HostedSync)
+            .PendingUploadCount;
         if (!network.IsOnline)
         {
             return PortableHostedSyncResult.Offline(
@@ -153,7 +154,7 @@ public sealed class MobileHostedSyncWorkflow(
             return PortableHostedSyncResult.NeedsAttention(
                 request.Document,
                 request.HostedSync.LastAcknowledgedHostedRevision,
-                request.Document.Operations.Count,
+                pendingLocalOperationCount,
                 ex.Message);
         }
     }
@@ -163,7 +164,7 @@ public sealed class MobileHostedSyncWorkflow(
         PortableLogbookOperationV2 operation)
     {
         var plaintext = Compress(Encoding.UTF8.GetBytes(PortableLogbookJson.SerializeOperationV2(operation)));
-        var nonce = RandomNumberGenerator.GetBytes(12);
+        var nonce = HostedOperationCipher.DeriveNonce(logbookId, operation.RevisionId, plaintext);
         var encrypted = await keyStore.EncryptAsync(
             logbookId,
             nonce,

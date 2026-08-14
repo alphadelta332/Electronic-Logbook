@@ -2291,6 +2291,49 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     }
 }
 
+.sync-diagnostics {
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    padding: 12px;
+    background: var(--app-surface-alt);
+}
+
+.sync-diagnostics > summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.sync-diagnostics[open] > summary {
+    margin-bottom: 12px;
+}
+
+.sync-diagnostic-group {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.sync-diagnostic-group h3 {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.sync-operation-detail {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--app-surface);
+}
+
+.sync-operation-detail span,
+.sync-operation-detail code {
+    overflow-wrap: anywhere;
+    font-size: 0.75rem;
+}
+
 @media (min-width: 900px) {
     .dashboard-page {
         grid-template-columns: minmax(0, 3fr) minmax(300px, 2fr);

@@ -136,6 +136,7 @@ public static class HostedOperationCipher
 {
     private const int NonceSizeBytes = 12;
     private const int TagSizeBytes = 16;
+    private const string NonceDomain = "electronic-logbook.hosted-operation-nonce.v1";
 
     public static HostedOperationUpload Encrypt(
         PortableLogbookOperationV2 operation,
@@ -146,7 +147,7 @@ public static class HostedOperationCipher
 
         var plaintext = Compress(Encoding.UTF8.GetBytes(PortableLogbookJson.SerializeOperationV2(operation)));
         var ciphertext = new byte[plaintext.Length];
-        var nonce = RandomNumberGenerator.GetBytes(NonceSizeBytes);
+        var nonce = DeriveNonce(operation.LogbookId, operation.RevisionId, plaintext);
         var tag = new byte[TagSizeBytes];
         using var aes = new AesGcm(key.ToBytes(), TagSizeBytes);
         aes.Encrypt(nonce, plaintext, ciphertext, tag, AdditionalData(operation));
@@ -162,6 +163,25 @@ public static class HostedOperationCipher
             Convert.ToBase64String(tag),
             Convert.ToHexString(SHA256.HashData(ciphertext)).ToLowerInvariant(),
             operation.ParentRevisionIds.ToArray());
+    }
+
+    public static byte[] DeriveNonce(
+        LogbookId logbookId,
+        RevisionId revisionId,
+        ReadOnlySpan<byte> plaintext)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logbookId.Value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(revisionId.Value);
+
+        var identity = Encoding.UTF8.GetBytes(string.Join(
+            "\0",
+            NonceDomain,
+            logbookId.Value,
+            revisionId.Value));
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(identity);
+        hash.AppendData(plaintext);
+        return hash.GetHashAndReset()[..NonceSizeBytes];
     }
 
     public static PortableLogbookOperationV2 Decrypt(

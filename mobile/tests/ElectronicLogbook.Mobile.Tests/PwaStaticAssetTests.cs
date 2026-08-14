@@ -169,11 +169,20 @@ public sealed class PwaStaticAssetTests
     public void BrowserNetworkBridgeSubscribesAndUnsubscribesFromConnectivityRestoration()
     {
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
+        var package = ReadRepositoryFile("package.json");
 
         Assert.Contains("window.electronicLogbookNetwork", bridge, StringComparison.Ordinal);
-        Assert.Contains("window.addEventListener(\"online\", handler)", bridge, StringComparison.Ordinal);
+        Assert.Contains("globalThis.Capacitor?.Plugins?.Network", bridge, StringComparison.Ordinal);
+        Assert.Contains("await plugin.getStatus()", bridge, StringComparison.Ordinal);
+        Assert.Contains("plugin.addListener(\"networkStatusChange\"", bridge, StringComparison.Ordinal);
+        Assert.Contains("let wasConnected = initialStatus?.connected === true", bridge, StringComparison.Ordinal);
+        Assert.Contains("if (connected && !wasConnected)", bridge, StringComparison.Ordinal);
+        Assert.Contains("wasConnected = connected", bridge, StringComparison.Ordinal);
         Assert.Contains("invokeMethodAsync(\"HandleNetworkRestoredAsync\")", bridge, StringComparison.Ordinal);
-        Assert.Contains("window.removeEventListener(\"online\", handler)", bridge, StringComparison.Ordinal);
+        Assert.Contains("await subscription.listener.remove()", bridge, StringComparison.Ordinal);
+        Assert.Contains("window.addEventListener(\"online\", handler)", bridge, StringComparison.Ordinal);
+        Assert.Contains("window.removeEventListener(\"online\", subscription.handler)", bridge, StringComparison.Ordinal);
+        Assert.Contains("\"@capacitor/network\": \"8.0.1\"", package, StringComparison.Ordinal);
     }
 
     [Fact]

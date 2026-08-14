@@ -26,6 +26,7 @@ public sealed class MobileLogbookSession(
     private readonly ISyncClock syncClock = syncClock ?? SystemSyncClock.Instance;
     private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryEnrollments = [];
     private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryCodeConfigurations = [];
+    private readonly SemaphoreSlim hostedSyncGate = new(1, 1);
     private MobileRecoveryCodeSetup? pendingRecoveryCodeSetup;
     private PendingWorkbookActionFeedback? pendingWorkbookActionFeedback;
 
@@ -107,6 +108,10 @@ public sealed class MobileLogbookSession(
 
     public bool HasHostedSync => HostedSync is not null;
 
+    public MobileHostedSyncDiagnosticSummary? HostedSyncDiagnostics => HostedSync is null
+        ? null
+        : MobileHostedSyncDiagnosticSummary.Create(DocumentV2, HostedSync);
+
     public string? PendingRecoveryCode => pendingRecoveryCodeSetup?.RecoveryCode;
 
     public bool IsRecoveryCodeConfirmationPending => pendingRecoveryCodeSetup is not null;
@@ -138,7 +143,7 @@ public sealed class MobileLogbookSession(
                     : "This device is connected and ready to sync.",
                 PortableHostedSyncStatus.Waiting => "More hosted operations are waiting; sync will continue shortly.",
                 PortableHostedSyncStatus.Offline => HostedSync.PendingLocalOperationCount > 0
-                    ? $"{HostedSync.PendingLocalOperationCount} local operation(s) will sync when the network returns."
+                    ? $"{FormatOperationCount(HostedSync.PendingLocalOperationCount, "local operation")} will sync when the network returns."
                     : "This device is offline; local edits remain available.",
                 PortableHostedSyncStatus.SigningIn => "Finish signing in to resume hosted sync.",
                 PortableHostedSyncStatus.NeedsAttention => HostedSync.AttentionRequiredReason ?? "Hosted sync needs attention.",
@@ -1232,6 +1237,9 @@ public sealed class MobileLogbookSession(
     public static string FormatTimestamp(DateTimeOffset? timestamp) =>
         timestamp?.ToLocalTime().ToString("dd MMM yyyy HH:mm") ?? "Never";
 
+    private static string FormatOperationCount(int count, string singular) =>
+        $"{count} {singular}{(count == 1 ? string.Empty : "s")}";
+
     public string FormatRoute(PortableLogbookEntry entry)
     {
         var route = $"{entry.From}-{entry.To}".Trim(' ', '-');
@@ -1419,6 +1427,19 @@ public sealed class MobileLogbookSession(
 
     private async Task<PortableHostedSyncResult?> SyncHostedAsync(BackgroundSyncReason reason)
     {
+        await hostedSyncGate.WaitAsync();
+        try
+        {
+            return await SyncHostedCoreAsync(reason);
+        }
+        finally
+        {
+            hostedSyncGate.Release();
+        }
+    }
+
+    private async Task<PortableHostedSyncResult?> SyncHostedCoreAsync(BackgroundSyncReason reason)
+    {
         if (HostedSync is null)
         {
             return null;
@@ -1429,7 +1450,7 @@ public sealed class MobileLogbookSession(
             var unavailable = PortableHostedSyncResult.NeedsAttention(
                 DocumentV2,
                 HostedSync.LastAcknowledgedHostedRevision,
-                DocumentV2.Operations.Count,
+                MobileHostedSyncDiagnosticSummary.Create(DocumentV2, HostedSync).PendingUploadCount,
                 "Hosted sync is not configured on this device.");
             HostedSync = HostedSync.WithResult(unavailable, syncClock.UtcNow);
             await SaveStateV2Async();
