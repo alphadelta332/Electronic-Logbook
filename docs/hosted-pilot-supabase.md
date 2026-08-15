@@ -62,11 +62,13 @@ Configure Auth in the Supabase dashboard for each project:
 
 - Disable public self-registration.
 - Enable email sign-in only for invited users.
-- Use the shared **Magic Link or OTP** email template for pilot sign-in. Include a visible
-  `{{ .Token }}` when practical. The Android pilot client accepts either the six-digit
-  code or an unused default Supabase confirmation-link address pasted into the sign-in
-  field; the link must belong to the configured pilot project and is exchanged as a
-  token hash without opening its redirect target.
+- Use the shared **Magic Link or OTP** email template for pilot sign-in. Supabase Free
+  projects using the default email provider cannot customize this template, so the default
+  email may contain only a link. Both the Android pilot client and workbook updater must
+  accept either the displayed OTP (when a custom template can include `{{ .Token }}`) or an
+  unused default Supabase confirmation-link address pasted into the sign-in field. The link
+  must belong to the configured pilot project and is exchanged as a token hash without
+  opening its redirect target. Do not hard-code the hosted OTP length in client instructions.
 - Keep OAuth, phone, anonymous, and public signup providers disabled unless a later gate
   explicitly adds them.
 - Client sign-in calls must pass the SDK option `shouldCreateUser: false`, which maps to

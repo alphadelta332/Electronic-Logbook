@@ -24,7 +24,9 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.Contains("x:Name=\"PortableRevisionHistoryButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableResolveConflictButton\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"PortableRefreshStatusButton\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Account, sync, and Advanced recovery", xaml, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"HostedConnectButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Content=\"Connect to Electronic Logbook\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Advanced recovery and support", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Enable Sync\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Recovery Export\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Content=\"Recovery Import\"", xaml, StringComparison.Ordinal);
@@ -32,6 +34,8 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.Contains("Content=\"Refresh Sync Status\"", xaml, StringComparison.Ordinal);
         Assert.Contains("TryReadPortableLogbookStatusTextWithRetryAsync", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.ReadStatus", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("SupabaseWorkbookConnectionClient", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookCommandRunner.ConnectHostedWorkbook", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.Enable", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.Export", codeBehind, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookCommandRunner.PreviewImport", codeBehind, StringComparison.Ordinal);
@@ -48,6 +52,41 @@ public sealed class WizardPortableLogbookStatusTests
         Assert.Contains("PortableLogbookCommandRunner.ResolveConflict", codeBehind, StringComparison.Ordinal);
         Assert.Contains("Workbook sync: not enabled", codeBehind, StringComparison.Ordinal);
         Assert.Contains("Workbook sync: enabled", codeBehind, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TextPromptKeepsItsWidthWhenLongContentIsPasted()
+    {
+        var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml.cs")));
+        var promptMethod = ExtractMethodBody(codeBehind, "private string? PromptForText");
+
+        Assert.Contains("Width = 480", promptMethod, StringComparison.Ordinal);
+        Assert.Contains("SizeToContent = SizeToContent.Height", promptMethod, StringComparison.Ordinal);
+        Assert.Contains("HorizontalScrollBarVisibility = ScrollBarVisibility.Auto", promptMethod, StringComparison.Ordinal);
+        Assert.Contains("TextWrapping = TextWrapping.Wrap", promptMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("SizeToContent.WidthAndHeight", promptMethod, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HostedConnectionSyncsDurablyBeforeActivatingWorkbookDevice()
+    {
+        var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml.cs")));
+        var connectionMethod = ExtractMethodBody(codeBehind, "private async Task RunHostedConnectionAsync");
+
+        var connectIndex = connectionMethod.IndexOf("ConnectHostedWorkbook", StringComparison.Ordinal);
+        var syncIndex = connectionMethod.IndexOf("SyncHostedWorkbook", StringComparison.Ordinal);
+        var activateIndex = connectionMethod.IndexOf("ActivateWorkbookDeviceAsync", StringComparison.Ordinal);
+        Assert.True(connectIndex >= 0 && syncIndex > connectIndex && activateIndex > syncIndex);
+        Assert.Contains("sync.Status != \"Synced\"", connectionMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecordInitialAcknowledgementAsync", connectionMethod, StringComparison.Ordinal);
     }
 
     [Fact]

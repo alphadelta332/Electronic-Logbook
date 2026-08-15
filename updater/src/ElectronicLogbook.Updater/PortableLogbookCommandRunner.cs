@@ -67,8 +67,9 @@ public static class PortableLogbookCommandRunner
                         options.HostedAccessTokenExpiresAt!.Value),
                     DateTimeOffset.UtcNow),
                 PortableLogbookCommand.HostedStatus => ReadHostedStatus(options.WorkbookPath!),
-                PortableLogbookCommand.HostedSync => SyncHostedWorkbook(
+                PortableLogbookCommand.HostedSync => SyncHostedWorkbookAfterUnlock(
                     options.WorkbookPath!,
+                    options.WaitForWorkbookUnlockSeconds,
                     DateTimeOffset.UtcNow),
                 _ => throw new UpdaterUsageException("Portable command is required.")
             };
@@ -162,6 +163,119 @@ public static class PortableLogbookCommandRunner
             targetName,
             metadata.Status,
             pairedAt);
+    }
+
+    public static PortableHostedConnectionResult ConnectHostedWorkbook(
+        string workbookPath,
+        HostedAccountId accountId,
+        LogbookId hostedLogbookId,
+        DeviceId workbookDeviceId,
+        PortableHostedCredential credential,
+        PortableLogbookKey hostedLogbookKey,
+        PortableWorkbookRecoveryKeyPair recoveryKeyPair,
+        DateTimeOffset connectedAt)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(accountId);
+        ArgumentNullException.ThrowIfNull(credential);
+        ArgumentNullException.ThrowIfNull(hostedLogbookKey);
+        ArgumentNullException.ThrowIfNull(recoveryKeyPair);
+
+        var fullPath = Path.GetFullPath(workbookPath);
+        if (!File.Exists(fullPath))
+        {
+            throw new UpdaterUsageException($"Workbook not found: {fullPath}");
+        }
+
+        var customFieldDefinitions = PortableLogbookWorkbookPackageStorage.ReadWorkbookCustomFieldDefinitions(fullPath);
+        var visibleRows = PortableLogbookWorkbookPackageStorage
+            .ReadCurrentRowsV2(fullPath, customFieldDefinitions)
+            .Select(row => new PortableLogbookWorkbookRowV2(null, null, row.Entry))
+            .ToArray();
+        var currencyOverrideDates = PortableLogbookWorkbookPackageStorage.ReadCurrencyOverrideDates(fullPath);
+        var setup = PortableLogbookSetup.CreateInitialSetupPlanV2(
+            visibleRows,
+            customFieldDefinitions,
+            currencyOverrideDates,
+            connectedAt,
+            hostedLogbookId,
+            workbookDeviceId,
+            hostedLogbookKey);
+        var envelope = PortableLogbookWorkbookStorage.CreateEnvelope(
+            setup.InitialDocument,
+            setup.InitialPackageBytes,
+            []);
+        var backupPath = CreateWorkbookBackup(fullPath, "hosted-connect", connectedAt);
+        var credentialTargetName = PortableHostedCredentialStore.CreateTargetName(hostedLogbookId, workbookDeviceId);
+        var packageKeyTargetName = PortableLogbookWindowsCredentialStore.CreateTargetName(hostedLogbookId, workbookDeviceId);
+        var recoveryKeyTargetName = PortableWorkbookRecoveryKeyStore.CreateTargetName(hostedLogbookId, workbookDeviceId);
+
+        try
+        {
+            PortableHostedCredentialStore.Save(credentialTargetName, credential);
+            PortableLogbookWindowsCredentialStore.SaveKey(packageKeyTargetName, hostedLogbookKey);
+            PortableWorkbookRecoveryKeyStore.Save(recoveryKeyTargetName, recoveryKeyPair);
+
+            PortableLogbookWorkbookPackageStorage.EnsureHiddenMetadataColumns(fullPath);
+            PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+                fullPath,
+                setup.WorkbookRows,
+                setup.InitialDocument.CustomFieldDefinitions,
+                writeVisiblePayloadCells: false);
+            PortableLogbookWorkbookPackageStorage.EnsureWorkbookIdentityMetadata(
+                fullPath,
+                hostedLogbookId,
+                workbookDeviceId,
+                setup.InitialDocument.SchemaVersion);
+            PortableLogbookWorkbookPackageStorage.WriteEnvelope(fullPath, envelope);
+            PortableLogbookWorkbookPackageStorage.EnsureHostedWorkbookMetadata(
+                fullPath,
+                accountId,
+                credentialTargetName,
+                0,
+                FormatHostedSyncStatus(PortableHostedSyncStatus.SigningIn),
+                connectedAt,
+                null);
+
+            var verifiedIdentity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(fullPath);
+            var verifiedState = PortableLogbookWorkbookPackageStorage.OpenStateV2(fullPath, hostedLogbookKey);
+            if (verifiedIdentity?.LogbookId != hostedLogbookId ||
+                verifiedIdentity.DeviceId != workbookDeviceId ||
+                verifiedState?.Document.LogbookId != hostedLogbookId ||
+                verifiedState.Document.Operations.Count != setup.InitialDocument.Operations.Count)
+            {
+                throw new InvalidDataException("The connected workbook could not be verified after durable key recovery.");
+            }
+        }
+        catch
+        {
+            try
+            {
+                File.Copy(backupPath, fullPath, overwrite: true);
+            }
+            catch
+            {
+                // Preserve the original failure. The timestamped backup is retained for recovery.
+            }
+
+            TryDeleteHostedCredential(credentialTargetName);
+            TryDeleteWindowsCredential(packageKeyTargetName);
+            TryDeleteWorkbookRecoveryCredential(recoveryKeyTargetName);
+            throw;
+        }
+
+        return new PortableHostedConnectionResult(
+            fullPath,
+            Path.GetFullPath(backupPath),
+            accountId,
+            hostedLogbookId,
+            workbookDeviceId,
+            credentialTargetName,
+            packageKeyTargetName,
+            recoveryKeyTargetName,
+            setup.InitialDocument.Operations.Count,
+            FormatHostedSyncStatus(PortableHostedSyncStatus.SigningIn),
+            connectedAt);
     }
 
     public static PortableHostedWorkbookStatusResult ReadHostedStatus(string workbookPath)
@@ -1502,6 +1616,96 @@ public static class PortableLogbookCommandRunner
             // Preserve the workbook-write failure that triggered cleanup.
         }
     }
+
+    public static PortableHostedWorkbookSyncResult SyncHostedWorkbookAfterUnlock(
+        string workbookPath,
+        int? waitForWorkbookUnlockSeconds,
+        DateTimeOffset syncedAt)
+    {
+        if (waitForWorkbookUnlockSeconds is not null)
+        {
+            WaitForWorkbookUnlock(
+                workbookPath,
+                TimeSpan.FromSeconds(waitForWorkbookUnlockSeconds.Value),
+                TimeSpan.FromMilliseconds(250));
+        }
+
+        return SyncHostedWorkbook(workbookPath, syncedAt);
+    }
+
+    internal static void WaitForWorkbookUnlock(
+        string workbookPath,
+        TimeSpan timeout,
+        TimeSpan pollInterval)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        if (timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(timeout));
+        }
+        if (pollInterval <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(pollInterval));
+        }
+
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        while (true)
+        {
+            try
+            {
+                using var stream = new FileStream(
+                    workbookPath,
+                    FileMode.Open,
+                    FileAccess.ReadWrite,
+                    FileShare.None);
+                return;
+            }
+            catch (IOException) when (DateTimeOffset.UtcNow < deadline)
+            {
+                Thread.Sleep(pollInterval);
+            }
+            catch (UnauthorizedAccessException) when (DateTimeOffset.UtcNow < deadline)
+            {
+                Thread.Sleep(pollInterval);
+            }
+            catch (IOException ex)
+            {
+                throw new IOException(
+                    "The workbook remained open or busy, so its queued hosted sync did not run.",
+                    ex);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new IOException(
+                    "The workbook remained open or busy, so its queued hosted sync did not run.",
+                    ex);
+            }
+        }
+    }
+
+    private static void TryDeleteHostedCredential(string targetName)
+    {
+        try
+        {
+            PortableHostedCredentialStore.Delete(targetName);
+        }
+        catch
+        {
+            // Preserve the original failure.
+        }
+    }
+
+    private static void TryDeleteWorkbookRecoveryCredential(string targetName)
+    {
+        try
+        {
+            PortableWorkbookRecoveryKeyStore.Delete(targetName);
+        }
+        catch
+        {
+            // Preserve the original failure.
+        }
+    }
 }
 
 internal sealed record V2CommandImportPlan(
@@ -1620,6 +1824,19 @@ public sealed record PortableHostedPairResult(
     string CredentialTargetName,
     string Status,
     DateTimeOffset PairedAt);
+
+public sealed record PortableHostedConnectionResult(
+    string WorkbookPath,
+    string BackupPath,
+    HostedAccountId AccountId,
+    LogbookId LogbookId,
+    DeviceId DeviceId,
+    string HostedCredentialTargetName,
+    string PackageKeyTargetName,
+    string RecoveryKeyTargetName,
+    int InitialWorkbookOperationCount,
+    string Status,
+    DateTimeOffset ConnectedAt);
 
 public sealed record PortableHostedWorkbookStatusResult(
     string WorkbookPath,

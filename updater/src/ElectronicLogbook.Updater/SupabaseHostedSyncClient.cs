@@ -31,23 +31,20 @@ public sealed class SupabaseHostedSyncClient(
         out SupabaseHostedSyncClient? client,
         out string? unavailableReason)
     {
-        var url = Environment.GetEnvironmentVariable("ELECTRONIC_LOGBOOK_SUPABASE_URL");
-        var anonKey = Environment.GetEnvironmentVariable("ELECTRONIC_LOGBOOK_SUPABASE_ANON_KEY");
-        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(anonKey))
+        if (!SupabaseHostedSyncConfiguration.TryLoad(out var configuration, out unavailableReason))
         {
             client = null;
-            unavailableReason = "Hosted transport is not configured in this updater build; workbook changes are queued locally.";
             return false;
         }
 
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var supabaseUrl))
-        {
-            client = null;
-            unavailableReason = "Hosted Supabase URL is not a valid absolute URI.";
-            return false;
-        }
-
-        client = new SupabaseHostedSyncClient(supabaseUrl, anonKey, accountId, deviceId, credential, credentialUpdated);
+        var resolved = configuration ?? throw new InvalidOperationException("Hosted configuration was not resolved.");
+        client = new SupabaseHostedSyncClient(
+            resolved.SupabaseUrl,
+            resolved.AnonKey,
+            accountId,
+            deviceId,
+            credential,
+            credentialUpdated);
         unavailableReason = null;
         return true;
     }

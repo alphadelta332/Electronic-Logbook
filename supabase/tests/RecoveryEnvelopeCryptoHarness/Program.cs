@@ -22,9 +22,11 @@ var jwtSecret = Required(status, "JWT_SECRET");
 
 using var ingressRsa = RSA.Create(2048);
 using var deviceRsa = RSA.Create(2048);
+using var workbookDeviceRsa = RSA.Create(2048);
 var ingressPublic = ingressRsa.ExportSubjectPublicKeyInfo();
 var ingressPrivate = ingressRsa.ExportPkcs8PrivateKey();
 var devicePublic = deviceRsa.ExportSubjectPublicKeyInfo();
+var workbookDevicePublic = workbookDeviceRsa.ExportSubjectPublicKeyInfo();
 var recoveryKek = RandomNumberGenerator.GetBytes(32);
 var packageKey = RandomNumberGenerator.GetBytes(32);
 var secondPackageKey = RandomNumberGenerator.GetBytes(32);
@@ -34,6 +36,7 @@ var outsiderAccountId = Guid.NewGuid();
 var logbookId = Guid.NewGuid();
 var ownerDeviceId = Guid.NewGuid();
 var outsiderDeviceId = Guid.NewGuid();
+var workbookDeviceId = Guid.NewGuid();
 var ownerSessionId = Guid.NewGuid();
 var outsiderSessionId = Guid.NewGuid();
 var runSuffix = Guid.NewGuid().ToString("N")[..12];
@@ -158,6 +161,7 @@ try
             action = "restore",
             logbookId,
             deviceId = ownerDeviceId,
+            deviceType = "android",
             platformLabel = "Recovery Harness Owner Device",
             devicePublicKey = Convert.ToBase64String(devicePublic),
             devicePublicKeyFingerprint = deviceFingerprint,
@@ -175,6 +179,61 @@ try
     Expect(!ContainsSensitiveMaterial(restoredSnapshot.AuditDetails, restore.wrappedKey, Convert.ToBase64String(packageKey), restoredSnapshot.DeviceCiphertext), "restore audit details are redacted");
     checks.Add("device-envelope restore decrypted locally, stored short-lived ciphertext, and redacted audit details");
 
+    var workbookRestore = await InvokeRecoveryAsync<RestoreResponse>(
+        http,
+        anonKey,
+        ownerToken,
+        new
+        {
+            action = "restore",
+            logbookId,
+            deviceId = workbookDeviceId,
+            deviceType = "workbook",
+            platformLabel = "Recovery Harness Excel Workbook",
+            devicePublicKey = Convert.ToBase64String(workbookDevicePublic),
+            devicePublicKeyFingerprint = Sha256Hex(workbookDevicePublic),
+            devicePublicKeyAlgorithm = "RSA-OAEP-256"
+        },
+        HttpStatusCode.OK);
+    var workbookPackageKey = workbookDeviceRsa.Decrypt(
+        Convert.FromBase64String(workbookRestore.wrappedKey),
+        RSAEncryptionPadding.OaepSHA256);
+    Expect(workbookPackageKey.SequenceEqual(packageKey), "workbook restore envelope decrypts to the original package key");
+    var pendingWorkbook = ReadEnvelopeSnapshot(psqlCli, dbUrl, logbookId, workbookDeviceId);
+    Expect(pendingWorkbook.DeviceType == "workbook", "workbook restore registered the workbook device type");
+    Expect(pendingWorkbook.DeviceStatus == "pending", "workbook restore kept the new device pending before durable recovery");
+    await AcknowledgeAsync(http, anonKey, ownerToken, logbookId, workbookDeviceId, 0);
+
+    var workbookActivation = await InvokeRecoveryAsync<ActivationResponse>(
+        http,
+        anonKey,
+        ownerToken,
+        new { action = "activate", logbookId, deviceId = workbookDeviceId },
+        HttpStatusCode.OK);
+    Expect(workbookActivation.activated, "workbook activation returned activated=true");
+    var activeWorkbook = ReadEnvelopeSnapshot(psqlCli, dbUrl, logbookId, workbookDeviceId);
+    Expect(activeWorkbook.DeviceStatus == "active", "workbook device activated after recovery completion");
+    checks.Add("managed recovery registered, restored, and activated a workbook device without plaintext key material");
+
+    var invalidDeviceType = await InvokeRecoveryAsync<ErrorResponse>(
+        http,
+        anonKey,
+        ownerToken,
+        new
+        {
+            action = "restore",
+            logbookId,
+            deviceId = Guid.NewGuid(),
+            deviceType = "desktop",
+            platformLabel = "Unsupported Desktop",
+            devicePublicKey = Convert.ToBase64String(devicePublic),
+            devicePublicKeyFingerprint = deviceFingerprint,
+            devicePublicKeyAlgorithm = "RSA-OAEP-256"
+        },
+        HttpStatusCode.BadRequest);
+    Expect(invalidDeviceType.code == "RECOVERY_DEVICE_TYPE_INVALID", "unsupported recovery device type was rejected");
+    checks.Add("unsupported recovery device type was rejected before registration");
+
     await InvokeRecoveryAsync<ErrorResponse>(
         http,
         anonKey,
@@ -184,6 +243,7 @@ try
             action = "restore",
             logbookId,
             deviceId = outsiderDeviceId,
+            deviceType = "android",
             platformLabel = "Recovery Harness Outsider Device",
             devicePublicKey = Convert.ToBase64String(devicePublic),
             devicePublicKeyFingerprint = deviceFingerprint,
@@ -201,6 +261,7 @@ try
             action = "restore",
             logbookId,
             deviceId = outsiderDeviceId,
+            deviceType = "android",
             platformLabel = "Recovery Harness Outsider Device",
             devicePublicKey = Convert.ToBase64String(devicePublic),
             devicePublicKeyFingerprint = deviceFingerprint,
@@ -223,8 +284,8 @@ finally
     TryDeleteFile(envPath);
     if (ownerAccountId != Guid.Empty && outsiderAccountId != Guid.Empty)
     {
-        CleanupFixtures(psqlCli, dbUrl, ownerAccountId, outsiderAccountId, logbookId, ownerDeviceId, outsiderDeviceId);
-        var cleanup = ReadCleanupCounts(psqlCli, dbUrl, ownerAccountId, outsiderAccountId, logbookId, ownerDeviceId, outsiderDeviceId);
+        CleanupFixtures(psqlCli, dbUrl, ownerAccountId, outsiderAccountId, logbookId, ownerDeviceId, outsiderDeviceId, workbookDeviceId);
+        var cleanup = ReadCleanupCounts(psqlCli, dbUrl, ownerAccountId, outsiderAccountId, logbookId, ownerDeviceId, outsiderDeviceId, workbookDeviceId);
         if (cleanup != 0)
         {
             throw new InvalidOperationException("Recovery-envelope harness cleanup left disposable rows behind.");
@@ -353,20 +414,21 @@ static void CleanupFixtures(
     Guid outsiderAccountId,
     Guid logbookId,
     Guid ownerDeviceId,
-    Guid outsiderDeviceId)
+    Guid outsiderDeviceId,
+    Guid workbookDeviceId)
 {
     ExecuteSql(psqlCli, dbUrl, $"""
         delete from public.security_events
         where logbook_id = '{logbookId}'
            or account_id in ('{ownerAccountId}', '{outsiderAccountId}')
-           or device_id in ('{ownerDeviceId}', '{outsiderDeviceId}');
+           or device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}');
         delete from public.key_envelopes
         where logbook_id = '{logbookId}'
-           or recipient_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}')
-           or created_by_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}');
+           or recipient_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}')
+           or created_by_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}');
         delete from public.operation_acks where logbook_id = '{logbookId}';
         delete from public.operations where logbook_id = '{logbookId}';
-        delete from public.devices where device_id in ('{ownerDeviceId}', '{outsiderDeviceId}');
+        delete from public.devices where device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}');
         delete from public.logbook_memberships
         where logbook_id = '{logbookId}'
            or account_id in ('{ownerAccountId}', '{outsiderAccountId}');
@@ -385,16 +447,17 @@ static int ReadCleanupCounts(
     Guid outsiderAccountId,
     Guid logbookId,
     Guid ownerDeviceId,
-    Guid outsiderDeviceId)
+    Guid outsiderDeviceId,
+    Guid workbookDeviceId)
 {
     var json = QueryScalar(psqlCli, dbUrl, $"""
         select jsonb_build_object(
             'count',
-            (select count(*) from public.security_events where logbook_id = '{logbookId}' or account_id in ('{ownerAccountId}', '{outsiderAccountId}') or device_id in ('{ownerDeviceId}', '{outsiderDeviceId}'))
-            + (select count(*) from public.key_envelopes where logbook_id = '{logbookId}' or recipient_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}') or created_by_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}'))
+            (select count(*) from public.security_events where logbook_id = '{logbookId}' or account_id in ('{ownerAccountId}', '{outsiderAccountId}') or device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}'))
+            + (select count(*) from public.key_envelopes where logbook_id = '{logbookId}' or recipient_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}') or created_by_device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}'))
             + (select count(*) from public.operation_acks where logbook_id = '{logbookId}')
             + (select count(*) from public.operations where logbook_id = '{logbookId}')
-            + (select count(*) from public.devices where device_id in ('{ownerDeviceId}', '{outsiderDeviceId}'))
+            + (select count(*) from public.devices where device_id in ('{ownerDeviceId}', '{outsiderDeviceId}', '{workbookDeviceId}'))
             + (select count(*) from public.logbook_memberships where logbook_id = '{logbookId}' or account_id in ('{ownerAccountId}', '{outsiderAccountId}'))
             + (select count(*) from public.logbooks where logbook_id = '{logbookId}')
             + (select count(*) from public.accounts where account_id in ('{ownerAccountId}', '{outsiderAccountId}'))
@@ -420,6 +483,8 @@ static EnvelopeSnapshot ReadEnvelopeSnapshot(string psqlCli, string dbUrl, Guid 
             'deviceAlgorithm', coalesce((select wrapping_algorithm from public.key_envelopes where logbook_id = '{logbookId}' and recipient_device_id = '{deviceId}' and revoked_at is null limit 1), ''),
             'deviceEnvelopeExpiresInFuture', coalesce((select expires_at > now() from public.key_envelopes where logbook_id = '{logbookId}' and recipient_device_id = '{deviceId}' and revoked_at is null limit 1), false),
             'deviceRecoveryPublicKey', coalesce((select recovery_public_key from public.devices where device_id = '{deviceId}' limit 1), ''),
+            'deviceType', coalesce((select device_type::text from public.devices where device_id = '{deviceId}' limit 1), ''),
+            'deviceStatus', coalesce((select status::text from public.devices where device_id = '{deviceId}' limit 1), ''),
             'managedAuditCount', (select count(*) from public.security_events where logbook_id = '{logbookId}' and event_type = 'managed_recovery_envelope_created'),
             'deviceAuditCount', (select count(*) from public.security_events where logbook_id = '{logbookId}' and event_type = 'device_recovery_envelope_issued'),
             'auditDetails', coalesce((select string_agg(redacted_details::text, E'\n') from public.security_events where logbook_id = '{logbookId}'), '')
@@ -559,6 +624,40 @@ static async Task AssertAuthUserEndpointAsync(HttpClient http, string anonKey, s
     {
         throw new InvalidOperationException(
             $"Disposable Auth token was rejected by local Auth; status={(int)response.StatusCode}; {SanitizedErrorCode(body)}.");
+    }
+}
+
+static async Task AcknowledgeAsync(
+    HttpClient http,
+    string anonKey,
+    string bearerToken,
+    Guid logbookId,
+    Guid deviceId,
+    long revision)
+{
+    using var request = new HttpRequestMessage(HttpMethod.Post, "rest/v1/rpc/record_operation_ack")
+    {
+        Content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                p_logbook_id = logbookId,
+                p_device_id = deviceId,
+                p_highest_contiguous_revision = revision,
+                p_last_upload_revision = revision,
+                p_last_pull_revision = revision,
+                p_local_queue_state = "synced"
+            }, JsonOptions()),
+            Encoding.UTF8,
+            "application/json")
+    };
+    request.Headers.TryAddWithoutValidation("apikey", anonKey);
+    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+    using var response = await http.SendAsync(request);
+    var body = await response.Content.ReadAsStringAsync();
+    if (!response.IsSuccessStatusCode)
+    {
+        throw new InvalidOperationException(
+            $"Workbook acknowledgement failed with status {(int)response.StatusCode}; {SanitizedErrorCode(body)}.");
     }
 }
 
@@ -792,6 +891,8 @@ sealed record RestoreResponse(
     string algorithm,
     string keyVersionId);
 
+sealed record ActivationResponse(bool activated);
+
 sealed record ErrorResponse(
     string code,
     string message);
@@ -806,6 +907,8 @@ sealed record EnvelopeSnapshot(
     string DeviceAlgorithm,
     bool DeviceEnvelopeExpiresInFuture,
     string DeviceRecoveryPublicKey,
+    string DeviceType,
+    string DeviceStatus,
     int ManagedAuditCount,
     int DeviceAuditCount,
     string AuditDetails);

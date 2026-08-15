@@ -209,6 +209,8 @@ if (-not $SkipDependencyAudit) {
 if ($Tier -in @("Excel", "Release")) {
     Write-Step "Excel validation"
     & (Join-Path $repoRoot "tools\Test-WorkbookVbaParity.ps1") -RepoRoot $repoRoot
+    & (Join-Path $repoRoot "tools\Test-NewEntryHostedConnectionButtons.ps1") `
+        -WorkbookPath (Join-Path $repoRoot "Electronic_Logbook_Master.xlsm")
     & (Join-Path $repoRoot "tools\Test-VbaCompileDisposable.ps1")
     if (-not $SkipPublicReadinessCheck) {
         & (Join-Path $repoRoot "tools\Test-WorkbookPublicReadiness.ps1") -RepoRoot $repoRoot

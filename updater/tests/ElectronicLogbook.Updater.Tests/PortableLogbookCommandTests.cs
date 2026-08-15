@@ -92,11 +92,29 @@ public sealed class PortableLogbookCommandTests : IDisposable
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
 
-        var options = PortableLogbookCommandOptions.Parse(["hosted-sync", "--workbook", workbook, "--json"]);
+        var options = PortableLogbookCommandOptions.Parse(
+            ["hosted-sync", "--workbook", workbook, "--wait-for-workbook-unlock-seconds", "120", "--json"]);
 
         Assert.Equal(PortableLogbookCommand.HostedSync, options.Command);
         Assert.Equal(Path.GetFullPath(workbook), options.WorkbookPath);
+        Assert.Equal(120, options.WaitForWorkbookUnlockSeconds);
         Assert.True(options.Json);
+    }
+
+    [Fact]
+    public async Task HostedSyncWaitsForWorkbookExclusiveAccess()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var lockStream = new FileStream(workbook, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var waitTask = Task.Run(() => PortableLogbookCommandRunner.WaitForWorkbookUnlock(
+            workbook,
+            TimeSpan.FromSeconds(2),
+            TimeSpan.FromMilliseconds(20)));
+
+        await Task.Delay(100);
+        Assert.False(waitTask.IsCompleted);
+        await lockStream.DisposeAsync();
+        await waitTask;
     }
 
     [Fact]

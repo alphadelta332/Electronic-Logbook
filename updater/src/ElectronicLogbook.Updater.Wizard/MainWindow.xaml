@@ -33,14 +33,19 @@
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" x:Name="WelcomePanel">
-                <TextBlock Text="Welcome" FontSize="20" FontWeight="SemiBold" />
-                <TextBlock Margin="0,8,0,0" TextWrapping="Wrap" Text="This wizard creates a separate updated workbook. Your source workbook is never overwritten." />
+                <TextBlock x:Name="WelcomeTitleText" Text="Welcome" FontSize="20" FontWeight="SemiBold" />
+                <TextBlock x:Name="WelcomeDescriptionText" Margin="0,8,0,0" TextWrapping="Wrap" Text="This wizard creates a separate updated workbook. Your source workbook is never overwritten." />
                 <TextBlock Margin="0,16,0,0" x:Name="InstalledVersionText" Text="Installed version: unknown" />
                 <TextBlock Margin="0,6,0,0" x:Name="LatestVersionText" Text="Update channel: checking..." />
                 <TextBlock Margin="0,6,0,0" x:Name="LastCheckedText" Text="Last checked: never" />
                 <TextBlock Margin="0,6,0,0" x:Name="PortableLogbookStatusText" Text="Workbook sync: checking..." />
-                <TextBlock Margin="0,16,0,0" Text="Account, sync, and Advanced recovery" FontWeight="SemiBold" />
-                <UniformGrid Margin="0,8,0,0" Rows="2" Columns="4">
+                <Button Margin="0,16,0,0"
+                        Height="34"
+                        x:Name="HostedConnectButton"
+                        Content="Connect to Electronic Logbook"
+                        Click="HostedConnectButton_OnClick" />
+                <TextBlock x:Name="AdvancedRecoveryHeadingText" Margin="0,16,0,0" Text="Advanced recovery and support" FontWeight="SemiBold" />
+                <UniformGrid x:Name="AdvancedPortableActionsPanel" Margin="0,8,0,0" Rows="2" Columns="4">
                     <Button Margin="0,0,8,8"
                             x:Name="PortableEnableButton"
                             Content="Enable Sync"

@@ -193,9 +193,11 @@ public sealed class MobileSupabaseHostedSyncClientTests
         Assert.Equal("ingress-wrapped-package-key", requests[1].Body.GetProperty("wrappedPackageKey").GetString());
         Assert.False(requests[2].Body.TryGetProperty("wrappedPackageKey", out _));
         Assert.Equal("Pixel 8 Pro", requests[3].Body.GetProperty("platformLabel").GetString());
+        Assert.Equal("android", requests[3].Body.GetProperty("deviceType").GetString());
         Assert.Equal("code-ciphertext", requests[4].Body.GetProperty("recoveryCiphertext").GetString());
         Assert.False(requests[4].Body.TryGetProperty("recoveryCode", out _));
         Assert.Equal("Pixel 8 Pro", requests[5].Body.GetProperty("platformLabel").GetString());
+        Assert.Equal("android", requests[5].Body.GetProperty("deviceType").GetString());
         Assert.Equal("device-public-key", requests[5].Body.GetProperty("devicePublicKey").GetString());
         Assert.False(requests[6].Body.TryGetProperty("devicePublicKey", out _));
     }

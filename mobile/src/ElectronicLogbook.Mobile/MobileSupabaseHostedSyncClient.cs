@@ -597,7 +597,8 @@ public sealed class MobileSupabaseHostedSyncClient(
                 request.DeviceKey.PublicKey,
                 request.DeviceKey.Fingerprint,
                 request.DeviceKey.Algorithm,
-                PlatformLabel: request.PlatformLabel),
+                PlatformLabel: request.PlatformLabel,
+                DeviceType: "android"),
             cancellationToken);
     }
 
@@ -643,7 +644,8 @@ public sealed class MobileSupabaseHostedSyncClient(
                 request.DeviceKey.PublicKey,
                 request.DeviceKey.Fingerprint,
                 request.DeviceKey.Algorithm,
-                PlatformLabel: request.PlatformLabel),
+                PlatformLabel: request.PlatformLabel,
+                DeviceType: "android"),
             cancellationToken);
     }
 
@@ -1373,6 +1375,8 @@ public sealed class MobileSupabaseHostedSyncClient(
         string? IngressKeyVersionId = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? PlatformLabel = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? DeviceType = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         string? RecoveryCiphertext = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

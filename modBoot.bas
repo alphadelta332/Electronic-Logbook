@@ -45,6 +45,63 @@ Public Sub CheckForUpdate()
 Fail:
 End Sub
 
+Public Sub ConnectToElectronicLogbook()
+    Dim sourceWorkbookPath As String
+    Dim wizardReason As String
+    Dim targetVersion As String
+    Dim closeErr As Long
+    Dim closeMsg As String
+
+    On Error GoTo Fail
+
+    If MsgBox("Connect this workbook to your invited Electronic Logbook account?" & vbCrLf & vbCrLf & _
+              "The workbook will save and close, then the updater will ask you to sign in. A timestamped backup will be kept before account data is connected.", _
+              vbYesNo + vbInformation, "Connect to Electronic Logbook") <> vbYes Then Exit Sub
+
+    targetVersion = FetchRemoteVersion()
+    If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+        If Not ConfirmDevelopmentWizardLaunch(targetVersion) Then Exit Sub
+    End If
+
+    sourceWorkbookPath = ResolveLocalPath(ThisWorkbook) & "\" & ThisWorkbook.Name
+    ThisWorkbook.Save
+
+    If TryLaunchExternalUpdaterWizard( _
+            sourceWorkbookPath, _
+            GITHUB_USER & "/" & GITHUB_REPO, _
+            wizardReason, _
+            "", _
+            targetVersion, _
+            True) Then
+        On Error Resume Next
+        SuppressHostedWorkbookSyncOnClose
+        Application.DisplayAlerts = False
+        ThisWorkbook.Close SaveChanges:=False
+        closeErr = Err.Number
+        closeMsg = Err.Description
+        Application.DisplayAlerts = True
+        On Error GoTo 0
+
+        If closeErr <> 0 Then
+            MsgBox "The account connection window is running, but this workbook could not close automatically." & vbCrLf & vbCrLf & _
+                   "Please close this workbook now so connection can continue." & vbCrLf & vbCrLf & _
+                   "Close error: " & closeMsg, _
+                   vbExclamation, "Manual Close Required"
+        End If
+        Exit Sub
+    End If
+
+    MsgBox "The Electronic Logbook updater was not available, so account connection could not start." & vbCrLf & vbCrLf & _
+           "Reason: " & wizardReason & vbCrLf & vbCrLf & _
+           "Your workbook has not been changed.", vbCritical, "Connection Failed"
+    Exit Sub
+
+Fail:
+    MsgBox "Account connection could not start." & vbCrLf & vbCrLf & _
+           Err.Description & vbCrLf & vbCrLf & _
+           "Your workbook has not been changed.", vbCritical, "Connection Failed"
+End Sub
+
 Public Sub CheckForUpdateManual()
     Dim remoteVer As String
     Dim localVer  As String
@@ -113,6 +170,7 @@ Private Sub RunWizardUpdate(ByVal newVersion As String)
             Dim closeErr As Long
             Dim closeMsg As String
             On Error Resume Next
+            SuppressHostedWorkbookSyncOnClose
             Application.DisplayAlerts = False
             ThisWorkbook.Close SaveChanges:=False
             closeErr = Err.Number
@@ -363,7 +421,8 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
                                                 ByVal repository As String, _
                                                 Optional ByRef reason As String = "", _
                                                 Optional ByVal masterWorkbookPath As String = "", _
-                                                Optional ByVal targetVersion As String = "") As Boolean
+                                                Optional ByVal targetVersion As String = "", _
+                                                Optional ByVal connectHosted As Boolean = False) As Boolean
     Dim wizardPath As String
     Dim commandLine As String
     Dim shellObj As Object
@@ -386,6 +445,7 @@ Private Function TryLaunchExternalUpdaterWizard(ByVal sourceWorkbookPath As Stri
             commandLine = commandLine & " --channel " & WorkbookUpdateChannelArgument()
         End If
     End If
+    If connectHosted Then commandLine = commandLine & " --connect-hosted"
 
     Set shellObj = CreateObject("WScript.Shell")
     shellObj.Run commandLine, 1, False

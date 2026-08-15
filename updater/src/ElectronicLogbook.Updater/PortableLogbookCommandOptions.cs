@@ -22,6 +22,7 @@ public sealed record PortableLogbookCommandOptions(
     string? HostedRefreshToken,
     DateTimeOffset? HostedAccessTokenExpiresAt,
     string? WindowsCredentialTargetName,
+    int? WaitForWorkbookUnlockSeconds,
     bool SaveWindowsCredential,
     bool Json,
     bool ShowHelp)
@@ -112,6 +113,7 @@ public sealed record PortableLogbookCommandOptions(
         string? hostedRefreshToken = null;
         DateTimeOffset? hostedAccessTokenExpiresAt = null;
         string? windowsCredentialTargetName = null;
+        int? waitForWorkbookUnlockSeconds = null;
         var saveWindowsCredential = false;
         var json = false;
         var showHelp = command == PortableLogbookCommand.None;
@@ -179,6 +181,9 @@ public sealed record PortableLogbookCommandOptions(
                 case "--hosted-access-token-expires-at":
                     hostedAccessTokenExpiresAt = ReadDateTimeOffsetValue(args, ref index, arg);
                     break;
+                case "--wait-for-workbook-unlock-seconds":
+                    waitForWorkbookUnlockSeconds = ReadPositiveIntValue(args, ref index, arg);
+                    break;
                 case "--json":
                     json = true;
                     break;
@@ -196,7 +201,7 @@ public sealed record PortableLogbookCommandOptions(
 
         if (showHelp)
         {
-            return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, hostedAccountId, hostedAccessToken, hostedRefreshToken, hostedAccessTokenExpiresAt, windowsCredentialTargetName, saveWindowsCredential, json, true);
+            return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, hostedAccountId, hostedAccessToken, hostedRefreshToken, hostedAccessTokenExpiresAt, windowsCredentialTargetName, waitForWorkbookUnlockSeconds, saveWindowsCredential, json, true);
         }
 
         if ((command == PortableLogbookCommand.Enable ||
@@ -409,7 +414,19 @@ public sealed record PortableLogbookCommandOptions(
             throw new UpdaterUsageException("--save-windows-credential is only supported for portable enable.");
         }
 
-        return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, hostedAccountId, hostedAccessToken, hostedRefreshToken, hostedAccessTokenExpiresAt, windowsCredentialTargetName, saveWindowsCredential, json, false);
+        if (waitForWorkbookUnlockSeconds is not null && command != PortableLogbookCommand.HostedSync)
+        {
+            throw new UpdaterUsageException(
+                "--wait-for-workbook-unlock-seconds is only supported for portable hosted-sync.");
+        }
+
+        if (waitForWorkbookUnlockSeconds > 300)
+        {
+            throw new UpdaterUsageException(
+                "--wait-for-workbook-unlock-seconds cannot exceed 300 seconds.");
+        }
+
+        return new(command, workbook, recoveryOutput, recoveryCodeFile, packageOutput, packageInput, printedCopyOutput, holderName, holderDateOfBirth, certifiedOn, recordsPerPage, entryId, revisionId, note, hostedAccountId, hostedAccessToken, hostedRefreshToken, hostedAccessTokenExpiresAt, windowsCredentialTargetName, waitForWorkbookUnlockSeconds, saveWindowsCredential, json, false);
     }
 
     private static string ReadValue(IReadOnlyList<string> args, ref int index, string option)

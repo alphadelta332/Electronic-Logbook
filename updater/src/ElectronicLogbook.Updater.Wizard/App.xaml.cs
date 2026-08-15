@@ -20,7 +20,14 @@ public partial class App : Application
         var mainWindow = new MainWindow();
         MainWindow = mainWindow;
         mainWindow.Closed += (_, _) => Shutdown();
-        mainWindow.BeginAvailabilityCheck();
+        if (mainWindow.IsHostedConnectionMode)
+        {
+            mainWindow.BeginHostedConnectionMode();
+        }
+        else
+        {
+            mainWindow.BeginAvailabilityCheck();
+        }
     }
 }
 

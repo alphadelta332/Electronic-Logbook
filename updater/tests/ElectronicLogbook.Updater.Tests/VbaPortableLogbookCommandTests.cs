@@ -82,39 +82,74 @@ public sealed class VbaPortableLogbookCommandTests
         Assert.Contains("actionName = \"ViewPortableLogbookRevisionHistory\"", source, StringComparison.Ordinal);
         Assert.Contains("resolveportablelogbookconflict", source, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("actionName = \"ResolvePortableLogbookConflict\"", source, StringComparison.Ordinal);
+        Assert.Contains("connecttoelectroniclogbook", source, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("actionName = \"ConnectToElectronicLogbook\"", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WorkbookExposesNormalHostedAccountConnectionAction()
+    {
+        var source = File.ReadAllText(TestRepo.FindFile("modBoot.bas"));
+        var connectionBody = ExtractVbaProcedureBody(source, "ConnectToElectronicLogbook", "End Sub");
+
+        Assert.Contains("Public Sub ConnectToElectronicLogbook()", connectionBody, StringComparison.Ordinal);
+        Assert.Contains("ThisWorkbook.Save", connectionBody, StringComparison.Ordinal);
+        Assert.Contains("ThisWorkbook.Close SaveChanges:=False", connectionBody, StringComparison.Ordinal);
+        Assert.Contains("TryLaunchExternalUpdaterWizard(", connectionBody, StringComparison.Ordinal);
+        Assert.Contains("SuppressHostedWorkbookSyncOnClose", connectionBody, StringComparison.Ordinal);
+        Assert.Contains("--connect-hosted", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("--access-token", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("--refresh-token", source, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("--logbook-key", source, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void ModLogbookExposesGuardedHostedWorkbookSyncBridge()
     {
         var source = ReadModLogbookSource();
+        var queueBody = ExtractVbaProcedureBody(source, "QueueHostedWorkbookSync", "End Sub");
+        var closeLaunchBody = ExtractVbaProcedureBody(source, "LaunchQueuedHostedWorkbookSyncAfterClose", "End Sub");
 
         Assert.Contains("Public Sub QueueHostedWorkbookSync", source, StringComparison.Ordinal);
-        Assert.Contains("Public Sub RunQueuedHostedWorkbookSync()", source, StringComparison.Ordinal);
         Assert.Contains("Public Sub FlushHostedWorkbookSyncBeforeSave()", source, StringComparison.Ordinal);
         Assert.Contains("Public Sub RefreshHostedWorkbookSyncStatus()", source, StringComparison.Ordinal);
-        Assert.Contains("mHostedWorkbookSyncBusy", source, StringComparison.Ordinal);
+        Assert.Contains("Public Sub LaunchQueuedHostedWorkbookSyncAfterClose()", source, StringComparison.Ordinal);
+        Assert.Contains("Public Sub SuppressHostedWorkbookSyncOnClose()", source, StringComparison.Ordinal);
         Assert.Contains("mHostedWorkbookSyncQueued", source, StringComparison.Ordinal);
-        Assert.Contains("Application.OnTime", source, StringComparison.Ordinal);
-        Assert.Contains("\"hosted-sync\"", source, StringComparison.Ordinal);
+        Assert.Contains("portable hosted-sync", source, StringComparison.Ordinal);
         Assert.Contains("\"hosted-status\"", source, StringComparison.Ordinal);
         Assert.Contains("--json", source, StringComparison.Ordinal);
         Assert.Contains("\"Synced\"", source, StringComparison.Ordinal);
         Assert.Contains("\"Waiting\"", source, StringComparison.Ordinal);
         Assert.Contains("\"Signing in\"", source, StringComparison.Ordinal);
         Assert.Contains("\"Needs attention\"", source, StringComparison.Ordinal);
+        Assert.Contains("Public Function HostedWorkbookSyncMetadataChanged", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Application.OnTime", queueBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("RunPortableLogbookCommand", queueBody, StringComparison.Ordinal);
+        Assert.Contains("--wait-for-workbook-unlock-seconds 120", closeLaunchBody, StringComparison.Ordinal);
+        Assert.Contains("shellObj.Run commandLine, 0, False", closeLaunchBody, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ThisWorkbookQueuesHostedSyncOnOpenSaveAndChange()
+    public void ThisWorkbookQueuesHostedSyncOnSaveAndChangeThenLaunchesAfterClose()
     {
         var source = ReadThisWorkbookSource();
 
         Assert.Contains("RefreshHostedWorkbookSyncStatus", source, StringComparison.Ordinal);
-        Assert.Contains("QueueHostedWorkbookSync \"open\"", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("QueueHostedWorkbookSync \"open\"", source, StringComparison.Ordinal);
         Assert.Contains("Private Sub Workbook_BeforeSave", source, StringComparison.Ordinal);
         Assert.Contains("FlushHostedWorkbookSyncBeforeSave", source, StringComparison.Ordinal);
+        Assert.Contains("Private Sub Workbook_BeforeClose", source, StringComparison.Ordinal);
+        Assert.Contains("LaunchQueuedHostedWorkbookSyncAfterClose", source, StringComparison.Ordinal);
         Assert.Contains("QueueHostedWorkbookSync \"change\"", source, StringComparison.Ordinal);
+
+        var sheetChangeBody = ExtractVbaProcedureBody(source, "Workbook_SheetChange", "End Sub");
+        var metadataGuardIndex = sheetChangeBody.IndexOf(
+            "If HostedWorkbookSyncMetadataChanged(Target) Then GoTo CleanExit",
+            StringComparison.Ordinal);
+        var queueIndex = sheetChangeBody.IndexOf("QueueHostedWorkbookSync \"change\"", StringComparison.Ordinal);
+        Assert.True(metadataGuardIndex >= 0 && queueIndex > metadataGuardIndex,
+            "Hosted status-cell writes must exit the sheet-change handler before another sync is queued.");
     }
 
     [Fact]

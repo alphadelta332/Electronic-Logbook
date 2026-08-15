@@ -57,9 +57,37 @@ public partial class MainWindow : Window
         UpdateWizardView();
     }
 
+    public bool IsHostedConnectionMode => _context.ConnectHosted;
+
     public void BeginAvailabilityCheck()
     {
         _ = InitialiseAvailabilitySafelyAsync();
+    }
+
+    public void BeginHostedConnectionMode()
+    {
+        _ = InitialiseHostedConnectionModeSafelyAsync();
+    }
+
+    private async Task InitialiseHostedConnectionModeSafelyAsync()
+    {
+        Show();
+        Activate();
+        FooterStatusText.Text = "Waiting for the workbook to save and close...";
+        var sourceCheck = await WaitForSourceWorkbookAsync(_context.SourcePath);
+        if (!sourceCheck.IsOk)
+        {
+            FooterStatusText.Text = sourceCheck.Message;
+            MessageBox.Show(
+                this,
+                sourceCheck.Message,
+                "Connect to Electronic Logbook",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+            return;
+        }
+
+        await RunHostedConnectionAsync();
     }
 
     private async Task InitialiseAvailabilitySafelyAsync()
@@ -82,6 +110,29 @@ public partial class MainWindow : Window
 
     private void UpdateWizardView()
     {
+        if (_context.ConnectHosted)
+        {
+            StepHeaderText.Text = "Connect to Electronic Logbook";
+            WelcomePanel.Visibility = Visibility.Visible;
+            AvailablePanel.Visibility = Visibility.Collapsed;
+            PreflightPanel.Visibility = Visibility.Collapsed;
+            ReadyPanel.Visibility = Visibility.Collapsed;
+            UpdatingPanel.Visibility = Visibility.Collapsed;
+            CompletePanel.Visibility = Visibility.Collapsed;
+            WelcomeTitleText.Text = "Connect this workbook";
+            WelcomeDescriptionText.Text = "Sign in to your invited account. The updater will recover the existing hosted logbook key into Windows Credential Manager, register this workbook as its own device, and sync without showing keys or service tokens.";
+            InstalledVersionText.Visibility = Visibility.Collapsed;
+            LatestVersionText.Visibility = Visibility.Collapsed;
+            LastCheckedText.Visibility = Visibility.Collapsed;
+            AdvancedRecoveryHeadingText.Visibility = Visibility.Collapsed;
+            AdvancedPortableActionsPanel.Visibility = Visibility.Collapsed;
+            BackButton.Visibility = Visibility.Collapsed;
+            NextButton.Visibility = Visibility.Collapsed;
+            CancelButton.Content = "Close";
+            HostedConnectButton.IsEnabled = !_isUpdating && File.Exists(_context.SourcePath);
+            return;
+        }
+
         StepHeaderText.Text = $"Step {_stepIndex + 1} of {TotalSteps}: {_stepTitles[_stepIndex]}";
 
         WelcomePanel.Visibility = _stepIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -100,6 +151,7 @@ public partial class MainWindow : Window
         CancelButton.Content = _isUpdating ? "Cancel Update" : "Cancel";
 
         var portableActionsEnabled = !_isUpdating && File.Exists(_context.SourcePath);
+        HostedConnectButton.IsEnabled = portableActionsEnabled;
         PortableEnableButton.IsEnabled = portableActionsEnabled;
         PortableExportButton.IsEnabled = portableActionsEnabled;
         PortableImportButton.IsEnabled = portableActionsEnabled;
@@ -559,6 +611,209 @@ public partial class MainWindow : Window
         await RefreshPortableLogbookStatusAsync();
     }
 
+    private async void HostedConnectButton_OnClick(object sender, RoutedEventArgs e)
+    {
+        await RunHostedConnectionAsync();
+    }
+
+    private async Task RunHostedConnectionAsync()
+    {
+        if (_isUpdating)
+        {
+            return;
+        }
+
+        var email = PromptForText(
+            "Connect to Electronic Logbook",
+            "Enter the email address used for your invited Electronic Logbook account:",
+            allowEmpty: false);
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            return;
+        }
+
+        if (!SupabaseHostedSyncConfiguration.TryLoad(out var configuration, out var unavailableReason))
+        {
+            ShowPortableActionError(
+                "Account connection is not configured",
+                new InvalidOperationException(unavailableReason));
+            return;
+        }
+
+        _isUpdating = true;
+        UpdateWizardView();
+        try
+        {
+            using var client = new SupabaseWorkbookConnectionClient(
+                configuration ?? throw new InvalidOperationException("Hosted configuration was not resolved."));
+            FooterStatusText.Text = "Sending a private-pilot sign-in email...";
+            var signIn = await client.StartEmailSignInAsync(email);
+            var verificationInput = PromptForText(
+                "Verify invited account",
+                $"A sign-in email was sent to {signIn.DeliveryHint}. Enter the code shown in the email, or paste the full unused sign-in link:",
+                allowEmpty: false);
+            if (string.IsNullOrWhiteSpace(verificationInput))
+            {
+                FooterStatusText.Text = "Account connection cancelled.";
+                return;
+            }
+
+            FooterStatusText.Text = "Verifying the invited account...";
+            var session = await client.CompleteEmailSignInAsync(verificationInput);
+            var logbooks = await client.DiscoverActiveLogbooksAsync();
+            if (logbooks.Count == 0)
+            {
+                throw new InvalidOperationException("This invited account has no active Electronic Logbook to connect.");
+            }
+
+            var logbook = PromptForHostedLogbook(logbooks);
+            if (logbook is null)
+            {
+                FooterStatusText.Text = "Account connection cancelled.";
+                return;
+            }
+
+            var currentStatus = PortableLogbookCommandRunner.ReadHostedStatus(_context.SourcePath);
+            var warning = currentStatus.IsPaired
+                ? "This workbook is already connected. Continuing will create a new workbook device and retain a timestamped backup of the current file."
+                : "The workbook will be backed up, registered as a separate device, and its visible flight rows will merge with the selected hosted logbook.";
+            if (MessageBox.Show(
+                    this,
+                    $"Connect this workbook to '{logbook.DisplayName}'?{Environment.NewLine}{Environment.NewLine}{warning}",
+                    "Confirm workbook connection",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information) != MessageBoxResult.Yes)
+            {
+                FooterStatusText.Text = "Account connection cancelled.";
+                return;
+            }
+
+            var deviceId = DeviceId.New();
+            using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
+            FooterStatusText.Text = "Recovering the hosted logbook key securely...";
+            var logbookKey = await client.RestoreWorkbookKeyAsync(
+                logbook.LogbookId,
+                deviceId,
+                recoveryKeyPair);
+
+            FooterStatusText.Text = "Saving the connected workbook device...";
+            _ = await Task.Run(() => PortableLogbookCommandRunner.ConnectHostedWorkbook(
+                _context.SourcePath,
+                session.AccountId,
+                logbook.LogbookId,
+                deviceId,
+                session.Credential,
+                logbookKey,
+                recoveryKeyPair,
+                DateTimeOffset.UtcNow));
+
+            FooterStatusText.Text = "Running the first workbook sync...";
+            PortableHostedWorkbookSyncResult? sync = null;
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                sync = await Task.Run(() => PortableLogbookCommandRunner.SyncHostedWorkbook(
+                    _context.SourcePath,
+                    DateTimeOffset.UtcNow));
+                if (sync.Status != "Waiting")
+                {
+                    break;
+                }
+            }
+
+            if (sync is null || sync.Status != "Synced")
+            {
+                var status = sync?.Status ?? "Needs attention";
+                var reason = string.IsNullOrWhiteSpace(sync?.AttentionRequiredReason)
+                    ? null
+                    : $" {sync.AttentionRequiredReason}";
+                throw new InvalidOperationException(
+                    $"The workbook was saved securely, but its initial hosted sync reports '{status}'.{reason} " +
+                    "The workbook device was not activated; reconnect when hosted sync is available.");
+            }
+
+            FooterStatusText.Text = "Activating the synced workbook device...";
+            await client.ActivateWorkbookDeviceAsync(logbook.LogbookId, deviceId);
+
+            PortableLogbookStatusText.Text = $"Workbook sync: {sync.Status}";
+            FooterStatusText.Text = "Account connected and workbook synced.";
+
+            MessageBox.Show(
+                this,
+                "This workbook is connected to your Electronic Logbook account and the first sync completed.",
+                "Electronic Logbook connected",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+
+            if (_context.ConnectHosted)
+            {
+                Process.Start(new ProcessStartInfo(_context.SourcePath) { UseShellExecute = true });
+                Close();
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowPortableActionError("Account connection failed", ex);
+        }
+        finally
+        {
+            _isUpdating = false;
+            UpdateWizardView();
+        }
+    }
+
+    private SupabaseWorkbookLogbook? PromptForHostedLogbook(IReadOnlyList<SupabaseWorkbookLogbook> logbooks)
+    {
+        if (logbooks.Count == 1)
+        {
+            return logbooks[0];
+        }
+
+        var choices = logbooks
+            .Select((logbook, index) => new HostedLogbookChoice(index, $"{logbook.DisplayName} ({logbook.Role})"))
+            .ToArray();
+        var comboBox = new ComboBox
+        {
+            MinWidth = 360,
+            Margin = new Thickness(0, 8, 0, 0),
+            ItemsSource = choices,
+            DisplayMemberPath = nameof(HostedLogbookChoice.Label),
+            SelectedIndex = 0
+        };
+        var okButton = new Button { Content = "Continue", Width = 90, IsDefault = true };
+        var cancelButton = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+        var window = new Window
+        {
+            Title = "Choose Electronic Logbook",
+            Owner = this,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            ResizeMode = ResizeMode.NoResize,
+            SizeToContent = SizeToContent.WidthAndHeight
+        };
+        okButton.Click += (_, _) => window.DialogResult = true;
+        window.Content = new StackPanel
+        {
+            Margin = new Thickness(16),
+            Children =
+            {
+                new TextBlock { Text = "Choose the logbook this workbook should use:" },
+                comboBox,
+                new StackPanel
+                {
+                    Margin = new Thickness(0, 12, 0, 0),
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Right,
+                    Children = { okButton, cancelButton }
+                }
+            }
+        };
+        if (window.ShowDialog() != true || comboBox.SelectedItem is not HostedLogbookChoice selected)
+        {
+            return null;
+        }
+
+        return logbooks[selected.Index];
+    }
+
     private async void PortableEnableButton_OnClick(object sender, RoutedEventArgs e)
     {
         var recoveryPath = ChooseSavePath(
@@ -812,7 +1067,11 @@ public partial class MainWindow : Window
 
     private string? PromptForText(string title, string prompt, bool allowEmpty)
     {
-        var textBox = new TextBox { MinWidth = 320, Margin = new Thickness(0, 8, 0, 0) };
+        var textBox = new TextBox
+        {
+            Margin = new Thickness(0, 8, 0, 0),
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Auto
+        };
         var okButton = new Button { Content = "OK", Width = 80, IsDefault = true };
         var cancelButton = new Button { Content = "Cancel", Width = 80, Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
         var window = new Window
@@ -821,7 +1080,8 @@ public partial class MainWindow : Window
             Owner = this,
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             ResizeMode = ResizeMode.NoResize,
-            SizeToContent = SizeToContent.WidthAndHeight
+            Width = 480,
+            SizeToContent = SizeToContent.Height
         };
         okButton.Click += (_, _) =>
         {
@@ -844,7 +1104,7 @@ public partial class MainWindow : Window
             Margin = new Thickness(16),
             Children =
             {
-                new TextBlock { Text = prompt },
+                new TextBlock { Text = prompt, TextWrapping = TextWrapping.Wrap },
                 textBox,
                 buttons
             }
@@ -1949,6 +2209,7 @@ public partial class MainWindow : Window
         var repository = UpdaterOptions.DefaultRepository;
         UpdateChannel? channel = null;
         var useInPlaceSwap = true;
+        var connectHosted = false;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -1976,6 +2237,9 @@ public partial class MainWindow : Window
                 case "--no-inplace":
                     useInPlaceSwap = false;
                     break;
+                case "--connect-hosted":
+                    connectHosted = true;
+                    break;
             }
         }
 
@@ -2002,7 +2266,8 @@ public partial class MainWindow : Window
             Repository: repository,
             Channel: channel.Value,
             UseInPlaceSwap: updatePathPlan.UseInPlaceSwap,
-            HandoffNote: updatePathPlan.HandoffNote);
+            HandoffNote: updatePathPlan.HandoffNote,
+            ConnectHosted: connectHosted);
     }
 
     private static UpdateChannel ParseUpdateChannel(string value)
@@ -2215,7 +2480,8 @@ public partial class MainWindow : Window
         string Repository,
         UpdateChannel Channel,
         bool UseInPlaceSwap,
-        string HandoffNote)
+        string HandoffNote,
+        bool ConnectHosted)
     {
         public bool UsesProvidedMaster => !string.IsNullOrWhiteSpace(MasterPath);
 
@@ -2228,4 +2494,6 @@ public partial class MainWindow : Window
             _ => "Stable"
         };
     }
+
+    private sealed record HostedLogbookChoice(int Index, string Label);
 }

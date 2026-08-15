@@ -63,7 +63,6 @@ Private Sub Workbook_Open()
     ' Always start interactive sessions on the primary entry field.
     SetWorkbookOpenStatus "Opening New Entry screen"
     NavigateToDefaultOpenView
-    QueueHostedWorkbookSync "open"
 
     FinishWorkbookOpenStatus "Ready"
     Exit Sub
@@ -82,6 +81,13 @@ End Sub
 Private Sub Workbook_BeforeSave(ByVal SaveAsUI As Boolean, Cancel As Boolean)
     On Error GoTo CleanExit
     FlushHostedWorkbookSyncBeforeSave
+
+CleanExit:
+End Sub
+
+Private Sub Workbook_BeforeClose(Cancel As Boolean)
+    On Error GoTo CleanExit
+    LaunchQueuedHostedWorkbookSyncAfterClose
 
 CleanExit:
 End Sub
@@ -194,6 +200,7 @@ Private Sub Workbook_SheetChange(ByVal Sh As Object, ByVal Target As Range)
     On Error GoTo CleanExit
     statsSheetChanged = (Sh.Name = "Stats")
     If Sh.Name = "New Entry" Then ClearNewEntryValidationHighlightsForTarget Target
+    If HostedWorkbookSyncMetadataChanged(Target) Then GoTo CleanExit
     MarkRoutesDirtyForChangedRange Sh, Target
     QueueHostedWorkbookSync "change"
 

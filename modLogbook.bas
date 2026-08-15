@@ -40,7 +40,6 @@ Private Const HOSTED_SYNC_STATUS_NAME As String = "PortableHostedSyncStatus"
 Private Const HOSTED_SYNC_STATUS_AT_NAME As String = "PortableHostedSyncStatusAt"
 Private Const HOSTED_SYNC_ATTENTION_NAME As String = "PortableHostedSyncAttention"
 Private Const HOSTED_SYNC_CREDENTIAL_TARGET_NAME As String = "PortableHostedCredentialTarget"
-Private Const HOSTED_SYNC_IDLE_DELAY_SECONDS As Long = 5
 Private Const HOSTED_SYNC_STATUS_SYNCED As String = "Synced"
 Private Const HOSTED_SYNC_STATUS_WAITING As String = "Waiting"
 Private Const HOSTED_SYNC_STATUS_OFFLINE As String = "Offline"
@@ -49,10 +48,8 @@ Private Const HOSTED_SYNC_STATUS_NEEDS_ATTENTION As String = "Needs attention"
 Private mApplyingNewEntryLayout As Boolean
 Private mLastLogbookExportError As String
 Private mPendingNewEntryNavigationFields As Variant
-Private mHostedWorkbookSyncBusy As Boolean
 Private mHostedWorkbookSyncQueued As Boolean
-Private mHostedWorkbookSyncScheduledAt As Date
-Private mHostedWorkbookSyncLastReason As String
+Private mSuppressHostedWorkbookSyncOnClose As Boolean
 
 Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
@@ -7467,30 +7464,74 @@ Public Sub QueueHostedWorkbookSync(Optional ByVal reason As String = "idle")
     If Not WorkbookHostedSyncIsPaired() Then Exit Sub
 
     mHostedWorkbookSyncQueued = True
-    mHostedWorkbookSyncLastReason = reason
     SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME, HOSTED_SYNC_STATUS_WAITING
     SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_AT_NAME, Format$(Now, "yyyy-mm-dd hh:nn:ss")
     SetHostedWorkbookStatusBar HOSTED_SYNC_STATUS_WAITING
-
-    If mHostedWorkbookSyncBusy Then Exit Sub
-    If mHostedWorkbookSyncScheduledAt <> 0 Then Exit Sub
-
-    mHostedWorkbookSyncScheduledAt = Now + TimeSerial(0, 0, HOSTED_SYNC_IDLE_DELAY_SECONDS)
-    Application.OnTime EarliestTime:=mHostedWorkbookSyncScheduledAt, _
-                       Procedure:="RunQueuedHostedWorkbookSync", _
-                       Schedule:=True
 End Sub
 
-Public Sub RunQueuedHostedWorkbookSync()
-    mHostedWorkbookSyncScheduledAt = 0
-    If Not mHostedWorkbookSyncQueued Then Exit Sub
-    RunHostedWorkbookSync mHostedWorkbookSyncLastReason
-End Sub
+Public Function HostedWorkbookSyncMetadataChanged(ByVal changedRange As Range) As Boolean
+    Dim metadataNames As Variant
+    Dim metadataName As Variant
+    Dim metadataRange As Range
+
+    If changedRange Is Nothing Then Exit Function
+
+    metadataNames = Array( _
+        HOSTED_SYNC_STATUS_NAME, _
+        HOSTED_SYNC_STATUS_AT_NAME, _
+        HOSTED_SYNC_ATTENTION_NAME, _
+        HOSTED_SYNC_CREDENTIAL_TARGET_NAME)
+
+    On Error Resume Next
+    For Each metadataName In metadataNames
+        Set metadataRange = Nothing
+        Set metadataRange = ThisWorkbook.Names(CStr(metadataName)).RefersToRange
+        If Not metadataRange Is Nothing Then
+            If Not Intersect(changedRange, metadataRange) Is Nothing Then
+                HostedWorkbookSyncMetadataChanged = True
+                Exit Function
+            End If
+        End If
+    Next metadataName
+    On Error GoTo 0
+End Function
 
 Public Sub FlushHostedWorkbookSyncBeforeSave()
     If Not WorkbookHostedSyncIsPaired() Then Exit Sub
 
     QueueHostedWorkbookSync "save"
+End Sub
+
+Public Sub SuppressHostedWorkbookSyncOnClose()
+    mSuppressHostedWorkbookSyncOnClose = True
+End Sub
+
+Public Sub LaunchQueuedHostedWorkbookSyncAfterClose()
+    Dim updaterPath As String
+    Dim commandLine As String
+    Dim shellObj As Object
+    Dim statusText As String
+
+    If mSuppressHostedWorkbookSyncOnClose Then
+        mSuppressHostedWorkbookSyncOnClose = False
+        Exit Sub
+    End If
+    If Not WorkbookHostedSyncIsPaired() Then Exit Sub
+
+    statusText = Trim$(CStr(GetWorkbookNameValue( _
+        ThisWorkbook, HOSTED_SYNC_STATUS_NAME, vbNullString)))
+    If Not mHostedWorkbookSyncQueued And statusText <> HOSTED_SYNC_STATUS_WAITING Then Exit Sub
+
+    updaterPath = ResolvePortableLogbookUpdaterPath()
+    If updaterPath = "" Then Exit Sub
+
+    commandLine = QuoteCommandArgument(updaterPath) & _
+                  " portable hosted-sync --workbook " & _
+                  QuoteCommandArgument(ThisWorkbook.FullName) & _
+                  " --wait-for-workbook-unlock-seconds 120 --json"
+    Set shellObj = CreateObject("WScript.Shell")
+    shellObj.Run commandLine, 0, False
+    mHostedWorkbookSyncQueued = False
 End Sub
 
 Public Sub RefreshHostedWorkbookSyncStatus()
@@ -7516,58 +7557,6 @@ Public Sub RefreshHostedWorkbookSyncStatus()
     End If
 
 CleanExit:
-End Sub
-
-Private Sub RunHostedWorkbookSync(ByVal reason As String)
-    Dim exitCode As Long
-    Dim outputText As String
-    Dim errorText As String
-    Dim statusText As String
-    Dim attentionText As String
-
-    If mHostedWorkbookSyncBusy Then
-        mHostedWorkbookSyncQueued = True
-        Exit Sub
-    End If
-    If Not WorkbookHostedSyncIsPaired() Then Exit Sub
-
-    On Error GoTo Fail
-    mHostedWorkbookSyncBusy = True
-    mHostedWorkbookSyncQueued = False
-    SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME, HOSTED_SYNC_STATUS_WAITING
-    SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_AT_NAME, Format$(Now, "yyyy-mm-dd hh:nn:ss")
-    SetHostedWorkbookStatusBar HOSTED_SYNC_STATUS_WAITING
-
-    exitCode = RunPortableLogbookCommand( _
-        "hosted-sync", _
-        "--workbook " & QuoteCommandArgument(ThisWorkbook.FullName) & " --json", _
-        outputText, _
-        errorText)
-
-    If exitCode = 0 Then
-        statusText = JsonStringProperty(outputText, "status")
-        attentionText = JsonStringProperty(outputText, "attentionRequiredReason")
-        If statusText = "" Then statusText = HOSTED_SYNC_STATUS_SYNCED
-        SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME, statusText
-        SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_AT_NAME, Format$(Now, "yyyy-mm-dd hh:nn:ss")
-        SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_ATTENTION_NAME, attentionText
-        SetHostedWorkbookStatusBar statusText
-    Else
-        SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME, HOSTED_SYNC_STATUS_NEEDS_ATTENTION
-        SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_ATTENTION_NAME, Trim$(errorText)
-        SetHostedWorkbookStatusBar HOSTED_SYNC_STATUS_NEEDS_ATTENTION
-    End If
-
-CleanExit:
-    mHostedWorkbookSyncBusy = False
-    If mHostedWorkbookSyncQueued Then QueueHostedWorkbookSync "queued"
-    Exit Sub
-
-Fail:
-    SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME, HOSTED_SYNC_STATUS_NEEDS_ATTENTION
-    SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_ATTENTION_NAME, Err.Description
-    SetHostedWorkbookStatusBar HOSTED_SYNC_STATUS_NEEDS_ATTENTION
-    Resume CleanExit
 End Sub
 
 Private Function WorkbookHostedSyncIsPaired() As Boolean
@@ -8944,6 +8933,9 @@ Private Sub ConfigureNewEntryCommandButtons(ByVal ws As Worksheet)
 
         If InStr(nameText, "addtologbook") > 0 Or (InStr(labelText, "add to") > 0 And InStr(labelText, "logbook") > 0) Then
             actionName = "AddToLogbook"
+        ElseIf InStr(nameText, "connecttoelectroniclogbook") > 0 Or _
+               (InStr(labelText, "connect") > 0 And InStr(labelText, "electronic logbook") > 0) Then
+            actionName = "ConnectToElectronicLogbook"
         ElseIf InStr(nameText, "portablelogbookstatus") > 0 Or _
                (InStr(labelText, "portable") > 0 And InStr(labelText, "status") > 0) Then
             actionName = "ShowPortableLogbookStatus"

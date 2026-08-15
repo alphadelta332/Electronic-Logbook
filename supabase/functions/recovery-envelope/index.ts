@@ -29,6 +29,7 @@ type RequestBody = {
   wrappedPackageKey?: unknown;
   ingressKeyVersionId?: unknown;
   platformLabel?: unknown;
+  deviceType?: unknown;
   recoveryCiphertext?: unknown;
   recoveryNonce?: unknown;
   recoverySalt?: unknown;
@@ -76,6 +77,15 @@ function requiredUuid(value: unknown, label: string): string {
   }
 
   return result.toLowerCase();
+}
+
+function requiredDeviceType(value: unknown): "android" | "workbook" {
+  const deviceType = requiredString(value, "Device type", 32);
+  if (deviceType !== "android" && deviceType !== "workbook") {
+    throw new RecoveryError(400, "RECOVERY_DEVICE_TYPE_INVALID", "This device type cannot use account recovery.");
+  }
+
+  return deviceType;
 }
 
 function decodeBase64(value: string, minimumBytes: number, maximumBytes: number): Uint8Array {
@@ -371,6 +381,7 @@ async function restore(accountId: string, body: RequestBody): Promise<Response> 
   const logbookId = requiredUuid(body.logbookId, "Logbook");
   const deviceId = requiredUuid(body.deviceId, "Device");
   const platformLabel = requiredString(body.platformLabel, "Platform label", 128);
+  const deviceType = requiredDeviceType(body.deviceType);
   const publicKey = requiredString(body.devicePublicKey, "Device recovery key");
   const fingerprint = requiredString(body.devicePublicKeyFingerprint, "Device recovery fingerprint", 64);
   const algorithm = requiredString(body.devicePublicKeyAlgorithm, "Device recovery algorithm", 64);
@@ -383,7 +394,7 @@ async function restore(accountId: string, body: RequestBody): Promise<Response> 
     p_actor_account_id: accountId,
     p_logbook_id: logbookId,
     p_device_id: deviceId,
-    p_device_type: "android",
+    p_device_type: deviceType,
     p_platform_label: platformLabel,
   });
   await bindDeviceRecoveryKey(accountId, logbookId, deviceId, publicKey, fingerprint, algorithm);
@@ -457,6 +468,7 @@ async function restoreWithRecoveryCode(accountId: string, body: RequestBody): Pr
   const logbookId = requiredUuid(body.logbookId, "Logbook");
   const deviceId = requiredUuid(body.deviceId, "Device");
   const platformLabel = requiredString(body.platformLabel, "Platform label", 128);
+  const deviceType = requiredDeviceType(body.deviceType);
   const publicKey = requiredString(body.devicePublicKey, "Device recovery key");
   const fingerprint = requiredString(body.devicePublicKeyFingerprint, "Device recovery fingerprint", 64);
   const algorithm = requiredString(body.devicePublicKeyAlgorithm, "Device recovery algorithm", 64);
@@ -469,7 +481,7 @@ async function restoreWithRecoveryCode(accountId: string, body: RequestBody): Pr
     p_actor_account_id: accountId,
     p_logbook_id: logbookId,
     p_device_id: deviceId,
-    p_device_type: "android",
+    p_device_type: deviceType,
     p_platform_label: platformLabel,
   });
   await bindDeviceRecoveryKey(accountId, logbookId, deviceId, publicKey, fingerprint, algorithm);

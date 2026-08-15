@@ -1,4 +1,4 @@
-# Imports tracked VBA source into a disposable workbook copy and runs Debug > Compile.
+# Imports tracked VBA source into a disposable workbook copy and forces VBA to compile it.
 
 [CmdletBinding()]
 param(
@@ -40,34 +40,27 @@ try {
 
         $workbook = $excel.Workbooks.Open($tempWorkbook, $false, $false)
 
-        $compile = $excel.VBE.CommandBars.Item("Menu Bar").Controls.Item("Debug").Controls |
-            Where-Object { $_.Id -eq 578 } |
-            Select-Object -First 1
+        # CommandBarControl.Enabled is not a reliable compile signal in current Excel:
+        # command ID 578 remains enabled after Execute even for a valid project. Running
+        # a temporary public function forces VBA to compile the entire project first.
+        # A syntax error in any other module prevents this probe from running.
+        $probeComponent = $workbook.VBProject.VBComponents.Add(1)
+        $probeComponent.Name = "ELBCompileProbe"
+        $probeComponent.CodeModule.AddFromString(@"
+Option Explicit
 
-        if ($null -eq $compile) {
-            throw "VBE compile command was not found."
+Public Function ELBDisposableCompileProbe() As Boolean
+    ELBDisposableCompileProbe = True
+End Function
+"@)
+
+        $probeResult = $excel.Run("'" + $workbook.Name + "'!ELBDisposableCompileProbe")
+        if ($probeResult -ne $true) {
+            throw "Disposable VBA compile probe returned an unexpected result: $probeResult"
         }
 
-        $firstEnabled = [bool]$compile.Enabled
-        if ($firstEnabled) {
-            $compile.Execute() | Out-Null
-        }
-
-        $compileAfter = $excel.VBE.CommandBars.Item("Menu Bar").Controls.Item("Debug").Controls |
-            Where-Object { $_.Id -eq 578 } |
-            Select-Object -First 1
-        if ($null -eq $compileAfter) {
-            throw "VBE compile command was not found after execution."
-        }
-
-        $secondEnabled = [bool]$compileAfter.Enabled
         Write-Host "Disposable VBA compile pass complete." -ForegroundColor Green
-        Write-Host "  FirstEnabled=$firstEnabled"
-        Write-Host "  SecondEnabled=$secondEnabled"
-
-        if ($secondEnabled) {
-            throw "Compile command remained enabled after execution; check VBA project for unresolved compile issues."
-        }
+        Write-Host "  Project-wide compile probe passed."
     }
     finally {
         if ($null -ne $workbook) {
