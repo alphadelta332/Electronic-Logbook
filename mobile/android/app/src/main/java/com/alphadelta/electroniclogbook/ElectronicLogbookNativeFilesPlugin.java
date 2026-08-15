@@ -1,21 +1,25 @@
 package com.alphadelta.electroniclogbook;
 
+import android.app.Activity;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
+import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
@@ -112,6 +116,74 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             call.resolve(result);
         } catch (JSONException | IOException ex) {
             call.reject(ex.getMessage(), ex);
+        }
+    }
+
+    @PluginMethod
+    public void saveToDevice(PluginCall call) {
+        String fileName = call.getString("fileName");
+        String contentType = call.getString("contentType", "application/octet-stream");
+        JSArray bytes = call.getArray("bytes");
+
+        if (!isSupportedExportFileName(fileName)) {
+            call.reject("Exported file names must be a plain .elogbook or .json file name.");
+            return;
+        }
+
+        if (bytes == null || bytes.length() == 0) {
+            call.reject("Exported package is empty.");
+            return;
+        }
+
+        if (bytes.length() > MaxElogbookBytes) {
+            call.reject("Exported package is larger than the 67108864 byte package limit.");
+            return;
+        }
+
+        Intent saveIntent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        saveIntent.addCategory(Intent.CATEGORY_OPENABLE);
+        saveIntent.setType(contentType);
+        saveIntent.putExtra(Intent.EXTRA_TITLE, fileName);
+        startActivityForResult(call, saveIntent, "saveToDeviceResult");
+    }
+
+    @ActivityCallback
+    private void saveToDeviceResult(PluginCall call, ActivityResult activityResult) {
+        if (call == null) {
+            return;
+        }
+
+        Intent resultData = activityResult.getData();
+        Uri destination = resultData == null ? null : resultData.getData();
+        if (activityResult.getResultCode() != Activity.RESULT_OK || destination == null) {
+            JSObject cancelled = new JSObject();
+            cancelled.put("fileName", call.getString("fileName"));
+            cancelled.put("shared", false);
+            cancelled.put("cancelled", true);
+            call.resolve(cancelled);
+            return;
+        }
+
+        JSArray bytes = call.getArray("bytes");
+        if (bytes == null || bytes.length() == 0 || bytes.length() > MaxElogbookBytes) {
+            call.reject("The exported file was not retained while Android's save picker was open.");
+            return;
+        }
+        try (OutputStream stream = getContext().getContentResolver().openOutputStream(destination, "w")) {
+            if (stream == null) {
+                call.reject("Android did not provide a writable destination for the exported file.");
+                return;
+            }
+            stream.write(toByteArray(bytes));
+
+            JSObject result = new JSObject();
+            result.put("fileName", call.getString("fileName"));
+            result.put("devicePath", destination.toString());
+            result.put("shared", false);
+            result.put("cancelled", false);
+            call.resolve(result);
+        } catch (JSONException | IOException ex) {
+            call.reject("Could not save the exported file to the selected location.", ex);
         }
     }
 

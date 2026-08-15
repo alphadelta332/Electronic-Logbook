@@ -64,7 +64,8 @@ else
                 </div>
             </div>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload" OnClick="ImportPackageAsync" Disabled="@(!CanImport)">Recover from package</MudButton>
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.IosShare" OnClick="ExportPackageAsync" Disabled="@(!CanExport)">Export support package</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.SaveAlt" OnClick="SavePackageToDeviceAsync" Disabled="@(!CanExport)">Save encrypted backup to device</MudButton>
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.IosShare" OnClick="SharePackageAsync" Disabled="@(!CanExport)">Share encrypted backup</MudButton>
         </section>
 
         @if (ImportExchangePlan?.Status == PortableLogbookImportPlanStatus.RequiresCustomFieldResolution)
@@ -229,12 +230,25 @@ else
         });
     }
 
-    private async Task ExportPackageAsync()
+    private Task SavePackageToDeviceAsync() =>
+        ExportPackageAsync(MobilePackageExportDestination.SaveToDevice);
+
+    private Task SharePackageAsync() =>
+        ExportPackageAsync(MobilePackageExportDestination.Share);
+
+    private async Task ExportPackageAsync(MobilePackageExportDestination destination)
     {
         await RunExchangeAsync(async () =>
         {
-            var result = await Session.ExportWorkbookPackageAsync(FileStore, DateTimeOffset.UtcNow);
-            Message = $"Exported {result.FileName}.";
+            var result = await Session.ExportWorkbookPackageAsync(
+                FileStore,
+                DateTimeOffset.UtcNow,
+                destination);
+            Message = result.Transfer.Cancelled
+                ? "Backup save cancelled."
+                : destination == MobilePackageExportDestination.SaveToDevice
+                    ? $"Saved encrypted backup as {result.FileName}."
+                    : $"Prepared {result.FileName} for sharing.";
         });
     }
 

@@ -533,6 +533,18 @@
                 bytes: Array.from(new Uint8Array(bytes))
             });
         },
+        nativeSaveToDevice: async (fileName, bytes, contentType) => {
+            const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookNativeFiles;
+            if (!globalThis.Capacitor?.isNativePlatform?.() || !plugin?.saveToDevice) {
+                return null;
+            }
+
+            return await plugin.saveToDevice({
+                fileName,
+                contentType,
+                bytes: Array.from(new Uint8Array(bytes))
+            });
+        },
         download: (fileName, bytes, contentType) => {
             const blob = new Blob([new Uint8Array(bytes)], { type: contentType });
             const url = URL.createObjectURL(blob);

@@ -1050,13 +1050,22 @@ public sealed class MobileLogbookSession(
 
     public async Task<MobilePackageExportWorkflowResult> ExportWorkbookPackageAsync(
         BrowserFileStore fileStore,
-        DateTimeOffset exportedAt)
+        DateTimeOffset exportedAt,
+        MobilePackageExportDestination destination = MobilePackageExportDestination.Share)
     {
         ArgumentNullException.ThrowIfNull(fileStore);
-        var result = await MobilePackageExportWorkflow.ExportAsync(DocumentV2, packageKeyStore, fileStore, exportedAt);
-        LastSuccessfulExportAt = result.ExportedAt;
-        LastSuccessfulExport = BrowserLogbookExportCheckpoint.Create(DocumentV2, result);
-        await SaveStateV2Async();
+        var result = await MobilePackageExportWorkflow.ExportAsync(
+            DocumentV2,
+            packageKeyStore,
+            fileStore,
+            exportedAt,
+            destination);
+        if (!result.Transfer.Cancelled)
+        {
+            LastSuccessfulExportAt = result.ExportedAt;
+            LastSuccessfulExport = BrowserLogbookExportCheckpoint.Create(DocumentV2, result);
+            await SaveStateV2Async();
+        }
         return result;
     }
 

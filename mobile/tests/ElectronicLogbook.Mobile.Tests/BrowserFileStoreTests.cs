@@ -93,6 +93,47 @@ public sealed class BrowserFileStoreTests
     }
 
     [Fact]
+    public async Task SaveToDeviceAsyncUsesNativeDocumentPickerWhenAvailable()
+    {
+        var nativeResult = new BrowserFileTransferResult(
+            "logbook.elogbook",
+            "content://downloads/logbook.elogbook",
+            null,
+            Shared: false);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(nativeResult);
+        var store = new BrowserFileStore(jsRuntime);
+        var bytes = new byte[] { 1, 2, 3 };
+
+        var result = await store.SaveToDeviceAsync("logbook.elogbook", bytes);
+
+        Assert.Equal(nativeResult, result);
+        var call = Assert.Single(jsRuntime.Calls);
+        Assert.Equal("electronicLogbookFiles.nativeSaveToDevice", call.Identifier);
+        Assert.Equal("logbook.elogbook", call.Arguments[0]);
+        Assert.Same(bytes, call.Arguments[1]);
+        Assert.Equal(BrowserFileStore.ElogbookContentType, call.Arguments[2]);
+    }
+
+    [Fact]
+    public async Task SaveToDeviceAsyncFallsBackToBrowserDownloadOutsideNativeAndroid()
+    {
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(null);
+        var store = new BrowserFileStore(jsRuntime);
+        var bytes = new byte[] { 1, 2, 3 };
+
+        var result = await store.SaveToDeviceAsync("logbook.elogbook", bytes);
+
+        Assert.False(result.Shared);
+        Assert.False(result.Cancelled);
+        Assert.Equal(2, jsRuntime.Calls.Count);
+        Assert.Equal("electronicLogbookFiles.nativeSaveToDevice", jsRuntime.Calls[0].Identifier);
+        Assert.Equal("electronicLogbookFiles.download", jsRuntime.Calls[1].Identifier);
+        Assert.Same(bytes, jsRuntime.Calls[1].Arguments[1]);
+    }
+
+    [Fact]
     public async Task ShareOrDownloadAsyncUsesWebShareWhenAvailable()
     {
         var jsRuntime = new RecordingJsRuntime();
@@ -223,6 +264,9 @@ public sealed class BrowserFileStoreTests
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareAsync(" ", []));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.ShareAsync("logbook.elogbook", null!));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareAsync("logbook.elogbook", [], " "));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.SaveToDeviceAsync(" ", []));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.SaveToDeviceAsync("logbook.elogbook", null!));
+        await Assert.ThrowsAsync<ArgumentException>(async () => await store.SaveToDeviceAsync("logbook.elogbook", [], " "));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareOrDownloadAsync(" ", []));
         await Assert.ThrowsAsync<ArgumentNullException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", null!));
         await Assert.ThrowsAsync<ArgumentException>(async () => await store.ShareOrDownloadAsync("logbook.elogbook", [], " "));

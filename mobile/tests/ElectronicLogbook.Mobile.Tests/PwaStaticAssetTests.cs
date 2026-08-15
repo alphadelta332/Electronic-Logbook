@@ -260,6 +260,31 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void AndroidNativeFileBridgeOffersARealDocumentPickerSaveAction()
+    {
+        var plugin = ReadRepositoryFile(
+            "android",
+            "app",
+            "src",
+            "main",
+            "java",
+            "com",
+            "alphadelta",
+            "electroniclogbook",
+            "ElectronicLogbookNativeFilesPlugin.java");
+        var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
+
+        Assert.Contains("public void saveToDevice(PluginCall call)", plugin, StringComparison.Ordinal);
+        Assert.Contains("Intent.ACTION_CREATE_DOCUMENT", plugin, StringComparison.Ordinal);
+        Assert.Contains("Intent.CATEGORY_OPENABLE", plugin, StringComparison.Ordinal);
+        Assert.Contains("startActivityForResult(call, saveIntent, \"saveToDeviceResult\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("@ActivityCallback", plugin, StringComparison.Ordinal);
+        Assert.Contains("getContentResolver().openOutputStream(destination, \"w\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("nativeSaveToDevice", bridge, StringComparison.Ordinal);
+        Assert.Contains("plugin.saveToDevice", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void IndexedDbBridgeResolvesWritesOnlyAfterTransactionCompletes()
     {
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));

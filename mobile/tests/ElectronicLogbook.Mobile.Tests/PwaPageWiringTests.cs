@@ -33,6 +33,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("MobilePackageImportWorkflow.ReadV2Async", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ApplyWorkbookPackageAsync", exchange, StringComparison.Ordinal);
         Assert.Contains("Session.ExportWorkbookPackageAsync", exchange, StringComparison.Ordinal);
+        Assert.Contains("Save encrypted backup to device", exchange, StringComparison.Ordinal);
+        Assert.Contains("Share encrypted backup", exchange, StringComparison.Ordinal);
+        Assert.Contains("MobilePackageExportDestination.SaveToDevice", exchange, StringComparison.Ordinal);
         Assert.Contains("package-exchange-feedback", exchange, StringComparison.Ordinal);
         Assert.Contains("Label=\"Recovery code\"", exchange, StringComparison.Ordinal);
         Assert.Contains("Recovery needs attention", exchange, StringComparison.Ordinal);

@@ -64,6 +64,42 @@ public sealed class MobilePackageExportWorkflowTests
     }
 
     [Fact]
+    public async Task ExportAsyncCanSaveEncryptedPackageThroughNativeDocumentPicker()
+    {
+        var document = CreateDocumentV2();
+        var exportedAt = DateTimeOffset.Parse("2026-07-19T04:05:06Z");
+        var encryptionPlan = PortableLogbookPackage.CreateEncryptionPlan(document, exportedAt);
+        var nativeResult = new BrowserFileTransferResult(
+            "log_mobile_20260719_040506.elogbook",
+            "content://downloads/log_mobile_20260719_040506.elogbook",
+            null,
+            Shared: false);
+        var jsRuntime = new RecordingJsRuntime();
+        jsRuntime.Results.Enqueue(true);
+        jsRuntime.Results.Enqueue(new BrowserPackageCiphertext(new byte[encryptionPlan.CompressedPlaintext.Length], new byte[16]));
+        jsRuntime.Results.Enqueue(nativeResult);
+        var keyStore = new BrowserPackageKeyStore(jsRuntime);
+        var fileStore = new BrowserFileStore(jsRuntime);
+
+        var result = await MobilePackageExportWorkflow.ExportAsync(
+            document,
+            keyStore,
+            fileStore,
+            exportedAt,
+            MobilePackageExportDestination.SaveToDevice);
+
+        Assert.Equal(nativeResult, result.Transfer);
+        Assert.Equal(
+            [
+                "electronicLogbookKeys.hasPackageKey",
+                "electronicLogbookKeys.encrypt",
+                "electronicLogbookFiles.nativeSaveToDevice"
+            ],
+            jsRuntime.Calls.Select(call => call.Identifier));
+        Assert.Same(result.PackageBytes, jsRuntime.Calls[2].Arguments[1]);
+    }
+
+    [Fact]
     public async Task ExportAsyncStopsBeforeEncryptionWhenPackageKeyIsMissing()
     {
         var jsRuntime = new RecordingJsRuntime();

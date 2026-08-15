@@ -128,6 +128,31 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
             contentType);
     }
 
+    public async ValueTask<BrowserFileTransferResult> SaveToDeviceAsync(
+        string fileName,
+        byte[] bytes,
+        string contentType = ElogbookContentType)
+    {
+        ValidateExportArguments(fileName, bytes, contentType);
+
+        var nativeTransfer = await jsRuntime.InvokeAsync<BrowserFileTransferResult?>(
+            "electronicLogbookFiles.nativeSaveToDevice",
+            fileName,
+            bytes,
+            contentType).ConfigureAwait(false);
+        if (nativeTransfer is not null)
+        {
+            return nativeTransfer;
+        }
+
+        await jsRuntime.InvokeVoidAsync(
+            "electronicLogbookFiles.download",
+            fileName,
+            bytes,
+            contentType).ConfigureAwait(false);
+        return new BrowserFileTransferResult(fileName, null, null, Shared: false);
+    }
+
     public ValueTask<BrowserFileTransferResult?> TryNativeShareOrDownloadAsync(
         string fileName,
         byte[] bytes,
@@ -241,6 +266,7 @@ public sealed record BrowserFileTransferResult(
     string FileName,
     string? DevicePath,
     string? AdbPath,
-    bool Shared);
+    bool Shared,
+    bool Cancelled = false);
 
 public sealed class BrowserFileStoreException(string message) : Exception(message);

@@ -9,7 +9,8 @@ public static class MobilePackageExportWorkflow
         PortableLogbookDocumentV2 document,
         BrowserPackageKeyStore keyStore,
         BrowserFileStore fileStore,
-        DateTimeOffset exportedAt)
+        DateTimeOffset exportedAt,
+        MobilePackageExportDestination destination = MobilePackageExportDestination.Share)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(keyStore);
@@ -29,7 +30,9 @@ public static class MobilePackageExportWorkflow
             .ConfigureAwait(false);
         var packageBytes = PortableLogbookPackage.Assemble(encryptionPlan, encrypted.Ciphertext, encrypted.Tag);
 
-        var transfer = await fileStore.ShareOrDownloadAsync(plan.FileName, packageBytes, plan.ContentType).ConfigureAwait(false);
+        var transfer = destination == MobilePackageExportDestination.SaveToDevice
+            ? await fileStore.SaveToDeviceAsync(plan.FileName, packageBytes, plan.ContentType).ConfigureAwait(false)
+            : await fileStore.ShareOrDownloadAsync(plan.FileName, packageBytes, plan.ContentType).ConfigureAwait(false);
 
         return new MobilePackageExportWorkflowResult(
             plan.FileName,
@@ -83,3 +86,9 @@ public sealed record MobilePackageExportWorkflowResult(
     string PackageSha256,
     byte[] PackageBytes,
     BrowserFileTransferResult Transfer);
+
+public enum MobilePackageExportDestination
+{
+    Share,
+    SaveToDevice
+}
