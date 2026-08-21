@@ -64,7 +64,7 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable
         {
             throw new HostedSignInException(
                 HostedSignInFailureReason.VerificationExpired,
-                "Request a new sign-in email before entering its code or unused sign-in link.");
+                "Request a new sign-in code before entering the six-digit code from the email.");
         }
 
         using var request = NewRequest(HttpMethod.Post, "/auth/v1/verify", includeAuthorization: false);

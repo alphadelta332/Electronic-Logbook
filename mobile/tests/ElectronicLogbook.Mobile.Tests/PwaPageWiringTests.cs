@@ -263,9 +263,11 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Connection status", settings, StringComparison.Ordinal);
         Assert.Contains("Hosted sync", settings, StringComparison.Ordinal);
         Assert.Contains("Invited email", settings, StringComparison.Ordinal);
-        Assert.Contains("Code or unused sign-in link", settings, StringComparison.Ordinal);
-        Assert.Contains("Outlook Safe Links and unused direct links are supported", settings, StringComparison.Ordinal);
-        Assert.Contains("Send sign-in email", settings, StringComparison.Ordinal);
+        Assert.Contains("Six-digit sign-in code", settings, StringComparison.Ordinal);
+        Assert.Contains("Enter the code from the latest FlightLogX email. It expires after 10 minutes.", settings, StringComparison.Ordinal);
+        Assert.Contains("Send sign-in code", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("unused sign-in link", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Safe Links", settings, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Connect account", settings, StringComparison.Ordinal);
         Assert.Contains("Resume verified sign-in", settings, StringComparison.Ordinal);
         Assert.Contains("ResumeHostedInviteAcceptanceAsync", settings, StringComparison.Ordinal);

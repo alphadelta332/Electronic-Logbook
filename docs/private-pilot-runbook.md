@@ -72,8 +72,8 @@ Out of scope:
    self-registration must remain disabled.
 3. Create the matching hosted `accounts` invitation row.
 4. Ask the participant to install the Android build.
-5. Have the participant sign in with the invited email and complete OTP or magic-link
-   verification.
+5. Have the participant request the email sign-in code and enter the displayed six-digit
+   code within ten minutes. Do not instruct participants to copy or open a sign-in link.
 6. Confirm `public.accept_hosted_invitation(...)` activates the account and registers
    the Android device.
 7. For workbook-linked pilots, pair the workbook through the updater account connection

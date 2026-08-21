@@ -9,6 +9,8 @@ public sealed class PrivatePilotRunbookTests
         var healthScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PrivatePilotHealthCheck.ps1"));
         var preflightScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PrivatePilotPreflight.ps1"));
         var recoveryRehearsalScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-HostedRecoveryRehearsal.ps1"));
+        var emailOtpConfigScript = File.ReadAllText(TestRepo.FindFile("tools", "Test-HostedEmailOtpConfiguration.ps1"));
+        var hostedSetup = File.ReadAllText(TestRepo.FindFile("docs", "hosted-pilot-supabase.md"));
 
         Assert.Contains("artifacts/private-pilot-20260806/cohort.md", runbook, StringComparison.Ordinal);
         Assert.Contains("Invoke-PrivatePilotHealthCheck.ps1", runbook, StringComparison.Ordinal);
@@ -39,6 +41,18 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("secretHandling", preflightScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Host $ConnectionString", preflightScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Output $ConnectionString", preflightScript, StringComparison.Ordinal);
+
+        Assert.Contains("displayed six-digit", runbook, StringComparison.Ordinal);
+        Assert.DoesNotContain("OTP or magic-link", runbook, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("auth-dev.flightlogx.app", hostedSetup, StringComparison.Ordinal);
+        Assert.Contains("auth.flightlogx.app", hostedSetup, StringComparison.Ordinal);
+        Assert.Contains("Test-HostedEmailOtpConfiguration.ps1", hostedSetup, StringComparison.Ordinal);
+        Assert.Contains("mailer_otp_exp", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("rate_limit_email_sent", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("rate_limit_otp", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("ConfirmationURL|TokenHash", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Write-Host $managementToken", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("Write-Output $managementToken", emailOtpConfigScript, StringComparison.Ordinal);
 
         Assert.Contains("ACTIVE_HEALTHY", recoveryRehearsalScript, StringComparison.Ordinal);
         Assert.Contains("Sydney development project", recoveryRehearsalScript, StringComparison.Ordinal);

@@ -1071,7 +1071,7 @@ public sealed class MobileSupabaseHostedSyncClient(
             {
                 throw new HostedSignInException(
                     HostedSignInFailureReason.VerificationExpired,
-                    "A six-digit code requires a successful sign-in email request. An unused full sign-in link can be pasted without one.");
+                    "Request a new sign-in code before entering the six-digit code from the email.");
             }
 
             return JsonContent(new VerifyOtpRequest(email, trimmed, Type: "email"));
@@ -1181,7 +1181,7 @@ public sealed class MobileSupabaseHostedSyncClient(
         {
             return new HostedSignInException(
                 HostedSignInFailureReason.VerificationExpired,
-                "The sign-in code or link is invalid or has expired.");
+                "The sign-in code is invalid or has expired. Request a new code and try again.");
         }
 
         var message = $"Hosted sign-in failed with HTTP {(int)statusCode}.";

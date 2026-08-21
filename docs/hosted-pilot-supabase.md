@@ -62,13 +62,14 @@ Configure Auth in the Supabase dashboard for each project:
 
 - Disable public self-registration.
 - Enable email sign-in only for invited users.
-- Use the shared **Magic Link or OTP** email template for pilot sign-in. Supabase Free
-  projects using the default email provider cannot customize this template, so the default
-  email may contain only a link. Both the Android pilot client and workbook updater must
-  accept either the displayed OTP (when a custom template can include `{{ .Token }}`) or an
-  unused default Supabase confirmation-link address pasted into the sign-in field. The link
-  must belong to the configured pilot project and is exchanged as a token hash without
-  opening its redirect target. Do not hard-code the hosted OTP length in client instructions.
+- Send Auth email through Resend using `auth-dev.flightlogx.app` for development and
+  `auth.flightlogx.app` for private pilot, with a separate sending-only Resend credential
+  for each Supabase project. Use `FlightLogX <signin@...>` as the sender.
+- Change the shared **Magic Link or OTP** template to display the six-digit `{{ .Token }}`
+  and no clickable confirmation link. Set Email OTP expiration to 600 seconds, email sends
+  to 30 per hour, and OTP requests to 30 per hour. Normal Android and updater instructions
+  request only the six-digit code. The clients retain URL parsing as an undisclosed support
+  fallback for already-issued links; do not advertise it in normal UI or participant steps.
 - Keep phone, anonymous, and public signup providers disabled. Email is the first-invitation
   method. Google is the only enabled OAuth provider and is used only for the implemented
   returning-user recovery path documented in `docs/account-recovery-threat-model.md`.
@@ -80,6 +81,13 @@ Configure Auth in the Supabase dashboard for each project:
 
 Invitations are created administratively. The app and workbook must not contain a shared
 service credential capable of creating users.
+
+Verify the redacted remote configuration after setup and before each canary:
+
+```powershell
+.\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment development
+.\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment privatePilot
+```
 
 After a Supabase Auth invitation is accepted, the client should call
 `public.accept_hosted_invitation(...)` with the local device type and platform label. The

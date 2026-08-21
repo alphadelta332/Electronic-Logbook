@@ -650,7 +650,7 @@ public partial class MainWindow : Window
             var signIn = await client.StartEmailSignInAsync(email);
             var verificationInput = PromptForText(
                 "Verify invited account",
-                $"A sign-in email was sent to {signIn.DeliveryHint}. Enter the code shown in the email, or paste the full unused sign-in link:",
+                $"A sign-in code was sent to {signIn.DeliveryHint}. Enter the six-digit code shown in the email. It expires after 10 minutes:",
                 allowEmpty: false);
             if (string.IsNullOrWhiteSpace(verificationInput))
             {

@@ -727,7 +727,7 @@ public sealed class MobileLogbookSession(
 
         ClearLastActionMessage();
         PendingHostedSignIn = await hostedAuthenticator.StartEmailSignInAsync(email, shouldCreateUser: false);
-        SetLastActionMessage("Sign-in email sent.");
+        SetLastActionMessage("Sign-in code sent.");
         return PendingHostedSignIn;
     }
 

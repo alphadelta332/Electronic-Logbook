@@ -90,6 +90,21 @@ public sealed class WizardPortableLogbookStatusTests
     }
 
     [Fact]
+    public void HostedConnectionRequestsTheDisplayedSixDigitCodeWithoutAdvertisingLinkFallback()
+    {
+        var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml.cs")));
+        var connectionMethod = ExtractMethodBody(codeBehind, "private async Task RunHostedConnectionAsync");
+
+        Assert.Contains("Enter the six-digit code shown in the email. It expires after 10 minutes:", connectionMethod, StringComparison.Ordinal);
+        Assert.DoesNotContain("unused sign-in link", connectionMethod, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Safe Links", connectionMethod, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void DiagnosticReportFlowIsLocalRedactedAndReviewableBeforeSharing()
     {
         var xaml = File.ReadAllText(FindRepoFile(Path.Combine(
