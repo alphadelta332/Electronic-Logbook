@@ -28,10 +28,56 @@ if ($null -eq $psql) {
     }
     $psql = Get-Item -LiteralPath $psqlPath
 }
+$psqlExecutablePath = if (-not [string]::IsNullOrWhiteSpace([string]$psql.Source)) {
+    [string]$psql.Source
+} else {
+    [string]$psql.FullName
+}
+if ([string]::IsNullOrWhiteSpace($psqlExecutablePath) -or
+    -not (Test-Path -LiteralPath $psqlExecutablePath -PathType Leaf)) {
+    throw 'PostgreSQL 17 psql executable path could not be resolved.'
+}
 $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $projectRef = [string]$metadata.development.project_ref
 if ([string]::IsNullOrWhiteSpace($projectRef)) {
     throw 'Development project metadata does not contain a project ref.'
+}
+
+$managementToken = (Get-Content -LiteralPath $tokenPath -Raw -Encoding UTF8).Trim()
+$managementHeaders = @{ Authorization = "Bearer $managementToken" }
+$projects = Invoke-RestMethod -Uri 'https://api.supabase.com/v1/projects' -Headers $managementHeaders -Method Get
+$developmentProjects = @($projects | Where-Object { $_.id -eq $projectRef -or $_.ref -eq $projectRef })
+if ($developmentProjects.Count -ne 1) {
+    throw 'Supabase management returned an unexpected development-project result.'
+}
+$developmentProject = $developmentProjects[0]
+if ($developmentProject.name -ne 'Electronic Logbook Development') {
+    throw 'Configured development project does not match the expected project name.'
+}
+if ($developmentProject.region -ne 'ap-southeast-2') {
+    throw 'Hosted recovery rehearsal requires the Sydney development project.'
+}
+if ($developmentProject.status -ne 'ACTIVE_HEALTHY') {
+    throw 'Hosted recovery rehearsal requires the development project to be active and healthy.'
+}
+
+$authConfig = Invoke-RestMethod `
+    -Uri "https://api.supabase.com/v1/projects/$projectRef/config/auth" `
+    -Headers $managementHeaders `
+    -Method Get
+if ($authConfig.disable_signup -ne $true) {
+    throw 'Hosted recovery rehearsal requires public Auth signup to be disabled.'
+}
+if ($authConfig.external_email_enabled -ne $true) {
+    throw 'Hosted recovery rehearsal requires invited-user email sign-in.'
+}
+$enabledExternalProviders = @(
+    $authConfig.PSObject.Properties |
+        Where-Object { $_.Name -match '^external_(.+)_enabled$' -and $_.Value -eq $true } |
+        ForEach-Object { [regex]::Match($_.Name, '^external_(.+)_enabled$').Groups[1].Value }
+)
+if (@($enabledExternalProviders).Count -ne 1 -or $enabledExternalProviders[0] -ne 'email') {
+    throw 'Hosted recovery rehearsal requires email to be the only enabled external Auth provider.'
 }
 
 if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
@@ -41,7 +87,8 @@ $EvidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory)
 New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
 $evidencePath = Join-Path $EvidenceDirectory 'verification.json'
 
-$env:SUPABASE_ACCESS_TOKEN = (Get-Content -LiteralPath $tokenPath -Raw -Encoding UTF8).Trim()
+$previousSupabaseAccessToken = $env:SUPABASE_ACCESS_TOKEN
+$env:SUPABASE_ACCESS_TOKEN = $managementToken
 $keys = @(& $supabase.Source projects api-keys --project-ref $projectRef --output json | ConvertFrom-Json)
 if ($LASTEXITCODE -ne 0) {
     throw 'Could not read the development project API keys.'
@@ -57,7 +104,7 @@ try {
     $env:ELB_REHEARSAL_ANON_KEY = $anonKey
     $env:ELB_REHEARSAL_SERVICE_ROLE_KEY = $serviceRoleKey
     $env:ELB_REHEARSAL_EVIDENCE_PATH = $evidencePath
-    $env:ELB_REHEARSAL_PSQL_PATH = $psql.FullName
+    $env:ELB_REHEARSAL_PSQL_PATH = $psqlExecutablePath
     $env:ELB_REHEARSAL_DB_HOST = 'aws-0-ap-southeast-2.pooler.supabase.com'
     $env:ELB_REHEARSAL_DB_USER = "postgres.$projectRef"
     $env:ELB_REHEARSAL_DB_PASSWORD = [string]$metadata.development.db_password
@@ -78,7 +125,11 @@ finally {
     Remove-Item Env:ELB_REHEARSAL_DB_HOST -ErrorAction SilentlyContinue
     Remove-Item Env:ELB_REHEARSAL_DB_USER -ErrorAction SilentlyContinue
     Remove-Item Env:ELB_REHEARSAL_DB_PASSWORD -ErrorAction SilentlyContinue
-    Remove-Item Env:SUPABASE_ACCESS_TOKEN -ErrorAction SilentlyContinue
+    if ($null -eq $previousSupabaseAccessToken) {
+        Remove-Item Env:SUPABASE_ACCESS_TOKEN -ErrorAction SilentlyContinue
+    } else {
+        $env:SUPABASE_ACCESS_TOKEN = $previousSupabaseAccessToken
+    }
 }
 
 Write-Host "Redacted evidence: $evidencePath" -ForegroundColor Green

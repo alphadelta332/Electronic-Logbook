@@ -1,6 +1,6 @@
 {
   "appId": "com.alphadelta.electroniclogbook",
-  "appName": "LogbookOne",
+  "appName": "FlightLogX",
   "webDir": "artifacts/capacitor",
   "server": {
     "androidScheme": "https"

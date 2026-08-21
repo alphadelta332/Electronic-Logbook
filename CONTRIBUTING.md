@@ -90,7 +90,7 @@ npm run install:android:debug
 ```
 
 Debug APKs install as `com.alphadelta.electroniclogbook.dev` while keeping the visible
-app name `LogbookOne`. Release builds keep `com.alphadelta.electroniclogbook`. This
+app name `FlightLogX`. Release builds keep `com.alphadelta.electroniclogbook`. This
 side-by-side debug application ID keeps development installs away from pilot or
 release-test data without cluttering the launcher label.
 

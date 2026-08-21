@@ -69,8 +69,9 @@ Configure Auth in the Supabase dashboard for each project:
   unused default Supabase confirmation-link address pasted into the sign-in field. The link
   must belong to the configured pilot project and is exchanged as a token hash without
   opening its redirect target. Do not hard-code the hosted OTP length in client instructions.
-- Keep OAuth, phone, anonymous, and public signup providers disabled unless a later gate
-  explicitly adds them.
+- Keep phone, anonymous, and public signup providers disabled. Email is the first-invitation
+  method. Google is the only enabled OAuth provider and is used only for the implemented
+  returning-user recovery path documented in `docs/account-recovery-threat-model.md`.
 - Client sign-in calls must pass the SDK option `shouldCreateUser: false`, which maps to
   the REST field `create_user: false`, so an unknown email address cannot create a new
   account from the app.
@@ -261,7 +262,10 @@ Run the hosted managed/recovery-code rehearsal only against the development proj
 It obtains project credentials from the private local configuration, uses an
 administrator-generated email OTP without sending mail, exercises both replacement
 paths against a non-empty encrypted ledger, and removes the disposable Auth identity
-and hosted rows. PostgreSQL 17 is required because the append-only operation trigger is
+and hosted rows. It fails before creating disposable state unless the configured development
+project is `ACTIVE_HEALTHY`, is the named Sydney project, has public signup disabled, and
+has email as its only enabled external Auth provider. PostgreSQL 17 is required because the
+append-only operation trigger is
 bypassed only inside the narrowly scoped cleanup transaction; normal API deletion
 remains blocked.
 

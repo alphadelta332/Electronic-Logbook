@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">LogbookOne Acceptance</string>
-    <string name="title_activity_main">LogbookOne Acceptance</string>
+    <string name="app_name">FlightLogX Acceptance</string>
+    <string name="title_activity_main">FlightLogX Acceptance</string>
     <string name="package_name">com.alphadelta.electroniclogbook.acceptance</string>
     <string name="custom_url_scheme">com.alphadelta.electroniclogbook.acceptance</string>
 </resources>

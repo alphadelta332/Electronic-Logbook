@@ -153,8 +153,9 @@ $env:ELB_SUPABASE_PILOT_DB_URL = "<pilot-db-url>"
   -OutputPath artifacts\private-pilot-20260806\health\week-01.json
 ```
 
-Also inspect Supabase Security Advisor, Performance Advisor, Auth configuration, and
-usage dashboards before each new invite batch.
+Also inspect Supabase Security Advisor, Performance Advisor, Auth configuration, project
+status, and usage dashboards before each new invite batch. The preflight must report the
+private-pilot project as `ACTIVE_HEALTHY`; a paused or restoring project is not invite-ready.
 
 For a single redacted pre-invite report that checks the local pilot files, captures
 health, and can run the adversarial RLS harness:
@@ -207,6 +208,7 @@ cannot be explained, or the support burden is not sustainable for a private pilo
 - [ ] Development project migration and RLS harness pass.
 - [ ] Private-pilot project is created in `ap-southeast-2`.
 - [ ] Public signup is disabled and email sign-in is configured for invited users only.
+- [ ] Private-pilot project status is `ACTIVE_HEALTHY` immediately before invitations.
 - [ ] Security Advisor and Performance Advisor are reviewed.
 - [ ] Logical export and restore are rehearsed into a separate project or disposable
   local database.

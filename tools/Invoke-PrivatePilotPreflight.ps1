@@ -162,7 +162,7 @@ $runtimeConfig = $null
     }
 }))
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "Supabase management token sees private-pilot project in ap-southeast-2" -Action {
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Supabase management token sees active private-pilot project in ap-southeast-2" -Action {
     if ([string]::IsNullOrWhiteSpace($supabaseManagementToken)) {
         throw "Supabase management access token is not configured"
     }
@@ -191,6 +191,9 @@ $runtimeConfig = $null
         if ($pilot.region -ne "ap-southeast-2") {
             throw "private-pilot project is not in ap-southeast-2"
         }
+        if ($pilot.status -ne "ACTIVE_HEALTHY") {
+            throw "private-pilot project is not active and healthy"
+        }
     }
     finally {
         $env:SUPABASE_ACCESS_TOKEN = $previousToken
@@ -198,7 +201,7 @@ $runtimeConfig = $null
     }
 }))
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "Auth signup disabled with invited-user email sign-in only" -Action {
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Auth signup disabled with invited-user email and Google recovery only" -Action {
     if ($null -eq $runtimeConfig) {
         $script:runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     }
@@ -210,13 +213,17 @@ $runtimeConfig = $null
     if ($settings.external.email -ne $true) {
         throw "email sign-in is not enabled"
     }
+    if ($settings.external.google -ne $true) {
+        throw "Google returning-user recovery is not enabled"
+    }
+    $allowedExternalProviders = @("email", "google")
     $enabledExternalProviders = @(
         $settings.external.PSObject.Properties |
-            Where-Object { $_.Name -ne "email" -and $_.Value -eq $true } |
+            Where-Object { $_.Name -notin $allowedExternalProviders -and $_.Value -eq $true } |
             Select-Object -ExpandProperty Name
     )
     if (@($enabledExternalProviders).Count -gt 0) {
-        throw "one or more non-email Auth providers are enabled"
+        throw "one or more unapproved Auth providers are enabled"
     }
 }))
 
