@@ -293,6 +293,90 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void WriteHiddenMetadataColumnValuesV2KeepsCellsOrderedAndExcludesTotalsRowFromFilter()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:B3", ["EntryID", "Year"]);
+            var table = ReadXml(archive, "xl/tables/table1.xml");
+            table.Root!.SetAttributeValue("totalsRowCount", "1");
+            table.Root.Elements().Single(element => element.Name.LocalName == "autoFilter")
+                .SetAttributeValue("ref", "A1:B3");
+            ReplaceXml(archive, "xl/tables/table1.xml", table);
+
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A3", "Totals");
+            UpsertInlineStringCell(worksheet, "B3", "0");
+            var totalsFormulaCell = worksheet.Descendants().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B3");
+            totalsFormulaCell.SetAttributeValue("t", null);
+            totalsFormulaCell.Elements().Remove();
+            totalsFormulaCell.Add(
+                new XElement(worksheet.Root!.Name.Namespace + "f", "SUBTOTAL(109,B2:B2)"),
+                new XElement(worksheet.Root.Name.Namespace + "v", "0"));
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var row = new PortableLogbookWorkbookRowV2(
+            new EntryId("ent_ordered"),
+            new RevisionId("rev_ordered"),
+            PortableLogbookWorkbookEntry.Empty with { Year = 2026 });
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(workbook, [row]);
+
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var table = ReadXml(archive, "xl/tables/table1.xml");
+            Assert.Equal("A1:C3", (string?)table.Root!.Attribute("ref"));
+            Assert.Equal(
+                "A1:C2",
+                (string?)table.Root.Elements().Single(element => element.Name.LocalName == "autoFilter").Attribute("ref"));
+
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            AssertCellReferencesAscending(worksheet, 2, ["A2", "B2", "C2"]);
+            Assert.Equal("Totals", ReadInlineStringCell(worksheet, "A3"));
+            Assert.Equal(
+                "SUBTOTAL(109,B2:B2)",
+                worksheet.Descendants().Single(element =>
+                    element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B3")
+                    .Elements().Single(element => element.Name.LocalName == "f").Value);
+
+            var dataRow = worksheet.Descendants().Single(element =>
+                element.Name.LocalName == "row" && (string?)element.Attribute("r") == "2");
+            dataRow.Elements().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "A2").Remove();
+            dataRow.Add(new XElement(
+                worksheet.Root!.Name.Namespace + "c",
+                new XAttribute("r", "A2"),
+                new XAttribute("t", "inlineStr"),
+                new XElement(
+                    worksheet.Root.Name.Namespace + "is",
+                    new XElement(worksheet.Root.Name.Namespace + "t", "ent_ordered"))));
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+
+            table.Root.Elements().Single(element => element.Name.LocalName == "autoFilter")
+                .SetAttributeValue("ref", "A1:C3");
+            ReplaceXml(archive, "xl/tables/table1.xml", table);
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(workbook, [row]);
+
+        using var repairedArchive = ZipFile.OpenRead(workbook);
+        var repairedTable = ReadXml(repairedArchive, "xl/tables/table1.xml");
+        Assert.Equal(
+            "A1:C2",
+            (string?)repairedTable.Root!.Elements().Single(element => element.Name.LocalName == "autoFilter").Attribute("ref"));
+        var repairedWorksheet = ReadXml(repairedArchive, "xl/worksheets/sheet2.xml");
+        AssertCellReferencesAscending(repairedWorksheet, 2, ["A2", "B2", "C2"]);
+        Assert.Equal("Totals", ReadInlineStringCell(repairedWorksheet, "A3"));
+        Assert.Equal(
+            "SUBTOTAL(109,B2:B2)",
+            repairedWorksheet.Descendants().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B3")
+                .Elements().Single(element => element.Name.LocalName == "f").Value);
+    }
+
+    [Fact]
     public void WriteHiddenMetadataColumnValuesClearsStaleRows()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
@@ -1168,6 +1252,26 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
                 (string?)element.Attribute("name") == name);
         Assert.Equal(expectedReference, definedName.Value);
         Assert.Equal("1", (string?)definedName.Attribute("hidden"));
+    }
+
+    private static void AssertCellReferencesAscending(
+        XDocument worksheet,
+        int rowNumber,
+        IReadOnlyList<string> expectedReferences)
+    {
+        var references = worksheet
+            .Descendants()
+            .Single(element =>
+                element.Name.LocalName == "row" &&
+                (string?)element.Attribute("r") == rowNumber.ToString(System.Globalization.CultureInfo.InvariantCulture))
+            .Elements()
+            .Where(element => element.Name.LocalName == "c")
+            .Select(element => (string?)element.Attribute("r"))
+            .Where(reference => reference is not null)
+            .Cast<string>()
+            .ToArray();
+
+        Assert.Equal(expectedReferences, references);
     }
 
     private static void SetDefinedName(XDocument workbook, string name, string reference)

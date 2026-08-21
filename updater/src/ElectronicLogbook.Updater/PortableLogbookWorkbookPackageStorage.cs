@@ -222,8 +222,10 @@ public static class PortableLogbookWorkbookPackageStorage
         if (plan.RequiresMutation)
         {
             ApplyHiddenColumnPlanToTable(root, tableColumns, plan);
-            WriteXmlEntry(archive, tableEntry.FullName, tableDocument);
         }
+
+        SynchronizeAutoFilterReference(root);
+        WriteXmlEntry(archive, tableEntry.FullName, tableDocument);
 
         if (!TryParseTableReference((string?)root.Attribute("ref"), out var startColumn, out var startRow, out _, out _))
         {
@@ -295,14 +297,22 @@ public static class PortableLogbookWorkbookPackageStorage
             throw new InvalidDataException("Logbook table reference is invalid.");
         }
 
-        var requiredEndRow = startRow + workbookRows.Length;
-        if (requiredEndRow > endRow &&
-            TryResizeTableReference((string?)root.Attribute("ref"), plan.WorkbookColumnNames.Count, requiredEndRow, out var resizedRef))
+        var totalsRowCount = GetTableTotalsRowCount(root);
+        var currentDataEndRow = Math.Max(startRow, endRow - totalsRowCount);
+        var requiredDataEndRow = startRow + workbookRows.Length;
+        if (requiredDataEndRow > currentDataEndRow &&
+            TryResizeTableReference(
+                (string?)root.Attribute("ref"),
+                plan.WorkbookColumnNames.Count,
+                requiredDataEndRow + totalsRowCount,
+                out var resizedRef))
         {
             root.SetAttributeValue("ref", resizedRef);
-            root.Element(SpreadsheetNamespace + "autoFilter")?.SetAttributeValue("ref", resizedRef);
-            endRow = requiredEndRow;
+            endRow = requiredDataEndRow + totalsRowCount;
         }
+
+        SynchronizeAutoFilterReference(root);
+        var dataEndRow = Math.Max(startRow, endRow - totalsRowCount);
 
         WriteXmlEntry(archive, tableEntry.FullName, tableDocument);
 
@@ -331,7 +341,7 @@ public static class PortableLogbookWorkbookPackageStorage
             worksheetEntryName,
             startColumn,
             startRow,
-            endRow,
+            dataEndRow,
             plan.WorkbookColumnNames,
             metadataColumnIndexes,
             workbookRows,
@@ -378,14 +388,22 @@ public static class PortableLogbookWorkbookPackageStorage
             throw new InvalidDataException("Logbook table reference is invalid.");
         }
 
-        var requiredEndRow = startRow + workbookRows.Length;
-        if (requiredEndRow > endRow &&
-            TryResizeTableReference((string?)root.Attribute("ref"), plan.WorkbookColumnNames.Count, requiredEndRow, out var resizedRef))
+        var totalsRowCount = GetTableTotalsRowCount(root);
+        var currentDataEndRow = Math.Max(startRow, endRow - totalsRowCount);
+        var requiredDataEndRow = startRow + workbookRows.Length;
+        if (requiredDataEndRow > currentDataEndRow &&
+            TryResizeTableReference(
+                (string?)root.Attribute("ref"),
+                plan.WorkbookColumnNames.Count,
+                requiredDataEndRow + totalsRowCount,
+                out var resizedRef))
         {
             root.SetAttributeValue("ref", resizedRef);
-            root.Element(SpreadsheetNamespace + "autoFilter")?.SetAttributeValue("ref", resizedRef);
-            endRow = requiredEndRow;
+            endRow = requiredDataEndRow + totalsRowCount;
         }
+
+        SynchronizeAutoFilterReference(root);
+        var dataEndRow = Math.Max(startRow, endRow - totalsRowCount);
 
         WriteXmlEntry(archive, tableEntry.FullName, tableDocument);
 
@@ -414,7 +432,7 @@ public static class PortableLogbookWorkbookPackageStorage
             worksheetEntryName,
             startColumn,
             startRow,
-            endRow,
+            dataEndRow,
             plan.WorkbookColumnNames,
             metadataColumnIndexes,
             workbookRows,
@@ -1331,8 +1349,48 @@ public static class PortableLogbookWorkbookPackageStorage
         if (TryResizeTableReference(tableRef, plan.WorkbookColumnNames.Count, out var resizedRef))
         {
             tableRoot.SetAttributeValue("ref", resizedRef);
-            tableRoot.Element(SpreadsheetNamespace + "autoFilter")?.SetAttributeValue("ref", resizedRef);
         }
+
+        SynchronizeAutoFilterReference(tableRoot);
+    }
+
+    private static void SynchronizeAutoFilterReference(XElement tableRoot)
+    {
+        var autoFilter = tableRoot.Element(SpreadsheetNamespace + "autoFilter");
+        if (autoFilter is null ||
+            !TryParseTableReference(
+                (string?)tableRoot.Attribute("ref"),
+                out var startColumn,
+                out var startRow,
+                out var endColumn,
+                out var endRow))
+        {
+            return;
+        }
+
+        var filterEndRow = Math.Max(startRow, endRow - GetTableTotalsRowCount(tableRoot));
+        autoFilter.SetAttributeValue(
+            "ref",
+            $"{ColumnName(startColumn)}{startRow}:{ColumnName(endColumn)}{filterEndRow}");
+    }
+
+    private static int GetTableTotalsRowCount(XElement tableRoot)
+    {
+        if (int.TryParse(
+                (string?)tableRoot.Attribute("totalsRowCount"),
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var totalsRowCount) &&
+            totalsRowCount > 0)
+        {
+            return totalsRowCount;
+        }
+
+        var totalsRowShownValue = (string?)tableRoot.Attribute("totalsRowShown");
+        return string.Equals(totalsRowShownValue, "1", StringComparison.Ordinal) ||
+            (bool.TryParse(totalsRowShownValue, out var totalsRowShown) && totalsRowShown)
+                ? 1
+                : 0;
     }
 
     private static string? FindWorksheetEntryForTable(ZipArchive archive, string tableEntryName)
@@ -1819,7 +1877,7 @@ public static class PortableLogbookWorkbookPackageStorage
     {
         var root = worksheet.Root
             ?? throw new InvalidDataException("Worksheet XML is invalid.");
-        if (!TryParseCellReference(cellReference, out _, out var rowNumber))
+        if (!TryParseCellReference(cellReference, out var columnNumber, out var rowNumber))
         {
             throw new InvalidDataException($"Cell reference '{cellReference}' is invalid.");
         }
@@ -1837,19 +1895,57 @@ public static class PortableLogbookWorkbookPackageStorage
         if (row is null)
         {
             row = new XElement(SpreadsheetNamespace + "row", new XAttribute("r", rowNumber));
-            sheetData.Add(row);
+        }
+        else
+        {
+            row.Remove();
         }
 
-        var cell = row
+        var nextRow = sheetData
+            .Elements(SpreadsheetNamespace + "row")
+            .FirstOrDefault(element => ((uint?)element.Attribute("r") ?? 0) > rowNumber);
+        if (nextRow is null)
+        {
+            sheetData.Add(row);
+        }
+        else
+        {
+            nextRow.AddBeforeSelf(row);
+        }
+
+        var matchingCells = row
             .Elements(SpreadsheetNamespace + "c")
-            .FirstOrDefault(element => string.Equals(
+            .Where(element => string.Equals(
                 (string?)element.Attribute("r"),
                 cellReference,
-                StringComparison.OrdinalIgnoreCase));
+                StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var cell = matchingCells.FirstOrDefault();
         if (cell is null)
         {
             cell = new XElement(SpreadsheetNamespace + "c", new XAttribute("r", cellReference));
+        }
+        else
+        {
+            cell.Remove();
+            foreach (var duplicate in matchingCells.Skip(1))
+            {
+                duplicate.Remove();
+            }
+        }
+
+        var nextCell = row
+            .Elements(SpreadsheetNamespace + "c")
+            .FirstOrDefault(element =>
+                TryParseCellReference((string?)element.Attribute("r") ?? string.Empty, out var existingColumn, out _) &&
+                existingColumn > columnNumber);
+        if (nextCell is null)
+        {
             row.Add(cell);
+        }
+        else
+        {
+            nextCell.AddBeforeSelf(cell);
         }
 
         cell.SetAttributeValue("t", "inlineStr");

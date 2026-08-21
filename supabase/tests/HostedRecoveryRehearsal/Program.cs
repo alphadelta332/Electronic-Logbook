@@ -26,6 +26,7 @@ var stage = "startup";
 var cleanupVerified = false;
 Exception? failure = null;
 string? failureStage = null;
+IReadOnlyDictionary<string, int>? liveWorkbookDeviceStatusCounts = null;
 
 var runSuffix = Guid.NewGuid().ToString("N")[..12];
 var email = liveWorkbookOtp
@@ -180,12 +181,36 @@ try
         _ = await Console.In.ReadLineAsync();
 
         stage = "verify-live-workbook-device";
-        var workbookDevices = await GetRestAsync<JsonElement[]>(
-            http,
-            serviceRoleKey,
-            $"devices?select=device_id&account_id=eq.{accountId}&device_type=eq.workbook&status=eq.active");
-        Expect(workbookDevices.Length == 1, "Live OTP pairing did not leave exactly one active workbook device.");
-        var workbookDeviceId = workbookDevices[0].GetProperty("device_id").GetGuid();
+        JsonElement[] workbookDevices = [];
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            workbookDevices = await GetRestAsync<JsonElement[]>(
+                http,
+                serviceRoleKey,
+                $"devices?select=device_id,status&account_id=eq.{accountId}&device_type=eq.workbook");
+            if (workbookDevices.Count(device =>
+                    string.Equals(device.GetProperty("status").GetString(), "active", StringComparison.Ordinal)) == 1)
+            {
+                break;
+            }
+
+            await Task.Delay(500);
+        }
+
+        liveWorkbookDeviceStatusCounts = workbookDevices
+            .GroupBy(device => device.GetProperty("status").GetString() ?? "unknown", StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var activeWorkbookDevices = workbookDevices
+            .Where(device => string.Equals(
+                device.GetProperty("status").GetString(),
+                "active",
+                StringComparison.Ordinal))
+            .ToArray();
+        Expect(
+            activeWorkbookDevices.Length == 1,
+            $"Live OTP pairing did not leave exactly one active workbook device " +
+            $"(active={activeWorkbookDevices.Length}, total={workbookDevices.Length}).");
+        var workbookDeviceId = activeWorkbookDevices[0].GetProperty("device_id").GetGuid();
         Pass("liveEmailOtpWorkbookDeviceActivated");
 
         stage = "verify-live-workbook-acknowledgement";
@@ -333,6 +358,7 @@ finally
         passed = failure is null && cleanupVerified && checks.Values.All(value => value),
         cleanupVerified,
         checks,
+        liveWorkbookDeviceStatusCounts,
         failureStage,
         failure = failure is null ? null : SanitizeFailure(failure)
     };
