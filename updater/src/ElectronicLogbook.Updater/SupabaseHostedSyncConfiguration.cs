@@ -9,6 +9,7 @@ public sealed record SupabaseHostedSyncConfiguration(
 {
     private const string UrlEnvironmentVariable = "ELECTRONIC_LOGBOOK_SUPABASE_URL";
     private const string AnonKeyEnvironmentVariable = "ELECTRONIC_LOGBOOK_SUPABASE_ANON_KEY";
+    private const string EmbeddedConfigurationResource = "ElectronicLogbook.HostedSyncConfiguration.json";
 
     public static bool TryLoad(out SupabaseHostedSyncConfiguration? configuration, out string? unavailableReason)
     {
@@ -17,6 +18,16 @@ public sealed record SupabaseHostedSyncConfiguration(
         if (!string.IsNullOrWhiteSpace(url) || !string.IsNullOrWhiteSpace(anonKey))
         {
             return TryCreate(url, anonKey, Environment.MachineName, out configuration, out unavailableReason);
+        }
+
+        var updaterAssembly = typeof(SupabaseHostedSyncConfiguration).Assembly;
+        if (updaterAssembly.GetManifestResourceInfo(EmbeddedConfigurationResource) is not null)
+        {
+            return TryLoadEmbeddedConfiguration(
+                updaterAssembly,
+                EmbeddedConfigurationResource,
+                out configuration,
+                out unavailableReason);
         }
 
         foreach (var path in CandidateDevelopmentConfigPaths())
@@ -48,6 +59,46 @@ public sealed record SupabaseHostedSyncConfiguration(
         configuration = null;
         unavailableReason = "Hosted transport is not configured in this updater build; workbook changes are queued locally.";
         return false;
+    }
+
+    internal static bool TryLoadEmbeddedConfiguration(
+        System.Reflection.Assembly assembly,
+        string resourceName,
+        out SupabaseHostedSyncConfiguration? configuration,
+        out string? unavailableReason)
+    {
+        ArgumentNullException.ThrowIfNull(assembly);
+        ArgumentException.ThrowIfNullOrWhiteSpace(resourceName);
+
+        try
+        {
+            using var stream = assembly.GetManifestResourceStream(resourceName);
+            if (stream is null)
+            {
+                configuration = null;
+                unavailableReason = "Embedded hosted sync configuration was not found.";
+                return false;
+            }
+
+            configuration = null;
+            unavailableReason = null;
+            var json = JsonSerializer.Deserialize<HostedSyncConfigFile>(stream, JsonDefaults.Web);
+            if (json is not null &&
+                TryCreate(json.SupabaseUrl, json.AnonKey, json.PlatformLabel, out configuration, out unavailableReason))
+            {
+                return true;
+            }
+
+            configuration = null;
+            unavailableReason ??= "Embedded hosted sync configuration is invalid.";
+            return false;
+        }
+        catch (JsonException)
+        {
+            configuration = null;
+            unavailableReason = "Embedded hosted sync configuration is invalid.";
+            return false;
+        }
     }
 
     internal static bool TryCreate(

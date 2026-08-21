@@ -28,7 +28,23 @@ jobs:
 
       - name: Build wizard asset
         shell: pwsh
-        run: ./updater/Publish-WizardAsset.ps1
+        env:
+          HOSTED_SUPABASE_URL: ${{ vars.ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_URL }}
+          HOSTED_SUPABASE_ANON_KEY: ${{ secrets.ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_ANON_KEY }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:HOSTED_SUPABASE_URL) -or
+              [string]::IsNullOrWhiteSpace($env:HOSTED_SUPABASE_ANON_KEY)) {
+            throw "Development hosted-sync repository configuration is missing."
+          }
+
+          $configPath = Join-Path $env:RUNNER_TEMP "wizard-hosted-sync.json"
+          [pscustomobject][ordered]@{
+            supabaseUrl = $env:HOSTED_SUPABASE_URL
+            anonKey = $env:HOSTED_SUPABASE_ANON_KEY
+            platformLabel = "Excel workbook"
+          } | ConvertTo-Json | Set-Content -LiteralPath $configPath -Encoding UTF8
+
+          ./updater/Publish-WizardAsset.ps1 -HostedSyncConfigPath $configPath
 
       - name: Publish dev wizard release
         shell: pwsh

@@ -11,11 +11,11 @@ Create two separate Supabase projects:
 - Development: used for local and CI-adjacent integration work.
 - Private pilot: used only for invited pilot users.
 
-Use the Sydney region, `ap-southeast-2`, for both projects. Keep each project's anon key,
-service-role key, project URL, database password, and access token in local secret
-storage only. Do not add them to `release.local.json`, diagnostics bundles, screenshots,
-artifacts, or workbook metadata unless a later release gate explicitly adds a redacted
-secret-handling path.
+Use the Sydney region, `ap-southeast-2`, for both projects. Service-role keys, database
+passwords, and management access tokens are secrets and must remain in protected local or
+CI secret storage. The project URL and anon key are public client configuration, but keep
+them out of source files, logs, diagnostics, screenshots, and workbook metadata. They may
+be embedded in a built client artifact for the intended environment.
 
 The first private pilot remains on Supabase Free until a documented upgrade trigger is
 reached. Recheck current Supabase Free limits, region availability, and Auth behavior
@@ -65,11 +65,12 @@ Configure Auth in the Supabase dashboard for each project:
 - Send Auth email through Resend using `auth-dev.flightlogx.app` for development and
   `auth.flightlogx.app` for private pilot, with a separate sending-only Resend credential
   for each Supabase project. Use `FlightLogX <signin@...>` as the sender.
-- Change the shared **Magic Link or OTP** template to display the six-digit `{{ .Token }}`
-  and no clickable confirmation link. Set Email OTP expiration to 600 seconds, email sends
+- Change the shared **Magic Link or OTP** template to display `{{ .Token }}` and no
+  clickable confirmation link. Set Email OTP length to 6, expiration to 600 seconds, email sends
   to 30 per hour, and OTP requests to 30 per hour. Normal Android and updater instructions
-  request only the six-digit code. The clients retain URL parsing as an undisclosed support
-  fallback for already-issued links; do not advertise it in normal UI or participant steps.
+  request only the six-digit code and tell the user to check junk or spam if the message
+  does not arrive. The clients retain URL parsing as an undisclosed support fallback for
+  already-issued links; do not advertise it in normal UI or participant steps.
 - Keep phone, anonymous, and public signup providers disabled. Email is the first-invitation
   method. Google is the only enabled OAuth provider and is used only for the implemented
   returning-user recovery path documented in `docs/account-recovery-threat-model.md`.
@@ -88,6 +89,12 @@ Verify the redacted remote configuration after setup and before each canary:
 .\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment development
 .\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment privatePilot
 ```
+
+The development wizard publishing workflow reads the project URL from the repository
+variable `ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_URL` and the anon key from the repository
+secret `ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_ANON_KEY`. It embeds those public client
+settings in the wizard executable and validates the finished executable before publishing.
+Do not reuse the development values for a private-pilot or release build.
 
 After a Supabase Auth invitation is accepted, the client should call
 `public.accept_hosted_invitation(...)` with the local device type and platform label. The

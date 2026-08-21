@@ -646,11 +646,11 @@ public partial class MainWindow : Window
         {
             using var client = new SupabaseWorkbookConnectionClient(
                 configuration ?? throw new InvalidOperationException("Hosted configuration was not resolved."));
-            FooterStatusText.Text = "Sending a private-pilot sign-in email...";
+            FooterStatusText.Text = "Sending the sign-in email...";
             var signIn = await client.StartEmailSignInAsync(email);
             var verificationInput = PromptForText(
                 "Verify invited account",
-                $"A sign-in code was sent to {signIn.DeliveryHint}. Enter the six-digit code shown in the email. It expires after 10 minutes:",
+                $"A sign-in code was sent to {signIn.DeliveryHint}. Enter the six-digit code shown in the email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive:",
                 allowEmpty: false);
             if (string.IsNullOrWhiteSpace(verificationInput))
             {

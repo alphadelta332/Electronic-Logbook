@@ -125,7 +125,7 @@ else
                     <MudTextField @bind-Value="HostedVerificationCode"
                                   InputType="InputType.Text"
                                   Label="Six-digit sign-in code"
-                                  HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes."
+                                  HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive."
                                   Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
                         Connect account
@@ -439,7 +439,7 @@ else
     private string AttentionGuidance => Session.HostedSyncStatusLabel switch
     {
         "Needs attention" => "Resolve conflicts, reauthenticate, restore a lost key, or recover a revoked device from Advanced recovery/support.",
-        "Signing in" => "Finish sign-in with the six-digit code sent to the invited email.",
+        "Signing in" => "Finish sign-in with the six-digit code sent to the invited email. Check your junk or spam folder if it does not arrive.",
         "Offline" => "You can keep working; queued edits sync when the network returns.",
         _ => "Daily sync stays automatic. Package tools are only for Advanced recovery/support."
     };
@@ -457,7 +457,7 @@ else
         try
         {
             var signIn = await Session.StartHostedInviteAcceptanceAsync(HostedEmail);
-            AccountMessage = $"Sign-in code sent to {signIn.DeliveryHint}. It expires after 10 minutes.";
+            AccountMessage = $"Sign-in code sent to {signIn.DeliveryHint}. It expires after 10 minutes. Check your junk or spam folder if it does not arrive.";
         }
         catch (Exception ex)
         {

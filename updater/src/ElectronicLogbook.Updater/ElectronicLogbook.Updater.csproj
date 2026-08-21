@@ -11,6 +11,9 @@
   <ItemGroup>
     <EmbeddedResource Include="..\..\compatibility-policy.json" Link="compatibility-policy.json" />
     <EmbeddedResource Include="..\..\release-manifest-signing-public-key.pem" Link="release-manifest-signing-public-key.pem" />
+    <EmbeddedResource Include="$(HostedSyncConfigPath)"
+                      LogicalName="ElectronicLogbook.HostedSyncConfiguration.json"
+                      Condition="'$(HostedSyncConfigPath)' != '' and Exists('$(HostedSyncConfigPath)')" />
   </ItemGroup>
 
   <ItemGroup>

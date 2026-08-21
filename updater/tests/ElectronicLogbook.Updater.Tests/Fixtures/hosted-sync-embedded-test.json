@@ -1,0 +1,5 @@
+{
+  "supabaseUrl": "https://development-test.supabase.co",
+  "anonKey": "public-anon-key",
+  "platformLabel": "Excel embedded test"
+}

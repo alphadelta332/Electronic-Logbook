@@ -9,6 +9,21 @@ namespace ElectronicLogbook.Updater.Tests;
 public sealed class SupabaseWorkbookConnectionClientTests
 {
     [Fact]
+    public void ConfigurationLoadsEmbeddedPublishedWizardSettings()
+    {
+        var loaded = SupabaseHostedSyncConfiguration.TryLoadEmbeddedConfiguration(
+            typeof(SupabaseWorkbookConnectionClientTests).Assembly,
+            "ElectronicLogbook.Tests.HostedSyncConfiguration.json",
+            out var configuration,
+            out var unavailableReason);
+
+        Assert.True(loaded, unavailableReason);
+        Assert.Equal("https://development-test.supabase.co/", configuration?.SupabaseUrl.AbsoluteUri);
+        Assert.Equal("public-anon-key", configuration?.AnonKey);
+        Assert.Equal("Excel embedded test", configuration?.PlatformLabel);
+    }
+
+    [Fact]
     public async Task InvitedOtpDiscoveryAndManagedWorkbookRecoveryUseBoundedPublicRequests()
     {
         var accountId = Guid.NewGuid();

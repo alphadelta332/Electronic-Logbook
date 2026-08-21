@@ -16,15 +16,21 @@ var psqlPath = RequiredEnvironment("ELB_REHEARSAL_PSQL_PATH");
 var dbHost = RequiredEnvironment("ELB_REHEARSAL_DB_HOST");
 var dbUser = RequiredEnvironment("ELB_REHEARSAL_DB_USER");
 var dbPassword = RequiredEnvironment("ELB_REHEARSAL_DB_PASSWORD");
+var liveWorkbookOtp = string.Equals(
+    Environment.GetEnvironmentVariable("ELB_REHEARSAL_LIVE_WORKBOOK_OTP"),
+    "1",
+    StringComparison.Ordinal);
 var startedAt = DateTimeOffset.UtcNow;
-var checks = ExpectedChecks().ToDictionary(value => value, _ => false, StringComparer.Ordinal);
+var checks = ExpectedChecks(liveWorkbookOtp).ToDictionary(value => value, _ => false, StringComparer.Ordinal);
 var stage = "startup";
 var cleanupVerified = false;
 Exception? failure = null;
 string? failureStage = null;
 
 var runSuffix = Guid.NewGuid().ToString("N")[..12];
-var email = $"hosted-recovery-{runSuffix}@example.invalid";
+var email = liveWorkbookOtp
+    ? RequiredEnvironment("ELB_REHEARSAL_LIVE_EMAIL")
+    : $"hosted-recovery-{runSuffix}@example.invalid";
 var accountId = Guid.Empty;
 var logbookId = Guid.NewGuid();
 var initialDeviceId = Guid.Empty;
@@ -166,9 +172,33 @@ try
     Expect(hostedRevision > 0, "The hosted ledger did not assign a positive revision.");
     Pass("nonEmptyEncryptedLedgerAppended");
 
-    stage = "managed-replacement-authentication";
-    var managedSession = await GenerateAndVerifyOtpAsync(http, anonKey, serviceRoleKey, email, accountId);
-    Pass("managedReplacementEmailOtpVerified");
+    if (liveWorkbookOtp)
+    {
+        stage = "await-live-workbook-otp";
+        Console.WriteLine("LIVE_WORKBOOK_OTP_READY");
+        Console.WriteLine("Complete the workbook email-code connection, then press Enter here to verify and clean up.");
+        _ = await Console.In.ReadLineAsync();
+
+        stage = "verify-live-workbook-device";
+        var workbookDevices = await GetRestAsync<JsonElement[]>(
+            http,
+            serviceRoleKey,
+            $"devices?select=device_id&account_id=eq.{accountId}&device_type=eq.workbook&status=eq.active");
+        Expect(workbookDevices.Length == 1, "Live OTP pairing did not leave exactly one active workbook device.");
+        var workbookDeviceId = workbookDevices[0].GetProperty("device_id").GetGuid();
+        Pass("liveEmailOtpWorkbookDeviceActivated");
+
+        stage = "verify-live-workbook-acknowledgement";
+        Expect(
+            await ReadAcknowledgementAsync(http, serviceRoleKey, logbookId, workbookDeviceId) >= hostedRevision,
+            "Live OTP pairing did not durably acknowledge the hosted revision.");
+        Pass("liveWorkbookAcknowledgedHostedRevision");
+    }
+    else
+    {
+        stage = "managed-replacement-authentication";
+        var managedSession = await GenerateAndVerifyOtpAsync(http, anonKey, serviceRoleKey, email, accountId);
+        Pass("managedReplacementEmailOtpVerified");
 
     stage = "managed-replacement-restore";
     using var managedDeviceKey = RSA.Create(2048);
@@ -254,7 +284,8 @@ try
         "Recovery-code replacement activation was not durable.");
     Pass("recoveryCodeFallbackActivated");
     CryptographicOperations.ZeroMemory(codePackageKey);
-    recoveryCode = string.Empty;
+        recoveryCode = string.Empty;
+    }
 }
 catch (Exception ex)
 {
@@ -294,7 +325,9 @@ finally
     var evidence = new
     {
         schemaVersion = 1,
-        rehearsal = "hosted-development-disposable-recovery",
+        rehearsal = liveWorkbookOtp
+            ? "hosted-development-live-workbook-otp"
+            : "hosted-development-disposable-recovery",
         startedAtUtc = startedAt,
         completedAtUtc = DateTimeOffset.UtcNow,
         passed = failure is null && cleanupVerified && checks.Values.All(value => value),
@@ -316,34 +349,48 @@ if (failure is not null)
     return 1;
 }
 
-Console.WriteLine("Hosted recovery rehearsal passed.");
+Console.WriteLine(liveWorkbookOtp
+    ? "Hosted live workbook OTP rehearsal passed."
+    : "Hosted recovery rehearsal passed.");
 Console.WriteLine($"- {checks.Count} redacted checks passed");
 Console.WriteLine("- disposable Auth identity and hosted rows were removed");
 return 0;
 
 void Pass(string name) => checks[name] = true;
 
-static IEnumerable<string> ExpectedChecks() =>
-[
-    "disposableAccountInvited",
-    "adminGeneratedEmailOtpVerified",
-    "managedEnvelopeEnrolled",
-    "recoveryCodeConfirmTestedAndEnrolled",
-    "nonEmptyEncryptedLedgerAppended",
-    "managedReplacementEmailOtpVerified",
-    "managedReplacementPackageKeyRecovered",
-    "managedReplacementLedgerMaterialized",
-    "managedReplacementDurableLocalReadBack",
-    "managedReplacementAcknowledged",
-    "managedReplacementActivated",
-    "recoveryCodeReplacementEmailOtpVerified",
-    "recoveryCodeFallbackPackageKeyRecovered",
-    "recoveryCodeFallbackLedgerMaterialized",
-    "recoveryCodeFallbackDurableLocalReadBack",
-    "recoveryCodeFallbackAcknowledged",
-    "recoveryCodeFallbackActivated",
-    "disposableIdentityCleaned"
-];
+static IEnumerable<string> ExpectedChecks(bool liveWorkbookOtp) => liveWorkbookOtp
+    ?
+    [
+        "disposableAccountInvited",
+        "adminGeneratedEmailOtpVerified",
+        "managedEnvelopeEnrolled",
+        "recoveryCodeConfirmTestedAndEnrolled",
+        "nonEmptyEncryptedLedgerAppended",
+        "liveEmailOtpWorkbookDeviceActivated",
+        "liveWorkbookAcknowledgedHostedRevision",
+        "disposableIdentityCleaned"
+    ]
+    :
+    [
+        "disposableAccountInvited",
+        "adminGeneratedEmailOtpVerified",
+        "managedEnvelopeEnrolled",
+        "recoveryCodeConfirmTestedAndEnrolled",
+        "nonEmptyEncryptedLedgerAppended",
+        "managedReplacementEmailOtpVerified",
+        "managedReplacementPackageKeyRecovered",
+        "managedReplacementLedgerMaterialized",
+        "managedReplacementDurableLocalReadBack",
+        "managedReplacementAcknowledged",
+        "managedReplacementActivated",
+        "recoveryCodeReplacementEmailOtpVerified",
+        "recoveryCodeFallbackPackageKeyRecovered",
+        "recoveryCodeFallbackLedgerMaterialized",
+        "recoveryCodeFallbackDurableLocalReadBack",
+        "recoveryCodeFallbackAcknowledged",
+        "recoveryCodeFallbackActivated",
+        "disposableIdentityCleaned"
+    ];
 
 static string RequiredEnvironment(string name) =>
     Environment.GetEnvironmentVariable(name) is { Length: > 0 } value

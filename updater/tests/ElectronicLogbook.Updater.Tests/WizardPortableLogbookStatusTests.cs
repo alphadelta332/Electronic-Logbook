@@ -99,9 +99,33 @@ public sealed class WizardPortableLogbookStatusTests
             "MainWindow.xaml.cs")));
         var connectionMethod = ExtractMethodBody(codeBehind, "private async Task RunHostedConnectionAsync");
 
-        Assert.Contains("Enter the six-digit code shown in the email. It expires after 10 minutes:", connectionMethod, StringComparison.Ordinal);
+        Assert.Contains("Enter the six-digit code shown in the email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive:", connectionMethod, StringComparison.Ordinal);
         Assert.DoesNotContain("unused sign-in link", connectionMethod, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Safe Links", connectionMethod, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void DevelopmentWizardWorkflowEmbedsHostedClientConfiguration()
+    {
+        var workflow = File.ReadAllText(FindRepoFile(Path.Combine(
+            ".github",
+            "workflows",
+            "publish-dev-wizard.yml")));
+        var publishScript = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "Publish-WizardAsset.ps1")));
+        var appCode = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "App.xaml.cs")));
+
+        Assert.Contains("ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_URL", workflow, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_ANON_KEY", workflow, StringComparison.Ordinal);
+        Assert.Contains("-HostedSyncConfigPath $configPath", workflow, StringComparison.Ordinal);
+        Assert.Contains("/p:HostedSyncConfigPath=$resolvedHostedSyncConfigPath", publishScript, StringComparison.Ordinal);
+        Assert.Contains("$publishedExe --validate-hosted-configuration", publishScript, StringComparison.Ordinal);
+        Assert.Contains("SupabaseHostedSyncConfiguration.TryLoad", appCode, StringComparison.Ordinal);
     }
 
     [Fact]

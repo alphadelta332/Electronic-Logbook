@@ -2338,27 +2338,59 @@ public static class PortableLogbookWorkbookPackageStorage
 
     private static void EnsureCustomXmlRelationship(ZipArchive archive)
     {
-        var document = ReadXmlEntry(archive, "_rels/.rels") ?? new XDocument(new XElement(RelationshipsNamespace + "Relationships"));
+        const string relationshipId = "rIdPortableLogbookStorage";
+        const string relationshipType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml";
+
+        // Custom XML belongs to the workbook part, not the package root. Remove the
+        // legacy root relationship so the next write also repairs workbooks produced
+        // by the earlier implementation.
+        var packageRelationships = ReadXmlEntry(archive, "_rels/.rels");
+        var packageRelationshipsRoot = packageRelationships?.Root;
+        if (packageRelationshipsRoot is not null)
+        {
+            var staleRelationships = packageRelationshipsRoot
+                .Elements(RelationshipsNamespace + "Relationship")
+                .Where(element =>
+                    string.Equals((string?)element.Attribute("Id"), relationshipId, StringComparison.Ordinal) ||
+                    string.Equals(
+                        (string?)element.Attribute("Target"),
+                        PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath,
+                        StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (staleRelationships.Length > 0)
+            {
+                foreach (var staleRelationship in staleRelationships)
+                {
+                    staleRelationship.Remove();
+                }
+
+                WriteXmlEntry(archive, "_rels/.rels", packageRelationships!);
+            }
+        }
+
+        const string workbookRelationshipsPath = "xl/_rels/workbook.xml.rels";
+        var document = ReadXmlEntry(archive, workbookRelationshipsPath)
+            ?? new XDocument(new XElement(RelationshipsNamespace + "Relationships"));
         var root = document.Root ?? throw new InvalidDataException("Workbook relationships part is invalid.");
-        var target = PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath;
+        var target = "../" + PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath;
         var relationship = root
             .Elements(RelationshipsNamespace + "Relationship")
-            .FirstOrDefault(element => string.Equals((string?)element.Attribute("Id"), "rIdPortableLogbookStorage", StringComparison.Ordinal));
+            .FirstOrDefault(element => string.Equals((string?)element.Attribute("Id"), relationshipId, StringComparison.Ordinal));
         if (relationship is null)
         {
             root.Add(new XElement(
                 RelationshipsNamespace + "Relationship",
-                new XAttribute("Id", "rIdPortableLogbookStorage"),
-                new XAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"),
+                new XAttribute("Id", relationshipId),
+                new XAttribute("Type", relationshipType),
                 new XAttribute("Target", target)));
         }
         else
         {
-            relationship.SetAttributeValue("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml");
+            relationship.SetAttributeValue("Type", relationshipType);
             relationship.SetAttributeValue("Target", target);
         }
 
-        WriteXmlEntry(archive, "_rels/.rels", document);
+        WriteXmlEntry(archive, workbookRelationshipsPath, document);
     }
 
     private static XDocument? ReadXmlEntry(ZipArchive archive, string entryName)

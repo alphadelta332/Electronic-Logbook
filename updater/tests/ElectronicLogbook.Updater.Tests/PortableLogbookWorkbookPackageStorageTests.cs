@@ -44,7 +44,7 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
         using var archive = ZipFile.OpenRead(workbook);
         Assert.NotNull(archive.GetEntry(PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath));
         Assert.NotNull(archive.GetEntry("[Content_Types].xml"));
-        Assert.NotNull(archive.GetEntry("_rels/.rels"));
+        Assert.NotNull(archive.GetEntry("xl/_rels/workbook.xml.rels"));
         Assert.Single(archive.Entries, entry => entry.FullName == PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath);
     }
 
@@ -76,15 +76,50 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
 
         using var archive = ZipFile.OpenRead(workbook);
         var contentTypes = ReadXml(archive, "[Content_Types].xml");
-        var relationships = ReadXml(archive, "_rels/.rels");
+        var workbookRelationships = ReadXml(archive, "xl/_rels/workbook.xml.rels");
         Assert.Contains(
             contentTypes.Root!.Elements().Where(element => element.Name.LocalName == "Override"),
             element => (string?)element.Attribute("PartName") == "/" + PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath);
         Assert.Contains(
-            relationships.Root!.Elements().Where(element => element.Name.LocalName == "Relationship"),
+            workbookRelationships.Root!.Elements().Where(element => element.Name.LocalName == "Relationship"),
             element =>
                 (string?)element.Attribute("Id") == "rIdPortableLogbookStorage" &&
-                (string?)element.Attribute("Target") == PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath);
+                (string?)element.Attribute("Target") == "../" + PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath);
+        Assert.Null(archive.GetEntry("_rels/.rels"));
+    }
+
+    [Fact]
+    public void WriteEnvelopeRepairsLegacyPackageRootCustomXmlRelationship()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var envelope = CreateEnvelope("log_storage_repair", PortableLogbookKey.Generate());
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            var relationshipNamespace = XNamespace.Get("http://schemas.openxmlformats.org/package/2006/relationships");
+            var packageRelationships = new XDocument(
+                new XElement(
+                    relationshipNamespace + "Relationships",
+                    new XElement(
+                        relationshipNamespace + "Relationship",
+                        new XAttribute("Id", "rIdPortableLogbookStorage"),
+                        new XAttribute("Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml"),
+                        new XAttribute("Target", PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath))));
+            ReplaceXml(archive, "_rels/.rels", packageRelationships);
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteEnvelope(workbook, envelope);
+
+        using var repairedArchive = ZipFile.OpenRead(workbook);
+        var repairedPackageRelationships = ReadXml(repairedArchive, "_rels/.rels");
+        var repairedWorkbookRelationships = ReadXml(repairedArchive, "xl/_rels/workbook.xml.rels");
+        Assert.DoesNotContain(
+            repairedPackageRelationships.Root!.Elements().Where(element => element.Name.LocalName == "Relationship"),
+            element => (string?)element.Attribute("Id") == "rIdPortableLogbookStorage");
+        Assert.Contains(
+            repairedWorkbookRelationships.Root!.Elements().Where(element => element.Name.LocalName == "Relationship"),
+            element =>
+                (string?)element.Attribute("Id") == "rIdPortableLogbookStorage" &&
+                (string?)element.Attribute("Target") == "../" + PortableLogbookWorkbookMetadata.StorageCustomXmlPartPath);
     }
 
     [Fact]

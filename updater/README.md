@@ -183,6 +183,20 @@ with:
 .\updater\Publish-WizardAsset.ps1
 ```
 
+That command produces an updater without hosted account connection unless runtime
+environment variables are supplied. To package a wizard that can connect accounts, pass
+an environment-specific JSON file containing `supabaseUrl`, `anonKey`, and
+`platformLabel`:
+
+```powershell
+.\updater\Publish-WizardAsset.ps1 `
+  -HostedSyncConfigPath "<path-to-hosted-sync-config.json>"
+```
+
+The configuration is embedded in the executable and the packaging script validates that
+the finished executable can load it. Supabase anon keys are public client credentials;
+never put a service-role key, database password, or management token in this file.
+
 To Authenticode-sign the wizard executable during packaging, install the code-signing
 certificate in the current user or local machine certificate store and run:
 

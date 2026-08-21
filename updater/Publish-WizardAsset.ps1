@@ -5,6 +5,7 @@ param(
     [switch]$Sign,
     [string]$CertificateThumbprint,
     [string]$ExpectedPublisher,
+    [string]$HostedSyncConfigPath,
     [string]$TimestampServer = "http://timestamp.digicert.com"
 )
 
@@ -12,6 +13,20 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $projectPath = Join-Path $repoRoot "updater\src\ElectronicLogbook.Updater.Wizard\ElectronicLogbook.Updater.Wizard.csproj"
+$resolvedHostedSyncConfigPath = $null
+
+if (-not [string]::IsNullOrWhiteSpace($HostedSyncConfigPath)) {
+    $resolvedHostedSyncConfigPath = (Resolve-Path -LiteralPath $HostedSyncConfigPath).Path
+    $hostedSyncConfig = Get-Content -LiteralPath $resolvedHostedSyncConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $hostedSyncUrl = $null
+    if (-not [Uri]::TryCreate([string]$hostedSyncConfig.supabaseUrl, [UriKind]::Absolute, [ref]$hostedSyncUrl) -or
+        ($hostedSyncUrl.Scheme -ne [Uri]::UriSchemeHttps -and -not $hostedSyncUrl.IsLoopback)) {
+        throw "Hosted sync configuration must contain a secure Supabase URL."
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$hostedSyncConfig.anonKey)) {
+        throw "Hosted sync configuration must contain the public anon key."
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $repoRoot "updater\dist"
@@ -27,17 +42,37 @@ $assetZip = Join-Path $OutputDirectory "ElectronicLogbook.Updater.Wizard.win-x64
 $signatureReportPath = Join-Path $OutputDirectory "wizard-signature-report.json"
 
 if (-not $SkipBuild) {
-    dotnet publish $projectPath -c Release -r win-x64 --self-contained true `
-        /p:PublishSingleFile=true `
-        /p:IncludeNativeLibrariesForSelfExtract=true `
-        /p:EnableCompressionInSingleFile=true `
-        /p:PublishTrimmed=false `
-        -o $publishDir
+    $publishArguments = @(
+        "publish",
+        $projectPath,
+        "-c", "Release",
+        "-r", "win-x64",
+        "--self-contained", "true",
+        "/p:PublishSingleFile=true",
+        "/p:IncludeNativeLibrariesForSelfExtract=true",
+        "/p:EnableCompressionInSingleFile=true",
+        "/p:PublishTrimmed=false",
+        "-o", $publishDir)
+    if ($null -ne $resolvedHostedSyncConfigPath) {
+        $publishArguments += "/p:HostedSyncConfigPath=$resolvedHostedSyncConfigPath"
+    }
+
+    & dotnet @publishArguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "Wizard publish failed."
+    }
 }
 
 $publishedExe = Join-Path $publishDir "ElectronicLogbook.Updater.Wizard.exe"
 if (-not (Test-Path $publishedExe)) {
     throw "Wizard publish output not found: $publishedExe"
+}
+
+if ($null -ne $resolvedHostedSyncConfigPath) {
+    & $publishedExe --validate-hosted-configuration
+    if ($LASTEXITCODE -ne 0) {
+        throw "Published wizard did not load its embedded hosted sync configuration."
+    }
 }
 
 if ($Sign) {
@@ -86,6 +121,11 @@ Write-Host "Wizard assets ready:" -ForegroundColor Green
 Write-Host "  EXE: $assetExe"
 Write-Host "  ZIP: $assetZip"
 Write-Host "  Signature report: $signatureReportPath"
+if ($null -ne $resolvedHostedSyncConfigPath) {
+    Write-Host "  Hosted sync: embedded public client configuration"
+} else {
+    Write-Warning "Hosted sync configuration was not embedded; account connection will be unavailable unless runtime environment variables are set."
+}
 if ($Sign) {
     Write-Host "  Signature: Authenticode signed with $CertificateThumbprint"
 }

@@ -28,6 +28,8 @@
 
   <ItemGroup>
     <None Include="Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Fixtures\hosted-sync-embedded-test.json"
+                      LogicalName="ElectronicLogbook.Tests.HostedSyncConfiguration.json" />
   </ItemGroup>
 
 </Project>
