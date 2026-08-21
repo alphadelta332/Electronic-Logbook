@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
-    [string]$EvidenceDirectory
+    [string]$EvidenceDirectory,
+    [switch]$WorkbookClientInvestigation
 )
 
 $ErrorActionPreference = 'Stop'
@@ -108,8 +109,13 @@ try {
     $env:ELB_REHEARSAL_DB_HOST = 'aws-0-ap-southeast-2.pooler.supabase.com'
     $env:ELB_REHEARSAL_DB_USER = "postgres.$projectRef"
     $env:ELB_REHEARSAL_DB_PASSWORD = [string]$metadata.development.db_password
+    $env:ELB_REHEARSAL_WORKBOOK_CLIENT = if ($WorkbookClientInvestigation) { '1' } else { '0' }
 
-    Write-Host 'Running a disposable hosted recovery rehearsal.' -ForegroundColor Cyan
+    Write-Host $(if ($WorkbookClientInvestigation) {
+        'Running a disposable workbook-connection-client investigation.'
+    } else {
+        'Running a disposable hosted recovery rehearsal.'
+    }) -ForegroundColor Cyan
     Write-Host 'Secrets and disposable identifiers are held only in process memory; evidence is redacted.' -ForegroundColor Yellow
     & dotnet run --project $projectPath --no-launch-profile
     if ($LASTEXITCODE -ne 0) {
@@ -125,6 +131,7 @@ finally {
     Remove-Item Env:ELB_REHEARSAL_DB_HOST -ErrorAction SilentlyContinue
     Remove-Item Env:ELB_REHEARSAL_DB_USER -ErrorAction SilentlyContinue
     Remove-Item Env:ELB_REHEARSAL_DB_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:ELB_REHEARSAL_WORKBOOK_CLIENT -ErrorAction SilentlyContinue
     if ($null -eq $previousSupabaseAccessToken) {
         Remove-Item Env:SUPABASE_ACCESS_TOKEN -ErrorAction SilentlyContinue
     } else {

@@ -93,4 +93,21 @@ public sealed class PrivatePilotRunbookTests
             rehearsal,
             StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void WorkbookClientInvestigationUsesTheProductionClientAndIndependentDeviceQueries()
+    {
+        var rehearsal = File.ReadAllText(TestRepo.FindFile(
+            "supabase", "tests", "HostedRecoveryRehearsal", "Program.cs"));
+        var launcher = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-HostedRecoveryRehearsal.ps1"));
+
+        Assert.Contains("WorkbookClientInvestigation", launcher, StringComparison.Ordinal);
+        Assert.Contains("ELB_REHEARSAL_WORKBOOK_CLIENT", launcher, StringComparison.Ordinal);
+        Assert.Contains("new SupabaseWorkbookConnectionClient", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("connectionClient.RestoreWorkbookKeyAsync", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("connectionClient.ActivateWorkbookDeviceAsync", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("ReadDeviceObservationPairAsync", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("from public.devices", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("device_id=eq.{deviceId}", rehearsal, StringComparison.Ordinal);
+    }
 }

@@ -21,16 +21,27 @@ var liveWorkbookOtp = string.Equals(
     Environment.GetEnvironmentVariable("ELB_REHEARSAL_LIVE_WORKBOOK_OTP"),
     "1",
     StringComparison.Ordinal);
+var workbookClientInvestigation = string.Equals(
+    Environment.GetEnvironmentVariable("ELB_REHEARSAL_WORKBOOK_CLIENT"),
+    "1",
+    StringComparison.Ordinal);
+if (liveWorkbookOtp && workbookClientInvestigation)
+{
+    throw new InvalidOperationException("Live workbook OTP and workbook-client investigation modes cannot run together.");
+}
 var liveWorkbookPath = liveWorkbookOtp
     ? Path.GetFullPath(RequiredEnvironment("ELB_REHEARSAL_LIVE_WORKBOOK_PATH"))
     : null;
 var startedAt = DateTimeOffset.UtcNow;
-var checks = ExpectedChecks(liveWorkbookOtp).ToDictionary(value => value, _ => false, StringComparer.Ordinal);
+var checks = ExpectedChecks(liveWorkbookOtp, workbookClientInvestigation)
+    .ToDictionary(value => value, _ => false, StringComparer.Ordinal);
 var stage = "startup";
 var cleanupVerified = false;
 Exception? failure = null;
 string? failureStage = null;
 IReadOnlyDictionary<string, int>? liveWorkbookDeviceStatusCounts = null;
+DeviceObservationPair? workbookClientAfterRestore = null;
+DeviceObservationPair? workbookClientAfterActivation = null;
 
 var runSuffix = Guid.NewGuid().ToString("N")[..12];
 var email = liveWorkbookOtp
@@ -244,6 +255,102 @@ try
             "Live OTP pairing did not durably acknowledge the hosted revision.");
         Pass("liveWorkbookAcknowledgedHostedRevision");
     }
+    else if (workbookClientInvestigation)
+    {
+        stage = "workbook-client-authentication";
+        var connectionConfiguration = new SupabaseHostedSyncConfiguration(
+            new Uri(supabaseUrl.TrimEnd('/') + "/"),
+            anonKey,
+            "Disposable workbook client");
+        using var connectionClient = new SupabaseWorkbookConnectionClient(connectionConfiguration);
+        _ = await connectionClient.StartEmailSignInAsync(email);
+        var workbookOtp = await GenerateOtpAsync(http, serviceRoleKey, email);
+        var workbookSession = await connectionClient.CompleteEmailSignInAsync(workbookOtp);
+        Expect(
+            PortableIdToGuid(workbookSession.AccountId.Value, "acct_") == accountId,
+            "Workbook client OTP session belonged to a different Auth user.");
+        Pass("workbookClientAdminOtpVerified");
+
+        stage = "workbook-client-logbook-discovery";
+        var workbookLogbook = (await connectionClient.DiscoverActiveLogbooksAsync()).SingleOrDefault(item =>
+            PortableIdToGuid(item.LogbookId.Value, "log_") == logbookId);
+        Expect(workbookLogbook is not null, "Workbook client did not discover the disposable hosted logbook.");
+        Pass("workbookClientLogbookDiscovered");
+
+        stage = "workbook-client-restore";
+        var workbookDeviceId = new DeviceId("dev_" + managedDeviceId.ToString("N"));
+        using var workbookRecoveryKey = PortableWorkbookRecoveryKeyPair.Create();
+        var restoredWorkbookKey = await connectionClient.RestoreWorkbookKeyAsync(
+            workbookLogbook!.LogbookId,
+            workbookDeviceId,
+            workbookRecoveryKey);
+        Expect(restoredWorkbookKey.Equals(PortableLogbookKey.FromBytes(packageKey.Bytes)),
+            "Workbook client recovered a different package key.");
+        Pass("workbookClientPackageKeyRecovered");
+
+        workbookClientAfterRestore = await ReadDeviceObservationPairAsync(
+            http,
+            serviceRoleKey,
+            psqlPath,
+            dbHost,
+            dbUser,
+            dbPassword,
+            accountId,
+            managedDeviceId,
+            "pending");
+        Expect(workbookClientAfterRestore.Rest.AllMatched,
+            "Service-role REST did not retain the exact pending workbook device after restore.");
+        Pass("workbookClientPendingDeviceVerifiedByRest");
+        Expect(workbookClientAfterRestore.Sql.AllMatched,
+            "Direct SQL did not retain the exact pending workbook device after restore.");
+        Pass("workbookClientPendingDeviceVerifiedBySql");
+
+        stage = "workbook-client-acknowledgement";
+        var restoredWorkbookKeyBytes = restoredWorkbookKey.ToBytes();
+        try
+        {
+            _ = await PullDecryptMaterializeAsync(
+                http,
+                anonKey,
+                workbookSession.Credential.AccessToken,
+                logbookId,
+                restoredWorkbookKeyBytes,
+                hostedRevision);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(restoredWorkbookKeyBytes);
+        }
+        await AcknowledgeAsync(
+            http,
+            anonKey,
+            workbookSession.Credential.AccessToken,
+            logbookId,
+            managedDeviceId,
+            hostedRevision);
+        Expect(await ReadAcknowledgementAsync(http, serviceRoleKey, logbookId, managedDeviceId) == hostedRevision,
+            "Workbook client acknowledgement was not durable.");
+        Pass("workbookClientAcknowledged");
+
+        stage = "workbook-client-activation";
+        await connectionClient.ActivateWorkbookDeviceAsync(workbookLogbook.LogbookId, workbookDeviceId);
+        workbookClientAfterActivation = await ReadDeviceObservationPairAsync(
+            http,
+            serviceRoleKey,
+            psqlPath,
+            dbHost,
+            dbUser,
+            dbPassword,
+            accountId,
+            managedDeviceId,
+            "active");
+        Expect(workbookClientAfterActivation.Rest.AllMatched,
+            "Service-role REST did not retain the exact active workbook device after activation.");
+        Pass("workbookClientActivatedDeviceVerifiedByRest");
+        Expect(workbookClientAfterActivation.Sql.AllMatched,
+            "Direct SQL did not retain the exact active workbook device after activation.");
+        Pass("workbookClientActivatedDeviceVerifiedBySql");
+    }
     else
     {
         stage = "managed-replacement-authentication";
@@ -377,13 +484,17 @@ finally
         schemaVersion = 1,
         rehearsal = liveWorkbookOtp
             ? "hosted-development-live-workbook-otp"
-            : "hosted-development-disposable-recovery",
+            : workbookClientInvestigation
+                ? "hosted-development-workbook-connection-client"
+                : "hosted-development-disposable-recovery",
         startedAtUtc = startedAt,
         completedAtUtc = DateTimeOffset.UtcNow,
         passed = failure is null && cleanupVerified && checks.Values.All(value => value),
         cleanupVerified,
         checks,
         liveWorkbookDeviceStatusCounts,
+        workbookClientAfterRestore,
+        workbookClientAfterActivation,
         failureStage,
         failure = failure is null ? null : SanitizeFailure(failure)
     };
@@ -409,7 +520,7 @@ return 0;
 
 void Pass(string name) => checks[name] = true;
 
-static IEnumerable<string> ExpectedChecks(bool liveWorkbookOtp) => liveWorkbookOtp
+static IEnumerable<string> ExpectedChecks(bool liveWorkbookOtp, bool workbookClientInvestigation) => liveWorkbookOtp
     ?
     [
         "disposableAccountInvited",
@@ -419,6 +530,24 @@ static IEnumerable<string> ExpectedChecks(bool liveWorkbookOtp) => liveWorkbookO
         "nonEmptyEncryptedLedgerAppended",
         "liveEmailOtpWorkbookDeviceActivated",
         "liveWorkbookAcknowledgedHostedRevision",
+        "disposableIdentityCleaned"
+    ]
+    : workbookClientInvestigation
+    ?
+    [
+        "disposableAccountInvited",
+        "adminGeneratedEmailOtpVerified",
+        "managedEnvelopeEnrolled",
+        "recoveryCodeConfirmTestedAndEnrolled",
+        "nonEmptyEncryptedLedgerAppended",
+        "workbookClientAdminOtpVerified",
+        "workbookClientLogbookDiscovered",
+        "workbookClientPackageKeyRecovered",
+        "workbookClientPendingDeviceVerifiedByRest",
+        "workbookClientPendingDeviceVerifiedBySql",
+        "workbookClientAcknowledged",
+        "workbookClientActivatedDeviceVerifiedByRest",
+        "workbookClientActivatedDeviceVerifiedBySql",
         "disposableIdentityCleaned"
     ]
     :
@@ -478,6 +607,19 @@ static async Task<AuthSession> GenerateAndVerifyOtpAsync(
     string email,
     Guid expectedAccountId)
 {
+    var otp = await GenerateOtpAsync(http, serviceRoleKey, email);
+    var session = await SendJsonAsync<AuthSession>(
+        http,
+        HttpMethod.Post,
+        "auth/v1/verify",
+        new { email, token = otp, type = "email" },
+        anonKey);
+    Expect(session.User?.Id == expectedAccountId, "Verified OTP session belonged to a different Auth user.");
+    return session;
+}
+
+static async Task<string> GenerateOtpAsync(HttpClient http, string serviceRoleKey, string email)
+{
     var generated = await SendJsonAsync<JsonElement>(
         http,
         HttpMethod.Post,
@@ -487,14 +629,7 @@ static async Task<AuthSession> GenerateAndVerifyOtpAsync(
         serviceRoleKey);
     var otp = generated.GetProperty("email_otp").GetString();
     Expect(!string.IsNullOrWhiteSpace(otp), "Supabase did not generate an email OTP.");
-    var session = await SendJsonAsync<AuthSession>(
-        http,
-        HttpMethod.Post,
-        "auth/v1/verify",
-        new { email, token = otp, type = "email" },
-        anonKey);
-    Expect(session.User?.Id == expectedAccountId, "Verified OTP session belonged to a different Auth user.");
-    return session;
+    return otp!;
 }
 
 static async Task<Guid> AcceptInvitationAsync(HttpClient http, string anonKey, string accessToken)
@@ -687,6 +822,101 @@ static async Task<string?> ReadDeviceStatusAsync(HttpClient http, string service
     var rows = await GetRestAsync<JsonElement[]>(http, serviceRoleKey,
         $"devices?select=status&device_id=eq.{deviceId}");
     return rows.Length == 1 ? rows[0].GetProperty("status").GetString() : null;
+}
+
+static async Task<DeviceObservationPair> ReadDeviceObservationPairAsync(
+    HttpClient http,
+    string serviceRoleKey,
+    string psqlPath,
+    string dbHost,
+    string dbUser,
+    string dbPassword,
+    Guid accountId,
+    Guid deviceId,
+    string expectedStatus)
+{
+    var rows = await GetRestAsync<JsonElement[]>(
+        http,
+        serviceRoleKey,
+        $"devices?select=account_id,device_type,status&device_id=eq.{deviceId}");
+    var rest = new DeviceObservation(
+        rows.Length == 1,
+        rows.Length == 1 && string.Equals(rows[0].GetProperty("status").GetString(), expectedStatus, StringComparison.Ordinal),
+        rows.Length == 1 && string.Equals(rows[0].GetProperty("device_type").GetString(), "workbook", StringComparison.Ordinal),
+        rows.Length == 1 && rows[0].GetProperty("account_id").GetGuid() == accountId);
+    var sql = await ReadDeviceObservationSqlAsync(
+        psqlPath,
+        dbHost,
+        dbUser,
+        dbPassword,
+        accountId,
+        deviceId,
+        expectedStatus);
+    return new DeviceObservationPair(rest, sql);
+}
+
+static async Task<DeviceObservation> ReadDeviceObservationSqlAsync(
+    string psqlPath,
+    string dbHost,
+    string dbUser,
+    string dbPassword,
+    Guid accountId,
+    Guid deviceId,
+    string expectedStatus)
+{
+    using var process = new Process
+    {
+        StartInfo = new ProcessStartInfo
+        {
+            FileName = psqlPath,
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        }
+    };
+    foreach (var argument in new[]
+    {
+        "-X", "-h", dbHost, "-p", "5432", "-U", dbUser, "-d", "postgres",
+        "-v", "ON_ERROR_STOP=1", "-A", "-t", "-q"
+    })
+    {
+        process.StartInfo.ArgumentList.Add(argument);
+    }
+    process.StartInfo.Environment["PGPASSWORD"] = dbPassword;
+    process.Start();
+    await process.StandardInput.WriteLineAsync($$"""
+        select
+            (count(*) = 1)::text || '|' ||
+            coalesce(bool_and(status = '{{expectedStatus}}'), false)::text || '|' ||
+            coalesce(bool_and(device_type = 'workbook'), false)::text || '|' ||
+            coalesce(bool_and(account_id = '{{accountId}}'), false)::text
+        from public.devices
+        where device_id = '{{deviceId}}';
+        """);
+    process.StandardInput.Close();
+    var outputTask = process.StandardOutput.ReadToEndAsync();
+    var errorTask = process.StandardError.ReadToEndAsync();
+    await process.WaitForExitAsync();
+    var output = await outputTask;
+    _ = await errorTask;
+    if (process.ExitCode != 0)
+    {
+        throw new InvalidOperationException(
+            $"Direct SQL workbook-device verification failed with psql exit code {process.ExitCode}; output redacted.");
+    }
+
+    var values = output.Trim().Split('|', StringSplitOptions.TrimEntries);
+    if (values.Length != 4 || values.Any(value => !bool.TryParse(value, out _)))
+    {
+        throw new InvalidDataException("Direct SQL workbook-device verification returned an invalid redacted result.");
+    }
+    return new DeviceObservation(
+        bool.Parse(values[0]),
+        bool.Parse(values[1]),
+        bool.Parse(values[2]),
+        bool.Parse(values[3]));
 }
 
 static async Task<T> GetRestAsync<T>(HttpClient http, string serviceRoleKey, string query)
@@ -980,3 +1210,8 @@ sealed record ManagedRestore(string WrappedKey, string Algorithm, string KeyVers
 sealed record CodeEnrollment(bool Enrolled);
 sealed record RecoveryCodeEnvelope(string Ciphertext, string Nonce, string Salt, string Algorithm, string KeyVersionId);
 sealed record ActivationResponse(bool Activated);
+sealed record DeviceObservation(bool Exists, bool StatusMatches, bool TypeMatches, bool AccountMatches)
+{
+    public bool AllMatched => Exists && StatusMatches && TypeMatches && AccountMatches;
+}
+sealed record DeviceObservationPair(DeviceObservation Rest, DeviceObservation Sql);
