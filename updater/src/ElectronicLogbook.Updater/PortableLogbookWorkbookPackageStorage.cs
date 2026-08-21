@@ -251,10 +251,12 @@ public static class PortableLogbookWorkbookPackageStorage
                 startColumn,
                 startRow,
                 startRow,
+                startRow,
                 plan.WorkbookColumnNames,
                 hiddenColumnIndexes,
                 [],
-                []);
+                [],
+                writeVisiblePayloadCells: false);
         }
 
         return new PortableLogbookWorkbookMetadataPackageResult(
@@ -342,6 +344,7 @@ public static class PortableLogbookWorkbookPackageStorage
             startColumn,
             startRow,
             dataEndRow,
+            currentDataEndRow,
             plan.WorkbookColumnNames,
             metadataColumnIndexes,
             workbookRows,
@@ -433,6 +436,7 @@ public static class PortableLogbookWorkbookPackageStorage
             startColumn,
             startRow,
             dataEndRow,
+            currentDataEndRow,
             plan.WorkbookColumnNames,
             metadataColumnIndexes,
             workbookRows,
@@ -2137,6 +2141,7 @@ public static class PortableLogbookWorkbookPackageStorage
         int tableStartColumn,
         int tableStartRow,
         int tableEndRow,
+        int previousDataEndRow,
         IReadOnlyList<string> columnNames,
         IReadOnlyList<int> metadataColumnIndexes,
         IReadOnlyList<PortableLogbookWorkbookRow> rows,
@@ -2145,6 +2150,17 @@ public static class PortableLogbookWorkbookPackageStorage
     {
         var worksheet = ReadXmlEntry(archive, worksheetEntryName)
             ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
+        var tableGrowthRowCount = Math.Max(0, tableEndRow - previousDataEndRow);
+        if (tableGrowthRowCount > 0)
+        {
+            ShiftTableColumnCellsDown(
+                worksheet,
+                tableStartColumn,
+                columnNames.Count,
+                previousDataEndRow + 1,
+                tableGrowthRowCount);
+        }
+
         var entryIdColumn = tableStartColumn + metadataColumnIndexes[0] - 1;
         var revisionIdColumn = tableStartColumn + metadataColumnIndexes[1] - 1;
         var fieldsByColumnName = writeVisiblePayloadCells
@@ -2199,6 +2215,10 @@ public static class PortableLogbookWorkbookPackageStorage
         }
 
         WriteXmlEntry(archive, worksheetEntryName, worksheet);
+        if (writeVisiblePayloadCells || tableGrowthRowCount > 0)
+        {
+            InvalidateCalculationChain(archive);
+        }
     }
 
     private static void WriteHiddenMetadataWorksheetCellsV2(
@@ -2207,6 +2227,7 @@ public static class PortableLogbookWorkbookPackageStorage
         int tableStartColumn,
         int tableStartRow,
         int tableEndRow,
+        int previousDataEndRow,
         IReadOnlyList<string> columnNames,
         IReadOnlyList<int> metadataColumnIndexes,
         IReadOnlyList<PortableLogbookWorkbookRowV2> rows,
@@ -2215,6 +2236,17 @@ public static class PortableLogbookWorkbookPackageStorage
     {
         var worksheet = ReadXmlEntry(archive, worksheetEntryName)
             ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
+        var tableGrowthRowCount = Math.Max(0, tableEndRow - previousDataEndRow);
+        if (tableGrowthRowCount > 0)
+        {
+            ShiftTableColumnCellsDown(
+                worksheet,
+                tableStartColumn,
+                columnNames.Count,
+                previousDataEndRow + 1,
+                tableGrowthRowCount);
+        }
+
         var entryIdColumn = tableStartColumn + metadataColumnIndexes[0] - 1;
         var revisionIdColumn = tableStartColumn + metadataColumnIndexes[1] - 1;
         var fieldsByColumnName = writeVisiblePayloadCells
@@ -2269,6 +2301,185 @@ public static class PortableLogbookWorkbookPackageStorage
         }
 
         WriteXmlEntry(archive, worksheetEntryName, worksheet);
+        if (writeVisiblePayloadCells || tableGrowthRowCount > 0)
+        {
+            InvalidateCalculationChain(archive);
+        }
+    }
+
+    private static void ShiftTableColumnCellsDown(
+        XDocument worksheet,
+        int tableStartColumn,
+        int tableColumnCount,
+        int firstRow,
+        int rowOffset)
+    {
+        if (rowOffset <= 0)
+        {
+            return;
+        }
+
+        var root = worksheet.Root
+            ?? throw new InvalidDataException("Logbook worksheet part is invalid.");
+        var sheetData = root.Element(SpreadsheetNamespace + "sheetData");
+        if (sheetData is null)
+        {
+            return;
+        }
+
+        var tableEndColumn = tableStartColumn + tableColumnCount - 1;
+        var snapshots = sheetData
+            .Elements(SpreadsheetNamespace + "row")
+            .SelectMany(row => row.Elements(SpreadsheetNamespace + "c"))
+            .Select(cell =>
+            {
+                var reference = (string?)cell.Attribute("r") ?? string.Empty;
+                return TryParseCellReference(reference, out var column, out var row)
+                    ? (Cell: cell, Column: column, Row: row)
+                    : (Cell: cell, Column: 0, Row: 0);
+            })
+            .Where(item =>
+                item.Row >= firstRow &&
+                item.Column >= tableStartColumn &&
+                item.Column <= tableEndColumn)
+            .Select(item => (item.Column, item.Row, Cell: new XElement(item.Cell)))
+            .ToArray();
+
+        foreach (var snapshot in snapshots)
+        {
+            RemoveCell(worksheet, $"{ColumnName(snapshot.Column)}{snapshot.Row}");
+        }
+
+        foreach (var snapshot in snapshots)
+        {
+            var destinationRowNumber = snapshot.Row + rowOffset;
+            var destinationRow = sheetData
+                .Elements(SpreadsheetNamespace + "row")
+                .FirstOrDefault(element => ((int?)element.Attribute("r") ?? 0) == destinationRowNumber);
+            if (destinationRow is null)
+            {
+                destinationRow = new XElement(
+                    SpreadsheetNamespace + "row",
+                    new XAttribute("r", destinationRowNumber));
+                var nextRow = sheetData
+                    .Elements(SpreadsheetNamespace + "row")
+                    .FirstOrDefault(element => ((int?)element.Attribute("r") ?? 0) > destinationRowNumber);
+                if (nextRow is null)
+                {
+                    sheetData.Add(destinationRow);
+                }
+                else
+                {
+                    nextRow.AddBeforeSelf(destinationRow);
+                }
+            }
+
+            var cell = snapshot.Cell;
+            cell.SetAttributeValue("r", $"{ColumnName(snapshot.Column)}{destinationRowNumber}");
+            var nextCell = destinationRow
+                .Elements(SpreadsheetNamespace + "c")
+                .FirstOrDefault(element =>
+                    TryParseCellReference((string?)element.Attribute("r") ?? string.Empty, out var existingColumn, out _) &&
+                    existingColumn > snapshot.Column);
+            if (nextCell is null)
+            {
+                destinationRow.Add(cell);
+            }
+            else
+            {
+                nextCell.AddBeforeSelf(cell);
+            }
+        }
+    }
+
+    private static void InvalidateCalculationChain(ZipArchive archive)
+    {
+        const string calculationChainPath = "xl/calcChain.xml";
+        const string workbookRelationshipsPath = "xl/_rels/workbook.xml.rels";
+        const string calculationChainRelationshipType =
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain";
+
+        archive.GetEntry(calculationChainPath)?.Delete();
+
+        var relationships = ReadXmlEntry(archive, workbookRelationshipsPath);
+        if (relationships?.Root is not null)
+        {
+            var staleRelationships = relationships.Root
+                .Elements(RelationshipsNamespace + "Relationship")
+                .Where(element =>
+                    string.Equals(
+                        (string?)element.Attribute("Type"),
+                        calculationChainRelationshipType,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(
+                        ResolveRelationshipTarget("xl/workbook.xml", (string?)element.Attribute("Target") ?? string.Empty),
+                        calculationChainPath,
+                        StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (staleRelationships.Length > 0)
+            {
+                foreach (var staleRelationship in staleRelationships)
+                {
+                    staleRelationship.Remove();
+                }
+
+                WriteXmlEntry(archive, workbookRelationshipsPath, relationships);
+            }
+        }
+
+        var contentTypes = ReadXmlEntry(archive, "[Content_Types].xml");
+        if (contentTypes?.Root is not null)
+        {
+            var staleOverrides = contentTypes.Root
+                .Elements(ContentTypesNamespace + "Override")
+                .Where(element => string.Equals(
+                    (string?)element.Attribute("PartName"),
+                    "/" + calculationChainPath,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (staleOverrides.Length > 0)
+            {
+                foreach (var staleOverride in staleOverrides)
+                {
+                    staleOverride.Remove();
+                }
+
+                WriteXmlEntry(archive, "[Content_Types].xml", contentTypes);
+            }
+        }
+
+        var workbook = ReadXmlEntry(archive, "xl/workbook.xml")
+            ?? throw new InvalidDataException("Workbook part is invalid.");
+        var workbookRoot = workbook.Root
+            ?? throw new InvalidDataException("Workbook XML is invalid.");
+        var calculationProperties = workbookRoot.Element(SpreadsheetNamespace + "calcPr");
+        if (calculationProperties is null)
+        {
+            calculationProperties = new XElement(SpreadsheetNamespace + "calcPr");
+            var nextElement = workbookRoot.Elements().FirstOrDefault(element => element.Name.LocalName is
+                "oleSize" or
+                "customWorkbookViews" or
+                "pivotCaches" or
+                "smartTagPr" or
+                "smartTagTypes" or
+                "webPublishing" or
+                "fileRecoveryPr" or
+                "webPublishObjects" or
+                "extLst");
+            if (nextElement is null)
+            {
+                workbookRoot.Add(calculationProperties);
+            }
+            else
+            {
+                nextElement.AddBeforeSelf(calculationProperties);
+            }
+        }
+
+        calculationProperties.SetAttributeValue("calcMode", "auto");
+        calculationProperties.SetAttributeValue("fullCalcOnLoad", "1");
+        calculationProperties.SetAttributeValue("forceFullCalc", "1");
+        WriteXmlEntry(archive, "xl/workbook.xml", workbook);
     }
 
     private static void WriteWorkbookRowPayloadCells(

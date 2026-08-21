@@ -95,6 +95,79 @@ public sealed class PortableLogbookSyncContractsTests
     }
 
     [Fact]
+    public async Task PendingWorkbookRecoversHostedHistoryBeforeActivationAndThenUploadsRealisticLocalRows()
+    {
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-21T10:00:00Z"));
+        var ledger = new ActivationGuardedHostedLogbookLedger();
+        var logbookId = new LogbookId("log_sync");
+        var androidDeviceId = new DeviceId("dev_android");
+        var workbookDeviceId = new DeviceId("dev_workbook");
+        var key = PortableLogbookKey.Generate();
+        var remoteOperations = Enumerable.Range(1, 23)
+            .Select(index => HostedOperationCipher.Encrypt(
+                CreateWorkbookOperation(
+                    logbookId,
+                    $"ent_remote_{index:D3}",
+                    $"rev_remote_{index:D3}",
+                    androidDeviceId),
+                key))
+            .ToArray();
+        await ledger.SeedAsync(logbookId, androidDeviceId, remoteOperations);
+        ledger.IsActive = false;
+
+        var localOperations = Enumerable.Range(1, 321)
+            .Select(index => CreateWorkbookOperation(
+                logbookId,
+                $"ent_local_{index:D3}",
+                $"rev_local_{index:D3}",
+                workbookDeviceId))
+            .ToArray();
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            [new CustomFieldDefinition(new CustomFieldId("cf_workbook_1"), "Custom 1", 1)],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            localOperations);
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            workbookDeviceId,
+            clock);
+        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.CompleteEmailSignInAsync("123456");
+        var sync = new PortableHostedLogbookSync(
+            ledger,
+            authenticator,
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+            clock);
+
+        var recovery = await sync.SyncAsync(new PortableHostedSyncRequest(
+            document,
+            key,
+            LastAcknowledgedHostedRevision: 0,
+            UploadLocalOperations: false));
+
+        Assert.Equal(PortableHostedSyncStatus.Synced, recovery.Status);
+        Assert.Equal(23, recovery.LastAcknowledgedHostedRevision);
+        Assert.Equal(0, recovery.UploadedOperationCount);
+        Assert.Equal(23, recovery.DownloadedOperationCount);
+        Assert.Equal(321, recovery.PendingLocalOperationCount);
+        Assert.Equal(0, ledger.AppendAttemptCount);
+        Assert.Equal(23, ledger.Acknowledgements[(logbookId, workbookDeviceId)]);
+
+        ledger.IsActive = true;
+        var upload = await sync.SyncAsync(new PortableHostedSyncRequest(
+            recovery.Document,
+            key,
+            recovery.LastAcknowledgedHostedRevision));
+
+        Assert.Equal(PortableHostedSyncStatus.Synced, upload.Status);
+        Assert.Equal(321, upload.UploadedOperationCount);
+        Assert.Equal(344, upload.Document.Operations.Count);
+        Assert.Equal(344, upload.LastAcknowledgedHostedRevision);
+        Assert.Equal(344, ledger.Acknowledgements[(logbookId, workbookDeviceId)]);
+        Assert.Equal(1, ledger.AppendAttemptCount);
+    }
+
+    [Fact]
     public void HostedOperationCipherRejectsWrongKeysAndTamperedCiphertext()
     {
         var operation = CreateWorkbookOperation(new LogbookId("log_sync"), "ent_001", "rev_001", new DeviceId("dev_android"));
@@ -452,4 +525,53 @@ public sealed class PortableLogbookSyncContractsTests
     }
 
     private static string repeat(char value, int count) => new(value, count);
+
+    private sealed class ActivationGuardedHostedLogbookLedger : IHostedLogbookLedger
+    {
+        private readonly InMemoryHostedLogbookLedger inner = new();
+
+        public bool IsActive { get; set; } = true;
+
+        public int AppendAttemptCount { get; private set; }
+
+        public IReadOnlyDictionary<(LogbookId LogbookId, DeviceId DeviceId), long> Acknowledgements =>
+            inner.Acknowledgements;
+
+        public ValueTask<HostedAppendResult> SeedAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            IReadOnlyList<HostedOperationUpload> operations) =>
+            inner.AppendOperationsAsync(logbookId, deviceId, operations);
+
+        public ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            inner.ReadMissingOperationsAsync(logbookId, afterHostedRevision, pageSize, cancellationToken);
+
+        public ValueTask<HostedAppendResult> AppendOperationsAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            IReadOnlyList<HostedOperationUpload> operations,
+            CancellationToken cancellationToken = default)
+        {
+            AppendAttemptCount++;
+            if (!IsActive)
+            {
+                throw new HostedLedgerException(
+                    HostedLedgerFailureReason.DeviceMismatch,
+                    "Device is not active for current account.");
+            }
+
+            return inner.AppendOperationsAsync(logbookId, deviceId, operations, cancellationToken);
+        }
+
+        public ValueTask RecordAcknowledgementAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            long throughHostedRevision,
+            CancellationToken cancellationToken = default) =>
+            inner.RecordAcknowledgementAsync(logbookId, deviceId, throughHostedRevision, cancellationToken);
+    }
 }

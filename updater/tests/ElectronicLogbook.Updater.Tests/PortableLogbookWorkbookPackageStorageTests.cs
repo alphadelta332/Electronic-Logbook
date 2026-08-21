@@ -377,6 +377,145 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void WriteHiddenMetadataColumnValuesV2MovesTotalsRowWhenTableGrowsAndInvalidatesCalculationChain()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:B3", ["EntryID", "Year"]);
+            var table = ReadXml(archive, "xl/tables/table1.xml");
+            table.Root!.SetAttributeValue("totalsRowCount", "1");
+            table.Root.Elements().Single(element => element.Name.LocalName == "autoFilter")
+                .SetAttributeValue("ref", "A1:B2");
+            ReplaceXml(archive, "xl/tables/table1.xml", table);
+
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A3", "Totals");
+            UpsertInlineStringCell(worksheet, "B3", "0");
+            var totalsFormulaCell = worksheet.Descendants().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B3");
+            totalsFormulaCell.SetAttributeValue("t", null);
+            totalsFormulaCell.Elements().Remove();
+            totalsFormulaCell.Add(
+                new XElement(worksheet.Root!.Name.Namespace + "f", "SUBTOTAL(109,B2:B2)"),
+                new XElement(worksheet.Root.Name.Namespace + "v", "0"));
+            UpsertInlineStringCell(worksheet, "A4", "Grand Total");
+            UpsertInlineStringCell(worksheet, "B4", "0");
+            var grandTotalFormulaCell = worksheet.Descendants().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B4");
+            grandTotalFormulaCell.SetAttributeValue("t", null);
+            grandTotalFormulaCell.Elements().Remove();
+            grandTotalFormulaCell.Add(
+                new XElement(worksheet.Root.Name.Namespace + "f", "SUM(Table1[#Totals])"),
+                new XElement(worksheet.Root.Name.Namespace + "v", "0"));
+            UpsertInlineStringCell(worksheet, "D4", "Adjacent content");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+
+            var relationshipNamespace = XNamespace.Get("http://schemas.openxmlformats.org/package/2006/relationships");
+            var workbookRelationships = ReadXml(archive, "xl/_rels/workbook.xml.rels");
+            workbookRelationships.Root!.Add(new XElement(
+                relationshipNamespace + "Relationship",
+                new XAttribute("Id", "rIdCalcChain"),
+                new XAttribute(
+                    "Type",
+                    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/calcChain"),
+                new XAttribute("Target", "calcChain.xml")));
+            ReplaceXml(archive, "xl/_rels/workbook.xml.rels", workbookRelationships);
+
+            var spreadsheetNamespace = worksheet.Root.Name.Namespace;
+            ReplaceXml(
+                archive,
+                "xl/calcChain.xml",
+                new XDocument(
+                    new XElement(
+                        spreadsheetNamespace + "calcChain",
+                        new XElement(
+                            spreadsheetNamespace + "c",
+                            new XAttribute("r", "B3"),
+                            new XAttribute("i", "2")))));
+
+            var contentTypeNamespace = XNamespace.Get("http://schemas.openxmlformats.org/package/2006/content-types");
+            ReplaceXml(
+                archive,
+                "[Content_Types].xml",
+                new XDocument(
+                    new XElement(
+                        contentTypeNamespace + "Types",
+                        new XElement(
+                            contentTypeNamespace + "Override",
+                            new XAttribute("PartName", "/xl/calcChain.xml"),
+                            new XAttribute(
+                                "ContentType",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.calcChain+xml")))));
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbook,
+            [
+                new PortableLogbookWorkbookRowV2(
+                    new EntryId("ent_1"),
+                    new RevisionId("rev_1"),
+                    PortableLogbookWorkbookEntry.Empty with { Year = 2024 }),
+                new PortableLogbookWorkbookRowV2(
+                    new EntryId("ent_2"),
+                    new RevisionId("rev_2"),
+                    PortableLogbookWorkbookEntry.Empty with { Year = 2025 }),
+                new PortableLogbookWorkbookRowV2(
+                    new EntryId("ent_3"),
+                    new RevisionId("rev_3"),
+                    PortableLogbookWorkbookEntry.Empty with { Year = 2026 })
+            ]);
+
+        using var readArchive = ZipFile.OpenRead(workbook);
+        var tableAfter = ReadXml(readArchive, "xl/tables/table1.xml");
+        Assert.Equal("A1:C5", (string?)tableAfter.Root!.Attribute("ref"));
+        Assert.Equal(
+            "A1:C4",
+            (string?)tableAfter.Root.Elements().Single(element => element.Name.LocalName == "autoFilter").Attribute("ref"));
+
+        var worksheetAfter = ReadXml(readArchive, "xl/worksheets/sheet2.xml");
+        Assert.Equal("ent_2", ReadInlineStringCell(worksheetAfter, "A3"));
+        Assert.Equal("2025", ReadInlineStringCell(worksheetAfter, "B3"));
+        Assert.DoesNotContain(
+            worksheetAfter.Descendants().Where(element => element.Name.LocalName == "c"),
+            element =>
+                (string?)element.Attribute("r") == "B3" &&
+                element.Elements().Any(child => child.Name.LocalName == "f"));
+        Assert.Equal("Totals", ReadInlineStringCell(worksheetAfter, "A5"));
+        Assert.Equal(
+            "SUBTOTAL(109,B2:B2)",
+            worksheetAfter.Descendants().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B5")
+                .Elements().Single(element => element.Name.LocalName == "f").Value);
+        Assert.Equal("Grand Total", ReadInlineStringCell(worksheetAfter, "A6"));
+        Assert.Equal(
+            "SUM(Table1[#Totals])",
+            worksheetAfter.Descendants().Single(element =>
+                element.Name.LocalName == "c" && (string?)element.Attribute("r") == "B6")
+                .Elements().Single(element => element.Name.LocalName == "f").Value);
+        Assert.Equal("Adjacent content", ReadInlineStringCell(worksheetAfter, "D4"));
+
+        Assert.Null(readArchive.GetEntry("xl/calcChain.xml"));
+        var relationshipsAfter = ReadXml(readArchive, "xl/_rels/workbook.xml.rels");
+        Assert.DoesNotContain(
+            relationshipsAfter.Root!.Elements().Where(element => element.Name.LocalName == "Relationship"),
+            element => ((string?)element.Attribute("Type"))?.EndsWith("/calcChain", StringComparison.OrdinalIgnoreCase) == true);
+        var contentTypesAfter = ReadXml(readArchive, "[Content_Types].xml");
+        Assert.DoesNotContain(
+            contentTypesAfter.Root!.Elements().Where(element => element.Name.LocalName == "Override"),
+            element => string.Equals(
+                (string?)element.Attribute("PartName"),
+                "/xl/calcChain.xml",
+                StringComparison.OrdinalIgnoreCase));
+        var workbookAfter = ReadXml(readArchive, "xl/workbook.xml");
+        var calculationProperties = workbookAfter.Root!.Elements()
+            .Single(element => element.Name.LocalName == "calcPr");
+        Assert.Equal("auto", (string?)calculationProperties.Attribute("calcMode"));
+        Assert.Equal("1", (string?)calculationProperties.Attribute("fullCalcOnLoad"));
+        Assert.Equal("1", (string?)calculationProperties.Attribute("forceFullCalc"));
+    }
+
+    [Fact]
     public void WriteHiddenMetadataColumnValuesClearsStaleRows()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);

@@ -312,7 +312,8 @@ public static class PortableLogbookCommandRunner
 
     public static PortableHostedWorkbookSyncResult SyncHostedWorkbook(
         string workbookPath,
-        DateTimeOffset syncedAt)
+        DateTimeOffset syncedAt,
+        bool uploadLocalOperations = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
 
@@ -408,7 +409,11 @@ public static class PortableLogbookCommandRunner
                         client,
                         client,
                         SystemSyncClock.Instance)
-                    .SyncAsync(new PortableHostedSyncRequest(document, key, metadata.LastAcknowledgedHostedRevision))
+                    .SyncAsync(new PortableHostedSyncRequest(
+                        document,
+                        key,
+                        metadata.LastAcknowledgedHostedRevision,
+                        UploadLocalOperations: uploadLocalOperations))
                     .AsTask()
                     .GetAwaiter()
                     .GetResult();

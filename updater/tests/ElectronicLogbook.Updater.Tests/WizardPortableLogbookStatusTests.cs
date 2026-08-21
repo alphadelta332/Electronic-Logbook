@@ -72,7 +72,7 @@ public sealed class WizardPortableLogbookStatusTests
     }
 
     [Fact]
-    public void HostedConnectionSyncsDurablyBeforeActivatingWorkbookDevice()
+    public void HostedConnectionRecoversAndAcknowledgesBeforeActivationThenUploadsWorkbookRows()
     {
         var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(
             "updater",
@@ -82,11 +82,16 @@ public sealed class WizardPortableLogbookStatusTests
         var connectionMethod = ExtractMethodBody(codeBehind, "private async Task RunHostedConnectionAsync");
 
         var connectIndex = connectionMethod.IndexOf("ConnectHostedWorkbook", StringComparison.Ordinal);
-        var syncIndex = connectionMethod.IndexOf("SyncHostedWorkbook", StringComparison.Ordinal);
+        var recoverySyncIndex = connectionMethod.IndexOf("SyncHostedWorkbook", StringComparison.Ordinal);
         var activateIndex = connectionMethod.IndexOf("ActivateWorkbookDeviceAsync", StringComparison.Ordinal);
-        Assert.True(connectIndex >= 0 && syncIndex > connectIndex && activateIndex > syncIndex);
+        var uploadSyncIndex = connectionMethod.LastIndexOf("SyncHostedWorkbook", StringComparison.Ordinal);
+        Assert.True(
+            connectIndex >= 0 &&
+            recoverySyncIndex > connectIndex &&
+            activateIndex > recoverySyncIndex &&
+            uploadSyncIndex > activateIndex);
+        Assert.Contains("uploadLocalOperations: false", connectionMethod, StringComparison.Ordinal);
         Assert.Contains("sync.Status != \"Synced\"", connectionMethod, StringComparison.Ordinal);
-        Assert.DoesNotContain("RecordInitialAcknowledgementAsync", connectionMethod, StringComparison.Ordinal);
     }
 
     [Fact]

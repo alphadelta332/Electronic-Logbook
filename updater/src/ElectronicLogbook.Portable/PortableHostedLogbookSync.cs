@@ -49,7 +49,7 @@ public sealed class PortableHostedLogbookSync(
                 .Where(operation => operation.DeviceId == session.DeviceId)
                 .Select(operation => HostedOperationCipher.Encrypt(operation, request.LogbookKey))
                 .ToArray();
-            var appendResult = localOperations.Length > 0
+            var appendResult = request.UploadLocalOperations && localOperations.Length > 0
                 ? await ledger.AppendOperationsAsync(
                     request.Document.LogbookId,
                     session.DeviceId,
@@ -99,9 +99,22 @@ public sealed class PortableHostedLogbookSync(
         var uploadedRevisionIds = appendResult.AcceptedOperations
             .Select(operation => operation.RevisionId)
             .ToArray();
+        var pendingLocalOperationCount = request.UploadLocalOperations ? 0 : localOperations.Length;
         return hasMore
-            ? PortableHostedSyncResult.Waiting(document, throughHostedRevision, uploaded, downloaded, uploadedRevisionIds)
-            : PortableHostedSyncResult.Synced(document, throughHostedRevision, uploaded, downloaded, uploadedRevisionIds);
+            ? PortableHostedSyncResult.Waiting(
+                document,
+                throughHostedRevision,
+                uploaded,
+                downloaded,
+                uploadedRevisionIds,
+                pendingLocalOperationCount)
+            : PortableHostedSyncResult.Synced(
+                document,
+                throughHostedRevision,
+                uploaded,
+                downloaded,
+                uploadedRevisionIds,
+                pendingLocalOperationCount);
         }
         catch (Exception ex) when (ex is HostedSignInException or HostedLedgerException or HostedOperationCipherException)
         {
@@ -279,7 +292,8 @@ public sealed record PortableHostedSyncRequest(
     PortableLogbookDocumentV2 Document,
     PortableLogbookKey LogbookKey,
     long LastAcknowledgedHostedRevision,
-    int PageSize = IHostedLogbookLedger.MaxOperationPageSize);
+    int PageSize = IHostedLogbookLedger.MaxOperationPageSize,
+    bool UploadLocalOperations = true);
 
 public sealed record PortableHostedSyncResult(
     PortableHostedSyncStatus Status,
@@ -296,14 +310,15 @@ public sealed record PortableHostedSyncResult(
         long lastAcknowledgedHostedRevision,
         int uploadedOperationCount,
         int downloadedOperationCount,
-        IReadOnlyList<RevisionId>? uploadedRevisionIds = null) =>
+        IReadOnlyList<RevisionId>? uploadedRevisionIds = null,
+        int pendingLocalOperationCount = 0) =>
         new(
             PortableHostedSyncStatus.Synced,
             document,
             lastAcknowledgedHostedRevision,
             uploadedOperationCount,
             downloadedOperationCount,
-            PendingLocalOperationCount: 0,
+            pendingLocalOperationCount,
             UploadedRevisionIds: uploadedRevisionIds ?? []);
 
     public static PortableHostedSyncResult Waiting(
@@ -311,14 +326,15 @@ public sealed record PortableHostedSyncResult(
         long lastAcknowledgedHostedRevision,
         int uploadedOperationCount,
         int downloadedOperationCount,
-        IReadOnlyList<RevisionId>? uploadedRevisionIds = null) =>
+        IReadOnlyList<RevisionId>? uploadedRevisionIds = null,
+        int pendingLocalOperationCount = 0) =>
         new(
             PortableHostedSyncStatus.Waiting,
             document,
             lastAcknowledgedHostedRevision,
             uploadedOperationCount,
             downloadedOperationCount,
-            PendingLocalOperationCount: 0,
+            pendingLocalOperationCount,
             UploadedRevisionIds: uploadedRevisionIds ?? []);
 
     public static PortableHostedSyncResult Offline(

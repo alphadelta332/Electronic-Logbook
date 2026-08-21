@@ -707,7 +707,35 @@ public partial class MainWindow : Window
                 recoveryKeyPair,
                 DateTimeOffset.UtcNow));
 
-            FooterStatusText.Text = "Running the first workbook sync...";
+            FooterStatusText.Text = "Recovering existing hosted history...";
+            PortableHostedWorkbookSyncResult? recoverySync = null;
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                recoverySync = await Task.Run(() => PortableLogbookCommandRunner.SyncHostedWorkbook(
+                    _context.SourcePath,
+                    DateTimeOffset.UtcNow,
+                    uploadLocalOperations: false));
+                if (recoverySync.Status != "Waiting")
+                {
+                    break;
+                }
+            }
+
+            if (recoverySync is null || recoverySync.Status != "Synced")
+            {
+                var status = recoverySync?.Status ?? "Needs attention";
+                var reason = string.IsNullOrWhiteSpace(recoverySync?.AttentionRequiredReason)
+                    ? null
+                    : $" {recoverySync.AttentionRequiredReason}";
+                throw new InvalidOperationException(
+                    $"The workbook was saved securely, but its hosted-history recovery reports '{status}'.{reason} " +
+                    "The workbook device was not activated; reconnect when hosted sync is available.");
+            }
+
+            FooterStatusText.Text = "Activating the recovered workbook device...";
+            await client.ActivateWorkbookDeviceAsync(logbook.LogbookId, deviceId);
+
+            FooterStatusText.Text = "Uploading workbook rows...";
             PortableHostedWorkbookSyncResult? sync = null;
             for (var attempt = 0; attempt < 3; attempt++)
             {
@@ -727,12 +755,9 @@ public partial class MainWindow : Window
                     ? null
                     : $" {sync.AttentionRequiredReason}";
                 throw new InvalidOperationException(
-                    $"The workbook was saved securely, but its initial hosted sync reports '{status}'.{reason} " +
-                    "The workbook device was not activated; reconnect when hosted sync is available.");
+                    $"The workbook device was activated, but its initial upload reports '{status}'.{reason} " +
+                    "The workbook remains connected and will retry during the next hosted sync.");
             }
-
-            FooterStatusText.Text = "Activating the synced workbook device...";
-            await client.ActivateWorkbookDeviceAsync(logbook.LogbookId, deviceId);
 
             PortableLogbookStatusText.Text = $"Workbook sync: {sync.Status}";
             FooterStatusText.Text = "Account connected and workbook synced.";
