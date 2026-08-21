@@ -7461,12 +7461,20 @@ Fail:
 End Sub
 
 Public Sub QueueHostedWorkbookSync(Optional ByVal reason As String = "idle")
+    Dim previousEnableEvents As Boolean
+
     If Not WorkbookHostedSyncIsPaired() Then Exit Sub
 
+    On Error GoTo CleanExit
+    previousEnableEvents = Application.EnableEvents
+    Application.EnableEvents = False
     mHostedWorkbookSyncQueued = True
     SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME, HOSTED_SYNC_STATUS_WAITING
     SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_AT_NAME, Format$(Now, "yyyy-mm-dd hh:nn:ss")
     SetHostedWorkbookStatusBar HOSTED_SYNC_STATUS_WAITING
+
+CleanExit:
+    Application.EnableEvents = previousEnableEvents
 End Sub
 
 Public Function HostedWorkbookSyncMetadataChanged(ByVal changedRange As Range) As Boolean

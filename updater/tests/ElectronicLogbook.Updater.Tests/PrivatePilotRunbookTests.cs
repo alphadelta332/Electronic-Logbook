@@ -76,4 +76,21 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("public signup or waitlist", gate, StringComparison.Ordinal);
         Assert.Contains("billing, subscriptions", gate, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void LiveWorkbookOtpRehearsalVerifiesTheExactWorkbookIdentity()
+    {
+        var rehearsal = File.ReadAllText(TestRepo.FindFile(
+            "supabase", "tests", "HostedRecoveryRehearsal", "Program.cs"));
+
+        Assert.Contains("ELB_REHEARSAL_LIVE_WORKBOOK_PATH", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookCommandRunner.ReadHostedStatus", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("workbookAccountId == accountId", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("workbookLogbookId == logbookId", rehearsal, StringComparison.Ordinal);
+        Assert.Contains("device_id=eq.{workbookDeviceId}", rehearsal, StringComparison.Ordinal);
+        Assert.Contains(
+            "ReadAcknowledgementAsync(http, serviceRoleKey, logbookId, workbookDeviceId)",
+            rehearsal,
+            StringComparison.Ordinal);
+    }
 }

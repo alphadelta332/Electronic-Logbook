@@ -126,6 +126,22 @@ public sealed class VbaPortableLogbookCommandTests
         Assert.Contains("Public Function HostedWorkbookSyncMetadataChanged", source, StringComparison.Ordinal);
         Assert.DoesNotContain("Application.OnTime", queueBody, StringComparison.Ordinal);
         Assert.DoesNotContain("RunPortableLogbookCommand", queueBody, StringComparison.Ordinal);
+        var captureEventsIndex = queueBody.IndexOf(
+            "previousEnableEvents = Application.EnableEvents",
+            StringComparison.Ordinal);
+        var disableEventsIndex = queueBody.IndexOf("Application.EnableEvents = False", StringComparison.Ordinal);
+        var firstMetadataWriteIndex = queueBody.IndexOf(
+            "SetWorkbookNameValue ThisWorkbook, HOSTED_SYNC_STATUS_NAME",
+            StringComparison.Ordinal);
+        var restoreEventsIndex = queueBody.LastIndexOf(
+            "Application.EnableEvents = previousEnableEvents",
+            StringComparison.Ordinal);
+        Assert.True(
+            captureEventsIndex >= 0 &&
+            disableEventsIndex > captureEventsIndex &&
+            firstMetadataWriteIndex > disableEventsIndex &&
+            restoreEventsIndex > firstMetadataWriteIndex,
+            "Hosted sync queue metadata writes must suppress recursive workbook events and restore the prior setting.");
         Assert.Contains("--wait-for-workbook-unlock-seconds 120", closeLaunchBody, StringComparison.Ordinal);
         Assert.Contains("shellObj.Run commandLine, 0, False", closeLaunchBody, StringComparison.Ordinal);
     }

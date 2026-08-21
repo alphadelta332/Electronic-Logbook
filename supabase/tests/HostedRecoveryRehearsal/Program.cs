@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using ElectronicLogbook.Portable;
+using ElectronicLogbook.Updater;
 
 var supabaseUrl = RequiredEnvironment("ELB_REHEARSAL_SUPABASE_URL");
 var anonKey = RequiredEnvironment("ELB_REHEARSAL_ANON_KEY");
@@ -20,6 +21,9 @@ var liveWorkbookOtp = string.Equals(
     Environment.GetEnvironmentVariable("ELB_REHEARSAL_LIVE_WORKBOOK_OTP"),
     "1",
     StringComparison.Ordinal);
+var liveWorkbookPath = liveWorkbookOtp
+    ? Path.GetFullPath(RequiredEnvironment("ELB_REHEARSAL_LIVE_WORKBOOK_PATH"))
+    : null;
 var startedAt = DateTimeOffset.UtcNow;
 var checks = ExpectedChecks(liveWorkbookOtp).ToDictionary(value => value, _ => false, StringComparer.Ordinal);
 var stage = "startup";
@@ -180,6 +184,25 @@ try
         Console.WriteLine("Complete the workbook email-code connection, then press Enter here to verify and clean up.");
         _ = await Console.In.ReadLineAsync();
 
+        stage = "verify-live-workbook-identity";
+        Expect(File.Exists(liveWorkbookPath), "The live OTP workbook could not be found for verification.");
+        var workbookStatus = PortableLogbookCommandRunner.ReadHostedStatus(liveWorkbookPath!);
+        Expect(workbookStatus.IsPaired, "The live OTP workbook is not paired for hosted sync.");
+        Expect(workbookStatus.AccountId is not null, "The live OTP workbook has no hosted account identity.");
+        Expect(workbookStatus.LogbookId is not null, "The live OTP workbook has no hosted logbook identity.");
+        Expect(workbookStatus.DeviceId is not null, "The live OTP workbook has no hosted device identity.");
+        var workbookAccountId = PortableIdToGuid(workbookStatus.AccountId!.Value, "acct_");
+        var workbookLogbookId = PortableIdToGuid(workbookStatus.LogbookId!.Value.Value, "log_");
+        var workbookDeviceId = PortableIdToGuid(workbookStatus.DeviceId!.Value.Value, "dev_");
+        Expect(workbookAccountId == accountId, "The live OTP workbook connected to a different disposable account.");
+        Expect(workbookLogbookId == logbookId, "The live OTP workbook connected to a different hosted logbook.");
+        Expect(
+            string.Equals(workbookStatus.Status, "Synced", StringComparison.Ordinal),
+            $"The live OTP workbook status was '{workbookStatus.Status}', not 'Synced'.");
+        Expect(
+            workbookStatus.LastAcknowledgedHostedRevision >= hostedRevision,
+            "The live OTP workbook metadata did not acknowledge the hosted revision.");
+
         stage = "verify-live-workbook-device";
         JsonElement[] workbookDevices = [];
         for (var attempt = 0; attempt < 10; attempt++)
@@ -187,7 +210,7 @@ try
             workbookDevices = await GetRestAsync<JsonElement[]>(
                 http,
                 serviceRoleKey,
-                $"devices?select=device_id,status&account_id=eq.{accountId}&device_type=eq.workbook");
+                $"devices?select=device_id,status&account_id=eq.{accountId}&device_id=eq.{workbookDeviceId}&device_type=eq.workbook");
             if (workbookDevices.Count(device =>
                     string.Equals(device.GetProperty("status").GetString(), "active", StringComparison.Ordinal)) == 1)
             {
@@ -210,7 +233,9 @@ try
             activeWorkbookDevices.Length == 1,
             $"Live OTP pairing did not leave exactly one active workbook device " +
             $"(active={activeWorkbookDevices.Length}, total={workbookDevices.Length}).");
-        var workbookDeviceId = activeWorkbookDevices[0].GetProperty("device_id").GetGuid();
+        Expect(
+            activeWorkbookDevices[0].GetProperty("device_id").GetGuid() == workbookDeviceId,
+            "Hosted verification returned a different workbook device.");
         Pass("liveEmailOtpWorkbookDeviceActivated");
 
         stage = "verify-live-workbook-acknowledgement";
@@ -422,6 +447,17 @@ static string RequiredEnvironment(string name) =>
     Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
         ? value.Trim()
         : throw new InvalidOperationException($"Required environment variable {name} is missing.");
+
+static Guid PortableIdToGuid(string value, string prefix)
+{
+    if (!value.StartsWith(prefix, StringComparison.Ordinal) ||
+        !Guid.TryParseExact(value[prefix.Length..], "N", out var parsed))
+    {
+        throw new InvalidDataException($"Workbook metadata contains an invalid {prefix.TrimEnd('_')} identifier.");
+    }
+
+    return parsed;
+}
 
 static async Task<Guid> CreateAuthUserAsync(HttpClient http, string serviceRoleKey, string email)
 {
