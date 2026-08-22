@@ -281,6 +281,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Do not request another email", settings, StringComparison.Ordinal);
         Assert.Contains("Run connection preflight", settings, StringComparison.Ordinal);
         Assert.Contains("Recover retained connection", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.ShouldOfferHostedAuthentication", settings, StringComparison.Ordinal);
+        Assert.Contains("Reauthenticate with Google", settings, StringComparison.Ordinal);
+        Assert.Contains("Reauthenticate account", settings, StringComparison.Ordinal);
+        Assert.Contains("without deleting the local logbook", settings, StringComparison.Ordinal);
         Assert.Contains("Copy redacted diagnostics", settings, StringComparison.Ordinal);
         Assert.Contains("Technical details", settings, StringComparison.Ordinal);
         Assert.Contains("UNEXPECTED_", settings, StringComparison.Ordinal);

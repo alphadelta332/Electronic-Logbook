@@ -724,7 +724,7 @@ public sealed class MobileSupabaseHostedSyncClient(
             cancellationToken);
         return new HostedOperationPage(
             rows.Select(ToEnvelope).ToArray(),
-            rows.Length == 0 ? afterHostedRevision : rows.Max(row => row.HighestRevision),
+            rows.Length == 0 ? afterHostedRevision : rows.Max(row => row.Revision),
             rows.Any(row => row.HasMore));
     }
 

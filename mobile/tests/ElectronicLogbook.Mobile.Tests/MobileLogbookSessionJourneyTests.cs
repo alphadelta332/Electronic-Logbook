@@ -172,6 +172,76 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task ProvenRevokedDeviceCanReauthenticateWithoutRejectingRetainedOperations()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-22T00:00:00Z"));
+        var accountId = new HostedAccountId("acct_private");
+        var revokedDeviceId = new DeviceId("dev_revoked");
+        var initialAuthenticator = new InMemoryHostedLogbookAuthenticator(accountId, revokedDeviceId, clock);
+        var initial = CreateSession(jsRuntime, initialAuthenticator, clock);
+        await initial.EnsureLoadedWorkbookAsync();
+        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(initial.WorkbookDraft);
+        await initial.SaveWorkbookEntryAsync();
+
+        var store = new BrowserLogbookStore(jsRuntime);
+        var retained = Assert.IsType<BrowserLogbookStateV2>(await store.LoadStateV2Async());
+        var retainedHosted = Assert.IsType<BrowserHostedSyncState>(retained.HostedSync);
+        await store.SaveStateAsync(retained with
+        {
+            HostedSync = retainedHosted with
+            {
+                LastStatus = PortableHostedSyncStatus.NeedsAttention,
+                AttentionRequiredReason = "The active hosted device does not match the retained credential."
+            }
+        });
+
+        var replacementDeviceId = new DeviceId("dev_replacement");
+        var restoredHosted = retainedHosted with
+        {
+            DeviceId = replacementDeviceId,
+            LastStatus = PortableHostedSyncStatus.Synced,
+            AttentionRequiredReason = null
+        };
+        var recovery = new RecordingReplacementRecoveryWorkflow(
+            new MobileReplacementRecoveryResult(retained.Document, restoredHosted));
+        var recoveryClient = new InactiveDeviceRecoveryClient(accountId, revokedDeviceId, clock.UtcNow.AddHours(1));
+        var connectionRecovery = new MobileConnectionRecoveryWorkflow(
+            recoveryClient,
+            store,
+            new BrowserPackageKeyStore(jsRuntime),
+            clock);
+        var authenticator = new RecoveryRequiredEmailAuthenticator(accountId, clock);
+        var session = CreateSession(
+            jsRuntime,
+            hostedAuthenticator: authenticator,
+            syncClock: clock,
+            connectionRecovery: connectionRecovery,
+            replacementRecovery: recovery);
+
+        await session.EnsureLoadedWorkbookAsync();
+        var diagnostics = await session.RunConnectionPreflightAsync();
+
+        Assert.False(diagnostics.Passed);
+        Assert.Equal(MobileConnectionStage.DEVICE_READ, diagnostics.CurrentStage);
+        Assert.Equal("DEVICE_INACTIVE", diagnostics.ErrorCode);
+        Assert.True(session.ShouldOfferHostedAuthentication);
+        Assert.Single(session.DocumentV2.Operations);
+
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+
+        Assert.Equal(1, authenticator.CompleteCount);
+        Assert.Equal(1, recovery.AutomaticRecoveryCount);
+        Assert.Single(session.DocumentV2.Operations);
+        Assert.Equal(replacementDeviceId, session.HostedSync?.DeviceId);
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync?.LastStatus);
+        Assert.Equal("Existing logbook restored and synced.", session.LastActionMessage);
+    }
+
+    [Fact]
     public async Task GoogleSignInDoesNotStartRecoveryForUnrelatedAuthenticationFailure()
     {
         var recovery = new RecordingReplacementRecoveryWorkflow();
@@ -464,6 +534,93 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableHostedSyncStatus.Synced, restored.Status);
         Assert.Equal(2, session.HostedSync.LastAcknowledgedHostedRevision);
         Assert.Equal(2, (await ledger.ReadMissingOperationsAsync(session.DocumentV2.LogbookId, 0, 10)).Operations.Count);
+    }
+
+    [Fact]
+    public async Task LegacyLedgerCursorReplaysAllPagesBeforeTrustingItsSavedHighWaterMark()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-22T00:00:00Z"));
+        var accountId = new HostedAccountId("acct_private");
+        var logbookId = new LogbookId("log_paged_repair");
+        var sourceDeviceId = new DeviceId("dev_source");
+        var replacementDeviceId = new DeviceId("dev_replacement");
+        var packageKeyStore = new BrowserPackageKeyStore(jsRuntime);
+        await packageKeyStore.ImportRecoveryCodeAsync(
+            logbookId,
+            PortableLogbookKey.Generate().ToRecoveryCode());
+        var operations = Enumerable.Range(1, 223)
+            .Select(index => PortableLogbookOperationV2.Create(
+                logbookId,
+                new EntryId($"ent_{index:D3}"),
+                new RevisionId($"rev_{index:D3}"),
+                sourceDeviceId,
+                clock.UtcNow.AddSeconds(index),
+                PortableLogbookWorkbookEntry.Empty with { FlightId = $"PAGE-{index:D3}" }))
+            .ToArray();
+        var completeDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            operations);
+        var ledger = new InMemoryHostedLogbookLedger();
+        var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
+        var sourceAuthenticator = new InMemoryHostedLogbookAuthenticator(accountId, sourceDeviceId, clock);
+        await sourceAuthenticator.StartEmailSignInAsync("pilot@example.com");
+        await sourceAuthenticator.CompleteEmailSignInAsync("123456");
+        var seeded = await new MobileHostedSyncWorkflow(
+                packageKeyStore,
+                ledger,
+                sourceAuthenticator,
+                network,
+                clock)
+            .SyncAsync(new PortableHostedSyncRequestContext(
+                completeDocument,
+                new BrowserHostedSyncState(
+                    accountId,
+                    logbookId,
+                    sourceDeviceId,
+                    LastAcknowledgedHostedRevision: 0,
+                    PortableHostedSyncStatus.Waiting,
+                    LedgerCursorVersion: BrowserHostedSyncState.CurrentLedgerCursorVersion),
+                BackgroundSyncReason.ManualRefresh));
+        Assert.Equal(PortableHostedSyncStatus.Synced, seeded.Status);
+        Assert.Equal(223, seeded.LastAcknowledgedHostedRevision);
+
+        var incompleteDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            operations.Take(200));
+        var legacyHostedState = new BrowserHostedSyncState(
+            accountId,
+            logbookId,
+            replacementDeviceId,
+            LastAcknowledgedHostedRevision: 223,
+            PortableHostedSyncStatus.Synced);
+        var replacementAuthenticator = new InMemoryHostedLogbookAuthenticator(
+            accountId,
+            replacementDeviceId,
+            clock);
+        await replacementAuthenticator.StartEmailSignInAsync("pilot@example.com");
+        await replacementAuthenticator.CompleteEmailSignInAsync("123456");
+        var repaired = await new MobileHostedSyncWorkflow(
+                packageKeyStore,
+                ledger,
+                replacementAuthenticator,
+                network,
+                clock)
+            .SyncAsync(new PortableHostedSyncRequestContext(
+                incompleteDocument,
+                legacyHostedState,
+                BackgroundSyncReason.ManualRefresh));
+        var persisted = legacyHostedState.WithResult(repaired, clock.UtcNow);
+
+        Assert.Equal(PortableHostedSyncStatus.Synced, repaired.Status);
+        Assert.Equal(223, repaired.Document.Operations.Count);
+        Assert.Equal(23, repaired.DownloadedOperationCount);
+        Assert.Equal(223, repaired.LastAcknowledgedHostedRevision);
+        Assert.Equal(BrowserHostedSyncState.CurrentLedgerCursorVersion, persisted.LedgerCursorVersion);
     }
 
     [Fact]
@@ -1087,7 +1244,8 @@ public sealed class MobileLogbookSessionJourneyTests
         INetworkStatus? networkStatus = null,
         IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
         IMobileGoogleHostedAuthenticator? googleAuthenticator = null,
-        IMobileReplacementRecoveryWorkflow? replacementRecovery = null) =>
+        IMobileReplacementRecoveryWorkflow? replacementRecovery = null,
+        MobileConnectionRecoveryWorkflow? connectionRecovery = null) =>
         new(
             new BrowserLogbookStore(jsRuntime),
             new BrowserPackageKeyStore(jsRuntime),
@@ -1095,9 +1253,42 @@ public sealed class MobileLogbookSessionJourneyTests
             hostedLedger: hostedLedger,
             networkStatus: networkStatus,
             syncClock: syncClock,
+            connectionRecovery: connectionRecovery,
             recoveryEnvelopeService: recoveryEnvelopeService,
             googleAuthenticator: googleAuthenticator,
             replacementRecovery: replacementRecovery);
+
+    private sealed class InactiveDeviceRecoveryClient(
+        HostedAccountId accountId,
+        DeviceId deviceId,
+        DateTimeOffset expiresAt) : IMobileHostedRecoveryClient
+    {
+        public ValueTask ValidateConfigAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public ValueTask<MobileHostedCredentialSnapshot> LoadCredentialSnapshotAsync(
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileHostedCredentialSnapshot(
+                MobileCredentialState.Registered,
+                accountId,
+                deviceId,
+                expiresAt));
+
+        public ValueTask ValidateAccessTokenAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public ValueTask<MobileHostedPrincipal> ReadAuthUserAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileHostedPrincipal(accountId));
+
+        public ValueTask<MobileHostedAccountCheck> ReadAccountAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileHostedAccountCheck(true, true, true));
+
+        public ValueTask<MobileHostedDeviceCheck> ReadDeviceAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new MobileHostedDeviceCheck(true, false, true));
+
+        public ValueTask<HostedSyncSession> GetRegisteredSessionAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new HostedSyncSession(accountId, deviceId, expiresAt));
+    }
 
     private static void FillDraft(EntryDraft draft, string registration, decimal hours)
     {
@@ -1194,6 +1385,8 @@ public sealed class MobileLogbookSessionJourneyTests
 
         private Dictionary<string, byte[]> PackageKeys { get; } = [];
 
+        private Dictionary<string, string> StoredValues { get; } = [];
+
         public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
         {
             return InvokeAsync<TValue>(identifier, CancellationToken.None, args);
@@ -1207,7 +1400,7 @@ public sealed class MobileLogbookSessionJourneyTests
             cancellationToken.ThrowIfCancellationRequested();
             return identifier switch
             {
-                "electronicLogbookStore.load" => new ValueTask<TValue>((TValue)(object?)StoredJson!),
+                "electronicLogbookStore.load" => Load<TValue>(args),
                 "electronicLogbookStore.save" => Save<TValue>(args),
                 "electronicLogbookKeys.isSupported" => new ValueTask<TValue>((TValue)(object)true),
                 "electronicLogbookKeys.hasPackageKey" => new ValueTask<TValue>((TValue)(object)HasPackageKey(args)),
@@ -1223,11 +1416,28 @@ public sealed class MobileLogbookSessionJourneyTests
             };
         }
 
+        private ValueTask<TValue> Load<TValue>(object?[]? args)
+        {
+            Assert.NotNull(args);
+            var key = Assert.IsType<string>(args[0]);
+            var value = key == "portable-document"
+                ? StoredJson
+                : StoredValues.GetValueOrDefault(key);
+            return new ValueTask<TValue>((TValue)(object?)value!);
+        }
+
         private ValueTask<TValue> Save<TValue>(object?[]? args)
         {
             Assert.NotNull(args);
-            Assert.Equal("portable-document", Assert.IsType<string>(args[0]));
-            StoredJson = Assert.IsType<string>(args[1]);
+            var key = Assert.IsType<string>(args[0]);
+            var value = Assert.IsType<string>(args[1]);
+            if (key != "portable-document")
+            {
+                StoredValues[key] = value;
+                return new ValueTask<TValue>(default(TValue)!);
+            }
+
+            StoredJson = value;
             SaveCount++;
             JsonSerializer.Deserialize<BrowserLogbookStoredDocument>(StoredJson, PortableLogbookJson.SerializerOptions);
             return new ValueTask<TValue>(default(TValue)!);

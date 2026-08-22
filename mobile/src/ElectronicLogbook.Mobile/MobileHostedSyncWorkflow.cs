@@ -83,7 +83,10 @@ public sealed class MobileHostedSyncWorkflow(
                 : new HostedAppendResult([], request.HostedSync.LastAcknowledgedHostedRevision);
 
             var document = request.Document;
-            var throughHostedRevision = request.HostedSync.LastAcknowledgedHostedRevision;
+            var throughHostedRevision = request.HostedSync.LedgerCursorVersion
+                    >= BrowserHostedSyncState.CurrentLedgerCursorVersion
+                ? request.HostedSync.LastAcknowledgedHostedRevision
+                : 0;
             var downloaded = 0;
             var pagesRead = 0;
             var hasMore = false;

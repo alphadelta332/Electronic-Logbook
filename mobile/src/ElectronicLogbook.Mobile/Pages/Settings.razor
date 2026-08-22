@@ -111,13 +111,15 @@ else
                     <small>@PairingDetail</small>
                 </article>
             </div>
-            @if (!Session.HasHostedSync)
+            @if (Session.ShouldOfferHostedAuthentication)
             {
                 <div class="field-grid">
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AccountCircle" OnClick="SignInWithGoogleAsync" Disabled="@IsAccountBusy">
-                        Sign in with Google
+                        @(Session.HasHostedSync ? "Reauthenticate with Google" : "Sign in with Google")
                     </MudButton>
-                    <MudText Typo="Typo.caption">Returning pilots: use the Google account previously added to your invited account.</MudText>
+                    <MudText Typo="Typo.caption">@(Session.HasHostedSync
+                        ? "The connection preflight found a retained sign-in or device-access problem. Reauthenticate without deleting the local logbook."
+                        : "Returning pilots: use the Google account previously added to your invited account.")</MudText>
                     <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
                         Send sign-in code
@@ -128,7 +130,7 @@ else
                                   HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive."
                                   Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
-                        Connect account
+                        @(Session.HasHostedSync ? "Reauthenticate account" : "Connect account")
                     </MudButton>
                     <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResumeHostedSignInAsync" Disabled="@IsAccountBusy">
                         Resume verified sign-in
@@ -140,16 +142,8 @@ else
                     </MudButton>
                     <MudText Typo="Typo.caption">Fallback only: sign in first, then use the code saved when this logbook was created.</MudText>
                 </div>
-                <div class="connection-diagnostic-actions">
-                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="RunConnectionPreflightAsync" Disabled="@IsConnectionDiagnosticBusy">
-                        Run connection preflight
-                    </MudButton>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restore" OnClick="RecoverConnectionAsync" Disabled="@(!CanRecoverConnection)">
-                        Recover retained connection
-                    </MudButton>
-                </div>
             }
-            else
+            else if (Session.HostedSyncStatusLabel != "Needs attention")
             {
                 <div class="connection-diagnostic-actions">
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AddModerator" OnClick="LinkGoogleIdentityAsync" Disabled="@IsAccountBusy">
@@ -172,6 +166,20 @@ else
                         Confirm recovery code
                     </MudButton>
                 }
+            }
+            @if (!Session.HasHostedSync || Session.HostedSyncStatusLabel == "Needs attention")
+            {
+                <div class="connection-diagnostic-actions">
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck" OnClick="RunConnectionPreflightAsync" Disabled="@IsConnectionDiagnosticBusy">
+                        Run connection preflight
+                    </MudButton>
+                    @if (!Session.HasHostedSync)
+                    {
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Restore" OnClick="RecoverConnectionAsync" Disabled="@(!CanRecoverConnection)">
+                            Recover retained connection
+                        </MudButton>
+                    }
+                </div>
             }
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncNowAsync" Disabled="@(!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)">
                 Sync now

@@ -13,10 +13,11 @@ public sealed class SupabaseHostedSyncClient(
     HostedAccountId accountId,
     DeviceId deviceId,
     PortableHostedCredential credential,
-    Action<PortableHostedCredential>? credentialUpdated = null)
+    Action<PortableHostedCredential>? credentialUpdated = null,
+    HttpMessageHandler? httpMessageHandler = null)
     : IHostedLogbookLedger, IHostedLogbookAuthenticator, INetworkStatus, IDisposable
 {
-    private readonly HttpClient http = new()
+    private readonly HttpClient http = new(httpMessageHandler ?? new HttpClientHandler())
     {
         BaseAddress = new Uri(supabaseUrl.GetLeftPart(UriPartial.Authority))
     };
@@ -148,7 +149,7 @@ public sealed class SupabaseHostedSyncClient(
             cancellationToken);
         return new HostedOperationPage(
             rows.Select(ToEnvelope).ToArray(),
-            rows.Length == 0 ? afterHostedRevision : rows.Max(row => row.HighestRevision),
+            rows.Length == 0 ? afterHostedRevision : rows.Max(row => row.Revision),
             rows.Any(row => row.HasMore));
     }
 

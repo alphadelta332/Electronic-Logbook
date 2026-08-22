@@ -445,8 +445,11 @@ public sealed record BrowserHostedSyncState(
     DateTimeOffset? LastSyncedAt = null,
     string? AttentionRequiredReason = null,
     int PendingLocalOperationCount = 0,
-    IReadOnlyList<RevisionId>? UploadedRevisionIds = null)
+    IReadOnlyList<RevisionId>? UploadedRevisionIds = null,
+    int LedgerCursorVersion = 0)
 {
+    public const int CurrentLedgerCursorVersion = 1;
+
     public BrowserHostedSyncState WithResult(PortableHostedSyncResult result, DateTimeOffset attemptedAt)
     {
         ArgumentNullException.ThrowIfNull(result);
@@ -463,7 +466,10 @@ public sealed record BrowserHostedSyncState(
             LastSyncedAt = result.Status == PortableHostedSyncStatus.Synced ? attemptedAt : LastSyncedAt,
             AttentionRequiredReason = result.AttentionRequiredReason,
             PendingLocalOperationCount = result.PendingLocalOperationCount,
-            UploadedRevisionIds = uploadedRevisionIds
+            UploadedRevisionIds = uploadedRevisionIds,
+            LedgerCursorVersion = result.Status is PortableHostedSyncStatus.Synced or PortableHostedSyncStatus.Waiting
+                ? CurrentLedgerCursorVersion
+                : LedgerCursorVersion
         };
     }
 }

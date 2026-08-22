@@ -554,6 +554,52 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
+    public async Task ReadMissingOperationsUsesTheLastReturnedRevisionAsItsPageCursor()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/rest/v1/rpc/read_missing_operations"] =
+            (HttpStatusCode.OK, """
+                [{
+                  "revision": 200,
+                  "portable_revision_id": "rev_50000000000000000000000000000200",
+                  "entry_id": "ent_page_boundary",
+                  "author_device_id": "40000000-0000-0000-0000-000000000001",
+                  "client_created_at": "2026-08-22T00:00:00Z",
+                  "operation_format_version": 1,
+                  "payload_ciphertext": "AQIDBA==",
+                  "payload_nonce": "AAAAAAAAAAAAAAAA",
+                  "payload_tag": "AAAAAAAAAAAAAAAAAAAAAA==",
+                  "payload_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "parent_revision_ids": [],
+                  "highest_revision": 344,
+                  "has_more": true
+                }]
+                """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var jsRuntime = new MemoryJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-22T00:00:00Z"));
+        await new BrowserHostedCredentialStore(jsRuntime).SaveAsync(new BrowserHostedCredential(
+            new HostedAccountId("acct_10000000000000000000000000000001"),
+            new DeviceId("dev_40000000000000000000000000000001"),
+            "access-token",
+            "refresh-token",
+            clock.UtcNow.AddHours(1)));
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            new BrowserHostedCredentialStore(jsRuntime),
+            clock);
+
+        var page = await client.ReadMissingOperationsAsync(
+            new LogbookId("log_20000000000000000000000000000001"),
+            afterHostedRevision: 0,
+            pageSize: 200);
+
+        Assert.Single(page.Operations);
+        Assert.Equal(200, page.ThroughHostedRevision);
+        Assert.True(page.HasMore);
+    }
+
+    [Fact]
     public async Task ClientPersistsVerifiedCredentialAndResumesInterruptedDeviceRegistrationWithoutAnotherEmail()
     {
         var handler = new RecordingHandler();

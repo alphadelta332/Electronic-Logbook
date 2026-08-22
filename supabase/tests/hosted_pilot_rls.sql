@@ -1103,4 +1103,96 @@ select elb_rls_test.assert_true(
     )
 );
 
+select public.elb_register_pending_recovery_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000009',
+    'android',
+    'Retained-Key Replacement'
+);
+
+select elb_rls_test.expect_error(
+    'pending replacement cannot reuse a recovery key owned by an active device',
+    $sql$
+        select public.elb_bind_device_recovery_key(
+            '10000000-0000-0000-0000-000000000001',
+            '20000000-0000-0000-0000-000000000001',
+            '40000000-0000-0000-0000-000000000009',
+            repeat('R', 392),
+            repeat('d', 64),
+            'RSA-OAEP-256'
+        )
+    $sql$,
+    '%managed recovery key belongs to active device%'
+);
+
+update public.devices
+set status = 'revoked',
+    revoked_at = now()
+where device_id = '40000000-0000-0000-0000-000000000006';
+
+select elb_rls_test.assert_true(
+    'revoking a device atomically revokes its device-specific recovery envelope',
+    not exists (
+        select 1
+        from public.key_envelopes
+        where recipient_device_id = '40000000-0000-0000-0000-000000000006'
+          and revoked_at is null
+    )
+);
+
+select public.elb_bind_device_recovery_key(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000009',
+    repeat('R', 392),
+    repeat('d', 64),
+    'RSA-OAEP-256'
+);
+
+select public.elb_register_pending_recovery_device(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000010',
+    'android',
+    'Retained-Key Retry'
+);
+select public.elb_bind_device_recovery_key(
+    '10000000-0000-0000-0000-000000000001',
+    '20000000-0000-0000-0000-000000000001',
+    '40000000-0000-0000-0000-000000000010',
+    repeat('R', 392),
+    repeat('d', 64),
+    'RSA-OAEP-256'
+);
+
+select elb_rls_test.assert_true(
+    'pending attempts can reuse the retained key after its active device is revoked',
+    (
+        select count(*) = 2
+        from public.devices
+        where device_id in (
+                '40000000-0000-0000-0000-000000000009',
+                '40000000-0000-0000-0000-000000000010'
+            )
+          and status = 'pending'
+          and recovery_key_fingerprint = repeat('d', 64)
+          and recovery_public_key = repeat('R', 392)
+    )
+);
+
+update public.devices
+set status = 'active'
+where device_id = '40000000-0000-0000-0000-000000000009';
+
+select elb_rls_test.expect_error(
+    'only one device with a retained recovery key can become active',
+    $sql$
+        update public.devices
+        set status = 'active'
+        where device_id = '40000000-0000-0000-0000-000000000010'
+    $sql$,
+    '%duplicate key%'
+);
+
 rollback;

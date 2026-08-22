@@ -108,6 +108,9 @@ public sealed class MobileLogbookSession(
 
     public bool HasHostedSync => HostedSync is not null;
 
+    public bool ShouldOfferHostedAuthentication =>
+        MobileHostedReauthenticationPolicy.ShouldOffer(HostedSync, LastConnectionDiagnostics);
+
     public MobileHostedSyncDiagnosticSummary? HostedSyncDiagnostics => HostedSync is null
         ? null
         : MobileHostedSyncDiagnosticSummary.Create(DocumentV2, HostedSync);
@@ -948,6 +951,17 @@ public sealed class MobileLogbookSession(
         if (hostedAuthenticator is null)
         {
             throw new InvalidOperationException("Hosted sync is not configured on this device.");
+        }
+
+        if (HasHostedSync)
+        {
+            if (!ShouldOfferHostedAuthentication)
+            {
+                throw new InvalidOperationException(
+                    "Run connection preflight before reauthenticating this connected logbook.");
+            }
+
+            return;
         }
 
         if (DocumentV2.Operations.Count > 0 || ImportReceipts.Count > 0)
