@@ -8,6 +8,7 @@ public sealed class PrivatePilotRunbookTests
         var runbook = File.ReadAllText(TestRepo.FindFile("docs", "private-pilot-runbook.md"));
         var healthScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PrivatePilotHealthCheck.ps1"));
         var preflightScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PrivatePilotPreflight.ps1"));
+        var rlsHarness = File.ReadAllText(TestRepo.FindFile("supabase", "tests", "hosted_pilot_rls.sql"));
         var recoveryRehearsalScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-HostedRecoveryRehearsal.ps1"));
         var emailOtpConfigScript = File.ReadAllText(TestRepo.FindFile("tools", "Test-HostedEmailOtpConfiguration.ps1"));
         var hostedSetup = File.ReadAllText(TestRepo.FindFile("docs", "hosted-pilot-supabase.md"));
@@ -38,9 +39,19 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("Auth signup disabled with invited-user email and Google recovery only", preflightScript, StringComparison.Ordinal);
         Assert.Contains("Google returning-user recovery is not enabled", preflightScript, StringComparison.Ordinal);
         Assert.Contains("one or more unapproved Auth providers are enabled", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("and one hosted logbook", preflightScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("and no hosted logbook", preflightScript, StringComparison.Ordinal);
+        Assert.DoesNotContain("artifacts\\private-pilot-20260806\\cohort.md", preflightScript, StringComparison.Ordinal);
         Assert.Contains("secretHandling", preflightScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Host $ConnectionString", preflightScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Output $ConnectionString", preflightScript, StringComparison.Ordinal);
+
+        Assert.Contains("elb_rls_test.baseline_health", rlsHarness, StringComparison.Ordinal);
+        Assert.Contains("grant select on elb_rls_test.baseline_health to authenticated", rlsHarness, StringComparison.Ordinal);
+        Assert.Contains("baseline.active_account_count + 4", rlsHarness, StringComparison.Ordinal);
+        Assert.Contains("baseline.active_device_count + 4", rlsHarness, StringComparison.Ordinal);
+        Assert.Contains("baseline.stored_operation_count + 2", rlsHarness, StringComparison.Ordinal);
+        Assert.DoesNotContain("stored_operation_count = 2", rlsHarness, StringComparison.Ordinal);
 
         Assert.Contains("displayed six-digit", runbook, StringComparison.Ordinal);
         Assert.DoesNotContain("OTP or magic-link", runbook, StringComparison.OrdinalIgnoreCase);

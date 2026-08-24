@@ -47,6 +47,12 @@ $$;
 grant usage on schema elb_rls_test to authenticated;
 grant execute on all functions in schema elb_rls_test to authenticated;
 
+create table elb_rls_test.baseline_health as
+select *
+from public.get_hosted_pilot_health();
+
+grant select on elb_rls_test.baseline_health to authenticated;
+
 insert into auth.users (
     id,
     instance_id,
@@ -707,11 +713,12 @@ select elb_rls_test.assert_true(
 select elb_rls_test.assert_true(
     'pilot health reports counts and upgrade triggers without service secrets',
     (
-        select active_account_count >= 3
-          and active_device_count >= 3
-          and stored_operation_count = 2
-          and jsonb_typeof(paid_plan_upgrade_triggers) = 'array'
-        from public.get_hosted_pilot_health()
+        select health.active_account_count = baseline.active_account_count + 4
+          and health.active_device_count = baseline.active_device_count + 4
+          and health.stored_operation_count = baseline.stored_operation_count + 2
+          and jsonb_typeof(health.paid_plan_upgrade_triggers) = 'array'
+        from public.get_hosted_pilot_health() health
+        cross join elb_rls_test.baseline_health baseline
     )
 );
 

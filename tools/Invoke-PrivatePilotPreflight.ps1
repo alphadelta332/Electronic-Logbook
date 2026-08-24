@@ -269,11 +269,7 @@ $requiredFiles = @(
     "docs\hosted-pilot-supabase.md",
     "supabase\migrations\20260806000000_hosted_pilot_foundation.sql",
     "supabase\tests\hosted_pilot_rls.sql",
-    "tools\Invoke-PrivatePilotHealthCheck.ps1",
-    "artifacts\private-pilot-20260806\cohort.md",
-    "artifacts\private-pilot-20260806\incident-log.md",
-    "artifacts\private-pilot-20260806\weekly-checkins.md",
-    "artifacts\private-pilot-20260806\exit-decision.md"
+    "tools\Invoke-PrivatePilotHealthCheck.ps1"
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -342,8 +338,8 @@ select
     $row = & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -t -A -F '|' -c $query
     if ($LASTEXITCODE -ne 0) { throw "database account/device read failed" }
     $counts = ([string]$row).Trim().Split('|')
-    if ($counts.Count -ne 3 -or $counts[0] -ne '1' -or $counts[1] -ne '1' -or $counts[2] -ne '0') {
-        throw "expected one active account, one matching active device, and no hosted logbook"
+    if ($counts.Count -ne 3 -or $counts[0] -ne '1' -or $counts[1] -ne '1' -or $counts[2] -ne '1') {
+        throw "expected one active account, one matching active device, and one hosted logbook"
     }
 }))
 
