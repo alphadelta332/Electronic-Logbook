@@ -165,6 +165,8 @@ public sealed class MobileLogbookSession(
 
     public bool HasPendingActionFeedback => pendingWorkbookActionFeedback is not null;
 
+    public bool ShouldCelebrateActionFeedback => pendingWorkbookActionFeedback?.Celebrate == true;
+
     public bool CanUndoLastWorkbookAction =>
         pendingWorkbookActionFeedback is { UndoKind: not WorkbookActionUndoKind.None } pending &&
         syncClock.UtcNow < pending.ExpiresAt;
@@ -411,6 +413,7 @@ public sealed class MobileLogbookSession(
         SetWorkbookActionFeedback(
             isModification ? "Entry modified." : "Entry added.",
             isModification ? WorkbookActionUndoKind.RestoreModifiedEntry : WorkbookActionUndoKind.None,
+            celebrate: true,
             operation,
             previousEntry);
         ResetWorkbookDraft();
@@ -568,6 +571,7 @@ public sealed class MobileLogbookSession(
         SetWorkbookActionFeedback(
             "Entry deleted.",
             WorkbookActionUndoKind.RestoreDeletedEntry,
+            celebrate: false,
             operation,
             entry.Entry);
     }
@@ -1109,12 +1113,14 @@ public sealed class MobileLogbookSession(
     private void SetWorkbookActionFeedback(
         string message,
         WorkbookActionUndoKind undoKind,
+        bool celebrate,
         PortableLogbookOperationV2 operation,
         PortableLogbookWorkbookEntry? previousEntry)
     {
         pendingWorkbookActionFeedback = new(
             message,
             undoKind,
+            celebrate,
             operation.EntryId,
             operation.RevisionId,
             previousEntry,
@@ -1140,6 +1146,7 @@ public sealed class MobileLogbookSession(
     private sealed record PendingWorkbookActionFeedback(
         string Message,
         WorkbookActionUndoKind UndoKind,
+        bool Celebrate,
         EntryId EntryId,
         RevisionId ActionRevisionId,
         PortableLogbookWorkbookEntry? PreviousEntry,

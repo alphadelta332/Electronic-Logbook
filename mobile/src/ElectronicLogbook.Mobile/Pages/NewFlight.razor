@@ -96,12 +96,22 @@ else
             </div>
         }
 
-        <header class="entry-header">
-            <div>
-                <span class="eyebrow">@Session.DraftModeLabel</span>
-                <h1>@Session.WorkbookDraft.Date.ToString("dd MMM yyyy")</h1>
+        <header class="entry-header entry-action-header">
+            <div class="entry-action-context">
+                <h1>@Session.DraftModeLabel</h1>
+                <span class="entry-draft-status">
+                    <span class="entry-draft-status-dot" aria-hidden="true"></span>
+                    @(Session.HasEditedDraft ? "Draft edited" : "Ready")
+                </span>
             </div>
-            <span class="draft-pill">@(Session.HasEditedDraft ? "Draft edited" : "Ready")</span>
+            <div class="entry-header-actions" role="group" aria-label="Flight form actions">
+                <MudButton Class="entry-clear-action" Variant="Variant.Filled" Color="Color.Default" OnClick="RequestClear" Disabled="@Session.IsStorageBlocked" aria-label="Clear form" title="Clear form">
+                    Clear form
+                </MudButton>
+                <MudButton Class="entry-save-action" Variant="Variant.Filled" Color="Color.Primary" OnClick="ReviewSave" Disabled="@Session.IsStorageBlocked" aria-label="@Session.SaveLabel" title="@Session.SaveLabel">
+                    @Session.SaveLabel
+                </MudButton>
+            </div>
         </header>
 
         @if (Session.ShouldShowLastActionMessage(MobileActionMessageSurface.Draft))
@@ -235,16 +245,6 @@ else
             </div>
         </section>
 
-        <aside class="persistent-action-bar">
-            <div class="action-buttons" role="group" aria-label="Flight form actions">
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" OnClick="RequestClear" Disabled="@Session.IsStorageBlocked" StartIcon="@Icons.Material.Filled.DeleteSweep" aria-label="Clear form" title="Clear form">
-                    Clear form
-                </MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Success" OnClick="ReviewSave" Disabled="@Session.IsStorageBlocked" StartIcon="@Icons.Material.Filled.Done" aria-label="@Session.SaveLabel" title="@Session.SaveLabel">
-                    @Session.SaveLabel
-                </MudButton>
-            </div>
-        </aside>
     </section>
 }
 

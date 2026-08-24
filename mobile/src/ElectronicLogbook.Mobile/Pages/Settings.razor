@@ -17,20 +17,21 @@
 else
 {
     <section class="settings-page">
-        <header class="entry-header">
-            <div>
-                <span class="eyebrow">Settings</span>
-                <h1>Account and sync</h1>
+        <section class="form-section settings-overview-card" aria-labelledby="settings-heading">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Settings</span>
+                    <h1 id="settings-heading">Account and sync</h1>
+                </div>
+                <span class="draft-pill">@Session.HostedSyncStatusLabel</span>
             </div>
-            <span class="draft-pill">@Session.HostedSyncStatusLabel</span>
-        </header>
-
-        <section class="notice-panel">
-            <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
-            <div>
-                <strong>Connection status</strong>
-                <span>@Session.HostedSyncStatusDetail</span>
-                <span>@AttentionGuidance</span>
+            <div class="settings-connection-summary" role="status" aria-live="polite">
+                <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
+                <div>
+                    <strong>Connection status</strong>
+                    <span>@Session.HostedSyncStatusDetail</span>
+                    <span>@AttentionGuidance</span>
+                </div>
             </div>
         </section>
 

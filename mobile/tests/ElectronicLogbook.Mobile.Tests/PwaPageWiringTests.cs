@@ -201,6 +201,18 @@ public sealed class PwaPageWiringTests
         Assert.Contains("html[data-elb-theme=\"dark\"]", css, StringComparison.Ordinal);
         Assert.Contains("html[data-elb-theme=\"system\"]", css, StringComparison.Ordinal);
         Assert.Contains("html[data-elb-accent=\"ocean\"]", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("html[data-elb-accent=\"red\"]", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("html[data-elb-accent=\"orange\"]", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("html[data-elb-accent=\"amber\"]", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("html[data-elb-accent=\"gold\"]", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Red\"", preferenceStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Orange\"", preferenceStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Amber\"", preferenceStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Gold\"", preferenceStore, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Red\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Orange\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Amber\"", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"Gold\"", script, StringComparison.Ordinal);
         Assert.Contains(".accent-picker", css, StringComparison.Ordinal);
         Assert.Contains("color: var(--app-text);", css, StringComparison.Ordinal);
         Assert.DoesNotContain("color: #ffffff;\r\n    font-size: 18px;", css, StringComparison.Ordinal);
@@ -214,7 +226,7 @@ public sealed class PwaPageWiringTests
         var settings = ReadMobilePage("Settings.razor");
         var css = ReadMobileAsset("css", "app.css");
 
-        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Success\" OnClick=\"ReviewSave\"", newFlight, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Filled\" Color=\"Color.Primary\" OnClick=\"ReviewSave\"", newFlight, StringComparison.Ordinal);
         Assert.Contains("@Session.SaveLabel", newFlight, StringComparison.Ordinal);
         Assert.Contains("Color=\"Color.Primary\" StartIcon=\"@Icons.Material.Filled.Edit\" OnClick=\"EditEntry\"", flightDetail, StringComparison.Ordinal);
         Assert.Contains("Href=\"/exchange\" Variant=\"Variant.Outlined\"", settings, StringComparison.Ordinal);
@@ -311,9 +323,15 @@ public sealed class PwaPageWiringTests
     public void GlobalErrorUiOffersExplicitDismissAndRestartActions()
     {
         var index = ReadMobileWebAsset("index.html");
+        var css = ReadMobileWebAsset("css/app.css");
 
         Assert.Contains("Restart app", index, StringComparison.Ordinal);
         Assert.Contains("class=\"dismiss\">Dismiss", index, StringComparison.Ordinal);
+        Assert.Contains("class=\"error-message\"", index, StringComparison.Ordinal);
+        Assert.Contains("class=\"error-actions\"", index, StringComparison.Ordinal);
+        Assert.Contains("max-height: calc(100dvh - 32px)", css, StringComparison.Ordinal);
+        Assert.Contains("bottom: max(16px, env(safe-area-inset-bottom))", css, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap", css, StringComparison.Ordinal);
         Assert.DoesNotContain("An unhandled error has occurred", index, StringComparison.Ordinal);
     }
 
@@ -517,6 +535,20 @@ public sealed class PwaPageWiringTests
         Assert.Contains("window.electronicLogbookNavigation", bridge, StringComparison.Ordinal);
         Assert.Contains("history.back()", bridge, StringComparison.Ordinal);
         Assert.Contains("path === \"/\"", bridge, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate2SettingsKeepsThePageHeadingAndSyncStatusInsideTheOverviewCard()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Matches(
+            @"(?s)<section class=""form-section settings-overview-card"" aria-labelledby=""settings-heading"">.*?<div class=""section-title-row"">.*?<h1 id=""settings-heading"">Account and sync</h1>.*?<span class=""draft-pill"">@Session\.HostedSyncStatusLabel</span>.*?<div class=""settings-connection-summary"" role=""status"" aria-live=""polite"">",
+            settings);
+        Assert.DoesNotContain("<header class=\"entry-header\">", settings, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.section-title-row h1,\s*\.section-title-row h2\s*\{[^}]*font-size:\s*18px", css);
+        Assert.Matches(@"(?s)\.settings-connection-summary\s*\{[^}]*border-top:\s*1px solid var\(--app-border\)", css);
     }
 
     [Fact]
@@ -886,6 +918,28 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate2FlightDetailActionsMatchTheNewFlightStickyHeader()
+    {
+        var newFlight = ReadMobilePage("NewFlight.razor");
+        var flightDetail = ReadMobilePage("FlightDetail.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("class=\"entry-header entry-action-header\"", newFlight, StringComparison.Ordinal);
+        Assert.Contains("class=\"entry-header entry-action-header\"", flightDetail, StringComparison.Ordinal);
+        Assert.Contains("class=\"entry-header-actions\" role=\"group\" aria-label=\"Flight entry actions\"", flightDetail, StringComparison.Ordinal);
+        Assert.Contains("Class=\"entry-clear-action\" Variant=\"Variant.Filled\" Color=\"Color.Default\" OnClick=\"RequestClear\"", newFlight, StringComparison.Ordinal);
+        Assert.Contains("Class=\"entry-delete-action\" Variant=\"Variant.Filled\" Color=\"Color.Error\" OnClick=\"RequestDeleteEntry\"", flightDetail, StringComparison.Ordinal);
+        Assert.Contains("Class=\"entry-save-action\" Variant=\"Variant.Filled\" Color=\"Color.Primary\" OnClick=\"CloneEntry\"", flightDetail, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.entry-header-actions\s*\{(?=[^}]*display:\s*grid)(?=[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\))(?=[^}]*width:\s*clamp\(176px, 46vw, 190px\))", css);
+        Assert.Matches(@"(?s)\.entry-header-actions \.mud-button-root\s*\{(?=[^}]*width:\s*100%)(?=[^}]*min-height:\s*44px)(?=[^}]*font-weight:\s*800)", css);
+        Assert.DoesNotMatch(@"(?s)\.entry-header-actions \.mud-button-root\s*\{[^}]*width:\s*auto", css);
+        Assert.Matches(@"(?s)\.entry-header-actions \.entry-clear-action\s*\{[^}]*background-color:\s*var\(--app-text-muted\)", css);
+        Assert.Matches(@"(?s)\.entry-header-actions \.entry-delete-action\s*\{[^}]*background-color:\s*var\(--app-error\)", css);
+        Assert.DoesNotContain("<div class=\"row-actions\">", flightDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("Icons.Material.Filled.ContentCopy", flightDetail, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate2LayoutShowsSharedAnimatedFeedbackForAddedModifiedAndDeletedEntries()
     {
         var feedback = ReadMobileSource(Path.Combine("Layout", "MobileActionFeedback.razor"));
@@ -894,8 +948,13 @@ public sealed class PwaPageWiringTests
         var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("<MobileActionFeedback />", layout, StringComparison.Ordinal);
-        Assert.Contains("class=\"action-feedback-message @AnimationClass\"", feedback, StringComparison.Ordinal);
+        Assert.Contains("class=\"action-feedback-message @AnimationClass @(ShowCelebration", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ActionFeedbackMessage", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.ShouldCelebrateActionFeedback", feedback, StringComparison.Ordinal);
+        Assert.Contains("class=\"action-feedback-confirmation\" aria-hidden=\"true\"", feedback, StringComparison.Ordinal);
+        Assert.Contains("action-feedback-confirmation-check", feedback, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"polite\"", feedback, StringComparison.Ordinal);
+        Assert.Contains("aria-atomic=\"true\"", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.CanUndoLastWorkbookAction", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.UndoLastWorkbookActionAsync()", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ActionFeedbackRemaining", feedback, StringComparison.Ordinal);
@@ -909,7 +968,14 @@ public sealed class PwaPageWiringTests
         Assert.Contains("\"Entry deleted.\"", session, StringComparison.Ordinal);
         Assert.Contains("WorkbookActionUndoKind.None", session, StringComparison.Ordinal);
         Assert.Contains("WorkbookActionUndoKind.RestoreModifiedEntry", session, StringComparison.Ordinal);
+        Assert.Contains("celebrate: true", session, StringComparison.Ordinal);
+        Assert.Contains("celebrate: false", session, StringComparison.Ordinal);
         Assert.Contains(".action-feedback-message", css, StringComparison.Ordinal);
+        Assert.Contains(".action-feedback-message-success", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes action-feedback-confirmation-pop", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes action-feedback-confirmation-draw", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes action-feedback-confirmation-ring", css, StringComparison.Ordinal);
+        Assert.Contains("@keyframes action-feedback-confirmation-spark", css, StringComparison.Ordinal);
         Assert.Contains("bottom: calc(78px + var(--native-safe-bottom));", css, StringComparison.Ordinal);
         Assert.Contains("z-index: 25;", css, StringComparison.Ordinal);
         Assert.Contains("--action-feedback-hidden-offset: calc(100% + 88px + var(--native-safe-bottom));", css, StringComparison.Ordinal);
@@ -1106,9 +1172,9 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("Icons.Material.Filled.Refresh", page, StringComparison.Ordinal);
         Assert.DoesNotContain("MudIconButton", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Color=\"Color.Default\" OnClick=\"RequestCancel\"", page, StringComparison.Ordinal);
-        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Error\" OnClick=\"RequestClear\"", page, StringComparison.Ordinal);
-        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Success\" OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
-        Assert.Contains("Icons.Material.Filled.DeleteSweep", page, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Filled\" Color=\"Color.Default\" OnClick=\"RequestClear\"", page, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Filled\" Color=\"Color.Primary\" OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Icons.Material.Filled.DeleteSweep", page, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"@Session.SaveLabel\"", page, StringComparison.Ordinal);
         Assert.Contains("white-space: nowrap;", css, StringComparison.Ordinal);
 
@@ -1145,20 +1211,35 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3NewFlightKeepsTheCompletionActionVisibleAboveBottomNavigation()
+    public void Gate3NewFlightKeepsTheActionsVisibleInACompactStickyHeader()
     {
         var page = ReadMobilePage("NewFlight.razor");
         var css = ReadMobileWebAsset("css/app.css");
 
-        Assert.Contains("class=\"persistent-action-bar\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"entry-header entry-action-header\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"entry-header-actions\" role=\"group\" aria-label=\"Flight form actions\"", page, StringComparison.Ordinal);
         Assert.Contains("OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
-        Assert.Matches(@"(?s)\.flight-entry-page\s*\{[^}]*padding-bottom:\s*76px", css);
-        Assert.Matches(@"(?s)\.persistent-action-bar\s*\{[^}]*position:\s*fixed", css);
-        Assert.Matches(@"(?s)\.persistent-action-bar\s*\{[^}]*bottom:\s*calc\(74px \+ var\(--native-safe-bottom\)\)", css);
-        Assert.Matches(@"(?s)\.persistent-action-bar\s*\{[^}]*z-index:\s*25", css);
-        Assert.Contains("background: color-mix(in srgb, var(--app-surface) 94%, transparent);", css, StringComparison.Ordinal);
-        Assert.Contains(".action-buttons .mud-button-root", css, StringComparison.Ordinal);
-        Assert.Contains("width: 100%;", css, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.flight-entry-page\s*\{[^}]*padding-bottom:\s*0", css);
+        Assert.Matches(@"(?s)\.entry-action-header\s*\{[^}]*position:\s*sticky", css);
+        Assert.Matches(@"(?s)\.entry-action-header\s*\{[^}]*top:\s*-16px", css);
+        Assert.Matches(@"(?s)\.entry-action-header\s*\{[^}]*z-index:\s*25", css);
+        Assert.Contains("background: color-mix(in srgb, var(--app-surface) 96%, transparent);", css, StringComparison.Ordinal);
+        Assert.Contains(".entry-header-actions .mud-button-root", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("persistent-action-bar", page, StringComparison.Ordinal);
+        Assert.DoesNotContain(".persistent-action-bar", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3AppBrandHeaderUsesBalancedSpacingAndASingleLargerTitle()
+    {
+        var layout = ReadMobileSource(Path.Combine("Layout", "MainLayout.razor"));
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("<strong>FlightLogX</strong>", layout, StringComparison.Ordinal);
+        Assert.DoesNotContain("Portable operations", layout, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.app-topbar\s*\{[^}]*padding:\s*8px 16px", css);
+        Assert.DoesNotContain("padding: calc(8px + var(--native-safe-top)) 16px 8px;", css, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.brand-lockup strong\s*\{[^}]*font-size:\s*20px", css);
     }
 
     [Fact]

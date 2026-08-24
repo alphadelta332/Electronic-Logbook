@@ -32,9 +32,11 @@
     </div>
 
     <div id="blazor-error-ui" role="alert" aria-live="assertive">
-        Something went wrong. Your saved logbook data remains on this device.
-        <a href="" class="reload">Restart app</a>
-        <button type="button" class="dismiss">Dismiss</button>
+        <span class="error-message">Something went wrong. Your saved logbook data remains on this device.</span>
+        <span class="error-actions">
+            <a href="" class="reload">Restart app</a>
+            <button type="button" class="dismiss">Dismiss</button>
+        </span>
     </div>
     <script src="js/logbookStore.js"></script>
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>

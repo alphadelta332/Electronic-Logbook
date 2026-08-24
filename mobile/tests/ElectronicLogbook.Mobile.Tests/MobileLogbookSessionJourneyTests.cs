@@ -768,6 +768,56 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task NetworkBridgeFailureDuringColdStartStillLoadsRetainedDeviceCopyAsOffline()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-24T08:00:00Z"));
+        var logbookId = new LogbookId("log_retained_cold_start");
+        var deviceId = new DeviceId("dev_retained");
+        var retainedOperation = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_retained"),
+            new RevisionId("rev_retained"),
+            deviceId,
+            clock.UtcNow.AddHours(-1),
+            PortableLogbookWorkbookEntry.Empty with
+            {
+                FlightId = "OFFLINE-COLD-START",
+                Reg = "VH-OFF"
+            });
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [retainedOperation]);
+        var hosted = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            logbookId,
+            deviceId,
+            LastAcknowledgedHostedRevision: 1,
+            PortableHostedSyncStatus.Synced,
+            UploadedRevisionIds: [retainedOperation.RevisionId]);
+        await new BrowserLogbookStore(jsRuntime).SaveStateAsync(
+            new BrowserLogbookStateV2(document, [], null, HostedSync: hosted));
+        var session = CreateSession(
+            jsRuntime,
+            new InMemoryHostedLogbookAuthenticator(hosted.AccountId, deviceId, clock),
+            clock,
+            new InMemoryHostedLogbookLedger(),
+            new ThrowingNetworkStatus());
+
+        await session.EnsureLoadedWorkbookAsync();
+
+        Assert.True(session.IsLoaded);
+        Assert.False(session.IsStorageBlocked);
+        Assert.Equal(PortableHostedSyncStatus.Offline, session.HostedSync?.LastStatus);
+        Assert.Equal("Offline", session.HostedSyncStatusLabel);
+        var retained = Assert.Single(session.CurrentEntriesV2);
+        Assert.Equal("OFFLINE-COLD-START", retained.Entry?.FlightId);
+        Assert.Equal("VH-OFF", retained.Entry?.Reg);
+    }
+
+    [Fact]
     public async Task UnreachableHostedTransportPersistsOfflineStateAndQueuedEditAcrossReload()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -990,6 +1040,7 @@ public sealed class MobileLogbookSessionJourneyTests
         await session.DeleteWorkbookEntryAsync(original);
 
         Assert.Equal("Entry deleted.", session.ActionFeedbackMessage);
+        Assert.False(session.ShouldCelebrateActionFeedback);
         Assert.True(session.CanUndoLastWorkbookAction);
         Assert.Equal(MobileLogbookSession.ActionFeedbackWindow, session.ActionFeedbackRemaining);
         var deletion = session.DocumentV2.Operations.Last();
@@ -1045,6 +1096,7 @@ public sealed class MobileLogbookSessionJourneyTests
         await session.SaveWorkbookEntryAsync();
 
         Assert.Equal("Entry added.", session.ActionFeedbackMessage);
+        Assert.True(session.ShouldCelebrateActionFeedback);
         Assert.Equal("Entry added.", session.LastActionMessage);
         Assert.True(session.HasPendingActionFeedback);
         Assert.False(session.CanUndoLastWorkbookAction);
@@ -1072,6 +1124,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableOperationKind.Correction, modification.Kind);
         Assert.Equal("VH-MOD", Assert.Single(session.CurrentEntriesV2).Entry?.Reg);
         Assert.Equal("Entry modified.", session.ActionFeedbackMessage);
+        Assert.True(session.ShouldCelebrateActionFeedback);
         Assert.True(session.CanUndoLastWorkbookAction);
         Assert.Equal(MobileLogbookSession.ActionFeedbackWindow, session.ActionFeedbackRemaining);
 
@@ -1570,6 +1623,13 @@ public sealed class MobileLogbookSessionJourneyTests
             FailTransport
                 ? ValueTask.FromException(new HttpRequestException("Simulated unreachable hosted transport."))
                 : inner.RecordAcknowledgementAsync(logbookId, deviceId, throughHostedRevision, cancellationToken);
+    }
+
+    private sealed class ThrowingNetworkStatus : INetworkStatus
+    {
+        public ValueTask<NetworkAvailability> GetAvailabilityAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromException<NetworkAvailability>(
+                new JSException("Android network bridge unavailable during offline cold-start."));
     }
 
     private sealed class BlockingAppendLedger(IHostedLogbookLedger inner) : IHostedLogbookLedger

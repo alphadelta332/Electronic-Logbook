@@ -105,12 +105,22 @@ else
             <MudIcon Icon="@Icons.Material.Filled.ArrowBack" />
             <span>Back to Logbook</span>
         </NavLink>
-        <header class="entry-header">
-            <div>
-                <span class="eyebrow">Entry detail</span>
-                <h1>@Session.FormatRoute(CurrentEntry.Entry)</h1>
+        <header class="entry-header entry-action-header">
+            <div class="entry-action-context">
+                <h1>Flight details</h1>
+                <span class="entry-draft-status">
+                    <span class="entry-draft-status-dot" aria-hidden="true"></span>
+                    @MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(CurrentEntry.Entry)) hr
+                </span>
             </div>
-            <span class="draft-pill">@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(CurrentEntry.Entry)) hr</span>
+            <div class="entry-header-actions" role="group" aria-label="Flight entry actions">
+                <MudButton Class="entry-delete-action" Variant="Variant.Filled" Color="Color.Error" OnClick="RequestDeleteEntry" Disabled="@Session.IsStorageBlocked" aria-label="Delete flight" title="Delete flight">
+                    Delete
+                </MudButton>
+                <MudButton Class="entry-save-action" Variant="Variant.Filled" Color="Color.Primary" OnClick="CloneEntry" aria-label="Clone flight" title="Clone flight">
+                    Clone
+                </MudButton>
+            </div>
         </header>
 
         <section class="detail-hero">
@@ -151,10 +161,6 @@ else
                         </dl>
                     </section>
                 }
-            </div>
-            <div class="row-actions">
-                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ContentCopy" OnClick="CloneEntry">Clone</MudButton>
-                <MudButton Variant="Variant.Outlined" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="RequestDeleteEntry" Disabled="@Session.IsStorageBlocked">Delete</MudButton>
             </div>
         </section>
 

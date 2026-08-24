@@ -167,7 +167,7 @@
         const [themeMode, accent] = String(value ?? "").split("|", 2);
         return {
             themeMode: themeMode === "Light" || themeMode === "Dark" || themeMode === "System" ? themeMode : "System",
-            accent: ["Forest", "Ocean", "Sky", "Indigo", "Violet", "Plum", "Rose", "Red", "Orange", "Amber", "Gold", "Teal"].includes(accent) ? accent : "Forest"
+            accent: ["Forest", "Ocean", "Sky", "Indigo", "Violet", "Plum", "Rose", "Teal"].includes(accent) ? accent : "Forest"
         };
     }
 

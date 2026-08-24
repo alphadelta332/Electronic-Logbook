@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using ElectronicLogbook.Portable;
+using Microsoft.JSInterop;
 
 namespace ElectronicLogbook.Mobile;
 
@@ -34,11 +35,36 @@ public sealed class MobileHostedSyncWorkflow(
         ArgumentNullException.ThrowIfNull(request.Document);
         ArgumentNullException.ThrowIfNull(request.HostedSync);
 
-        var network = await networkStatus.GetAvailabilityAsync(cancellationToken);
         var uploadedRevisionIds = (request.HostedSync.UploadedRevisionIds ?? []).ToHashSet();
         var pendingLocalOperationCount = MobileHostedSyncDiagnosticSummary
             .Create(request.Document, request.HostedSync)
             .PendingUploadCount;
+        NetworkAvailability network;
+        try
+        {
+            network = await networkStatus.GetAvailabilityAsync(cancellationToken);
+        }
+        catch (JSException)
+        {
+            return PortableHostedSyncResult.Offline(
+                request.Document,
+                request.HostedSync.LastAcknowledgedHostedRevision,
+                pendingLocalOperationCount);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is null)
+        {
+            return PortableHostedSyncResult.Offline(
+                request.Document,
+                request.HostedSync.LastAcknowledgedHostedRevision,
+                pendingLocalOperationCount);
+        }
+        catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return PortableHostedSyncResult.Offline(
+                request.Document,
+                request.HostedSync.LastAcknowledgedHostedRevision,
+                pendingLocalOperationCount);
+        }
         if (!network.IsOnline)
         {
             return PortableHostedSyncResult.Offline(
