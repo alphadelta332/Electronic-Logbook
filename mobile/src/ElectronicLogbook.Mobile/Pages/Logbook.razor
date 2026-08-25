@@ -33,6 +33,7 @@ else
         <div class="segmented-control" role="group" aria-label="Logbook view">
             <button type="button" class="@EntriesTabClass" aria-pressed="@(ActiveView == LogbookView.Entries)" @onclick="() => SelectView(LogbookView.Entries)">Entries</button>
             <button type="button" class="@TotalsTabClass" aria-pressed="@(ActiveView == LogbookView.Totals)" @onclick="() => SelectView(LogbookView.Totals)">Totals</button>
+            <button type="button" class="@DeletedTabClass" aria-pressed="@(ActiveView == LogbookView.Deleted)" @onclick="() => SelectView(LogbookView.Deleted)">Deleted</button>
         </div>
 
         @if (ActiveView == LogbookView.Entries)
@@ -87,7 +88,7 @@ else
                 }
             </section>
         }
-        else
+        else if (ActiveView == LogbookView.Totals)
         {
             <section class="form-section logbook-totals">
                 <div class="section-title-row">
@@ -208,24 +209,44 @@ else
                         <StatusMetric Label="Circling" Value="@(FormatCountTotal(entry => entry.Circling))" />
                     </div>
                 </section>
-                @if (Session.DeletedEntriesV2.Count > 0)
+            </section>
+        }
+        else
+        {
+            <section class="form-section deleted-entries-view">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Deletion history</span>
+                        <h2>Deleted flights</h2>
+                    </div>
+                    <span class="draft-pill">@Session.DeletedEntriesV2.Count deleted</span>
+                </div>
+                <p class="totals-intro">Deleted flights stay in the audit trail. Open a flight to review its revisions or restore it to the active logbook.</p>
+
+                @if (Session.DeletedEntriesV2.Count == 0)
                 {
-                    <section class="history-panel">
-                        <div class="section-title-row">
-                            <div>
-                                <span class="eyebrow">Deletion history</span>
-                                <h2>Removed entries</h2>
-                            </div>
-                            <span class="draft-pill">@Session.DeletedEntriesV2.Count deleted</span>
-                        </div>
+                    <section class="empty-state">
+                        <MudIcon Icon="@Icons.Material.Filled.RestoreFromTrash" />
+                        <strong>No deleted flights</strong>
+                        <span>Flights removed from the active logbook will appear here.</span>
+                    </section>
+                }
+                else
+                {
+                    <div class="deleted-entry-list">
                         @foreach (var entry in Session.DeletedEntriesV2)
                         {
-                            <NavLink class="history-row" href="@($"/flights/{entry.EntryId.Value}")">
-                                <strong>Deleted flight</strong>
-                                <span>@MobileLogbookSession.FormatTimestamp(Session.FindOperationV2(entry.CurrentRevisionId).CreatedAt)</span>
+                            var flight = Session.FindLatestWorkbookEntryPayload(entry);
+                            <NavLink class="deleted-entry-row" href="@($"/flights/{entry.EntryId.Value}")">
+                                <span class="deleted-entry-summary">
+                                    <strong>@(flight is null ? "Deleted flight" : Session.FormatRoute(flight))</strong>
+                                    <span>@(flight is null ? "Flight details unavailable" : $"{MobileLogbookSession.FormatDate(flight.Date)} · {Session.FormatAircraft(flight)} · {Session.FormatRegistration(flight)}")</span>
+                                </span>
+                                <span class="deleted-entry-time">Deleted @MobileLogbookSession.FormatTimestamp(Session.FindOperationV2(entry.CurrentRevisionId).CreatedAt)</span>
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" aria-hidden="true" />
                             </NavLink>
                         }
-                    </section>
+                    </div>
                 }
             </section>
         }
@@ -282,6 +303,7 @@ else
     private bool FilterFlightsWithApproachesOnly { get; set; }
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
+    private string DeletedTabClass => ActiveView == LogbookView.Deleted ? "active" : string.Empty;
     private string EntryCountLabel => Session.CurrentEntriesV2.Count == 1
         ? "1 active entry"
         : $"{Session.CurrentEntriesV2.Count} active entries";
@@ -305,9 +327,12 @@ else
 
     protected override void OnParametersSet()
     {
-        ActiveView = string.Equals(View, "totals", StringComparison.OrdinalIgnoreCase)
-            ? LogbookView.Totals
-            : LogbookView.Entries;
+        ActiveView = View?.ToLowerInvariant() switch
+        {
+            "totals" => LogbookView.Totals,
+            "deleted" => LogbookView.Deleted,
+            _ => LogbookView.Entries
+        };
     }
 
     private void SelectView(LogbookView view)
@@ -318,7 +343,13 @@ else
         }
 
         ActiveView = view;
-        Navigation.NavigateTo($"/flights?view={(view == LogbookView.Totals ? "totals" : "entries")}");
+        var queryValue = view switch
+        {
+            LogbookView.Totals => "totals",
+            LogbookView.Deleted => "deleted",
+            _ => "entries"
+        };
+        Navigation.NavigateTo($"/flights?view={queryValue}");
     }
 
     private bool MatchesSearch(PortableLogbookMaterializedEntryV2 materialized)
@@ -360,6 +391,7 @@ else
     private enum LogbookView
     {
         Entries,
-        Totals
+        Totals,
+        Deleted
     }
 }

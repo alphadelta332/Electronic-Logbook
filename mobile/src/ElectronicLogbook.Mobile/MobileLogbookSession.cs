@@ -66,6 +66,8 @@ public sealed class MobileLogbookSession(
 
     public IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts { get; private set; } = [];
 
+    public BrowserWorkbookMigrationReceipt? WorkbookMigration { get; private set; }
+
     public DateTimeOffset? LastSuccessfulExportAt { get; private set; }
 
     public BrowserLogbookExportCheckpoint? LastSuccessfulExport { get; private set; }
@@ -171,6 +173,14 @@ public sealed class MobileLogbookSession(
         pendingWorkbookActionFeedback is { UndoKind: not WorkbookActionUndoKind.None } pending &&
         syncClock.UtcNow < pending.ExpiresAt;
 
+    public bool CanMigrateWorkbook =>
+        IsLoaded &&
+        !IsStorageBlocked &&
+        HasHostedSync &&
+        WorkbookMigration is null &&
+        DocumentV2.Operations.Count == 0 &&
+        ImportReceipts.Count == 0;
+
     private MobileActionMessageScope LastActionMessageScope { get; set; } = MobileActionMessageScope.Global;
 
     public bool ShouldShowLastActionMessage(MobileActionMessageSurface surface) =>
@@ -240,7 +250,11 @@ public sealed class MobileLogbookSession(
 
     public IReadOnlyList<string> DraftErrors => ValidateDraft();
 
-    public IReadOnlyList<string> WorkbookDraftErrors => ValidateWorkbookDraft();
+    public IReadOnlyList<string> WorkbookDraftErrors => ValidateWorkbookDraft()
+        .Select(issue => issue.Message)
+        .ToArray();
+
+    public IReadOnlyList<MobileWorkbookEntryIssue> WorkbookDraftWarnings => ValidateWorkbookDraftWarnings();
 
     public IReadOnlyList<string> DraftWarnings => ValidateDraftWarnings();
 
@@ -250,7 +264,7 @@ public sealed class MobileLogbookSession(
 
     public string DraftModeLabel => EditingEntryId is null ? "New flight" : "Correction";
 
-    public string SaveLabel => EditingEntryId is null ? "Add flight" : "Save correction";
+    public string SaveLabel => EditingEntryId is null ? "Add flight" : "Save";
 
     public string PackageKeyNotice => MobilePackageKeyNotice.Create(PackageKeyStatus);
 
@@ -323,6 +337,7 @@ public sealed class MobileLogbookSession(
                 LastSuccessfulExportAt = state.LastSuccessfulExportAt;
                 LastSuccessfulExport = state.LastSuccessfulExport;
                 HostedSync = state.HostedSync;
+                WorkbookMigration = state.WorkbookMigration;
                 deviceId = HostedSync?.DeviceId ?? deviceId;
             }
 
@@ -576,12 +591,47 @@ public sealed class MobileLogbookSession(
             entry.Entry);
     }
 
+    public async Task<bool> RestoreWorkbookEntryAsync(PortableLogbookMaterializedEntryV2 entry)
+    {
+        if (IsStorageBlocked || !entry.IsDeleted)
+        {
+            return false;
+        }
+
+        var previousEntry = FindLatestWorkbookEntryPayload(entry);
+        if (previousEntry is null)
+        {
+            return false;
+        }
+
+        var operation = PortableLogbookOperationV2.Correct(
+            DocumentV2.LogbookId,
+            entry.EntryId,
+            RevisionId.New(),
+            [entry.CurrentRevisionId],
+            deviceId,
+            DateTimeOffset.UtcNow,
+            previousEntry);
+
+        DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
+        await SaveStateV2Async();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
+        SetWorkbookActionFeedback(
+            "Entry restored.",
+            WorkbookActionUndoKind.DeleteRestoredEntry,
+            celebrate: false,
+            operation,
+            previousEntry: null);
+        return true;
+    }
+
     public async Task<bool> UndoLastWorkbookActionAsync()
     {
         ExpireLastWorkbookActionFeedback();
         if (IsStorageBlocked || pendingWorkbookActionFeedback is not { } pending ||
             pending.UndoKind == WorkbookActionUndoKind.None ||
-            pending.PreviousEntry is null)
+            (pending.UndoKind is WorkbookActionUndoKind.RestoreDeletedEntry or WorkbookActionUndoKind.RestoreModifiedEntry &&
+             pending.PreviousEntry is null))
         {
             return false;
         }
@@ -593,6 +643,8 @@ public sealed class MobileLogbookSession(
                 currentEntry.CurrentRevisionId == pending.ActionRevisionId,
             WorkbookActionUndoKind.RestoreModifiedEntry => currentEntry is { IsDeleted: false, Entry: not null } &&
                 currentEntry.CurrentRevisionId == pending.ActionRevisionId,
+            WorkbookActionUndoKind.DeleteRestoredEntry => currentEntry is { IsDeleted: false, Entry: not null } &&
+                currentEntry.CurrentRevisionId == pending.ActionRevisionId,
             _ => false
         };
         if (!currentStateMatches)
@@ -602,21 +654,33 @@ public sealed class MobileLogbookSession(
         }
 
         pendingWorkbookActionFeedback = null;
-        var operation = PortableLogbookOperationV2.Correct(
-            DocumentV2.LogbookId,
-            pending.EntryId,
-            RevisionId.New(),
-            [pending.ActionRevisionId],
-            deviceId,
-            DateTimeOffset.UtcNow,
-            pending.PreviousEntry);
+        var operation = pending.UndoKind == WorkbookActionUndoKind.DeleteRestoredEntry
+            ? PortableLogbookOperationV2.Delete(
+                DocumentV2.LogbookId,
+                pending.EntryId,
+                RevisionId.New(),
+                [pending.ActionRevisionId],
+                deviceId,
+                DateTimeOffset.UtcNow,
+                "Restoration undone.")
+            : PortableLogbookOperationV2.Correct(
+                DocumentV2.LogbookId,
+                pending.EntryId,
+                RevisionId.New(),
+                [pending.ActionRevisionId],
+                deviceId,
+                DateTimeOffset.UtcNow,
+                pending.PreviousEntry!);
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
-        SetLastActionMessage(pending.UndoKind == WorkbookActionUndoKind.RestoreDeletedEntry
-            ? "Deletion undone."
-            : "Modification undone.");
+        SetLastActionMessage(pending.UndoKind switch
+        {
+            WorkbookActionUndoKind.RestoreDeletedEntry => "Deletion undone.",
+            WorkbookActionUndoKind.DeleteRestoredEntry => "Restoration undone.",
+            _ => "Modification undone."
+        });
         return true;
     }
 
@@ -869,6 +933,7 @@ public sealed class MobileLogbookSession(
         HostedSync = restored.HostedSync;
         deviceId = restored.HostedSync.DeviceId;
         ImportReceipts = [];
+        WorkbookMigration = null;
         LastSuccessfulExportAt = null;
         LastSuccessfulExport = null;
         PendingHostedSignIn = null;
@@ -935,6 +1000,7 @@ public sealed class MobileLogbookSession(
         DocumentV2 = result.Document;
         deviceId = result.HostedSync.DeviceId;
         ImportReceipts = [];
+        WorkbookMigration = null;
         LastSuccessfulExportAt = null;
         LastSuccessfulExport = null;
         HostedSync = result.HostedSync;
@@ -985,6 +1051,7 @@ public sealed class MobileLogbookSession(
         DocumentV2 = plan.InitialDocument;
         deviceId = session.DeviceId;
         ImportReceipts = [];
+        WorkbookMigration = null;
         LastSuccessfulExportAt = null;
         LastSuccessfulExport = null;
         HostedSync = new BrowserHostedSyncState(
@@ -1023,6 +1090,55 @@ public sealed class MobileLogbookSession(
 
     public Task<PortableHostedSyncResult?> SyncHostedAfterNetworkRestoredAsync() =>
         SyncHostedAsync(BackgroundSyncReason.NetworkRestored);
+
+    public async Task<MobileWorkbookMigrationApplyResult> ApplyWorkbookMigrationAsync(
+        MobileWorkbookMigrationPlan plan,
+        DateTimeOffset importedAt)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        if (!CanMigrateWorkbook)
+        {
+            throw new InvalidOperationException(
+                WorkbookMigration is null
+                    ? "Connect and initialize the invited account before migrating a workbook, and migrate before recording flights."
+                    : "This app logbook already has a completed workbook migration.");
+        }
+
+        var previous = await logbookStore.LoadStateV2Async();
+        var candidate = MobileWorkbookMigrationWorkflow.CreateCandidate(
+            plan,
+            DocumentV2,
+            deviceId,
+            importedAt,
+            portableIdFactory);
+        try
+        {
+            await logbookStore.SaveStateAsync(new BrowserLogbookStateV2(
+                candidate.Document,
+                ImportReceipts,
+                LastSuccessfulExportAt,
+                LastSuccessfulExport,
+                HostedSync,
+                candidate.Receipt));
+            var reloaded = await logbookStore.LoadStateV2Async();
+            MobileWorkbookMigrationWorkflow.VerifyDurableReadback(candidate, reloaded);
+        }
+        catch
+        {
+            await logbookStore.RestoreStateV2Async(previous);
+            throw;
+        }
+
+        DocumentV2 = candidate.Document;
+        WorkbookMigration = candidate.Receipt;
+        ResetWorkbookDraft();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
+        SetLastActionMessage("Workbook migration saved and verified on this device.");
+        return new MobileWorkbookMigrationApplyResult(
+            candidate.Receipt,
+            candidate.Document.Operations.Count,
+            DurableReadbackVerified: true);
+    }
 
     public async Task<MobilePackageImportApplyWorkflowResultV2> ApplyWorkbookPackageAsync(
         BrowserFile file,
@@ -1156,7 +1272,8 @@ public sealed class MobileLogbookSession(
     {
         None,
         RestoreModifiedEntry,
-        RestoreDeletedEntry
+        RestoreDeletedEntry,
+        DeleteRestoredEntry
     }
 
     public PortableLogbookMaterializedEntry? FindCurrentEntry(string? entryId)
@@ -1306,6 +1423,16 @@ public sealed class MobileLogbookSession(
     public PortableLogbookOperationV2 FindOperationV2(RevisionId revisionId) =>
         DocumentV2.Operations.First(operation => operation.RevisionId == revisionId);
 
+    public PortableLogbookWorkbookEntry? FindLatestWorkbookEntryPayload(PortableLogbookMaterializedEntryV2 entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return entry.RevisionHistory
+            .Select(FindOperationV2)
+            .Select(operation => operation.Entry)
+            .FirstOrDefault(payload => payload is not null);
+    }
+
     public IEnumerable<EntryDetail> EntryDetails(PortableLogbookEntry entry)
     {
         yield return new("Date", FormatDate(entry.Date));
@@ -1373,49 +1500,49 @@ public sealed class MobileLogbookSession(
 
     public IEnumerable<EntryDetail> EntryDetails(PortableLogbookWorkbookEntry entry)
     {
-        yield return new("Date", FormatDate(entry.Date), EntryDetailGroup.Flight);
-        yield return new("Type", FormatText(entry.Type), EntryDetailGroup.Flight);
-        yield return new("Reg", FormatText(entry.Reg), EntryDetailGroup.Flight);
-        yield return new("Flight ID", FormatText(entry.FlightId), EntryDetailGroup.Flight);
-        yield return new("PIC", FormatText(entry.Pic), EntryDetailGroup.CrewAndRoute);
-        yield return new("Other pilot or crew", FormatText(entry.OtherPilotOrCrew), EntryDetailGroup.CrewAndRoute);
-        yield return new("From", FormatText(entry.From), EntryDetailGroup.CrewAndRoute);
-        yield return new("To", FormatText(entry.To), EntryDetailGroup.CrewAndRoute);
-        yield return new("Via", FormatText(entry.Via), EntryDetailGroup.CrewAndRoute);
-        yield return new("Remarks", FormatText(entry.Remarks), EntryDetailGroup.CrewAndRoute);
-        yield return new("FR", FormatFlag(entry.FlightReview), EntryDetailGroup.Checks);
-        yield return new("IPC", FormatFlag(entry.InstrumentProficiencyCheck), EntryDetailGroup.Checks);
-        yield return new("OPC", FormatFlag(entry.OperatorProficiencyCheck), EntryDetailGroup.Checks);
-        yield return new("SE ICUS day", FormatNullableHours(entry.SeIcusDay), EntryDetailGroup.LoggedTime);
-        yield return new("SE ICUS night", FormatNullableHours(entry.SeIcusNight), EntryDetailGroup.LoggedTime);
-        yield return new("SE dual day", FormatNullableHours(entry.SeDualDay), EntryDetailGroup.LoggedTime);
-        yield return new("SE dual night", FormatNullableHours(entry.SeDualNight), EntryDetailGroup.LoggedTime);
-        yield return new("SE command day", FormatNullableHours(entry.SeCommandDay), EntryDetailGroup.LoggedTime);
-        yield return new("SE command night", FormatNullableHours(entry.SeCommandNight), EntryDetailGroup.LoggedTime);
-        yield return new("ME ICUS day", FormatNullableHours(entry.MeIcusDay), EntryDetailGroup.LoggedTime);
-        yield return new("ME ICUS night", FormatNullableHours(entry.MeIcusNight), EntryDetailGroup.LoggedTime);
-        yield return new("ME dual day", FormatNullableHours(entry.MeDualDay), EntryDetailGroup.LoggedTime);
-        yield return new("ME dual night", FormatNullableHours(entry.MeDualNight), EntryDetailGroup.LoggedTime);
-        yield return new("ME command day", FormatNullableHours(entry.MeCommandDay), EntryDetailGroup.LoggedTime);
-        yield return new("ME command night", FormatNullableHours(entry.MeCommandNight), EntryDetailGroup.LoggedTime);
-        yield return new("Copilot day", FormatNullableHours(entry.CopilotDay), EntryDetailGroup.LoggedTime);
-        yield return new("Copilot night", FormatNullableHours(entry.CopilotNight), EntryDetailGroup.LoggedTime);
-        yield return new("IFR IF", FormatNullableHours(entry.IfrIf), EntryDetailGroup.LoggedTime);
-        yield return new("IFR sim", FormatNullableHours(entry.IfrSim), EntryDetailGroup.LoggedTime);
-        yield return new("Landings day", FormatNullableCount(entry.LandingsDay), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("Landings night", FormatNullableCount(entry.LandingsNight), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("ILS", FormatNullableCount(entry.Ils), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("VOR", FormatNullableCount(entry.Vor), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("RNP", FormatNullableCount(entry.Rnp), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("NDB", FormatNullableCount(entry.Ndb), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi), EntryDetailGroup.LandingsAndApproaches);
-        yield return new("Circling", FormatNullableCount(entry.Circling), EntryDetailGroup.LandingsAndApproaches);
+        yield return new("Date", FormatDate(entry.Date), EntryDetailGroup.Flight, nameof(entry.Year));
+        yield return new("Type", FormatText(entry.Type), EntryDetailGroup.Flight, nameof(entry.Type));
+        yield return new("Reg", FormatText(entry.Reg), EntryDetailGroup.Flight, nameof(entry.Reg));
+        yield return new("Flight ID", FormatText(entry.FlightId), EntryDetailGroup.Flight, nameof(entry.FlightId));
+        yield return new("PIC", FormatText(entry.Pic), EntryDetailGroup.CrewAndRoute, nameof(entry.Pic));
+        yield return new("Other pilot or crew", FormatText(entry.OtherPilotOrCrew), EntryDetailGroup.CrewAndRoute, nameof(entry.OtherPilotOrCrew));
+        yield return new("From", FormatText(entry.From), EntryDetailGroup.CrewAndRoute, nameof(entry.From));
+        yield return new("To", FormatText(entry.To), EntryDetailGroup.CrewAndRoute, nameof(entry.To));
+        yield return new("Via", FormatText(entry.Via), EntryDetailGroup.CrewAndRoute, nameof(entry.Via));
+        yield return new("Remarks", FormatText(entry.Remarks), EntryDetailGroup.CrewAndRoute, nameof(entry.Remarks));
+        yield return new("FR", FormatFlag(entry.FlightReview), EntryDetailGroup.Checks, nameof(entry.FlightReview));
+        yield return new("IPC", FormatFlag(entry.InstrumentProficiencyCheck), EntryDetailGroup.Checks, nameof(entry.InstrumentProficiencyCheck));
+        yield return new("OPC", FormatFlag(entry.OperatorProficiencyCheck), EntryDetailGroup.Checks, nameof(entry.OperatorProficiencyCheck));
+        yield return new("SE ICUS day", FormatNullableHours(entry.SeIcusDay), EntryDetailGroup.LoggedTime, nameof(entry.SeIcusDay));
+        yield return new("SE ICUS night", FormatNullableHours(entry.SeIcusNight), EntryDetailGroup.LoggedTime, nameof(entry.SeIcusNight));
+        yield return new("SE dual day", FormatNullableHours(entry.SeDualDay), EntryDetailGroup.LoggedTime, nameof(entry.SeDualDay));
+        yield return new("SE dual night", FormatNullableHours(entry.SeDualNight), EntryDetailGroup.LoggedTime, nameof(entry.SeDualNight));
+        yield return new("SE command day", FormatNullableHours(entry.SeCommandDay), EntryDetailGroup.LoggedTime, nameof(entry.SeCommandDay));
+        yield return new("SE command night", FormatNullableHours(entry.SeCommandNight), EntryDetailGroup.LoggedTime, nameof(entry.SeCommandNight));
+        yield return new("ME ICUS day", FormatNullableHours(entry.MeIcusDay), EntryDetailGroup.LoggedTime, nameof(entry.MeIcusDay));
+        yield return new("ME ICUS night", FormatNullableHours(entry.MeIcusNight), EntryDetailGroup.LoggedTime, nameof(entry.MeIcusNight));
+        yield return new("ME dual day", FormatNullableHours(entry.MeDualDay), EntryDetailGroup.LoggedTime, nameof(entry.MeDualDay));
+        yield return new("ME dual night", FormatNullableHours(entry.MeDualNight), EntryDetailGroup.LoggedTime, nameof(entry.MeDualNight));
+        yield return new("ME command day", FormatNullableHours(entry.MeCommandDay), EntryDetailGroup.LoggedTime, nameof(entry.MeCommandDay));
+        yield return new("ME command night", FormatNullableHours(entry.MeCommandNight), EntryDetailGroup.LoggedTime, nameof(entry.MeCommandNight));
+        yield return new("Copilot day", FormatNullableHours(entry.CopilotDay), EntryDetailGroup.LoggedTime, nameof(entry.CopilotDay));
+        yield return new("Copilot night", FormatNullableHours(entry.CopilotNight), EntryDetailGroup.LoggedTime, nameof(entry.CopilotNight));
+        yield return new("IFR IF", FormatNullableHours(entry.IfrIf), EntryDetailGroup.LoggedTime, nameof(entry.IfrIf));
+        yield return new("IFR sim", FormatNullableHours(entry.IfrSim), EntryDetailGroup.LoggedTime, nameof(entry.IfrSim));
+        yield return new("Landings day", FormatNullableCount(entry.LandingsDay), EntryDetailGroup.LandingsAndApproaches, nameof(entry.LandingsDay));
+        yield return new("Landings night", FormatNullableCount(entry.LandingsNight), EntryDetailGroup.LandingsAndApproaches, nameof(entry.LandingsNight));
+        yield return new("ILS", FormatNullableCount(entry.Ils), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Ils));
+        yield return new("VOR", FormatNullableCount(entry.Vor), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Vor));
+        yield return new("RNP", FormatNullableCount(entry.Rnp), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Rnp));
+        yield return new("NDB", FormatNullableCount(entry.Ndb), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Ndb));
+        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi), EntryDetailGroup.LandingsAndApproaches, nameof(entry.DgaCdi));
+        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi), EntryDetailGroup.LandingsAndApproaches, nameof(entry.DgaAzi));
+        yield return new("Circling", FormatNullableCount(entry.Circling), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Circling));
 
         foreach (var field in WorkbookCustomFields)
         {
             entry.CustomFields.TryGetValue(field.Id, out var customValue);
-            yield return new(field.Label, FormatText(customValue), EntryDetailGroup.CustomFields);
+            yield return new(field.Label, FormatText(customValue), EntryDetailGroup.CustomFields, field.Id.Value);
         }
     }
 
@@ -1443,7 +1570,7 @@ public sealed class MobileLogbookSession(
         logbookStore.SaveStateAsync(new BrowserLogbookState(Document, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport, HostedSync));
 
     private ValueTask SaveStateV2Async() =>
-        logbookStore.SaveStateAsync(new BrowserLogbookStateV2(DocumentV2, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport, HostedSync));
+        logbookStore.SaveStateAsync(new BrowserLogbookStateV2(DocumentV2, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport, HostedSync, WorkbookMigration));
 
     private async Task TrySyncHostedAsync(BackgroundSyncReason reason)
     {
@@ -1604,42 +1731,17 @@ public sealed class MobileLogbookSession(
             .ToArray();
     }
 
-    private string[] ValidateWorkbookDraft()
+    private IReadOnlyList<MobileWorkbookEntryIssue> ValidateWorkbookDraft()
     {
         var entry = WorkbookDraft.ToEntry(WorkbookCustomFields);
-        var errors = new List<string>();
-        if (entry.Date is null || entry.Date > DateOnly.FromDateTime(DateTime.Today))
-        {
-            errors.Add("Date cannot be in the future.");
-        }
-
-        if (string.IsNullOrWhiteSpace(entry.Type))
-        {
-            errors.Add("Missing Aircraft Type.");
-        }
-
-        if (string.IsNullOrWhiteSpace(entry.Reg))
-        {
-            errors.Add("Missing Aircraft Registration.");
-        }
-
-        if (string.IsNullOrWhiteSpace(entry.From))
-        {
-            errors.Add("Missing Departure Airport.");
-        }
-
-        if (string.IsNullOrWhiteSpace(entry.To))
-        {
-            errors.Add("Missing Destination Airport.");
-        }
-
-        if (WorkbookFlightTime(entry) + (entry.IfrSim ?? 0) <= 0)
-        {
-            errors.Add("Flight and/or Sim Time cannot be zero.");
-        }
-
-        return errors.ToArray();
+        return MobileWorkbookEntryValidation.Validate(entry, DateOnly.FromDateTime(DateTime.Today));
     }
+
+    private IReadOnlyList<MobileWorkbookEntryIssue> ValidateWorkbookDraftWarnings() =>
+        MobileWorkbookEntryValidation.Warn(
+            WorkbookDraft.ToEntry(WorkbookCustomFields),
+            CurrentEntriesV2,
+            EditingEntryId);
 
     private MobileEntryDraftDefaults FindDraftDefaults() =>
         MobileEntryDraftDefaultPlanner.Create(CurrentEntries);
@@ -1705,7 +1807,8 @@ public sealed class MobileLogbookSession(
 public sealed record EntryDetail(
     string Label,
     string Value,
-    EntryDetailGroup Group = EntryDetailGroup.Record);
+    EntryDetailGroup Group = EntryDetailGroup.Record,
+    string? Field = null);
 
 public enum EntryDetailGroup
 {

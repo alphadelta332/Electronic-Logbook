@@ -186,7 +186,7 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
-    public void Gate2NewFlightKeyboardOverlaysFixedActionsAndKeepsTheFocusedFieldVisible()
+    public void Gate2NewFlightUsesNativeResizeAndNearestFieldScrolling()
     {
         var manifest = ReadRepositoryFile("android", "app", "src", "main", "AndroidManifest.xml");
         var activity = ReadRepositoryFile(
@@ -202,19 +202,20 @@ public sealed class PwaStaticAssetTests
         var css = ReadMobileAsset(Path.Combine("css", "app.css"));
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));
 
-        Assert.Contains("android:windowSoftInputMode=\"adjustNothing\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("android:windowSoftInputMode=\"adjustResize\"", manifest, StringComparison.Ordinal);
         Assert.Contains("WindowCompat.setDecorFitsSystemWindows(getWindow(), true)", activity, StringComparison.Ordinal);
-        Assert.Contains("WindowInsetsCompat.Type.ime()", activity, StringComparison.Ordinal);
-        Assert.Contains("imeInsets.bottom - systemBarInsets.bottom", activity, StringComparison.Ordinal);
-        Assert.Contains("window.electronicLogbookKeyboard?.setInset", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowInsetsCompat.Type.ime()", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("window.electronicLogbookKeyboard", activity, StringComparison.Ordinal);
         Assert.Matches(@"(?s)html\.capacitor-native\s*\{[^}]*--native-safe-top:\s*26px", css);
         Assert.Contains(".flight-entry-page input, .flight-entry-page select, .flight-entry-page textarea", bridge, StringComparison.Ordinal);
-        Assert.Contains("window.electronicLogbookKeyboard", bridge, StringComparison.Ordinal);
-        Assert.Contains("globalThis.innerHeight - nativeKeyboardInset", bridge, StringComparison.Ordinal);
+        Assert.Contains("control.closest(\"label\") ?? control", bridge, StringComparison.Ordinal);
+        Assert.Contains("--entry-scroll-padding-top", css, StringComparison.Ordinal);
+        Assert.Contains("main.style.setProperty(\"--entry-scroll-padding-top\"", bridge, StringComparison.Ordinal);
         Assert.Contains("globalThis.visualViewport?.addEventListener(\"resize\"", bridge, StringComparison.Ordinal);
         Assert.Contains("globalThis.visualViewport?.addEventListener(\"scroll\"", bridge, StringComparison.Ordinal);
-        Assert.Contains("control.getBoundingClientRect()", bridge, StringComparison.Ordinal);
-        Assert.Contains("main.scrollBy({ top: scrollDelta, behavior: \"smooth\" })", bridge, StringComparison.Ordinal);
+        Assert.Contains("field.scrollIntoView({ behavior: \"instant\", block: \"nearest\", inline: \"nearest\" })", bridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("nativeKeyboardInset", bridge, StringComparison.Ordinal);
+        Assert.DoesNotContain("window.electronicLogbookKeyboard", bridge, StringComparison.Ordinal);
     }
 
     [Fact]

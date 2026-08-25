@@ -41,7 +41,8 @@ public static class MobileDeviceStateExportWorkflow
             ElectronicLogbook.Portable.PortableLogbookJson.SerializeV2(state.Document),
             state.ImportReceipts,
             state.LastSuccessfulExportAt,
-            state.LastSuccessfulExport);
+            state.LastSuccessfulExport,
+            WorkbookMigration: state.WorkbookMigration);
         var json = JsonSerializer.Serialize(stored, ElectronicLogbook.Portable.PortableLogbookJson.SerializerOptions);
         var fileName = $"electronic-logbook-device-state-{SafeFileNameToken(state.Document.LogbookId.Value)}-{exportedAt:yyyyMMddTHHmmssZ}.json";
 

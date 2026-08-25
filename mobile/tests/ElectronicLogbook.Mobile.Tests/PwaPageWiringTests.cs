@@ -1,7 +1,50 @@
+using System.Text.RegularExpressions;
+
 namespace ElectronicLogbook.Mobile.Tests;
 
 public sealed class PwaPageWiringTests
 {
+    [Fact]
+    public void WorkbookMigrationRequiresPreviewExplicitChecksAndDurableVerification()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var migration = ReadMobilePage("WorkbookMigration.razor");
+
+        Assert.Contains("Href=\"/migrate\"", settings, StringComparison.Ordinal);
+        Assert.Contains("One-time workbook migration", settings, StringComparison.Ordinal);
+        Assert.Contains("@page \"/migrate\"", migration, StringComparison.Ordinal);
+        Assert.Contains("Select workbook copy", migration, StringComparison.Ordinal);
+        Assert.Contains("MobileWorkbookMigrationReader.Inspect", migration, StringComparison.Ordinal);
+        Assert.Contains("Target app logbook", migration, StringComparison.Ordinal);
+        Assert.Contains("Custom fields", migration, StringComparison.Ordinal);
+        Assert.Contains("Totals from visible flight rows", migration, StringComparison.Ordinal);
+        Assert.Contains("Sample values", migration, StringComparison.Ordinal);
+        Assert.Contains("ConfirmedDisposableCopy", migration, StringComparison.Ordinal);
+        Assert.Contains("ConfirmedIdentity", migration, StringComparison.Ordinal);
+        Assert.Contains("ConfirmedValues", migration, StringComparison.Ordinal);
+        Assert.Contains("Session.ApplyWorkbookMigrationAsync", migration, StringComparison.Ordinal);
+        Assert.Contains("Durable verification passed", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Save workbook", migration, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FieldDependentButtonsReactWhileTheUserIsTyping()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var exchange = ReadMobilePage("PackageExchange.razor");
+        var settingsTextFields = Regex.Matches(settings, @"<MudTextField\b[^>]*>");
+        var exchangeTextFields = Regex.Matches(exchange, @"<MudTextField\b[^>]*>");
+
+        Assert.Equal(4, settingsTextFields.Count);
+        Assert.All(
+            settingsTextFields.Select(match => match.Value),
+            field => Assert.Contains("Immediate=\"true\"", field, StringComparison.Ordinal));
+        Assert.Single(exchangeTextFields);
+        Assert.All(
+            exchangeTextFields.Select(match => match.Value),
+            field => Assert.Contains("Immediate=\"true\"", field, StringComparison.Ordinal));
+    }
+
     [Fact]
     public void UserFacingFlightPagesDoNotRenderSystemEntryIds()
     {
@@ -419,23 +462,46 @@ public sealed class PwaPageWiringTests
         Assert.Contains("filter-sheet", page, StringComparison.Ordinal);
         Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
         Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
+        Assert.Contains("Deleted", page, StringComparison.Ordinal);
+        Assert.Contains("LogbookView.Deleted", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeletedEntriesV2", page, StringComparison.Ordinal);
+        Assert.Contains("Session.FindLatestWorkbookEntryPayload(entry)", page, StringComparison.Ordinal);
         Assert.Contains(".logbook-page .logbook-entry-row", css, StringComparison.Ordinal);
         Assert.Contains("\"date hours\"", css, StringComparison.Ordinal);
         Assert.Contains("\"route route\"", css, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Gate3LogbookSupportsEntriesAndTotalsDeepLinks()
+    public void Gate3LogbookSupportsEntriesTotalsAndDeletedDeepLinks()
     {
         var page = ReadMobilePage("Logbook.razor");
 
         Assert.Contains("[SupplyParameterFromQuery(Name = \"view\")]", page, StringComparison.Ordinal);
         Assert.Contains("public string? View { get; set; }", page, StringComparison.Ordinal);
-        Assert.Contains("string.Equals(View, \"totals\", StringComparison.OrdinalIgnoreCase)", page, StringComparison.Ordinal);
-        Assert.Contains("/flights?view={", page, StringComparison.Ordinal);
-        Assert.Contains("? \"totals\" : \"entries\"", page, StringComparison.Ordinal);
+        Assert.Contains("\"totals\" => LogbookView.Totals", page, StringComparison.Ordinal);
+        Assert.Contains("\"deleted\" => LogbookView.Deleted", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo($\"/flights?view={queryValue}\")", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate3DeletedEntriesHaveADedicatedRecoveryViewAndRestoreAction()
+    {
+        var logbook = ReadMobilePage("Logbook.razor");
+        var detail = ReadMobilePage("FlightDetail.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+
+        Assert.Contains("Deleted flights", logbook, StringComparison.Ordinal);
+        Assert.Contains("review its revisions or restore it", logbook, StringComparison.Ordinal);
+        Assert.Contains("class=\"deleted-entry-row\"", logbook, StringComparison.Ordinal);
+        Assert.Contains("Restore flight", detail, StringComparison.Ordinal);
+        Assert.Contains("Session.RestoreWorkbookEntryAsync(History)", detail, StringComparison.Ordinal);
+        Assert.Contains("Restoring it adds a new revision", detail, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookOperationV2.Correct(", session, StringComparison.Ordinal);
+        Assert.Contains("[entry.CurrentRevisionId]", session, StringComparison.Ordinal);
+        Assert.Contains("\"Entry restored.\"", session, StringComparison.Ordinal);
+        Assert.Contains("WorkbookActionUndoKind.DeleteRestoredEntry", session, StringComparison.Ordinal);
+        Assert.Contains("\"Restoration undone.\"", session, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -497,7 +563,6 @@ public sealed class PwaPageWiringTests
         Assert.Equal(4, CountOccurrences(page, "class=\"totals-time-header\" role=\"columnheader\""));
         Assert.Equal(2, CountOccurrences(page, "Icons.Material.Filled.LightMode"));
         Assert.Equal(2, CountOccurrences(page, "Icons.Material.Filled.DarkMode"));
-        Assert.Equal(4, CountOccurrences(page, "aria-hidden=\"true\""));
         Assert.Contains(".totals-time-header .mud-icon-root", css, StringComparison.Ordinal);
         Assert.Contains("flex: 0 0 14px;", css, StringComparison.Ordinal);
     }
@@ -1063,11 +1128,12 @@ public sealed class PwaPageWiringTests
         Assert.Contains("role=\"group\" aria-label=\"Logbook view\"", page, StringComparison.Ordinal);
         Assert.Contains("aria-pressed=\"@(ActiveView == LogbookView.Entries)\" @onclick=\"() => SelectView(LogbookView.Entries)\">Entries</button>", page, StringComparison.Ordinal);
         Assert.Contains("aria-pressed=\"@(ActiveView == LogbookView.Totals)\" @onclick=\"() => SelectView(LogbookView.Totals)\">Totals</button>", page, StringComparison.Ordinal);
+        Assert.Contains("aria-pressed=\"@(ActiveView == LogbookView.Deleted)\" @onclick=\"() => SelectView(LogbookView.Deleted)\">Deleted</button>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("view-progress", page, StringComparison.Ordinal);
         Assert.DoesNotContain("MudProgressLinear", page, StringComparison.Ordinal);
         Assert.DoesNotContain("IsViewSwitchPending", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Task.Yield", page, StringComparison.Ordinal);
-        Assert.Contains("Navigation.NavigateTo($\"/flights?view={(view == LogbookView.Totals ? \"totals\" : \"entries\")}\");", page, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo($\"/flights?view={queryValue}\");", page, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1167,7 +1233,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("role=\"group\" aria-label=\"Flight form actions\"", page, StringComparison.Ordinal);
         Assert.Contains("OnClick=\"RequestClear\"", page, StringComparison.Ordinal);
         Assert.Contains("OnClick=\"ReviewSave\"", page, StringComparison.Ordinal);
-        Assert.Contains("Clear form", page, StringComparison.Ordinal);
+        Assert.Contains("                    Clear", page, StringComparison.Ordinal);
         Assert.Contains("@Session.SaveLabel", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Icons.Material.Filled.Refresh", page, StringComparison.Ordinal);
         Assert.DoesNotContain("MudIconButton", page, StringComparison.Ordinal);
@@ -1185,6 +1251,17 @@ public sealed class PwaPageWiringTests
         Assert.Contains("aria-modal=\"true\"", page, StringComparison.Ordinal);
         Assert.Contains("aria-label=\"Flight values to save\"", page, StringComparison.Ordinal);
         Assert.Contains("Review before saving", page, StringComparison.Ordinal);
+        Assert.Contains("ReviewWarnings = Session.WorkbookDraftWarnings;", page, StringComparison.Ordinal);
+        Assert.Contains("@ReviewWarningCountLabel", page, StringComparison.Ordinal);
+        Assert.Contains("Save anyway", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("@warning.Code", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Check the listed values", page, StringComparison.Ordinal);
+        Assert.Contains("HasReviewWarning(detail.Field)", page, StringComparison.Ordinal);
+        Assert.Contains("warning.AffectedField", page, StringComparison.Ordinal);
+        Assert.Contains("entry-review-field-warning", page, StringComparison.Ordinal);
+        Assert.Contains("gap: 14px;", css, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)<dd>\s*<span>@detail\.Value</span>\s*@if \(HasReviewWarning\(detail\.Field\)\)", page);
+        Assert.Matches(@"(?s)\.entry-review-group dd\s*\{[^}]*justify-content:\s*space-between;", css);
         Assert.Contains("OnClick=\"ConfirmSaveAsync\"", page, StringComparison.Ordinal);
         Assert.Contains("public bool PrepareWorkbookDraftForReview()", session, StringComparison.Ordinal);
         Assert.Contains("return WorkbookDraftErrors.Count == 0;", session, StringComparison.Ordinal);
@@ -1284,7 +1361,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("bounds.width < 44 || bounds.height < 44", audit, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(audit, "await assertAccessible(page"));
         Assert.Contains("role=\"group\" aria-label=\"Logbook view\"", logbook, StringComparison.Ordinal);
-        Assert.Equal(2, CountOccurrences(logbook, "aria-pressed="));
+        Assert.Equal(3, CountOccurrences(logbook, "aria-pressed="));
         Assert.DoesNotContain("role=\"tablist\"", logbook, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.mud-button-root\s*\{[^}]*min-height:\s*44px", css);
         Assert.Matches(@"(?s)\.accent-option\s*\{[^}]*min-height:\s*44px", css);

@@ -44,6 +44,21 @@ else
                             </div>
                         </header>
                         <div class="entry-review-values" tabindex="0" aria-label="Flight values to save">
+                            @if (ReviewWarnings.Count > 0)
+                            {
+                                <section class="entry-review-warnings" role="alert" aria-label="Entry warnings">
+                                    <header>
+                                        <MudIcon Icon="@Icons.Material.Filled.WarningAmber" />
+                                        <strong>@ReviewWarningCountLabel</strong>
+                                    </header>
+                                    <div class="entry-review-warning-list">
+                                        @foreach (var warning in ReviewWarnings)
+                                        {
+                                            <p>@warning.Message</p>
+                                        }
+                                    </div>
+                                </section>
+                            }
                             @foreach (var group in ReviewDetails.GroupBy(detail => detail.Group))
                             {
                                 <section class="entry-review-group">
@@ -53,7 +68,13 @@ else
                                         {
                                             <div>
                                                 <dt>@detail.Label</dt>
-                                                <dd>@detail.Value</dd>
+                                                <dd>
+                                                    <span>@detail.Value</span>
+                                                    @if (HasReviewWarning(detail.Field))
+                                                    {
+                                                        <MudIcon Class="entry-review-field-warning" Icon="@Icons.Material.Filled.WarningAmber" aria-label="Warning" />
+                                                    }
+                                                </dd>
                                             </div>
                                         }
                                     </dl>
@@ -64,8 +85,8 @@ else
                             <MudButton Variant="Variant.Text" OnClick="DismissPendingAction" Disabled="@IsActionPending">
                                 Keep editing
                             </MudButton>
-                            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConfirmSaveAsync" Disabled="@IsActionPending" StartIcon="@Icons.Material.Filled.Done">
-                                @Session.SaveLabel
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="ConfirmSaveAsync" Disabled="@IsActionPending" StartIcon="@(ReviewWarnings.Count > 0 ? Icons.Material.Filled.WarningAmber : Icons.Material.Filled.Done)">
+                                @(ReviewWarnings.Count > 0 ? "Save anyway" : Session.SaveLabel)
                             </MudButton>
                         </footer>
                     }
@@ -88,7 +109,7 @@ else
                                 Keep editing
                             </MudButton>
                             <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="ConfirmDestructiveAction" StartIcon="@Icons.Material.Filled.DeleteOutline">
-                                @(PendingAction == DraftAction.Clear ? "Clear form" : "Discard draft")
+                                @(PendingAction == DraftAction.Clear ? "Clear" : "Discard draft")
                             </MudButton>
                         </footer>
                     }
@@ -106,7 +127,7 @@ else
             </div>
             <div class="entry-header-actions" role="group" aria-label="Flight form actions">
                 <MudButton Class="entry-clear-action" Variant="Variant.Filled" Color="Color.Default" OnClick="RequestClear" Disabled="@Session.IsStorageBlocked" aria-label="Clear form" title="Clear form">
-                    Clear form
+                    Clear
                 </MudButton>
                 <MudButton Class="entry-save-action" Variant="Variant.Filled" Color="Color.Primary" OnClick="ReviewSave" Disabled="@Session.IsStorageBlocked" aria-label="@Session.SaveLabel" title="@Session.SaveLabel">
                     @Session.SaveLabel
@@ -256,7 +277,9 @@ else
     private string? LoadedEditEntryId { get; set; }
     private DraftAction? PendingAction { get; set; }
     private IReadOnlyList<EntryDetail> ReviewDetails { get; set; } = [];
+    private IReadOnlyList<MobileWorkbookEntryIssue> ReviewWarnings { get; set; } = [];
     private bool IsActionPending { get; set; }
+    private string ReviewWarningCountLabel => $"{ReviewWarnings.Count} {(ReviewWarnings.Count == 1 ? "Warning" : "Warnings")}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -282,6 +305,7 @@ else
         ReviewDetails = Session
             .EntryDetails(Session.WorkbookDraft.ToEntry(Session.WorkbookCustomFields))
             .ToArray();
+        ReviewWarnings = Session.WorkbookDraftWarnings;
         PendingAction = DraftAction.ReviewSave;
     }
 
@@ -299,6 +323,7 @@ else
             if (!Session.ShouldShowWorkbookDraftErrors)
             {
                 PendingAction = null;
+                ReviewWarnings = [];
                 Navigation.NavigateTo("/");
             }
         }
@@ -345,6 +370,7 @@ else
         if (!IsActionPending)
         {
             PendingAction = null;
+            ReviewWarnings = [];
         }
     }
 
@@ -368,6 +394,10 @@ else
         EntryDetailGroup.LandingsAndApproaches => "Landings and approaches",
         _ => "Other"
     };
+
+    private bool HasReviewWarning(string? field) =>
+        field is not null && ReviewWarnings.Any(warning =>
+            string.Equals(warning.AffectedField, field, StringComparison.Ordinal));
 
     private void LoadEditRoute()
     {

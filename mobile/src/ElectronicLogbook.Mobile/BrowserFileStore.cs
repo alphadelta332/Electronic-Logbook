@@ -8,6 +8,9 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
     public const string ElogbookContentType = "application/vnd.electronic-logbook";
     public const string ElogbookExtension = ".elogbook";
     public const int MaxElogbookBytes = 64 * 1024 * 1024;
+    public const string ExcelMacroEnabledExtension = ".xlsm";
+    public const string ExcelWorkbookExtension = ".xlsx";
+    public const int MaxWorkbookBytes = MaxElogbookBytes;
     public const string JsonContentType = "application/json";
     public const string JsonExtension = ".json";
     public const int MaxJsonDownloadBytes = MaxElogbookBytes;
@@ -24,6 +27,18 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
         }
 
         ValidateElogbookFile(file);
+        return file;
+    }
+
+    public async ValueTask<BrowserFile?> PickWorkbookAsync()
+    {
+        var file = await PickAsync($"{ExcelMacroEnabledExtension},{ExcelWorkbookExtension}").ConfigureAwait(false);
+        if (file is null)
+        {
+            return null;
+        }
+
+        ValidateWorkbookFile(file);
         return file;
     }
 
@@ -68,6 +83,38 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
         {
             throw new BrowserFileStoreException(
                 $"Selected file is larger than the {MaxElogbookBytes} byte package limit.");
+        }
+    }
+
+    public static bool IsWorkbookFile(BrowserFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        return file.FileName.EndsWith(ExcelMacroEnabledExtension, StringComparison.OrdinalIgnoreCase) ||
+               file.FileName.EndsWith(ExcelWorkbookExtension, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static void ValidateWorkbookFile(BrowserFile file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        if (file.Bytes is null)
+        {
+            throw new BrowserFileStoreException("Selected file did not include workbook bytes.");
+        }
+
+        if (!IsWorkbookFile(file))
+        {
+            throw new BrowserFileStoreException("Selected file must use the .xlsm or .xlsx extension.");
+        }
+
+        if (file.Bytes.Length == 0)
+        {
+            throw new BrowserFileStoreException("Selected workbook is empty.");
+        }
+
+        if (file.Bytes.Length > MaxWorkbookBytes)
+        {
+            throw new BrowserFileStoreException(
+                $"Selected workbook is larger than the {MaxWorkbookBytes} byte workbook limit.");
         }
     }
 

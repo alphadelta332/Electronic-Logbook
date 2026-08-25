@@ -1,0 +1,259 @@
+@page "/migrate"
+@inject MobileLogbookSession Session
+@inject BrowserFileStore FileStore
+@inject NavigationManager Navigation
+
+<PageTitle>Workbook migration</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading migration</span>
+    </section>
+}
+else
+{
+    <section class="settings-page workbook-migration-page">
+        <section class="form-section settings-overview-card">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Existing records</span>
+                    <h1>One-time workbook migration</h1>
+                </div>
+                <span class="draft-pill">@StatusLabel</span>
+            </div>
+            <div class="settings-connection-summary">
+                <MudIcon Icon="@Icons.Material.Filled.Security" />
+                <div>
+                    <strong>Your selected workbook is read only</strong>
+                    <span>The app reads a disposable .xlsm or .xlsx copy in memory. It never opens, saves, renames, or changes that file.</span>
+                </div>
+            </div>
+        </section>
+
+        @if (Session.WorkbookMigration is { } completed)
+        {
+            <section class="form-section" aria-live="polite">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Completed</span>
+                        <h2>Durable verification passed</h2>
+                    </div>
+                    <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Success" />
+                </div>
+                <div class="migration-facts">
+                    <MigrationFact Label="Target logbook" Value="@completed.TargetLogbookId.Value" />
+                    <MigrationFact Label="Source file" Value="@completed.SourceFileName" />
+                    <MigrationFact Label="Entries" Value="@completed.EntryCount.ToString(CultureInfo.InvariantCulture)" />
+                    <MigrationFact Label="Logged time" Value="@FormatHours(completed.Totals.LoggedHours)" />
+                    <MigrationFact Label="Source fingerprint" Value="@ShortHash(completed.SourceSha256)" />
+                    <MigrationFact Label="Imported" Value="@completed.ImportedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)" />
+                </div>
+                <p class="settings-status-line">The saved app document, entry values, entry count, custom fields, and totals matched after IndexedDB reload.</p>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenLogbook">Open migrated logbook</MudButton>
+            </section>
+        }
+        else if (!Session.CanMigrateWorkbook)
+        {
+            <section class="form-section validation-summary" role="alert">
+                <strong>Migration is not available yet</strong>
+                <span>@UnavailableReason</span>
+                <MudButton Href="/settings" Variant="Variant.Outlined">Back to account and sync</MudButton>
+            </section>
+        }
+        else
+        {
+            <section class="form-section">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Step 1</span>
+                        <h2>Select a disposable copy</h2>
+                    </div>
+                </div>
+                <p>First make a copy of your workbook in Windows or cloud storage. Select that copy here; keep the original untouched as your backup.</p>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileOpen" OnClick="SelectWorkbookAsync" Disabled="@IsBusy">
+                    Select workbook copy
+                </MudButton>
+                @if (!string.IsNullOrWhiteSpace(ErrorMessage))
+                {
+                    <div class="validation-summary" role="alert"><strong>Workbook not ready</strong><span>@ErrorMessage</span></div>
+                }
+            </section>
+
+            @if (Plan is { } plan)
+            {
+                <section class="form-section">
+                    <div class="section-title-row">
+                        <div>
+                            <span class="eyebrow">Step 2</span>
+                            <h2>Verify preview</h2>
+                        </div>
+                        <span class="draft-pill">@plan.Rows.Count entries</span>
+                    </div>
+                    <div class="migration-facts">
+                        <MigrationFact Label="Selected file" Value="@plan.SourceFileName" />
+                        <MigrationFact Label="Workbook version" Value="@(plan.WorkbookVersion ?? "Not recorded")" />
+                        <MigrationFact Label="Target app logbook" Value="@plan.TargetLogbookId.Value" />
+                        <MigrationFact Label="Workbook identity" Value="@(plan.EmbeddedWorkbookLogbookId?.Value ?? "Legacy workbook — no embedded ID")" />
+                        <MigrationFact Label="Source fingerprint" Value="@ShortHash(plan.SourceSha256)" />
+                        <MigrationFact Label="Values fingerprint" Value="@ShortHash(plan.EntryValuesSha256)" />
+                    </div>
+
+                    <h3>Custom fields</h3>
+                    <div class="migration-custom-fields">
+                        @foreach (var field in plan.CustomFieldDefinitions)
+                        {
+                            <span>@field.Order. @field.Label</span>
+                        }
+                    </div>
+
+                    <h3>Totals from visible flight rows</h3>
+                    <div class="migration-facts">
+                        <MigrationFact Label="Entries" Value="@plan.CalculatedTotals.EntryCount.ToString(CultureInfo.InvariantCulture)" />
+                        <MigrationFact Label="Flight time" Value="@FormatHours(plan.CalculatedTotals.FlightHours)" />
+                        <MigrationFact Label="Simulator" Value="@FormatHours(plan.CalculatedTotals.SimulatorHours)" />
+                        <MigrationFact Label="Logged time" Value="@FormatHours(plan.CalculatedTotals.LoggedHours)" />
+                        <MigrationFact Label="Landings" Value="@($"{plan.CalculatedTotals.DayLandings} day · {plan.CalculatedTotals.NightLandings} night")" />
+                        <MigrationFact Label="Approaches" Value="@($"{plan.CalculatedTotals.InstrumentApproaches} instrument · {plan.CalculatedTotals.Circling} circling")" />
+                    </div>
+                    @if (!plan.CachedTotalsMatch)
+                    {
+                        <div class="validation-summary" role="alert">
+                            <strong>Workbook totals do not match</strong>
+                            <span>Open this disposable copy in Excel, recalculate and save it, then select it again. Migration is blocked.</span>
+                        </div>
+                    }
+
+                    <h3>Sample values</h3>
+                    <div class="migration-preview-rows">
+                        @foreach (var row in PreviewRows(plan))
+                        {
+                            <article>
+                                <strong>@FormatDate(row.Entry) · @Text(row.Entry.Reg)</strong>
+                                <span>@Text(row.Entry.Type) · @Text(row.Entry.From) → @Text(row.Entry.To)</span>
+                                <span>@FormatHours(MobileLogbookSession.WorkbookLoggedTime(row.Entry)) · row @row.SourceRowNumber</span>
+                            </article>
+                        }
+                    </div>
+                </section>
+
+                <section class="form-section">
+                    <div class="section-title-row">
+                        <div>
+                            <span class="eyebrow">Step 3</span>
+                            <h2>Confirm and migrate</h2>
+                        </div>
+                    </div>
+                    <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedDisposableCopy" /> I selected a disposable copy and kept the original workbook unchanged.</label>
+                    <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedIdentity" /> I checked the target app logbook identity and selected workbook identity above.</label>
+                    <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedValues" /> I checked the entry count, sample values, custom fields, and totals above.</label>
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.MoveToInbox" OnClick="ApplyMigrationAsync" Disabled="@(!CanApply)">
+                        Migrate and verify saved copy
+                    </MudButton>
+                    @if (IsBusy)
+                    {
+                        <span class="settings-status-line" role="status">Saving and reading the app logbook back from device storage…</span>
+                    }
+                </section>
+            }
+        }
+    </section>
+}
+
+@code {
+    private MobileWorkbookMigrationPlan? Plan { get; set; }
+    private bool IsBusy { get; set; }
+    private bool ConfirmedDisposableCopy { get; set; }
+    private bool ConfirmedIdentity { get; set; }
+    private bool ConfirmedValues { get; set; }
+    private string? ErrorMessage { get; set; }
+
+    private bool CanApply =>
+        !IsBusy &&
+        Plan is { Rows.Count: > 0, CachedTotalsMatch: true } &&
+        ConfirmedDisposableCopy &&
+        ConfirmedIdentity &&
+        ConfirmedValues;
+
+    private string StatusLabel => Session.WorkbookMigration is not null
+        ? "Verified"
+        : Session.CanMigrateWorkbook
+            ? "Not started"
+            : "Unavailable";
+
+    private string UnavailableReason => !Session.HasHostedSync
+        ? "Return to Account and sync, connect the invited account, and finish initialization before migrating."
+        : Session.DocumentV2.Operations.Count > 0 || Session.ImportReceipts.Count > 0
+            ? "This app logbook already contains flights or a manual package. Migration must start with an initialized, empty app logbook to prevent duplicates."
+            : "Device storage needs attention before migration can begin.";
+
+    protected override async Task OnInitializedAsync() => await Session.EnsureLoadedWorkbookAsync();
+
+    private async Task SelectWorkbookAsync()
+    {
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = null;
+        Plan = null;
+        ConfirmedDisposableCopy = false;
+        ConfirmedIdentity = false;
+        ConfirmedValues = false;
+        try
+        {
+            var file = await FileStore.PickWorkbookAsync();
+            if (file is not null)
+            {
+                Plan = MobileWorkbookMigrationReader.Inspect(file, Session.DocumentV2.LogbookId);
+            }
+        }
+        catch (Exception ex) when (ex is BrowserFileStoreException or InvalidDataException or JSException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task ApplyMigrationAsync()
+    {
+        if (!CanApply || Plan is null)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        ErrorMessage = null;
+        try
+        {
+            _ = await Session.ApplyWorkbookMigrationAsync(Plan, DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or BrowserLogbookStoreException or JSException)
+        {
+            ErrorMessage = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void OpenLogbook() => Navigation.NavigateTo("/flights");
+
+    private static IEnumerable<MobileWorkbookMigrationRow> PreviewRows(MobileWorkbookMigrationPlan plan) =>
+        plan.Rows.Take(3).Concat(plan.Rows.Skip(Math.Max(3, plan.Rows.Count - 3))).DistinctBy(row => row.SourceRowNumber);
+
+    private static string FormatDate(PortableLogbookWorkbookEntry entry) => entry.Date?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "No date";
+
+    private static string FormatHours(decimal hours) => $"{hours.ToString("0.0#", CultureInfo.InvariantCulture)} h";
+
+    private static string Text(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
+
+    private static string ShortHash(string value) => value.Length <= 16 ? value : $"{value[..16]}…";
+}

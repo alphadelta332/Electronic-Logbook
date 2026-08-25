@@ -68,6 +68,26 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <div>
+                    <span class="eyebrow">Existing records</span>
+                    <h2>One-time workbook migration</h2>
+                </div>
+                <span class="draft-pill">@MigrationStatus</span>
+            </div>
+            <div class="settings-connection-summary">
+                <MudIcon Icon="@Icons.Material.Filled.UploadFile" />
+                <div>
+                    <strong>@MigrationStatus</strong>
+                    <span>@MigrationDetail</span>
+                </div>
+            </div>
+            <MudButton Href="/migrate" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck">
+                @(Session.WorkbookMigration is null ? "Preview workbook migration" : "View migration verification")
+            </MudButton>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
                     <span class="eyebrow">Device health</span>
                     <h2>Offline copy and backup</h2>
                 </div>
@@ -107,9 +127,9 @@ else
                     <small>@Session.HostedSyncStatusDetail</small>
                 </article>
                 <article class="device-health-item">
-                    <span>Workbook pairing</span>
-                    <strong>@Session.PackageKeyStatus</strong>
-                    <small>@PairingDetail</small>
+                    <span>Workbook migration</span>
+                    <strong>@MigrationStatus</strong>
+                    <small>@MigrationDetail</small>
                 </article>
             </div>
             @if (Session.ShouldOfferHostedAuthentication)
@@ -121,7 +141,7 @@ else
                     <MudText Typo="Typo.caption">@(Session.HasHostedSync
                         ? "The connection preflight found a retained sign-in or device-access problem. Reauthenticate without deleting the local logbook."
                         : "Returning pilots: use the Google account previously added to your invited account.")</MudText>
-                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Disabled="@IsAccountBusy" />
+                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Immediate="true" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
                         Send sign-in code
                     </MudButton>
@@ -129,6 +149,7 @@ else
                                   InputType="InputType.Text"
                                   Label="Six-digit sign-in code"
                                   HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive."
+                                  Immediate="true"
                                   Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
                         @(Session.HasHostedSync ? "Reauthenticate account" : "Connect account")
@@ -137,7 +158,7 @@ else
                         Resume verified sign-in
                     </MudButton>
                     <MudText Typo="Typo.caption">Recovery only: use after support confirms that email verification succeeded but device setup was interrupted.</MudText>
-                    <MudTextField @bind-Value="AccountRecoveryCode" InputType="InputType.Password" Label="Recovery code" Disabled="@IsAccountBusy" />
+                    <MudTextField @bind-Value="AccountRecoveryCode" InputType="InputType.Password" Label="Recovery code" Immediate="true" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RecoverWithCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(AccountRecoveryCode))">
                         Recover with code
                     </MudButton>
@@ -162,7 +183,7 @@ else
                             <span>Store it away from this phone. Enter it below to prove the saved copy works.</span>
                         </div>
                     </section>
-                    <MudTextField @bind-Value="RecoveryCodeConfirmation" InputType="InputType.Password" Label="Enter saved recovery code" Disabled="@IsAccountBusy" />
+                    <MudTextField @bind-Value="RecoveryCodeConfirmation" InputType="InputType.Password" Label="Enter saved recovery code" Immediate="true" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.VerifiedUser" OnClick="ConfirmRecoveryCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(RecoveryCodeConfirmation))">
                         Confirm recovery code
                     </MudButton>
@@ -441,9 +462,21 @@ else
         ? $"Last imported {FormatTimestamp(importedAt)}."
         : "No manual workbook package has been imported on this device yet.";
 
-    private string PairingDetail => Session.HasHostedSync
-        ? "This device is paired to the hosted account; workbook pairing happens through the updater."
-        : "Connect an invited account before pairing a workbook.";
+    private string MigrationStatus => Session.WorkbookMigration is not null
+        ? "Verified"
+        : Session.CanMigrateWorkbook
+            ? "Ready"
+            : Session.HasHostedSync
+                ? "Unavailable"
+                : "Sign in first";
+
+    private string MigrationDetail => Session.WorkbookMigration is { } receipt
+        ? $"{receipt.EntryCount} entries from {receipt.SourceFileName} were saved and read back successfully."
+        : Session.CanMigrateWorkbook
+            ? "Select a disposable .xlsm or .xlsx copy, review its values and totals, then migrate it once."
+            : Session.HasHostedSync
+                ? "Migration must happen before flights or manual packages are added to this app logbook."
+                : "Connect and initialize the invited account before selecting a workbook.";
 
     private string AttentionGuidance => Session.HostedSyncStatusLabel switch
     {
@@ -801,7 +834,8 @@ else
                     Session.ImportReceipts,
                     Session.LastSuccessfulExportAt,
                     Session.LastSuccessfulExport,
-                    Session.HostedSync),
+                    Session.HostedSync,
+                    Session.WorkbookMigration),
                 FileStore,
                 DateTimeOffset.UtcNow);
             DeviceStateExportMessage = result.Transfer.Shared

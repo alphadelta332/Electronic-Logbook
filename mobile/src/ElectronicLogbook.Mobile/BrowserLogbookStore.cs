@@ -126,7 +126,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
                 stored.ImportReceipts ?? [],
                 stored.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
                 exportCheckpoint,
-                stored.HostedSync);
+                stored.HostedSync,
+                stored.WorkbookMigration);
         }
         catch (JsonException ex)
         {
@@ -163,7 +164,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             existing?.ImportReceipts ?? [],
             existing?.LastSuccessfulExportAt,
             existingExportCheckpoint,
-            existing?.HostedSync));
+            existing?.HostedSync,
+            existing?.WorkbookMigration));
     }
 
     public async ValueTask SaveStateAsync(BrowserLogbookState state)
@@ -213,7 +215,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             state.ImportReceipts,
             state.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
             exportCheckpoint,
-            hostedSync);
+            hostedSync,
+            state.WorkbookMigration);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
             DocumentKey,
@@ -259,7 +262,8 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
             previous.ImportReceipts,
             previous.LastSuccessfulExportAt ?? exportCheckpoint?.ExportedAt,
             exportCheckpoint,
-            previous.HostedSync);
+            previous.HostedSync,
+            previous.WorkbookMigration);
         await jsRuntime.InvokeVoidAsync(
             "electronicLogbookStore.save",
             DocumentKey,
@@ -419,7 +423,8 @@ public sealed record BrowserLogbookStoredDocument(
     IReadOnlyList<PortableLogbookPackageReceipt>? ImportReceipts = null,
     DateTimeOffset? LastSuccessfulExportAt = null,
     BrowserLogbookExportCheckpoint? LastSuccessfulExport = null,
-    BrowserHostedSyncState? HostedSync = null);
+    BrowserHostedSyncState? HostedSync = null,
+    BrowserWorkbookMigrationReceipt? WorkbookMigration = null);
 
 public sealed record BrowserLogbookState(
     PortableLogbookDocument Document,
@@ -433,7 +438,8 @@ public sealed record BrowserLogbookStateV2(
     IReadOnlyList<PortableLogbookPackageReceipt> ImportReceipts,
     DateTimeOffset? LastSuccessfulExportAt,
     BrowserLogbookExportCheckpoint? LastSuccessfulExport = null,
-    BrowserHostedSyncState? HostedSync = null);
+    BrowserHostedSyncState? HostedSync = null,
+    BrowserWorkbookMigrationReceipt? WorkbookMigration = null);
 
 public sealed record BrowserHostedSyncState(
     HostedAccountId AccountId,

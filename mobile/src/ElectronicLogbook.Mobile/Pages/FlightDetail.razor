@@ -25,14 +25,35 @@ else if (CurrentEntry?.Entry is null)
                     <span class="eyebrow">Deleted entry</span>
                     <h1>Deleted flight</h1>
                 </div>
-                <span class="draft-pill">Deleted</span>
+                @if (HistoricalEntry is not null)
+                {
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Restore"
+                               OnClick="RestoreEntryAsync"
+                               Disabled="@(Session.IsStorageBlocked || IsRestorePending)">
+                        Restore flight
+                    </MudButton>
+                }
             </header>
+
+            @if (HistoricalEntry is not null)
+            {
+                <section class="detail-hero deleted-detail-hero">
+                    <div class="detail-primary-line">
+                        <strong>@Session.FormatRegistration(HistoricalEntry)</strong>
+                        <strong>@Session.FormatRoute(HistoricalEntry)</strong>
+                        <strong>@MobileLogbookSession.FormatHours(MobileLogbookSession.WorkbookLoggedTime(HistoricalEntry))</strong>
+                    </div>
+                    <span>@MobileLogbookSession.FormatDate(HistoricalEntry.Date) | @Session.FormatAircraft(HistoricalEntry)</span>
+                </section>
+            }
 
             <section class="notice-panel" role="status">
                 <MudIcon Icon="@Icons.Material.Filled.DeleteOutline" />
                 <div>
                     <strong>Deletion history</strong>
-                    <span>This entry is no longer active, but its revisions remain in the portable audit trail.</span>
+                    <span>This entry is no longer active. Restoring it adds a new revision; the deletion and every earlier revision remain in the audit trail.</span>
                 </div>
             </section>
 
@@ -197,9 +218,15 @@ else
 
     private bool IsDeletePending { get; set; }
 
+    private bool IsRestorePending { get; set; }
+
     private PortableLogbookMaterializedEntryV2? CurrentEntry => Session.FindCurrentEntryV2(EntryId);
 
     private PortableLogbookMaterializedEntryV2? History => CurrentEntry;
+
+    private PortableLogbookWorkbookEntry? HistoricalEntry => History is null
+        ? null
+        : Session.FindLatestWorkbookEntryPayload(History);
 
     private IReadOnlyList<DetailGroup> DetailGroups
     {
@@ -292,6 +319,27 @@ else
         finally
         {
             IsDeletePending = false;
+        }
+    }
+
+    private async Task RestoreEntryAsync()
+    {
+        if (History is null || !History.IsDeleted || IsRestorePending || Session.IsStorageBlocked)
+        {
+            return;
+        }
+
+        IsRestorePending = true;
+        try
+        {
+            if (await Session.RestoreWorkbookEntryAsync(History))
+            {
+                Navigation.NavigateTo("/flights?view=entries", replace: true);
+            }
+        }
+        finally
+        {
+            IsRestorePending = false;
         }
     }
 

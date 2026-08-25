@@ -66,3 +66,5 @@ try {
 }
 
 Write-Host "Airport dataset refresh complete." -ForegroundColor Green
+
+& (Join-Path $PSScriptRoot "Export-MobileAirportDataset.ps1") -WorkbookPath $resolvedPath

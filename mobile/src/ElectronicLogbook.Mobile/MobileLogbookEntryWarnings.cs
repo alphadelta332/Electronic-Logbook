@@ -26,17 +26,17 @@ public static class MobileLogbookEntryWarnings
             .Max();
         if (draft.Date is not null && latestDate is not null && draft.Date < latestDate)
         {
-            warnings.Add($"This entry is dated before the latest existing entry ({latestDate:dd MMM yyyy}).");
+            warnings.Add(PortableLogbookEntryMessages.BeforeLatestEntry(latestDate.Value));
         }
 
         if (comparableEntries.Any(entry => IsDuplicate(draft, entry.Entry!)))
         {
-            warnings.Add("An entry with the same date, type, registration, and remarks already exists.");
+            warnings.Add(PortableLogbookEntryMessages.PossibleDuplicate);
         }
 
         if (comparableEntries.Any(entry => HasRegistrationWithDifferentType(draft, entry.Entry!)))
         {
-            warnings.Add("This registration has previously been logged with a different aircraft type.");
+            warnings.Add(PortableLogbookEntryMessages.RegistrationTypeMismatch);
         }
 
         return warnings;

@@ -52,7 +52,7 @@ else
                     <h2>Recovery code</h2>
                 </div>
             </div>
-            <MudTextField @bind-Value="RecoveryCode" InputType="InputType.Password" Label="Recovery code" Disabled="@(IsBusy || ImportPlan is null)" />
+            <MudTextField @bind-Value="RecoveryCode" InputType="InputType.Password" Label="Recovery code" Immediate="true" Disabled="@(IsBusy || ImportPlan is null)" />
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RestoreKeyAsync" Disabled="@(IsBusy || ImportPlan is null || string.IsNullOrWhiteSpace(RecoveryCode))">Verify recovery code</MudButton>
         </section>
 

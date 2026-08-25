@@ -9,6 +9,82 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobileLogbookSessionJourneyTests
 {
     [Fact]
+    public async Task WorkbookMigrationPersistsExactValuesTotalsAndVerificationReceiptAcrossReload()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var logbookId = new LogbookId("log_migration_target");
+        var hosted = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            logbookId,
+            new DeviceId("dev_android"),
+            0,
+            PortableHostedSyncStatus.Synced);
+        var empty = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        await new BrowserLogbookStore(jsRuntime).SaveStateAsync(
+            new BrowserLogbookStateV2(empty, [], null, HostedSync: hosted));
+        var session = CreateSession(jsRuntime);
+        await session.EnsureLoadedWorkbookAsync();
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Role", "Employer", "Exercise", "Note"]);
+        var entry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 8,
+            Day = 25,
+            Type = "C172",
+            Reg = "VH-MIG",
+            From = "YSBK",
+            To = "YSCN",
+            CustomFields = new Dictionary<CustomFieldId, string?> { [customFields[0].Id] = "Captain" },
+            SeCommandDay = 1.4m,
+            IfrSim = 0.2m,
+            LandingsDay = 1,
+            Ils = 2
+        };
+        var rows = new[] { new MobileWorkbookMigrationRow(6, new EntryId("ent_workbook"), entry) };
+        var totals = MobileWorkbookMigrationTotals.Calculate(rows.Select(row => row.Entry));
+        var plan = new MobileWorkbookMigrationPlan(
+            "Disposable.xlsm",
+            new string('a', 64),
+            "2.0.7",
+            new LogbookId("log_legacy_source"),
+            logbookId,
+            customFields,
+            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 31), null, null),
+            rows,
+            totals,
+            MobileWorkbookMigrationCachedTotals.Empty,
+            MobileWorkbookMigrationReader.ComputeEntryValuesSha256(rows.Select(row => row.Entry)));
+
+        var result = await session.ApplyWorkbookMigrationAsync(
+            plan,
+            DateTimeOffset.Parse("2026-08-25T02:00:00Z"));
+
+        Assert.True(result.DurableReadbackVerified);
+        Assert.Equal(1, result.DurableEntryCount);
+        Assert.Equal(logbookId, session.DocumentV2.LogbookId);
+        Assert.Equal("Role", session.WorkbookCustomFields[0].Label);
+        Assert.Equal(totals, session.WorkbookMigration?.Totals);
+
+        var reloaded = CreateSession(jsRuntime);
+        await reloaded.EnsureLoadedWorkbookAsync();
+
+        Assert.NotNull(reloaded.WorkbookMigration);
+        Assert.True(reloaded.WorkbookMigration.DurableReadbackVerified);
+        Assert.Equal(plan.EntryValuesSha256, reloaded.WorkbookMigration.EntryValuesSha256);
+        Assert.Equal(totals, reloaded.WorkbookMigration.Totals);
+        var migrated = Assert.Single(reloaded.CurrentEntriesV2).Entry;
+        Assert.NotNull(migrated);
+        Assert.Equal("VH-MIG", migrated.Reg);
+        Assert.Equal("Captain", migrated.CustomFields[customFields[0].Id]);
+        Assert.Equal(1.6m, MobileLogbookSession.WorkbookLoggedTime(migrated));
+        Assert.False(reloaded.CanMigrateWorkbook);
+    }
+
+    [Fact]
     public async Task HostedInviteAcceptanceInitializesAppOnlyV2LogbookBeforeWorkbookImport()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -938,6 +1014,8 @@ public sealed class MobileLogbookSessionJourneyTests
             detail => Assert.Equal(EntryDetailGroup.Checks, detail.Group));
         Assert.All(details.Where(detail => detail.Group == EntryDetailGroup.CustomFields),
             detail => Assert.Equal("-", detail.Value));
+        Assert.Equal(nameof(PortableLogbookWorkbookEntry.LandingsDay),
+            Assert.Single(details, detail => detail.Label == "Landings day").Field);
     }
 
     [Fact]
@@ -960,6 +1038,7 @@ public sealed class MobileLogbookSessionJourneyTests
 
         Assert.True(session.HasAttemptedSubmit);
         Assert.True(session.ShouldShowWorkbookDraftErrors);
+        Assert.DoesNotContain(session.WorkbookDraftErrors, error => error.Contains("Technical code", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -975,6 +1054,23 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.True(isReadyForReview);
         Assert.True(session.HasAttemptedSubmit);
         Assert.False(session.ShouldShowWorkbookDraftErrors);
+        Assert.Empty(session.DocumentV2.Operations);
+        Assert.Equal(0, jsRuntime.SaveCount);
+    }
+
+    [Fact]
+    public async Task WorkbookDraftReviewExposesAddToLogbookWarningsWithoutPersistingTheEntry()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var session = CreateSession(jsRuntime);
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        session.WorkbookDraft.OperatorProficiencyCheck = true;
+        session.WorkbookDraft.InstrumentProficiencyCheck = false;
+
+        Assert.True(session.PrepareWorkbookDraftForReview());
+
+        Assert.Contains(session.WorkbookDraftWarnings, warning => warning.Code == "NEWENTRY-W001");
         Assert.Empty(session.DocumentV2.Operations);
         Assert.Equal(0, jsRuntime.SaveCount);
     }
@@ -1084,6 +1180,66 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Single(session.DeletedEntriesV2);
         Assert.Equal(2, session.DocumentV2.Operations.Count);
         Assert.Equal(2, jsRuntime.SaveCount);
+    }
+
+    [Fact]
+    public async Task DeletedWorkbookEntryCanBeRestoredLaterWithoutRemovingItsTombstoneOrEarlierHistory()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-08-14T02:00:00Z"));
+        var session = CreateSession(jsRuntime, syncClock: clock);
+        await session.EnsureLoadedWorkbookAsync();
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        var original = Assert.Single(session.CurrentEntriesV2);
+        await session.DeleteWorkbookEntryAsync(original);
+        var tombstone = session.DocumentV2.Operations.Last();
+
+        clock.Advance(TimeSpan.FromMinutes(1));
+        Assert.False(session.CanUndoLastWorkbookAction);
+        var deleted = Assert.Single(session.DeletedEntriesV2);
+        Assert.Equal(original.Entry, session.FindLatestWorkbookEntryPayload(deleted));
+
+        Assert.True(await session.RestoreWorkbookEntryAsync(deleted));
+
+        var restored = Assert.Single(session.CurrentEntriesV2);
+        Assert.Equal(original.EntryId, restored.EntryId);
+        Assert.Equal(original.Entry, restored.Entry);
+        Assert.Empty(session.DeletedEntriesV2);
+        Assert.Equal("Entry restored.", session.ActionFeedbackMessage);
+        Assert.True(session.CanUndoLastWorkbookAction);
+        Assert.Equal(3, session.DocumentV2.Operations.Count);
+        Assert.Contains(tombstone, session.DocumentV2.Operations);
+        var restoration = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Correction, restoration.Kind);
+        Assert.Equal(tombstone.RevisionId, Assert.Single(restoration.ParentRevisionIds));
+        Assert.Equal(3, restored.RevisionHistory.Count);
+
+        var reloaded = CreateSession(jsRuntime);
+        await reloaded.EnsureLoadedWorkbookAsync();
+        Assert.Single(reloaded.CurrentEntriesV2);
+        Assert.Empty(reloaded.DeletedEntriesV2);
+        Assert.Contains(reloaded.DocumentV2.Operations, operation => operation.RevisionId == tombstone.RevisionId);
+        Assert.Equal(3, reloaded.DocumentV2.Operations.Count);
+
+        Assert.True(await session.UndoLastWorkbookActionAsync());
+
+        Assert.Empty(session.CurrentEntriesV2);
+        var deletedAgain = Assert.Single(session.DeletedEntriesV2);
+        Assert.Equal("Restoration undone.", session.LastActionMessage);
+        Assert.False(session.CanUndoLastWorkbookAction);
+        Assert.Equal(4, session.DocumentV2.Operations.Count);
+        var restorationUndo = session.DocumentV2.Operations.Last();
+        Assert.Equal(PortableOperationKind.Deletion, restorationUndo.Kind);
+        Assert.Equal(restoration.RevisionId, Assert.Single(restorationUndo.ParentRevisionIds));
+        Assert.Equal("Restoration undone.", restorationUndo.Reason);
+        Assert.Equal(4, deletedAgain.RevisionHistory.Count);
+
+        var reloadedAfterUndo = CreateSession(jsRuntime);
+        await reloadedAfterUndo.EnsureLoadedWorkbookAsync();
+        Assert.Empty(reloadedAfterUndo.CurrentEntriesV2);
+        Assert.Single(reloadedAfterUndo.DeletedEntriesV2);
+        Assert.Equal(4, reloadedAfterUndo.DocumentV2.Operations.Count);
     }
 
     [Fact]

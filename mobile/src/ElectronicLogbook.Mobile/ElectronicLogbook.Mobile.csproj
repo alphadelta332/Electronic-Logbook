@@ -21,4 +21,8 @@
     <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Data\airports.json.gz" LogicalName="ElectronicLogbook.Mobile.Data.airports.json.gz" />
+  </ItemGroup>
+
 </Project>

@@ -13,14 +13,14 @@ public static class PortableLogbookEntryRules
         {
             errors.Add(new PortableLogbookEntryRuleViolation(
                 PortableLogbookEntryRuleCode.InvalidDate,
-                "The Date field is not valid or is in the future."));
+                PortableLogbookEntryMessages.InvalidDate));
         }
 
         if (IsBlank(entry.AircraftType))
         {
             errors.Add(new PortableLogbookEntryRuleViolation(
                 PortableLogbookEntryRuleCode.MissingAircraftType,
-                "Aircraft type is required before this entry can be added."));
+                PortableLogbookEntryMessages.MissingAircraftType));
         }
 
         var simulatorTime = Value(entry.InstrumentSimulated);
@@ -31,21 +31,21 @@ public static class PortableLogbookEntryRules
             {
                 errors.Add(new PortableLogbookEntryRuleViolation(
                     PortableLogbookEntryRuleCode.MissingRegistration,
-                    "Registration is required for a flight entry."));
+                    PortableLogbookEntryMessages.MissingRegistration));
             }
 
             if (IsBlank(entry.From))
             {
                 errors.Add(new PortableLogbookEntryRuleViolation(
                     PortableLogbookEntryRuleCode.MissingDeparture,
-                    "Departure airport is required for a flight entry."));
+                    PortableLogbookEntryMessages.MissingDeparture));
             }
 
             if (IsBlank(entry.To))
             {
                 errors.Add(new PortableLogbookEntryRuleViolation(
                     PortableLogbookEntryRuleCode.MissingDestination,
-                    "Destination airport is required for a flight entry."));
+                    PortableLogbookEntryMessages.MissingDestination));
             }
         }
 
@@ -57,14 +57,14 @@ public static class PortableLogbookEntryRules
         {
             errors.Add(new PortableLogbookEntryRuleViolation(
                 PortableLogbookEntryRuleCode.MissingLoggedTime,
-                "Total flight or simulator time cannot be zero."));
+                PortableLogbookEntryMessages.MissingLoggedTime));
         }
 
         if (Value(entry.InstrumentActual) > flightTime)
         {
             errors.Add(new PortableLogbookEntryRuleViolation(
                 PortableLogbookEntryRuleCode.InstrumentActualExceedsFlightTime,
-                "In-flight instrument time cannot be greater than the total flight time for this entry."));
+                PortableLogbookEntryMessages.InstrumentTimeExceedsFlightTime));
         }
 
         return new PortableLogbookEntryRuleResult(errors.Count == 0, errors);
@@ -95,49 +95,49 @@ public static class PortableLogbookEntryRules
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.FlightTimeWithoutDayOrNight,
-                "This entry has flight time but no day or night time."));
+                PortableLogbookEntryMessages.FlightTimeWithoutDayOrNight));
         }
 
         if (flightTime > 0 && dayNightTime > flightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.DayNightTimeExceedsFlightTime,
-                "Day and night time exceed the total flight time for this entry."));
+                PortableLogbookEntryMessages.DayNightTimeExceedsFlightTime));
         }
 
         if (flightTime > 0 && totalLandings == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.FlightTimeWithoutLanding,
-                "This entry has flight time but no landings."));
+                PortableLogbookEntryMessages.FlightTimeWithoutLanding));
         }
 
         if (Value(entry.Day) > 0 && landingsDay == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.DayTimeWithoutDayLanding,
-                "This entry has day time but no day landing."));
+                PortableLogbookEntryMessages.DayTimeWithoutDayLanding));
         }
 
         if (landingsDay > 0 && Value(entry.Day) == 0)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.DayLandingWithoutDayTime,
-                "This entry has a day landing but no day time."));
+                PortableLogbookEntryMessages.DayLandingWithoutDayTime));
         }
 
         if (Value(entry.Night) > 0 && landingsNight == 0 && !hasCopilotFlightTime)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.NightTimeWithoutNightLanding,
-                "This entry has night time but no night landing."));
+                PortableLogbookEntryMessages.NightTimeWithoutNightLanding));
         }
 
         if (landingsNight > 0 && Value(entry.Night) == 0)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.NightLandingWithoutNightTime,
-                "This entry has a night landing but no night time."));
+                PortableLogbookEntryMessages.NightLandingWithoutNightTime));
         }
 
         var totalApproaches =
@@ -150,28 +150,28 @@ public static class PortableLogbookEntryRules
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.ApproachWithoutInstrumentTime,
-                "This entry has approach activity but no instrument time."));
+                PortableLogbookEntryMessages.ApproachWithoutInstrumentTime));
         }
 
         if (instrumentTime > 0 && totalApproaches == 0)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.InstrumentTimeWithoutApproach,
-                "This entry has instrument time but no approach activity."));
+                PortableLogbookEntryMessages.InstrumentTimeWithoutApproach));
         }
 
         if (flightTime > 0 && totalLandings > flightTime * 6)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.HighLandingsForFlightTime,
-                "The number of landings seems high compared with the total flight time."));
+                PortableLogbookEntryMessages.HighLandingsForFlightTime));
         }
 
         if (flightTime > 0 && totalApproaches > flightTime * 3)
         {
             warnings.Add(new PortableLogbookEntryRuleWarning(
                 PortableLogbookEntryRuleWarningCode.HighApproachesForFlightTime,
-                "The number of approaches seems high compared with the total flight time."));
+                PortableLogbookEntryMessages.HighApproachesForFlightTime));
         }
 
         return warnings;
@@ -190,7 +190,7 @@ public static class PortableLogbookEntryRules
 
             errors.Add(new PortableLogbookEntryRuleViolation(
                 PortableLogbookEntryRuleCode.NegativeDuration,
-                $"{value.Label} cannot be negative."));
+                PortableLogbookEntryMessages.NegativeValue(value.Label)));
         }
     }
 
@@ -207,7 +207,7 @@ public static class PortableLogbookEntryRules
 
             errors.Add(new PortableLogbookEntryRuleViolation(
                 PortableLogbookEntryRuleCode.NegativeCount,
-                $"{value.Label} cannot be negative."));
+                PortableLogbookEntryMessages.NegativeValue(value.Label)));
         }
     }
 
