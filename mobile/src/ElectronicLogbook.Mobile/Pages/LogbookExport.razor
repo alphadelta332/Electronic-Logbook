@@ -1,0 +1,144 @@
+@page "/export"
+@inject MobileLogbookSession Session
+@inject BrowserFileStore FileStore
+
+<PageTitle>Export logbook</PageTitle>
+
+@if (!Session.IsLoaded)
+{
+    <section class="ui-state">
+        <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+        <span>Loading logbook export</span>
+    </section>
+}
+else
+{
+    <section class="settings-page workbook-migration-page">
+        <section class="form-section settings-overview-card">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Your records</span>
+                    <h1>Export logbook</h1>
+                </div>
+                <span class="draft-pill">@Session.CurrentEntriesV2.Count active</span>
+            </div>
+            <div class="settings-connection-summary">
+                <MudIcon Icon="@Icons.Material.Filled.FileDownload" />
+                <div>
+                    <strong>Every export is a new file</strong>
+                    <span>The app does not read, update, or replace an existing workbook.</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Step 1</span>
+                    <h2>Choose entries</h2>
+                </div>
+            </div>
+            <div class="field-grid">
+                <label>Start date <input type="date" value="@StartDateText" @onchange="args => StartDateText = args.Value?.ToString()" /></label>
+                <label>End date <input type="date" value="@EndDateText" @onchange="args => EndDateText = args.Value?.ToString()" /></label>
+            </div>
+            <label class="migration-confirmation"><input type="checkbox" @bind="CombineDetails" /> Combine route, remarks, and check flags into one Details column.</label>
+            <small>Leave both dates blank to export every active flight. The date range includes both selected dates.</small>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
+                    <span class="eyebrow">Step 2</span>
+                    <h2>Create new file</h2>
+                </div>
+            </div>
+            <div class="connection-diagnostic-actions">
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.TableView" OnClick="@(() => ExportAsync(MobileLogbookFileExportFormat.Xlsx))" Disabled="@CannotExport">
+                    Export XLSX
+                </MudButton>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Description" OnClick="@(() => ExportAsync(MobileLogbookFileExportFormat.Csv))" Disabled="@CannotExport">
+                    Export UTF-8 CSV
+                </MudButton>
+            </div>
+            <small>The UTC export time is recorded in the file and its filename.</small>
+            @if (IsBusy)
+            {
+                <span class="settings-status-line" role="status">Preparing export…</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(Message))
+            {
+                <span class="settings-status-line" role="status">@Message</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(Error))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@Error</span>
+            }
+        </section>
+    </section>
+}
+
+@code {
+    private string? StartDateText { get; set; }
+    private string? EndDateText { get; set; }
+    private bool CombineDetails { get; set; } = true;
+    private bool IsBusy { get; set; }
+    private string? Message { get; set; }
+    private string? Error { get; set; }
+
+    private bool CannotExport => IsBusy || Session.IsStorageBlocked || Session.CurrentEntriesV2.Count == 0;
+
+    protected override async Task OnInitializedAsync() => await Session.EnsureLoadedWorkbookAsync();
+
+    private async Task ExportAsync(MobileLogbookFileExportFormat format)
+    {
+        if (CannotExport)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        Message = null;
+        Error = null;
+        try
+        {
+            var request = new MobileLogbookFileExportRequest(
+                format,
+                ParseOptionalDate(StartDateText, "start"),
+                ParseOptionalDate(EndDateText, "end"),
+                CombineDetails);
+            var result = await MobileLogbookFileExportWorkflow.ExportAsync(
+                Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+                Session.WorkbookCustomFields,
+                request,
+                FileStore,
+                DateTimeOffset.UtcNow);
+            Message = result.Transfer.Shared
+                ? $"Shared {result.File.FileName}."
+                : $"Created {result.File.FileName}.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or BrowserFileStoreException or JSException)
+        {
+            Error = ex.Message;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static DateOnly? ParseOptionalDate(string? value, string label)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return date;
+        }
+
+        throw new InvalidOperationException($"The {label} date is not valid.");
+    }
+}

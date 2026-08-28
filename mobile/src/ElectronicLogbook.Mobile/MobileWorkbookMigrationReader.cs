@@ -613,6 +613,29 @@ public static class MobileWorkbookMigrationReader
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
+    public static string ComputeOrderIndependentEntryValuesSha256(IEnumerable<PortableLogbookWorkbookEntry> entries)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        var canonicalEntries = entries
+            .Select(CanonicalEntryValue)
+            .OrderBy(value => value, StringComparer.Ordinal)
+            .ToArray();
+        var canonical = JsonSerializer.Serialize(canonicalEntries, PortableLogbookJson.SerializerOptions);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
+    }
+
+    internal static string CanonicalEntryValue(PortableLogbookWorkbookEntry entry)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var normalized = entry with
+        {
+            CustomFields = entry.CustomFields
+                .OrderBy(pair => pair.Key.Value, StringComparer.Ordinal)
+                .ToDictionary(pair => pair.Key, pair => pair.Value)
+        };
+        return JsonSerializer.Serialize(normalized, PortableLogbookJson.SerializerOptions);
+    }
+
     private static string ComputeEntryValuesSha256(IEnumerable<MobileWorkbookMigrationRow> rows) =>
         ComputeEntryValuesSha256(rows.Select(row => row.Entry));
 

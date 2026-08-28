@@ -68,6 +68,26 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <div>
+                    <span class="eyebrow">Your records</span>
+                    <h2>Export logbook</h2>
+                </div>
+                <span class="draft-pill">New file</span>
+            </div>
+            <div class="settings-connection-summary">
+                <MudIcon Icon="@Icons.Material.Filled.FileDownload" />
+                <div>
+                    <strong>XLSX or UTF-8 CSV</strong>
+                    <span>Create a new dated file from this app logbook. Existing workbooks are never opened or changed.</span>
+                </div>
+            </div>
+            <MudButton Href="/export" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload">
+                Export logbook
+            </MudButton>
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <div>
                     <span class="eyebrow">Existing records</span>
                     <h2>One-time workbook migration</h2>
                 </div>
@@ -466,6 +486,8 @@ else
         ? "Verified"
         : Session.CanMigrateWorkbook
             ? "Ready"
+            : Session.CanPreviewWorkbookMigration
+                ? "Compare"
             : Session.HasHostedSync
                 ? "Unavailable"
                 : "Sign in first";
@@ -474,6 +496,8 @@ else
         ? $"{receipt.EntryCount} entries from {receipt.SourceFileName} were saved and read back successfully."
         : Session.CanMigrateWorkbook
             ? "Select a disposable .xlsm or .xlsx copy, review its values and totals, then migrate it once."
+            : Session.CanPreviewWorkbookMigration
+                ? "Compare a disposable workbook copy with this populated app logbook. Comparison is read only; migration remains blocked."
             : Session.HasHostedSync
                 ? "Migration must happen before flights or manual packages are added to this app logbook."
                 : "Connect and initialize the invited account before selecting a workbook.";

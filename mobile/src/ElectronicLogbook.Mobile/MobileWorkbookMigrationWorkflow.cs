@@ -4,6 +4,49 @@ namespace ElectronicLogbook.Mobile;
 
 public static class MobileWorkbookMigrationWorkflow
 {
+    public static MobileWorkbookMigrationComparison CompareWithApp(
+        MobileWorkbookMigrationPlan plan,
+        LogbookId appLogbookId,
+        IEnumerable<PortableLogbookWorkbookEntry> appEntries,
+        IEnumerable<CustomFieldDefinition> appCustomFields,
+        PortableLogbookCurrencyOverrideDates appCurrencyOverrideDates)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(appEntries);
+        ArgumentNullException.ThrowIfNull(appCustomFields);
+        ArgumentNullException.ThrowIfNull(appCurrencyOverrideDates);
+
+        var materializedAppEntries = appEntries.ToArray();
+        var appTotals = MobileWorkbookMigrationTotals.Calculate(materializedAppEntries);
+        var workbookValuesHash = MobileWorkbookMigrationReader.ComputeOrderIndependentEntryValuesSha256(
+            plan.Rows.Select(row => row.Entry));
+        var appValuesHash = MobileWorkbookMigrationReader.ComputeOrderIndependentEntryValuesSha256(materializedAppEntries);
+        var workbookFields = CanonicalCustomFields(plan.CustomFieldDefinitions);
+        var currentAppFields = CanonicalCustomFields(appCustomFields);
+        var workbookOnlyRows = FindWorkbookOnlyRows(plan.Rows, materializedAppEntries);
+        var appOnlyEntries = FindAppOnlyEntries(plan.Rows, materializedAppEntries);
+        var customFieldDifferences = FindCustomFieldDifferences(
+            plan.CustomFieldDefinitions,
+            appCustomFields);
+
+        return new MobileWorkbookMigrationComparison(
+            plan.EmbeddedWorkbookLogbookId is null
+                ? null
+                : plan.EmbeddedWorkbookLogbookId == appLogbookId,
+            plan.Rows.Count == materializedAppEntries.Length,
+            string.Equals(workbookValuesHash, appValuesHash, StringComparison.OrdinalIgnoreCase),
+            customFieldDifferences.Count == 0 &&
+            workbookFields.SequenceEqual(currentAppFields, StringComparer.Ordinal),
+            plan.CurrencyOverrideDates == appCurrencyOverrideDates,
+            plan.CalculatedTotals == appTotals,
+            materializedAppEntries.Length,
+            appValuesHash,
+            appTotals,
+            workbookOnlyRows,
+            appOnlyEntries,
+            customFieldDifferences);
+    }
+
     public static MobileWorkbookMigrationCandidate CreateCandidate(
         MobileWorkbookMigrationPlan plan,
         PortableLogbookDocumentV2 currentDocument,
@@ -107,6 +150,114 @@ public static class MobileWorkbookMigrationWorkflow
 
     private static EntryId AllocateEntryId(PortableLogbookIdFactory idFactory, IReadOnlySet<EntryId> allocatedEntryIds) =>
         idFactory.NewEntryIdExcluding(allocatedEntryIds);
+
+    private static string[] CanonicalCustomFields(IEnumerable<CustomFieldDefinition> fields) =>
+        fields
+            .OrderBy(field => field.Order)
+            .ThenBy(field => field.Id.Value, StringComparer.Ordinal)
+            .Select(field => $"{field.Id.Value}\u001f{field.Order}\u001f{field.Label.Trim()}")
+            .ToArray();
+
+    private static IReadOnlyList<MobileWorkbookMigrationRow> FindWorkbookOnlyRows(
+        IEnumerable<MobileWorkbookMigrationRow> workbookRows,
+        IEnumerable<PortableLogbookWorkbookEntry> appEntries)
+    {
+        var remainingAppValues = CreateValueCounts(appEntries);
+        var differences = new List<MobileWorkbookMigrationRow>();
+        foreach (var row in workbookRows)
+        {
+            var value = MobileWorkbookMigrationReader.CanonicalEntryValue(row.Entry);
+            if (!ConsumeValue(remainingAppValues, value))
+            {
+                differences.Add(row);
+            }
+        }
+
+        return differences;
+    }
+
+    private static IReadOnlyList<PortableLogbookWorkbookEntry> FindAppOnlyEntries(
+        IEnumerable<MobileWorkbookMigrationRow> workbookRows,
+        IEnumerable<PortableLogbookWorkbookEntry> appEntries)
+    {
+        var remainingWorkbookValues = CreateValueCounts(workbookRows.Select(row => row.Entry));
+        var differences = new List<PortableLogbookWorkbookEntry>();
+        foreach (var entry in appEntries)
+        {
+            var value = MobileWorkbookMigrationReader.CanonicalEntryValue(entry);
+            if (!ConsumeValue(remainingWorkbookValues, value))
+            {
+                differences.Add(entry);
+            }
+        }
+
+        return differences;
+    }
+
+    private static Dictionary<string, int> CreateValueCounts(IEnumerable<PortableLogbookWorkbookEntry> entries) =>
+        entries
+            .Select(MobileWorkbookMigrationReader.CanonicalEntryValue)
+            .GroupBy(value => value, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+
+    private static bool ConsumeValue(IDictionary<string, int> counts, string value)
+    {
+        if (!counts.TryGetValue(value, out var count) || count == 0)
+        {
+            return false;
+        }
+
+        counts[value] = count - 1;
+        return true;
+    }
+
+    private static IReadOnlyList<MobileWorkbookMigrationCustomFieldDifference> FindCustomFieldDifferences(
+        IEnumerable<CustomFieldDefinition> workbookFields,
+        IEnumerable<CustomFieldDefinition> appFields)
+    {
+        var workbookByOrder = workbookFields.ToDictionary(field => field.Order);
+        var appByOrder = appFields.ToDictionary(field => field.Order);
+        return workbookByOrder.Keys
+            .Concat(appByOrder.Keys)
+            .Distinct()
+            .OrderBy(order => order)
+            .Select(order => new MobileWorkbookMigrationCustomFieldDifference(
+                order,
+                workbookByOrder.GetValueOrDefault(order)?.Label,
+                appByOrder.GetValueOrDefault(order)?.Label))
+            .Where(difference => !string.Equals(
+                difference.WorkbookLabel?.Trim(),
+                difference.AppLabel?.Trim(),
+                StringComparison.Ordinal))
+            .ToArray();
+    }
+}
+
+public sealed record MobileWorkbookMigrationCustomFieldDifference(
+    int Order,
+    string? WorkbookLabel,
+    string? AppLabel);
+
+public sealed record MobileWorkbookMigrationComparison(
+    bool? EmbeddedIdentityMatches,
+    bool EntryCountMatches,
+    bool EntryValuesMatch,
+    bool CustomFieldsMatch,
+    bool CurrencyOverrideDatesMatch,
+    bool TotalsMatch,
+    int AppEntryCount,
+    string AppEntryValuesSha256,
+    MobileWorkbookMigrationTotals AppTotals,
+    IReadOnlyList<MobileWorkbookMigrationRow> WorkbookOnlyRows,
+    IReadOnlyList<PortableLogbookWorkbookEntry> AppOnlyEntries,
+    IReadOnlyList<MobileWorkbookMigrationCustomFieldDifference> CustomFieldDifferences)
+{
+    public bool IsExactDataMatch =>
+        EntryCountMatches &&
+        EntryValuesMatch &&
+        CustomFieldsMatch &&
+        CurrencyOverrideDatesMatch &&
+        TotalsMatch;
 }
 
 public sealed record MobileWorkbookMigrationCandidate(

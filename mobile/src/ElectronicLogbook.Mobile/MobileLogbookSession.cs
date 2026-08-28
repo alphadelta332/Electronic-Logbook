@@ -173,11 +173,14 @@ public sealed class MobileLogbookSession(
         pendingWorkbookActionFeedback is { UndoKind: not WorkbookActionUndoKind.None } pending &&
         syncClock.UtcNow < pending.ExpiresAt;
 
-    public bool CanMigrateWorkbook =>
+    public bool CanPreviewWorkbookMigration =>
         IsLoaded &&
         !IsStorageBlocked &&
         HasHostedSync &&
-        WorkbookMigration is null &&
+        WorkbookMigration is null;
+
+    public bool CanMigrateWorkbook =>
+        CanPreviewWorkbookMigration &&
         DocumentV2.Operations.Count == 0 &&
         ImportReceipts.Count == 0;
 
@@ -1099,9 +1102,11 @@ public sealed class MobileLogbookSession(
         if (!CanMigrateWorkbook)
         {
             throw new InvalidOperationException(
-                WorkbookMigration is null
-                    ? "Connect and initialize the invited account before migrating a workbook, and migrate before recording flights."
-                    : "This app logbook already has a completed workbook migration.");
+                WorkbookMigration is not null
+                    ? "This app logbook already has a completed workbook migration."
+                    : CanPreviewWorkbookMigration
+                        ? "This app logbook already contains flights or a manual package. Workbook comparison is available, but migration is blocked to prevent replacement or duplication."
+                        : "Connect and initialize the invited account before migrating a workbook.");
         }
 
         var previous = await logbookStore.LoadStateV2Async();

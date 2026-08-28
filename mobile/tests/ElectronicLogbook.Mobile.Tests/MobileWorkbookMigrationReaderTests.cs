@@ -98,6 +98,128 @@ public sealed class MobileWorkbookMigrationReaderTests
         Assert.Contains(".xlsm or .xlsx", exception.Message, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void CompareWithAppMatchesExactDataIndependentOfEntryAndCustomValueOrder()
+    {
+        var logbookId = new LogbookId("log_compare");
+        var fields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Role", "Employer", "Exercise", "Note"]);
+        var first = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 8,
+            Day = 20,
+            Reg = "VH-ONE",
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [fields[0].Id] = "Captain",
+                [fields[1].Id] = "Alpha"
+            },
+            SeCommandDay = 1.1m,
+            LandingsDay = 1
+        };
+        var second = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 8,
+            Day = 21,
+            Reg = "VH-TWO",
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [fields[1].Id] = "Bravo",
+                [fields[0].Id] = "First Officer"
+            },
+            SeDualNight = 0.9m,
+            LandingsNight = 1
+        };
+        var overrides = new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 31), null, null);
+        var plan = CreatePlan(logbookId, logbookId, fields, overrides, first, second);
+
+        var comparison = MobileWorkbookMigrationWorkflow.CompareWithApp(
+            plan,
+            logbookId,
+            [second, first],
+            fields.Reverse(),
+            overrides);
+
+        Assert.True(comparison.EmbeddedIdentityMatches);
+        Assert.True(comparison.EntryCountMatches);
+        Assert.True(comparison.EntryValuesMatch);
+        Assert.True(comparison.CustomFieldsMatch);
+        Assert.True(comparison.CurrencyOverrideDatesMatch);
+        Assert.True(comparison.TotalsMatch);
+        Assert.True(comparison.IsExactDataMatch);
+        Assert.Equal(2, comparison.AppEntryCount);
+        Assert.Empty(comparison.WorkbookOnlyRows);
+        Assert.Empty(comparison.AppOnlyEntries);
+        Assert.Empty(comparison.CustomFieldDifferences);
+    }
+
+    [Fact]
+    public void CompareWithAppReportsEachMaterialDifferenceWithoutChangingEitherSide()
+    {
+        var appLogbookId = new LogbookId("log_app");
+        var workbookFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Role", "Employer", "Exercise", "Note"]);
+        var workbookEntry = PortableLogbookWorkbookEntry.Empty with { Reg = "VH-WORKBOOK", SeCommandDay = 1.2m };
+        var secondWorkbookEntry = PortableLogbookWorkbookEntry.Empty with { Reg = "VH-SECOND", SeDualDay = 0.5m };
+        var plan = CreatePlan(
+            appLogbookId,
+            new LogbookId("log_other"),
+            workbookFields,
+            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 31), null, null),
+            workbookEntry,
+            secondWorkbookEntry);
+        var appEntry = workbookEntry with { Reg = "VH-APP", SeCommandDay = 2.4m };
+        var appFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(["Position", "Employer", "Exercise", "Note"]);
+
+        var comparison = MobileWorkbookMigrationWorkflow.CompareWithApp(
+            plan,
+            appLogbookId,
+            [appEntry],
+            appFields,
+            PortableLogbookCurrencyOverrideDates.Empty);
+
+        Assert.False(comparison.EmbeddedIdentityMatches);
+        Assert.False(comparison.EntryCountMatches);
+        Assert.False(comparison.EntryValuesMatch);
+        Assert.False(comparison.CustomFieldsMatch);
+        Assert.False(comparison.CurrencyOverrideDatesMatch);
+        Assert.False(comparison.TotalsMatch);
+        Assert.False(comparison.IsExactDataMatch);
+        Assert.Equal(2, comparison.WorkbookOnlyRows.Count);
+        Assert.Single(comparison.AppOnlyEntries);
+        var fieldDifference = Assert.Single(comparison.CustomFieldDifferences);
+        Assert.Equal(1, fieldDifference.Order);
+        Assert.Equal("Role", fieldDifference.WorkbookLabel);
+        Assert.Equal("Position", fieldDifference.AppLabel);
+        Assert.Equal("VH-WORKBOOK", workbookEntry.Reg);
+        Assert.Equal("VH-APP", appEntry.Reg);
+    }
+
+    private static MobileWorkbookMigrationPlan CreatePlan(
+        LogbookId targetLogbookId,
+        LogbookId embeddedLogbookId,
+        IReadOnlyList<CustomFieldDefinition> fields,
+        PortableLogbookCurrencyOverrideDates overrides,
+        params PortableLogbookWorkbookEntry[] entries)
+    {
+        var rows = entries
+            .Select((entry, index) => new MobileWorkbookMigrationRow(index + 2, null, entry))
+            .ToArray();
+        var totals = MobileWorkbookMigrationTotals.Calculate(entries);
+        return new MobileWorkbookMigrationPlan(
+            "Disposable.xlsm",
+            new string('a', 64),
+            "3.0.0",
+            embeddedLogbookId,
+            targetLogbookId,
+            fields,
+            overrides,
+            rows,
+            totals,
+            MobileWorkbookMigrationCachedTotals.Empty,
+            MobileWorkbookMigrationReader.ComputeEntryValuesSha256(entries));
+    }
+
     private static BrowserFile CreateWorkbook(decimal cachedFlightHours = 2.0m)
     {
         var columns = new[] { PortableLogbookWorkbookFieldCatalog.EntryIdColumnName }

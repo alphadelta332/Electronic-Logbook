@@ -10,6 +10,9 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
     public const int MaxElogbookBytes = 64 * 1024 * 1024;
     public const string ExcelMacroEnabledExtension = ".xlsm";
     public const string ExcelWorkbookExtension = ".xlsx";
+    public const string ExcelWorkbookContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+    public const string CsvExtension = ".csv";
+    public const string CsvContentType = "text/csv;charset=utf-8";
     public const int MaxWorkbookBytes = MaxElogbookBytes;
     public const string JsonContentType = "application/json";
     public const string JsonExtension = ".json";
@@ -161,6 +164,15 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
         return ShareOrDownloadValidatedAsync(fileName, bytes, JsonContentType);
     }
 
+    public ValueTask<BrowserFileTransferResult> ShareLogbookExportOrDownloadAsync(
+        string fileName,
+        byte[] bytes,
+        string contentType)
+    {
+        ValidateLogbookExportArguments(fileName, bytes, contentType);
+        return ShareOrDownloadValidatedAsync(fileName, bytes, contentType);
+    }
+
     public ValueTask ShareAsync(
         string fileName,
         byte[] bytes,
@@ -300,6 +312,32 @@ public sealed class BrowserFileStore(IJSRuntime jsRuntime)
         {
             throw new BrowserFileStoreException(
                 $"Downloaded JSON file is larger than the {MaxJsonDownloadBytes} byte limit.");
+        }
+    }
+
+    private static void ValidateLogbookExportArguments(string fileName, byte[] bytes, string contentType)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        ArgumentNullException.ThrowIfNull(bytes);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
+        var isXlsx = fileName.EndsWith(ExcelWorkbookExtension, StringComparison.OrdinalIgnoreCase) &&
+                     string.Equals(contentType, ExcelWorkbookContentType, StringComparison.OrdinalIgnoreCase);
+        var isCsv = fileName.EndsWith(CsvExtension, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(contentType, CsvContentType, StringComparison.OrdinalIgnoreCase);
+        if (!isXlsx && !isCsv)
+        {
+            throw new BrowserFileStoreException("Logbook exports must be an XLSX workbook or UTF-8 CSV file with the matching content type.");
+        }
+
+        if (bytes.Length == 0)
+        {
+            throw new BrowserFileStoreException("Exported logbook file is empty.");
+        }
+
+        if (bytes.Length > MaxWorkbookBytes)
+        {
+            throw new BrowserFileStoreException(
+                $"Exported logbook file is larger than the {MaxWorkbookBytes} byte limit.");
         }
     }
 }

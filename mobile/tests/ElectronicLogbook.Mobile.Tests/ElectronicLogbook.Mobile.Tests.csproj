@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <None Include="..\..\..\updater\tests\ElectronicLogbook.Updater.Tests\Fixtures\portable-logbook-v1.json" Link="Fixtures\portable-logbook-v1.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures\logbook-export-golden.csv" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

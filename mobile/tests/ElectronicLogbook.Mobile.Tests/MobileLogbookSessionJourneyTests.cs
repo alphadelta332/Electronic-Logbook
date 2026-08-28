@@ -85,6 +85,74 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task PopulatedHostedLogbookAllowsReadOnlyComparisonButStillRejectsMigrationWrite()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var logbookId = new LogbookId("log_populated_comparison");
+        var deviceId = new DeviceId("dev_android");
+        var retainedEntry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 8,
+            Day = 25,
+            Reg = "VH-RETAINED",
+            SeCommandDay = 1.3m
+        };
+        var operation = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_retained"),
+            new RevisionId("rev_retained"),
+            deviceId,
+            DateTimeOffset.Parse("2026-08-25T00:00:00Z"),
+            retainedEntry);
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [operation]);
+        var hosted = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            logbookId,
+            deviceId,
+            1,
+            PortableHostedSyncStatus.Synced);
+        await new BrowserLogbookStore(jsRuntime).SaveStateAsync(
+            new BrowserLogbookStateV2(document, [], null, HostedSync: hosted));
+        var session = CreateSession(jsRuntime);
+        await session.EnsureLoadedWorkbookAsync();
+        var rows = new[] { new MobileWorkbookMigrationRow(2, null, retainedEntry) };
+        var totals = MobileWorkbookMigrationTotals.Calculate(rows.Select(row => row.Entry));
+        var plan = new MobileWorkbookMigrationPlan(
+            "Disposable.xlsm",
+            new string('b', 64),
+            "3.0.0",
+            logbookId,
+            logbookId,
+            session.WorkbookCustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            rows,
+            totals,
+            MobileWorkbookMigrationCachedTotals.Empty,
+            MobileWorkbookMigrationReader.ComputeEntryValuesSha256(rows.Select(row => row.Entry)));
+
+        Assert.True(session.CanPreviewWorkbookMigration);
+        Assert.False(session.CanMigrateWorkbook);
+        var comparison = MobileWorkbookMigrationWorkflow.CompareWithApp(
+            plan,
+            session.DocumentV2.LogbookId,
+            session.CurrentEntriesV2.Select(entry => entry.Entry!),
+            session.WorkbookCustomFields,
+            session.DocumentV2.CurrencyOverrideDates);
+        Assert.True(comparison.IsExactDataMatch);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            session.ApplyWorkbookMigrationAsync(plan, DateTimeOffset.Parse("2026-08-25T02:00:00Z")));
+        Assert.Contains("already contains", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("VH-RETAINED", Assert.Single(session.CurrentEntriesV2).Entry?.Reg);
+        Assert.Null(session.WorkbookMigration);
+    }
+
+    [Fact]
     public async Task HostedInviteAcceptanceInitializesAppOnlyV2LogbookBeforeWorkbookImport()
     {
         var jsRuntime = new JourneyJsRuntime();

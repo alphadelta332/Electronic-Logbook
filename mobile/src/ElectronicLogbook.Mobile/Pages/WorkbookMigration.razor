@@ -54,7 +54,7 @@ else
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="OpenLogbook">Open migrated logbook</MudButton>
             </section>
         }
-        else if (!Session.CanMigrateWorkbook)
+        else if (!Session.CanPreviewWorkbookMigration)
         {
             <section class="form-section validation-summary" role="alert">
                 <strong>Migration is not available yet</strong>
@@ -64,6 +64,13 @@ else
         }
         else
         {
+            @if (!Session.CanMigrateWorkbook)
+            {
+                <section class="form-section validation-summary" role="status">
+                    <strong>Comparison only — app data cannot be changed here</strong>
+                    <span>This app logbook already contains flights or a manual package. You can inspect a disposable workbook copy and compare it with the app, but no migration control will be shown.</span>
+                </section>
+            }
             <section class="form-section">
                 <div class="section-title-row">
                     <div>
@@ -138,24 +145,102 @@ else
                     </div>
                 </section>
 
-                <section class="form-section">
-                    <div class="section-title-row">
-                        <div>
-                            <span class="eyebrow">Step 3</span>
-                            <h2>Confirm and migrate</h2>
+                @if (Comparison is { } comparison && !Session.CanMigrateWorkbook)
+                {
+                    <section class="form-section" aria-live="polite">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="eyebrow">Step 3</span>
+                                <h2>Workbook versus this app</h2>
+                            </div>
+                            <span class="draft-pill">@(comparison.IsExactDataMatch ? "Data match" : "Differences found")</span>
                         </div>
-                    </div>
-                    <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedDisposableCopy" /> I selected a disposable copy and kept the original workbook unchanged.</label>
-                    <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedIdentity" /> I checked the target app logbook identity and selected workbook identity above.</label>
-                    <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedValues" /> I checked the entry count, sample values, custom fields, and totals above.</label>
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.MoveToInbox" OnClick="ApplyMigrationAsync" Disabled="@(!CanApply)">
-                        Migrate and verify saved copy
-                    </MudButton>
-                    @if (IsBusy)
-                    {
-                        <span class="settings-status-line" role="status">Saving and reading the app logbook back from device storage…</span>
-                    }
-                </section>
+                        <div class="migration-facts">
+                            <MigrationFact Label="Workbook identity" Value="@IdentityMatchLabel(plan, comparison)" />
+                            <MigrationFact Label="Active entries" Value="@ComparisonLabel(comparison.EntryCountMatches, plan.Rows.Count, comparison.AppEntryCount)" />
+                            <MigrationFact Label="All entry values" Value="@MatchLabel(comparison.EntryValuesMatch)" />
+                            <MigrationFact Label="Custom fields" Value="@MatchLabel(comparison.CustomFieldsMatch)" />
+                            <MigrationFact Label="Currency override dates" Value="@MatchLabel(comparison.CurrencyOverrideDatesMatch)" />
+                            <MigrationFact Label="Calculated totals" Value="@MatchLabel(comparison.TotalsMatch)" />
+                            <MigrationFact Label="App values fingerprint" Value="@ShortHash(comparison.AppEntryValuesSha256)" />
+                            <MigrationFact Label="Flight time" Value="@HoursComparison(plan.CalculatedTotals.FlightHours, comparison.AppTotals.FlightHours)" />
+                            <MigrationFact Label="Simulator" Value="@HoursComparison(plan.CalculatedTotals.SimulatorHours, comparison.AppTotals.SimulatorHours)" />
+                            <MigrationFact Label="Logged time" Value="@HoursComparison(plan.CalculatedTotals.LoggedHours, comparison.AppTotals.LoggedHours)" />
+                            <MigrationFact Label="Landings" Value="@LandingsComparison(plan.CalculatedTotals, comparison.AppTotals)" />
+                        </div>
+
+                        @if (comparison.CustomFieldDifferences.Count > 0)
+                        {
+                            <h3>Custom-field label differences</h3>
+                            <div class="migration-custom-fields">
+                                @foreach (var difference in comparison.CustomFieldDifferences)
+                                {
+                                    <span>@difference.Order. @Text(difference.WorkbookLabel) in workbook / @Text(difference.AppLabel) in app</span>
+                                }
+                            </div>
+                        }
+
+                        @if (!comparison.EntryValuesMatch)
+                        {
+                            <h3>Flight differences</h3>
+                            @if (comparison.WorkbookOnlyRows.Count > 0)
+                            {
+                                <p><strong>Only in workbook (@comparison.WorkbookOnlyRows.Count)</strong></p>
+                                <div class="migration-preview-rows">
+                                    @foreach (var row in comparison.WorkbookOnlyRows.Take(5))
+                                    {
+                                        <article>
+                                            <strong>@FormatDate(row.Entry) · @Text(row.Entry.Reg)</strong>
+                                            <span>@Text(row.Entry.Type) · @Text(row.Entry.From) → @Text(row.Entry.To)</span>
+                                            <span>@FormatHours(MobileLogbookSession.WorkbookLoggedTime(row.Entry)) · workbook row @row.SourceRowNumber</span>
+                                        </article>
+                                    }
+                                </div>
+                            }
+                            @if (comparison.AppOnlyEntries.Count > 0)
+                            {
+                                <p><strong>Only in app (@comparison.AppOnlyEntries.Count)</strong></p>
+                                <div class="migration-preview-rows">
+                                    @foreach (var entry in comparison.AppOnlyEntries.Take(5))
+                                    {
+                                        <article>
+                                            <strong>@FormatDate(entry) · @Text(entry.Reg)</strong>
+                                            <span>@Text(entry.Type) · @Text(entry.From) → @Text(entry.To)</span>
+                                            <span>@FormatHours(MobileLogbookSession.WorkbookLoggedTime(entry))</span>
+                                        </article>
+                                    }
+                                </div>
+                            }
+                            @if (comparison.WorkbookOnlyRows.Count > 5 || comparison.AppOnlyEntries.Count > 5)
+                            {
+                                <p class="settings-status-line">The first five entries from each side are shown.</p>
+                            }
+                        }
+                        <p class="settings-status-line">A mismatch only reports a difference. This comparison does not save, import, delete, or replace any app data.</p>
+                    </section>
+                }
+
+                @if (Session.CanMigrateWorkbook)
+                {
+                    <section class="form-section">
+                        <div class="section-title-row">
+                            <div>
+                                <span class="eyebrow">Step 3</span>
+                                <h2>Confirm and migrate</h2>
+                            </div>
+                        </div>
+                        <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedDisposableCopy" /> I selected a disposable copy and kept the original workbook unchanged.</label>
+                        <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedIdentity" /> I checked the target app logbook identity and selected workbook identity above.</label>
+                        <label class="migration-confirmation"><input type="checkbox" @bind="ConfirmedValues" /> I checked the entry count, sample values, custom fields, and totals above.</label>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.MoveToInbox" OnClick="ApplyMigrationAsync" Disabled="@(!CanApply)">
+                            Migrate and verify saved copy
+                        </MudButton>
+                        @if (IsBusy)
+                        {
+                            <span class="settings-status-line" role="status">Saving and reading the app logbook back from device storage…</span>
+                        }
+                    </section>
+                }
             }
         }
     </section>
@@ -163,6 +248,7 @@ else
 
 @code {
     private MobileWorkbookMigrationPlan? Plan { get; set; }
+    private MobileWorkbookMigrationComparison? Comparison { get; set; }
     private bool IsBusy { get; set; }
     private bool ConfirmedDisposableCopy { get; set; }
     private bool ConfirmedIdentity { get; set; }
@@ -171,6 +257,7 @@ else
 
     private bool CanApply =>
         !IsBusy &&
+        Session.CanMigrateWorkbook &&
         Plan is { Rows.Count: > 0, CachedTotalsMatch: true } &&
         ConfirmedDisposableCopy &&
         ConfirmedIdentity &&
@@ -180,7 +267,9 @@ else
         ? "Verified"
         : Session.CanMigrateWorkbook
             ? "Not started"
-            : "Unavailable";
+            : Session.CanPreviewWorkbookMigration
+                ? "Compare only"
+                : "Unavailable";
 
     private string UnavailableReason => !Session.HasHostedSync
         ? "Return to Account and sync, connect the invited account, and finish initialization before migrating."
@@ -200,6 +289,7 @@ else
         IsBusy = true;
         ErrorMessage = null;
         Plan = null;
+        Comparison = null;
         ConfirmedDisposableCopy = false;
         ConfirmedIdentity = false;
         ConfirmedValues = false;
@@ -209,6 +299,12 @@ else
             if (file is not null)
             {
                 Plan = MobileWorkbookMigrationReader.Inspect(file, Session.DocumentV2.LogbookId);
+                Comparison = MobileWorkbookMigrationWorkflow.CompareWithApp(
+                    Plan,
+                    Session.DocumentV2.LogbookId,
+                    Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+                    Session.WorkbookCustomFields,
+                    Session.DocumentV2.CurrencyOverrideDates);
             }
         }
         catch (Exception ex) when (ex is BrowserFileStoreException or InvalidDataException or JSException)
@@ -256,4 +352,32 @@ else
     private static string Text(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
 
     private static string ShortHash(string value) => value.Length <= 16 ? value : $"{value[..16]}…";
+
+    private static string MatchLabel(bool matches) => matches ? "Match" : "Mismatch";
+
+    private static string IdentityMatchLabel(
+        MobileWorkbookMigrationPlan plan,
+        MobileWorkbookMigrationComparison comparison) => comparison.EmbeddedIdentityMatches switch
+        {
+            true => $"Match — {ShortIdentity(plan.TargetLogbookId)}",
+            false => $"Mismatch — {ShortIdentity(plan.EmbeddedWorkbookLogbookId)} workbook / {ShortIdentity(plan.TargetLogbookId)} app",
+            null => "Not recorded in workbook"
+        };
+
+    private static string ComparisonLabel(bool matches, int workbookCount, int appCount) =>
+        $"{MatchLabel(matches)} — {workbookCount} workbook / {appCount} app";
+
+    private static string HoursComparison(decimal workbookHours, decimal appHours) =>
+        $"{FormatHours(workbookHours)} workbook / {FormatHours(appHours)} app";
+
+    private static string LandingsComparison(
+        MobileWorkbookMigrationTotals workbook,
+        MobileWorkbookMigrationTotals app) =>
+        $"{workbook.DayLandings + workbook.NightLandings} workbook / {app.DayLandings + app.NightLandings} app";
+
+    private static string ShortIdentity(LogbookId? value) => value is null
+        ? "not recorded"
+        : value.Value.Value.Length <= 8
+            ? value.Value.Value
+            : $"…{value.Value.Value[^8..]}";
 }
