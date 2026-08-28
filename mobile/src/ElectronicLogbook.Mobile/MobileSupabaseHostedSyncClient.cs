@@ -788,7 +788,8 @@ public sealed class MobileSupabaseHostedSyncClient(
                 options.PlatformLabel ?? "Android",
                 null,
                 null),
-            cancellationToken);
+            cancellationToken,
+            ToInvitationAcceptanceException);
         return row;
     }
 
@@ -1002,7 +1003,8 @@ public sealed class MobileSupabaseHostedSyncClient(
         MobileHostedSyncConfig options,
         string functionName,
         TRequest payload,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<HttpStatusCode, string, Exception>? exceptionFactory = null)
     {
         using var request = NewRequest(options, HttpMethod.Post, $"/rest/v1/rpc/{functionName}", includeAuthorization: true);
         request.Headers.Accept.Clear();
@@ -1012,7 +1014,8 @@ public sealed class MobileSupabaseHostedSyncClient(
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
         {
-            throw ToHostedException(response.StatusCode, body);
+            throw exceptionFactory?.Invoke(response.StatusCode, body)
+                ?? ToHostedException(response.StatusCode, body);
         }
 
         try
@@ -1189,6 +1192,19 @@ public sealed class MobileSupabaseHostedSyncClient(
             ? HostedSignInFailureReason.InvitationRequired
             : HostedSignInFailureReason.InvalidVerificationCode;
         return new HostedSignInException(reason, message);
+    }
+
+    private static Exception ToInvitationAcceptanceException(HttpStatusCode statusCode, string body)
+    {
+        var error = ReadError(body);
+        if (error?.Message?.Contains("workbook migration required", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return new HostedSignInException(
+                HostedSignInFailureReason.WorkbookMigrationRequired,
+                "Finish moving your spreadsheet to FlightLogX on Windows, then sign in on this phone.");
+        }
+
+        return ToHostedException(statusCode, body);
     }
 
     private static HostedLedgerException ToHostedException(HttpStatusCode statusCode, string body)

@@ -48,6 +48,7 @@ It creates the minimum hosted ledger schema, constraints, indexes, RLS policies,
 bounded sync routines for:
 
 - invited accounts;
+- owner-managed `app_only` and `workbook_migration` invitation modes;
 - logbooks and owner-first memberships;
 - Android and workbook devices;
 - append-only encrypted operations;
@@ -81,7 +82,23 @@ Configure Auth in the Supabase dashboard for each project:
   language that does not reveal whether an address belongs to the pilot.
 
 Invitations are created administratively. The app and workbook must not contain a shared
-service credential capable of creating users.
+service credential capable of creating users. Set `accounts.onboarding_mode` to
+`workbook_migration` for the workbook-led pilot. The invitation RPC verifies the signed-in
+identity against `accounts.invited_email`, and rejects Android registration for that mode
+so the app must enter managed recovery after the Windows migration creates the hosted
+membership. Existing invitations default to `app_only` for backward compatibility; do
+not use that default for new workbook-led canaries.
+
+Workbook-led invitations use the authenticated `begin_workbook_migration`,
+`get_workbook_migration_status`, `fail_workbook_migration`, and
+`complete_workbook_migration` RPCs. `begin` atomically creates one migration logbook,
+owner membership, and workbook device; the account and source fingerprint uniquely bind
+all retries to those same resources. A failed attempt retains only a bounded failure code
+and resumes the same lifecycle. `complete` succeeds only when the hosted encrypted
+operation count matches the updater's verified count and stores a SHA-256 verification
+receipt. The underlying lifecycle table has no authenticated table access. Even after
+completion, the invitation RPC does not directly activate Android: the app must use the
+managed recovery path before a replacement device becomes active.
 
 Verify the redacted remote configuration after setup and before each canary:
 
@@ -202,19 +219,18 @@ is gitignored. Use the private-pilot project URL and anon key only. Re-run
 creating or changing that file so the Capacitor assets include the pilot transport
 configuration.
 
-### Gate 1 clean-slate connection recovery
+### Clean-slate connection recovery
 
-> **Pre-cohort blocker (2026-08-09):** the retained-connection workflow below only
-> repairs an installation that still has its hosted credential. A full uninstall or app
-> data clear also removes the credential and Android Keystore logbook key. Although the
-> encrypted operations remain in Supabase, the current client has no populated hosted
-> key envelope with which to decrypt them; completing email sign-in registers a new
-> device and initializes a different app-only logbook. Do not present database cleanup
-> and re-enrolment as user recovery. Before cohort launch, implement and rehearse the
-> recovery-code or trusted-device key-envelope design in
-> `docs/hosted-sync-architecture.md`, proving that reinstall + one sign-in restores the
-> existing logbook without duplicate devices, manual package import, or administrator
-> intervention.
+The managed-envelope implementation now discovers an existing membership before device
+or logbook creation, restores the logbook key into Android Keystore, replays hosted
+operations, and activates the replacement device only after verification. A
+`workbook_migration` invitation with no completed hosted membership is separately blocked
+from Android initialization and tells the user to finish the Windows migration.
+
+The remaining pre-cohort blocker is operational proof of that same path after the Windows
+migration has enrolled its managed envelope. Do not clear the retained Pixel app data for
+this proof. Use the disposable clean-install journey required by `TODO.md`; request the
+owner's explicit approval only after that independent evidence passes.
 
 Treat the current owner connection failure as an S2 blocked workflow. Preserve the
 retained credential and the single server device. The diagnostic build exposes a

@@ -142,6 +142,30 @@ public sealed record HostedSignInStart(
     string DeliveryHint,
     DateTimeOffset ExpiresAt);
 
+public enum HostedWorkbookMigrationStatus
+{
+    Pending,
+    Completed,
+    Failed
+}
+
+public sealed record HostedWorkbookMigration(
+    WorkbookMigrationId MigrationId,
+    HostedAccountId AccountId,
+    LogbookId LogbookId,
+    DeviceId DeviceId,
+    string SourceFingerprint,
+    HostedWorkbookMigrationStatus Status,
+    int AttemptCount,
+    int? ExpectedOperationCount,
+    int? VerifiedOperationCount,
+    string? VerificationReceiptHash,
+    string? FailureCode,
+    DateTimeOffset StartedAt,
+    DateTimeOffset UpdatedAt,
+    DateTimeOffset? CompletedAt,
+    DateTimeOffset? FailedAt);
+
 public sealed record HostedAccountId(string Value);
 
 public sealed record SyncSecretName(string Value);
@@ -170,7 +194,8 @@ public enum HostedSignInFailureReason
     AccountDisabled,
     DeviceRevoked,
     SignedOut,
-    PublicRegistrationBlocked
+    PublicRegistrationBlocked,
+    WorkbookMigrationRequired
 }
 
 public sealed class HostedSignInException(

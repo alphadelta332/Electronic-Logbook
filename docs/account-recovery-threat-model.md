@@ -26,13 +26,15 @@ support exports, or local browser storage.
 
 ## Recovery flow and trust boundaries
 
-1. First-time invitation proves control of the invited email and creates the Supabase
-   account.
-2. While that session is active, the user links the durable Google identity through
-   Credential Manager. Email OTP or magic link remains an explicit fallback.
-3. The first device creates the logbook key, its non-exportable device key pair, the
-   managed account-recovery envelope, and a separately rate-limited recovery-code
-   envelope.
+1. An owner-managed invitation records the invited email and either `app_only` or
+   `workbook_migration` onboarding. Invitation acceptance verifies that the authenticated
+   identity still has that email; the signed-in account cannot change either value.
+2. A `workbook_migration` invitation cannot register Android until the Windows migration
+   has created the hosted logbook and recovery envelope. This prevents a phone sign-in
+   from initializing a plausible-looking empty replacement. `app_only` remains the
+   explicit mode for a later cohort that starts without a workbook.
+3. The enrolling device creates the logbook key, device public-key material, the managed
+   account-recovery envelope, and any separately rate-limited recovery-code envelope.
 4. On reinstall, durable authentication occurs before device registration. The app
    queries active memberships and logbooks. If one already exists, it must not run
    app-only initialization or create another logbook.
@@ -45,6 +47,10 @@ support exports, or local browser storage.
 ## Fail-closed rules
 
 - No durable credential: offer email OTP/magic link fallback, then the recovery code.
+- Workbook-migration invitation without a completed hosted logbook: tell the user to
+  finish the Windows spreadsheet migration; do not register Android or initialize state.
+- Authenticated email differs from the invited email: reject acceptance without changing
+  the invitation or creating a device.
 - No recoverable envelope: do not create a new logbook for an account that already has
   an active membership; report a redacted recovery error.
 - More than one active logbook: require an explicit logbook choice after authentication,
@@ -72,14 +78,12 @@ support exports, or local browser storage.
 
 ## Implementation sequence
 
-1. Discover memberships after authentication and stop before device/logbook creation
-   when hosted state already exists.
-2. Add Credential Manager Sign in with Google and link it during first-time onboarding.
-3. Add native device key-pair generation/import plus the authenticated envelope service
-   and audited, idempotent device-enrolment RPC.
-4. Create both managed and recovery-code envelopes during first initialization.
-5. Restore ledger state before activation and `Synced`; then add Restore Credentials and
-   the full failure matrix.
+1. Implement the idempotent workbook-migration lifecycle and Windows Google sign-in.
+2. Enrol the Windows updater as a temporary migration device and create the managed
+   recovery envelope before Android arrival.
+3. Restore ledger and configuration state on a clean Android installation before device
+   activation and `Synced`.
+4. Prove the complete disposable workbook-to-clean-Android journey and its failure matrix.
 
 Primary platform references: [Android Credential Manager prerequisites](https://developer.android.com/identity/credential-manager/prerequisites),
 [Restore Credentials overview](https://developer.android.com/identity/sign-in/restore-credentials),

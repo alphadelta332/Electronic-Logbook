@@ -34,6 +34,11 @@ public readonly record struct DeviceId(string Value)
     public override string ToString() => Value;
 }
 
+public readonly record struct WorkbookMigrationId(string Value)
+{
+    public override string ToString() => Value;
+}
+
 public readonly record struct CustomFieldId(string Value)
 {
     public static CustomFieldId New() => new($"cf_{Guid.NewGuid():N}");

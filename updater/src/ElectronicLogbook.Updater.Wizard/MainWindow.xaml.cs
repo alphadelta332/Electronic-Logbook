@@ -241,6 +241,7 @@ public partial class MainWindow : Window
             {
                 UpdateChannel.Development => "Development",
                 UpdateChannel.Hotfix => "Hotfix",
+                UpdateChannel.Pilot => "Pilot",
                 UpdateChannel.LocalMaster => "Local Master",
                 _ => "Local Master"
             };
@@ -256,11 +257,19 @@ public partial class MainWindow : Window
                 UpdateChannel.Hotfix => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using hotfix build"
                     : $"Hotfix version: {masterVersion}",
+                UpdateChannel.Pilot => string.IsNullOrWhiteSpace(masterVersion)
+                    ? "Using private pilot build"
+                    : $"Pilot version: {masterVersion}",
                 _ => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using local master build"
                     : $"Local master version: {masterVersion}"
             };
-            var branchName = _context.Channel == UpdateChannel.Hotfix ? "hotfix" : "dev";
+            var branchName = _context.Channel switch
+            {
+                UpdateChannel.Hotfix => "hotfix",
+                UpdateChannel.Pilot => "pilot",
+                _ => "dev"
+            };
             SetReleaseSummaryMarkdown(await GetBranchReadmeSummaryAsync(
                 _context.Repository,
                 branchName,
@@ -1476,16 +1485,34 @@ public partial class MainWindow : Window
                 throw new InvalidOperationException(sourceCheck.Message);
             }
 
-            var migrator = new ExcelWorkbookMigrator(progressSink);
-            report = await Task.Run(() => migrator.Migrate(new MigrationRequest(
+            StagedWorkbookMigration? pilotStaging = null;
+            var migrationRequest = new MigrationRequest(
                 source,
                 resolvedMaster,
                 stagedOutput,
-                manifest), _updateCts.Token), _updateCts.Token);
+                manifest);
+            if (_context.Channel == UpdateChannel.Pilot)
+            {
+                AppendLog("validating the source and creating its untouched timestamped backup...");
+                var stager = new WorkbookMigrationStager(progressSink);
+                pilotStaging = await stager.StageAsync(migrationRequest, _updateCts.Token);
+                report = pilotStaging.MigrationReport;
+                _lastBackupPath = pilotStaging.BackupWorkbookPath;
+                _lastBackupExpectedVersion = report.SourceVersion;
+                AppendLog($"Untouched source backup: {_lastBackupPath}");
+                AppendLog("The original workbook remains unchanged until hosted migration is verified.");
+            }
+            else
+            {
+                var migrator = new ExcelWorkbookMigrator(progressSink);
+                report = await Task.Run(
+                    () => migrator.Migrate(migrationRequest, _updateCts.Token),
+                    _updateCts.Token);
+                _lastBackupPath = null;
+                _lastBackupExpectedVersion = null;
+            }
 
             _lastOutputPath = stagedOutput;
-            _lastBackupPath = null;
-            _lastBackupExpectedVersion = null;
             _lastReportPath = null;
             if (!string.IsNullOrWhiteSpace(diagnosticReportPath))
             {
@@ -1512,7 +1539,11 @@ public partial class MainWindow : Window
                 AppendLog(_context.HandoffNote);
             }
 
-            if (_context.UseInPlaceSwap)
+            if (pilotStaging is not null)
+            {
+                AppendLog("Pilot workbook staging complete; final installation is waiting for hosted verification.");
+            }
+            else if (_context.UseInPlaceSwap)
             {
                 AppendLog("finalising workbook handoff...");
                 var handoff = await Task.Run(
@@ -1540,6 +1571,7 @@ public partial class MainWindow : Window
             AppendLog("Waiting for workbook file to settle...");
             var finalWorkbookReady = await WaitForFileToSettleAsync(_lastOutputPath, _updateCts.Token);
             if (finalWorkbookReady &&
+                pilotStaging is null &&
                 _context.UseInPlaceSwap &&
                 !string.IsNullOrWhiteSpace(_lastBackupPath))
             {
@@ -1551,34 +1583,45 @@ public partial class MainWindow : Window
                 AppendLog("Post-handoff validation complete; older update backups pruned.");
             }
 
-            CompleteTitleText.Text = finalWorkbookReady
-                ? "Update Complete"
-                : "Update Complete With Warnings";
-            CompleteSummaryText.Text = finalWorkbookReady
-                ? (_context.UseInPlaceSwap
-                    ? "Update complete. The original filename now points to the updated workbook."
-                    : "The updated workbook was created as a separate file and validated.")
-                : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.";
+            CompleteTitleText.Text = pilotStaging is not null
+                ? (finalWorkbookReady ? "Workbook Prepared" : "Workbook Preparation Needs Attention")
+                : (finalWorkbookReady ? "Update Complete" : "Update Complete With Warnings");
+            CompleteSummaryText.Text = pilotStaging is not null
+                ? (finalWorkbookReady
+                    ? "The original workbook is unchanged. Its exact backup and the staged FlightLogX workbook are ready for the sign-in and hosted verification steps."
+                    : "The original workbook is unchanged, but the staged workbook file is still settling. Wait for OneDrive sync before continuing.")
+                : (finalWorkbookReady
+                    ? (_context.UseInPlaceSwap
+                        ? "Update complete. The original filename now points to the updated workbook."
+                        : "The updated workbook was created as a separate file and validated.")
+                    : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.");
             CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
-                "Current workbook",
+                pilotStaging is not null ? "Staged workbook" : "Current workbook",
                 _lastOutputPath,
                 _lastOutputExpectedVersion,
-                "Current workbook: not available");
+                pilotStaging is not null
+                    ? "Staged workbook: not available"
+                    : "Current workbook: not available");
             CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
                 "Retained backup",
                 _lastBackupPath,
                 _lastBackupExpectedVersion,
                 "Retained backup: not available");
-            RestoreBackupButton.IsEnabled = finalWorkbookReady &&
+            RestoreBackupButton.IsEnabled = pilotStaging is null &&
+                finalWorkbookReady &&
                 _context.UseInPlaceSwap &&
                 !string.IsNullOrWhiteSpace(_lastBackupPath);
-            OpenUpdatedCheckBox.IsEnabled = finalWorkbookReady;
-            OpenUpdatedCheckBox.IsChecked = finalWorkbookReady;
+            OpenUpdatedCheckBox.IsEnabled = pilotStaging is null && finalWorkbookReady;
+            OpenUpdatedCheckBox.IsChecked = pilotStaging is null && finalWorkbookReady;
             OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
                 File.Exists(_lastReportPath);
-            FooterStatusText.Text = finalWorkbookReady
-                ? "Update completed."
-                : "Update completed. Wait for sync before opening.";
+            FooterStatusText.Text = pilotStaging is not null
+                ? (finalWorkbookReady
+                    ? "Workbook preparation completed; sign-in is the next step."
+                    : "Workbook preparation completed. Wait for sync before continuing.")
+                : (finalWorkbookReady
+                    ? "Update completed."
+                    : "Update completed. Wait for sync before opening.");
 
             _stepIndex = 5;
         }
@@ -1636,7 +1679,8 @@ public partial class MainWindow : Window
                 _lastBackupPath,
                 _lastBackupExpectedVersion,
                 "Retained backup: not available");
-            RestoreBackupButton.IsEnabled = _context.UseInPlaceSwap &&
+            RestoreBackupButton.IsEnabled = _context.Channel != UpdateChannel.Pilot &&
+                _context.UseInPlaceSwap &&
                 !string.IsNullOrWhiteSpace(_lastBackupPath);
             OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
                 File.Exists(_lastReportPath);
@@ -2303,6 +2347,7 @@ public partial class MainWindow : Window
             "development" => UpdateChannel.Development,
             "dev" => UpdateChannel.Development,
             "hotfix" => UpdateChannel.Hotfix,
+            "pilot" => UpdateChannel.Pilot,
             "local-master" => UpdateChannel.LocalMaster,
             "localmaster" => UpdateChannel.LocalMaster,
             "local" => UpdateChannel.LocalMaster,
@@ -2494,6 +2539,7 @@ public partial class MainWindow : Window
         Stable,
         Development,
         Hotfix,
+        Pilot,
         LocalMaster
     }
 
@@ -2515,6 +2561,7 @@ public partial class MainWindow : Window
             UpdateChannel.Stable => "Stable",
             UpdateChannel.Development => "Development",
             UpdateChannel.Hotfix => "Hotfix",
+            UpdateChannel.Pilot => "Pilot",
             UpdateChannel.LocalMaster => "Local Master",
             _ => "Stable"
         };

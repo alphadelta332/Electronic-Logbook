@@ -2,7 +2,7 @@
 
 Status: pre-pilot operating plan
 
-Last checked: 2026-08-06
+Last checked: 2026-08-28
 
 This runbook defines the private, invitation-only Android-first pilot for hosted sync.
 It intentionally excludes public signup, billing, public uptime promises, and public
@@ -10,16 +10,70 @@ release hardening.
 
 ## Pilot Goal
 
-Run a small eight-week pilot that proves normal Electronic Logbook use works without
-manual packages:
+Run a small eight-week pilot that proves the workbook-led move to FlightLogX without
+manual packages. An existing `2.0.3` workbook is the one-time migration source. After
+the hosted migration is verified, the Android app is the normal editable logbook and
+Excel is used only for fresh exports. Continuing workbook/app synchronization is not
+part of this pilot.
 
-- app-only setup, sign-in, initialization, local entry, backup, restore, and export;
-- app-to-workbook and workbook-to-app sync through the existing updater;
-- offline local writes and later convergence;
-- actionable `Synced`, `Waiting`, `Offline`, `Signing in`, and `Needs attention`
-  states;
-- recovery, rollback, incident, and exit procedures that are understandable before
-  public-release planning begins.
+The controlled `pilot` update channel tests `3.0.0` while ordinary `main` workbooks stay
+on `2.0.3`. Pilot prerelease files are publicly downloadable because the repository and
+the `2.0.3` bootstrap use unauthenticated GitHub Release URLs. They are not advertised,
+linked from the public update channel, or offered to a workbook unless a coach explicitly
+changes that workbook to `GitHubBranch = pilot`.
+
+## Pilot Update Channel Bootstrap
+
+### Repository setup
+
+Before coaching any workbook, the owner must confirm all of the following:
+
+1. The remote `pilot` branch points to the exact approved `3.x` commit.
+2. The GitHub `pilot` environment requires owner approval.
+3. That environment contains repository variable
+   `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL` and secret
+   `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY` for the private-pilot Sydney project.
+4. The `Publish pilot wizard` workflow passed for that exact commit after its environment
+   approval.
+5. The resulting prerelease tag is `dev-wizard-<first 12 characters of the commit>` and
+   contains `pilot-wizard-channel.txt`. The old `dev-wizard-` name is intentional: the
+   `2.0.3` launcher requires it for the first hop.
+6. `origin/main:version.txt` is still `2.0.3` and the public latest release is still
+   `v2.0.3`.
+
+Do not coach the workbook change if any one of these checks fails. Do not substitute a
+development-branch build or a different Supabase project.
+
+### Coached change in the existing 2.0.3 workbook
+
+These steps are for the owner or a coached first canary only. They are not customer-facing
+public instructions.
+
+1. Open the existing `2.0.3` workbook and save it normally.
+2. Press `Alt+F11` to open the Visual Basic window.
+3. Press `Ctrl+G` to open the Immediate window at the bottom.
+4. Paste this exact line, then press Enter:
+
+   ```text
+   ThisWorkbook.Names("GitHubBranch").RefersToRange.Value2 = "pilot"
+   ```
+
+5. Close the Visual Basic window and save the workbook again.
+6. Use the workbook's normal update check and accept the `3.0.0` update.
+7. `2.0.3` will show one warning labelled `Development Updater Warning`. This is expected
+   because `2.0.3` does not yet know the word `pilot`. Confirm it only after the coach has
+   matched the approved pilot commit and prerelease tag from the repository setup above.
+8. Do not accept a second development warning after the workbook has reached `3.0.0`.
+   The `3.0.0` launcher understands `pilot` as its own channel.
+
+The updater copies only the exact `pilot` value into the upgraded workbook. It does not
+carry `dev`, `hotfix`, `main`, blank, or an arbitrary branch value across migration. This
+keeps the canary on the pilot channel without turning an accidental or hostile branch
+name into a durable update source.
+
+This channel bootstrap only selects and retains the pilot build. Do not treat it as proof
+that hosted migration, exact readback, Google recovery, workbook stamping, or Android
+arrival is complete; those have separate acceptance gates in `TODO.md`.
 
 ## Named Cohort
 
@@ -46,13 +100,13 @@ participant. Target maximum for the first run: 5 total participants.
 
 Supported for this pilot:
 
-- Android first, with the debug or acceptance Android app installed through the current
-  repo-supported path;
+- Android first, distributed through the approved private-pilot installation path once
+  that path passes its acceptance gate;
 - Pixel 8 Pro reference device and comparable Android phones that can run the current
   WebView/PWA build;
 - Australia/Sydney Supabase development or private-pilot project;
-- Windows Excel workbook use only through the existing `Electronic_Logbook_Master.xlsm`
-  plus the checked-in updater flow;
+- Windows Excel `2.0.3` as the one-time migration source through the controlled `pilot`
+  update channel and checked-in updater flow;
 - local encrypted app cache and hosted encrypted operation ledger.
 
 Out of scope:
@@ -61,26 +115,27 @@ Out of scope:
 - public signup;
 - billing or subscriptions;
 - user-owned cloud-file sync;
-- a separate Windows companion app;
+- continuing workbook/app synchronization;
 - public support or uptime commitments.
 
 ## Invitation Process
 
 1. Confirm the participant has the supported Android and, if relevant, Windows/Excel
    environment.
-2. Create or confirm the invited Supabase Auth user administratively. Public
-   self-registration must remain disabled.
-3. Create the matching hosted `accounts` invitation row.
-4. Ask the participant to install the Android build.
-5. Have the participant request the email sign-in code and enter the displayed six-digit
-   code within ten minutes. Tell them to check their junk or spam folder if it does not
-   arrive. Do not instruct participants to copy or open a sign-in link.
-6. Confirm `public.accept_hosted_invitation(...)` activates the account and registers
-   the Android device.
-7. For workbook-linked pilots, pair the workbook through the updater account connection
-   path. Do not use package import/export for normal pairing.
-8. Record start date, environment, and expected weekly check-in cadence in the private
-   cohort tracker.
+2. Provision the invited Google-account email through the owner-only enrolment path once
+   that path passes its acceptance gate. Public self-registration must remain disabled.
+3. Complete the repository and `2.0.3` coached channel checks above.
+4. Start the migration from the existing workbook, accept `3.0.0`, and use Google sign-in
+   in the Windows updater.
+5. Continue only after the updater reports exact hosted readback and completes the
+   workbook migration lifecycle.
+6. Ask the participant to install the approved Android pilot build and sign in with the
+   same Google account. The app must discover the completed migrated logbook without a
+   workbook picker or manual import.
+7. Keep the displayed six-digit email-code sign-in and package exchange in
+   Advanced/support only.
+8. Record the start date, environment, migration result, and expected weekly check-in
+   cadence in the private cohort tracker.
 
 ## Weekly Check-In
 

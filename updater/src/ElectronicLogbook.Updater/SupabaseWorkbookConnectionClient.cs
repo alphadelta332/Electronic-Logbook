@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -7,7 +8,7 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater;
 
-public sealed class SupabaseWorkbookConnectionClient : IDisposable
+public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMigrationRecoveryClient
 {
     private const string RecoveryEnvelopePath = "/functions/v1/recovery-envelope";
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
@@ -130,6 +131,74 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable
             row.Logbook.OperationFormatVersion)).ToArray();
     }
 
+    public async Task<HostedWorkbookMigration> BeginWorkbookMigrationAsync(
+        string sourceFingerprint,
+        string logbookDisplayName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceFingerprint);
+        ArgumentException.ThrowIfNullOrWhiteSpace(logbookDisplayName);
+        return ToWorkbookMigration(await SendMigrationRpcAsync(
+            "begin_workbook_migration",
+            new BeginWorkbookMigrationRequest(
+                sourceFingerprint,
+                logbookDisplayName,
+                configuration.PlatformLabel,
+                null,
+                null),
+            cancellationToken));
+    }
+
+    public async Task<HostedWorkbookMigration> GetWorkbookMigrationStatusAsync(
+        CancellationToken cancellationToken = default) =>
+        ToWorkbookMigration(await SendMigrationRpcAsync(
+            "get_workbook_migration_status",
+            new { },
+            cancellationToken));
+
+    public async Task<HostedWorkbookMigration> FailWorkbookMigrationAsync(
+        WorkbookMigrationId migrationId,
+        string failureCode,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(migrationId.Value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(failureCode);
+        return ToWorkbookMigration(await SendMigrationRpcAsync(
+            "fail_workbook_migration",
+            new FailWorkbookMigrationRequest(
+                ToUuid(migrationId.Value, "mig_"),
+                failureCode),
+            cancellationToken));
+    }
+
+    public async Task<HostedWorkbookMigration> CompleteWorkbookMigrationAsync(
+        WorkbookMigrationId migrationId,
+        int expectedOperationCount,
+        string verificationReceiptHash,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(migrationId.Value);
+        ArgumentException.ThrowIfNullOrWhiteSpace(verificationReceiptHash);
+        var completed = ToWorkbookMigration(await SendMigrationRpcAsync(
+            "complete_workbook_migration",
+            new CompleteWorkbookMigrationRequest(
+                ToUuid(migrationId.Value, "mig_"),
+                expectedOperationCount,
+                verificationReceiptHash),
+            cancellationToken));
+        if (completed.Status != HostedWorkbookMigrationStatus.Completed)
+        {
+            throw new InvalidDataException(
+                "The spreadsheet migration did not return a completed hosted state.");
+        }
+
+        PortableWorkbookMigrationRecoveryStore.Delete(
+            PortableWorkbookMigrationRecoveryStore.CreateTargetName(
+                completed.LogbookId,
+                completed.DeviceId));
+        return completed;
+    }
+
     public async Task<PortableLogbookKey> RestoreWorkbookKeyAsync(
         LogbookId logbookId,
         DeviceId deviceId,
@@ -156,6 +225,94 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable
         }
 
         return recoveryKeyPair.DecryptPackageKey(restored.WrappedKey);
+    }
+
+    public async Task EnrollWorkbookRecoveryAsync(
+        LogbookId logbookId,
+        DeviceId deviceId,
+        PortableLogbookKey logbookKey,
+        PortableWorkbookRecoveryKeyPair recoveryKeyPair,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(logbookKey);
+        ArgumentNullException.ThrowIfNull(recoveryKeyPair);
+
+        var configuration = await SendRecoveryAsync<RecoveryConfigurationResponse>(
+            new RecoveryRequest("configuration"),
+            cancellationToken);
+        using var ingressKey = ImportVerifiedRecoveryPublicKey(configuration);
+        var plaintextKey = logbookKey.ToBytes();
+        byte[] wrappedKey;
+        try
+        {
+            wrappedKey = ingressKey.Encrypt(plaintextKey, RSAEncryptionPadding.OaepSHA256);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintextKey);
+        }
+
+        RecoveryEnrollmentResponse enrolled;
+        try
+        {
+            enrolled = await SendRecoveryAsync<RecoveryEnrollmentResponse>(
+                new RecoveryRequest(
+                    "enroll",
+                    ToUuid(logbookId.Value, "log_"),
+                    ToUuid(deviceId.Value, "dev_"),
+                    recoveryKeyPair.PublicKey,
+                    recoveryKeyPair.Fingerprint,
+                    recoveryKeyPair.Algorithm,
+                    WrappedPackageKey: Convert.ToBase64String(wrappedKey),
+                    IngressKeyVersionId: configuration.KeyVersionId),
+                cancellationToken);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(wrappedKey);
+        }
+
+        if (!enrolled.Enrolled ||
+            !string.Equals(enrolled.KeyVersionId, configuration.KeyVersionId, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException("Workbook account recovery enrollment returned an invalid result.");
+        }
+    }
+
+    public async Task<PortableWorkbookMigrationRecoveryMaterial> PrepareAndEnrollWorkbookRecoveryAsync(
+        HostedWorkbookMigration migration,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(migration);
+        if (migration.Status != HostedWorkbookMigrationStatus.Pending)
+        {
+            throw new InvalidOperationException(
+                "Temporary recovery keys can be prepared only for a pending spreadsheet migration.");
+        }
+        if (migration.AccountId != RequireSession().AccountId)
+        {
+            throw new InvalidOperationException(
+                "The spreadsheet migration does not belong to the signed-in account.");
+        }
+
+        var material = PortableWorkbookMigrationRecoveryStore.LoadOrCreate(
+            migration.LogbookId,
+            migration.DeviceId);
+        try
+        {
+            await EnrollWorkbookRecoveryAsync(
+                migration.LogbookId,
+                migration.DeviceId,
+                material.LogbookKey,
+                material.RecoveryKeyPair,
+                cancellationToken);
+            return material;
+        }
+        catch
+        {
+            material.Dispose();
+            throw;
+        }
     }
 
     public async Task ActivateWorkbookDeviceAsync(
@@ -205,6 +362,116 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         return JsonSerializer.Deserialize<TResponse>(body, WebJson)
             ?? throw new InvalidDataException("Workbook account recovery returned an empty response.");
+    }
+
+    private async Task<WorkbookMigrationRow> SendMigrationRpcAsync<TRequest>(
+        string functionName,
+        TRequest payload,
+        CancellationToken cancellationToken)
+    {
+        using var request = NewRequest(
+            HttpMethod.Post,
+            $"/rest/v1/rpc/{functionName}",
+            includeAuthorization: true);
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.pgrst.object+json"));
+        request.Content = JsonContent(payload);
+        using var response = await http.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                "The spreadsheet migration could not update its resumable hosted state.");
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        return JsonSerializer.Deserialize<WorkbookMigrationRow>(body, WebJson)
+            ?? throw new InvalidDataException("The spreadsheet migration returned no resumable hosted state.");
+    }
+
+    private static HostedWorkbookMigration ToWorkbookMigration(WorkbookMigrationRow row) =>
+        new(
+            new WorkbookMigrationId("mig_" + Guid.Parse(row.MigrationId).ToString("N")),
+            new HostedAccountId("acct_" + Guid.Parse(row.AccountId).ToString("N")),
+            new LogbookId("log_" + Guid.Parse(row.LogbookId).ToString("N")),
+            new DeviceId("dev_" + Guid.Parse(row.DeviceId).ToString("N")),
+            row.SourceFingerprint,
+            row.Status switch
+            {
+                "pending" => HostedWorkbookMigrationStatus.Pending,
+                "completed" => HostedWorkbookMigrationStatus.Completed,
+                "failed" => HostedWorkbookMigrationStatus.Failed,
+                _ => throw new InvalidDataException("The spreadsheet migration returned an unknown state.")
+            },
+            row.AttemptCount,
+            row.ExpectedOperationCount,
+            row.VerifiedOperationCount,
+            row.VerificationReceiptHash,
+            row.FailureCode,
+            row.StartedAt,
+            row.UpdatedAt,
+            row.CompletedAt,
+            row.FailedAt);
+
+    private static RSA ImportVerifiedRecoveryPublicKey(RecoveryConfigurationResponse configuration)
+    {
+        if (!string.Equals(
+                configuration.Algorithm,
+                PortableWorkbookRecoveryKeyPair.AlgorithmName,
+                StringComparison.Ordinal) ||
+            string.IsNullOrWhiteSpace(configuration.PublicKey) ||
+            string.IsNullOrWhiteSpace(configuration.Fingerprint) ||
+            string.IsNullOrWhiteSpace(configuration.KeyVersionId))
+        {
+            throw new InvalidDataException("Workbook account recovery configuration is invalid.");
+        }
+
+        byte[] publicKey;
+        byte[] expectedFingerprint;
+        try
+        {
+            publicKey = Convert.FromBase64String(configuration.PublicKey);
+            expectedFingerprint = Convert.FromHexString(configuration.Fingerprint);
+        }
+        catch (FormatException ex)
+        {
+            throw new InvalidDataException("Workbook account recovery configuration is invalid.", ex);
+        }
+
+        try
+        {
+            var actualFingerprint = SHA256.HashData(publicKey);
+            if (expectedFingerprint.Length != actualFingerprint.Length ||
+                !CryptographicOperations.FixedTimeEquals(expectedFingerprint, actualFingerprint))
+            {
+                throw new InvalidDataException("Workbook account recovery configuration fingerprint does not match.");
+            }
+
+            var rsa = RSA.Create();
+            try
+            {
+                rsa.ImportSubjectPublicKeyInfo(publicKey, out var bytesRead);
+                if (bytesRead != publicKey.Length || rsa.KeySize < 2048)
+                {
+                    throw new InvalidDataException("Workbook account recovery configuration public key is invalid.");
+                }
+
+                return rsa;
+            }
+            catch
+            {
+                rsa.Dispose();
+                throw;
+            }
+        }
+        catch (CryptographicException ex)
+        {
+            throw new InvalidDataException("Workbook account recovery configuration public key is invalid.", ex);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(publicKey);
+            CryptographicOperations.ZeroMemory(expectedFingerprint);
+        }
     }
 
     private HttpRequestMessage NewRequest(HttpMethod method, string path, bool includeAuthorization)
@@ -367,17 +634,60 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable
 
     private sealed record RecoveryRequest(
         string Action,
-        string LogbookId,
-        string DeviceId,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LogbookId = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DeviceId = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DevicePublicKey = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DevicePublicKeyFingerprint = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DevicePublicKeyAlgorithm = null,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? PlatformLabel = null,
-        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DeviceType = null);
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DeviceType = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? WrappedPackageKey = null,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? IngressKeyVersionId = null);
+
+    private sealed record RecoveryConfigurationResponse(
+        string PublicKey,
+        string Fingerprint,
+        string Algorithm,
+        string KeyVersionId);
+
+    private sealed record RecoveryEnrollmentResponse(bool Enrolled, string KeyVersionId);
 
     private sealed record RecoveryRestoreResponse(string WrappedKey, string Algorithm, string KeyVersionId);
 
     private sealed record RecoveryActivationResponse(bool Activated);
+
+    private sealed record BeginWorkbookMigrationRequest(
+        [property: JsonPropertyName("p_source_fingerprint")] string SourceFingerprint,
+        [property: JsonPropertyName("p_logbook_display_name")] string LogbookDisplayName,
+        [property: JsonPropertyName("p_platform_label")] string PlatformLabel,
+        [property: JsonPropertyName("p_public_signing_key")] string? PublicSigningKey,
+        [property: JsonPropertyName("p_signing_key_fingerprint")] string? SigningKeyFingerprint);
+
+    private sealed record FailWorkbookMigrationRequest(
+        [property: JsonPropertyName("p_migration_id")] string MigrationId,
+        [property: JsonPropertyName("p_failure_code")] string FailureCode);
+
+    private sealed record CompleteWorkbookMigrationRequest(
+        [property: JsonPropertyName("p_migration_id")] string MigrationId,
+        [property: JsonPropertyName("p_expected_operation_count")] int ExpectedOperationCount,
+        [property: JsonPropertyName("p_verification_receipt_hash")] string VerificationReceiptHash);
+
+    private sealed record WorkbookMigrationRow(
+        [property: JsonPropertyName("migration_id")] string MigrationId,
+        [property: JsonPropertyName("account_id")] string AccountId,
+        [property: JsonPropertyName("logbook_id")] string LogbookId,
+        [property: JsonPropertyName("device_id")] string DeviceId,
+        [property: JsonPropertyName("source_fingerprint")] string SourceFingerprint,
+        string Status,
+        [property: JsonPropertyName("attempt_count")] int AttemptCount,
+        [property: JsonPropertyName("expected_operation_count")] int? ExpectedOperationCount,
+        [property: JsonPropertyName("verified_operation_count")] int? VerifiedOperationCount,
+        [property: JsonPropertyName("verification_receipt_hash")] string? VerificationReceiptHash,
+        [property: JsonPropertyName("failure_code")] string? FailureCode,
+        [property: JsonPropertyName("started_at")] DateTimeOffset StartedAt,
+        [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
+        [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
+        [property: JsonPropertyName("failed_at")] DateTimeOffset? FailedAt);
 
 }
 

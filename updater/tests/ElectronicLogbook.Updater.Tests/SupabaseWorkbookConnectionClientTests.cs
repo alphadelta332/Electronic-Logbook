@@ -75,6 +75,232 @@ public sealed class SupabaseWorkbookConnectionClientTests
     }
 
     [Fact]
+    public async Task WorkbookMigrationLifecycleUsesNarrowAuthenticatedRpcCallsAndStableResources()
+    {
+        var accountId = Guid.NewGuid();
+        var logbookId = Guid.NewGuid();
+        var handler = new WorkbookConnectionHandler(accountId, logbookId, PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+        var sourceFingerprint = new string('a', 64);
+        var receiptHash = new string('e', 64);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        var started = await client.BeginWorkbookMigrationAsync(sourceFingerprint, "Migrated Logbook");
+        var status = await client.GetWorkbookMigrationStatusAsync();
+        var failed = await client.FailWorkbookMigrationAsync(started.MigrationId, "NETWORK_INTERRUPTED");
+        var completed = await client.CompleteWorkbookMigrationAsync(started.MigrationId, 321, receiptHash);
+
+        Assert.Equal(HostedWorkbookMigrationStatus.Pending, started.Status);
+        Assert.Equal(started.MigrationId, status.MigrationId);
+        Assert.Equal(started.LogbookId, status.LogbookId);
+        Assert.Equal(started.DeviceId, status.DeviceId);
+        Assert.Equal(HostedWorkbookMigrationStatus.Failed, failed.Status);
+        Assert.Equal("NETWORK_INTERRUPTED", failed.FailureCode);
+        Assert.Equal(HostedWorkbookMigrationStatus.Completed, completed.Status);
+        Assert.Equal(321, completed.VerifiedOperationCount);
+        Assert.Equal(receiptHash, completed.VerificationReceiptHash);
+
+        var begin = handler.Requests.Single(request => request.Path.EndsWith("/begin_workbook_migration", StringComparison.Ordinal));
+        using var beginJson = JsonDocument.Parse(begin.Body);
+        Assert.Equal(sourceFingerprint, beginJson.RootElement.GetProperty("p_source_fingerprint").GetString());
+        Assert.Equal("Windows Migration", beginJson.RootElement.GetProperty("p_platform_label").GetString());
+        Assert.DoesNotContain("access-token", begin.Body, StringComparison.Ordinal);
+        Assert.All(
+            handler.Requests.Where(request => request.Path.Contains("workbook_migration", StringComparison.Ordinal)),
+            request => Assert.Equal("Bearer", request.AuthorizationScheme));
+    }
+
+    [Fact]
+    public async Task WorkbookMigrationEnrollsManagedRecoveryWithoutSendingPlaintextKey()
+    {
+        var accountId = Guid.NewGuid();
+        var logbookId = Guid.NewGuid();
+        var packageKey = PortableLogbookKey.Generate();
+        var handler = new WorkbookConnectionHandler(accountId, logbookId, packageKey);
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
+        using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
+
+        await client.EnrollWorkbookRecoveryAsync(
+            migration.LogbookId,
+            migration.DeviceId,
+            packageKey,
+            recoveryKeyPair);
+
+        Assert.True(handler.EnrollmentMatchedPackageKey);
+        var configurationRequest = handler.Requests.Single(request =>
+            request.Path == "/functions/v1/recovery-envelope" &&
+            JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "configuration");
+        var enrollmentRequest = handler.Requests.Single(request =>
+            request.Path == "/functions/v1/recovery-envelope" &&
+            JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "enroll");
+        using var enrollmentJson = JsonDocument.Parse(enrollmentRequest.Body);
+        Assert.Equal(logbookId.ToString("D"), enrollmentJson.RootElement.GetProperty("logbookId").GetString());
+        Assert.Equal(
+            recoveryKeyPair.PublicKey,
+            enrollmentJson.RootElement.GetProperty("devicePublicKey").GetString());
+        Assert.Equal("test-v1", enrollmentJson.RootElement.GetProperty("ingressKeyVersionId").GetString());
+        Assert.DoesNotContain(packageKey.ToRecoveryCode(), enrollmentRequest.Body, StringComparison.Ordinal);
+        Assert.Equal("Bearer", configurationRequest.AuthorizationScheme);
+        Assert.Equal("Bearer", enrollmentRequest.AuthorizationScheme);
+    }
+
+    [Fact]
+    public async Task WorkbookMigrationRecoveryResumesOneCredentialAndCompletionRemovesIt()
+    {
+        var handler = new WorkbookConnectionHandler(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
+        var targetName = PortableWorkbookMigrationRecoveryStore.CreateTargetName(
+            migration.LogbookId,
+            migration.DeviceId);
+
+        try
+        {
+            using var prepared = await client.PrepareAndEnrollWorkbookRecoveryAsync(migration);
+            using var resumed = await client.PrepareAndEnrollWorkbookRecoveryAsync(migration);
+
+            Assert.False(prepared.Resumed);
+            Assert.True(resumed.Resumed);
+            Assert.Equal(prepared.LogbookKey, resumed.LogbookKey);
+            Assert.Equal(
+                prepared.RecoveryKeyPair.Fingerprint,
+                resumed.RecoveryKeyPair.Fingerprint);
+            Assert.Equal(2, handler.EnrollmentPackageKeyFingerprints.Count);
+            Assert.Single(handler.EnrollmentPackageKeyFingerprints.Distinct(StringComparer.Ordinal));
+            using (var retained = PortableWorkbookMigrationRecoveryStore.Load(targetName))
+            {
+                Assert.NotNull(retained);
+            }
+
+            await client.CompleteWorkbookMigrationAsync(
+                migration.MigrationId,
+                expectedOperationCount: 321,
+                verificationReceiptHash: new string('e', 64));
+
+            Assert.Null(PortableWorkbookMigrationRecoveryStore.Load(targetName));
+        }
+        finally
+        {
+            PortableWorkbookMigrationRecoveryStore.Delete(targetName);
+        }
+    }
+
+    [Fact]
+    public async Task MigrationRecoveryCoordinatorConfirmsAndResumesTheSameHostedIdentityAndKeys()
+    {
+        var handler = new WorkbookConnectionHandler(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+        var coordinator = new WorkbookMigrationRecoveryCoordinator(client);
+        var sourceFingerprint = new string('a', 64);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        using var first = await coordinator.PrepareAsync(sourceFingerprint, "Migrated Logbook");
+        var targetName = first.RecoveryMaterial.CredentialTargetName;
+
+        try
+        {
+            using var retry = await coordinator.PrepareAsync(sourceFingerprint, "Migrated Logbook");
+
+            Assert.False(first.RecoveryMaterial.Resumed);
+            Assert.True(retry.RecoveryMaterial.Resumed);
+            Assert.Equal(first.Migration.MigrationId, retry.Migration.MigrationId);
+            Assert.Equal(first.Migration.AccountId, retry.Migration.AccountId);
+            Assert.Equal(first.Migration.LogbookId, retry.Migration.LogbookId);
+            Assert.Equal(first.Migration.DeviceId, retry.Migration.DeviceId);
+            Assert.Equal(first.RecoveryMaterial.LogbookKey, retry.RecoveryMaterial.LogbookKey);
+            Assert.Equal(
+                first.RecoveryMaterial.RecoveryKeyPair.Fingerprint,
+                retry.RecoveryMaterial.RecoveryKeyPair.Fingerprint);
+            Assert.Equal(2, handler.Requests.Count(request =>
+                request.Path.EndsWith("/begin_workbook_migration", StringComparison.Ordinal)));
+            Assert.Equal(2, handler.Requests.Count(request =>
+                request.Path.EndsWith("/get_workbook_migration_status", StringComparison.Ordinal)));
+            Assert.Equal(2, handler.EnrollmentPackageKeyFingerprints.Count);
+            Assert.Single(handler.EnrollmentPackageKeyFingerprints.Distinct(StringComparer.Ordinal));
+        }
+        finally
+        {
+            PortableWorkbookMigrationRecoveryStore.Delete(targetName);
+        }
+    }
+
+    [Fact]
+    public async Task WorkbookMigrationRejectsUnverifiedRecoveryIngressKeyBeforeEnrollment()
+    {
+        var packageKey = PortableLogbookKey.Generate();
+        var handler = new WorkbookConnectionHandler(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            packageKey,
+            invalidIngressFingerprint: true);
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
+        var targetName = PortableWorkbookMigrationRecoveryStore.CreateTargetName(
+            migration.LogbookId,
+            migration.DeviceId);
+
+        try
+        {
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                client.PrepareAndEnrollWorkbookRecoveryAsync(migration));
+
+            Assert.Contains("fingerprint", error.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(handler.Requests, request =>
+                request.Path == "/functions/v1/recovery-envelope" &&
+                JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "enroll");
+            using var retained = PortableWorkbookMigrationRecoveryStore.Load(targetName);
+            Assert.NotNull(retained);
+        }
+        finally
+        {
+            PortableWorkbookMigrationRecoveryStore.Delete(targetName);
+        }
+    }
+
+    [Fact]
     public void ConfigurationRejectsRemotePlaintextTransportAndAcceptsLoopback()
     {
         Assert.False(SupabaseHostedSyncConfiguration.TryCreate(
@@ -189,9 +415,18 @@ public sealed class SupabaseWorkbookConnectionClientTests
         Guid accountId,
         Guid logbookId,
         PortableLogbookKey packageKey,
-        bool rejectActivation = false) : HttpMessageHandler
+        bool rejectActivation = false,
+        bool invalidIngressFingerprint = false) : HttpMessageHandler
     {
+        private readonly Guid migrationId = Guid.NewGuid();
+        private readonly Guid migrationDeviceId = Guid.NewGuid();
+        private readonly RSA ingressKey = RSA.Create(2048);
+
         public List<RecordedRequest> Requests { get; } = [];
+
+        public bool EnrollmentMatchedPackageKey { get; private set; }
+
+        public List<string> EnrollmentPackageKeyFingerprints { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
@@ -238,10 +473,58 @@ public sealed class SupabaseWorkbookConnectionClientTests
                     """);
             }
 
+            if (path?.StartsWith("/rest/v1/rpc/", StringComparison.Ordinal) == true)
+            {
+                var status = path.EndsWith("/fail_workbook_migration", StringComparison.Ordinal)
+                    ? "failed"
+                    : path.EndsWith("/complete_workbook_migration", StringComparison.Ordinal)
+                        ? "completed"
+                        : "pending";
+                return Json(MigrationJson(status, body));
+            }
+
             if (path == "/functions/v1/recovery-envelope")
             {
                 using var json = JsonDocument.Parse(body);
                 var action = json.RootElement.GetProperty("action").GetString();
+                if (action == "configuration")
+                {
+                    var ingressPublicKey = ingressKey.ExportSubjectPublicKeyInfo();
+                    var fingerprint = invalidIngressFingerprint
+                        ? new string('0', 64)
+                        : Convert.ToHexString(SHA256.HashData(ingressPublicKey)).ToLowerInvariant();
+                    return Json(JsonSerializer.Serialize(new
+                    {
+                        publicKey = Convert.ToBase64String(ingressPublicKey),
+                        fingerprint,
+                        algorithm = PortableWorkbookRecoveryKeyPair.AlgorithmName,
+                        keyVersionId = "test-v1"
+                    }));
+                }
+
+                if (action == "enroll")
+                {
+                    var encrypted = Convert.FromBase64String(
+                        json.RootElement.GetProperty("wrappedPackageKey").GetString()!);
+                    var plaintext = ingressKey.Decrypt(encrypted, RSAEncryptionPadding.OaepSHA256);
+                    var expected = packageKey.ToBytes();
+                    try
+                    {
+                        EnrollmentMatchedPackageKey = CryptographicOperations.FixedTimeEquals(
+                            plaintext,
+                            expected);
+                        EnrollmentPackageKeyFingerprints.Add(
+                            Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant());
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(plaintext);
+                        CryptographicOperations.ZeroMemory(expected);
+                    }
+
+                    return Json("{\"enrolled\":true,\"keyVersionId\":\"test-v1\"}");
+                }
+
                 if (action == "activate")
                 {
                     if (rejectActivation)
@@ -272,6 +555,51 @@ public sealed class SupabaseWorkbookConnectionClientTests
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                ingressKey.Dispose();
+            }
+
+            base.Dispose(disposing);
+        }
+
+        private string MigrationJson(string status, string requestBody)
+        {
+            using var request = JsonDocument.Parse(string.IsNullOrWhiteSpace(requestBody) ? "{}" : requestBody);
+            var sourceFingerprint = request.RootElement.TryGetProperty("p_source_fingerprint", out var source)
+                ? source.GetString()
+                : new string('a', 64);
+            var failureCode = status == "failed"
+                ? request.RootElement.GetProperty("p_failure_code").GetString()
+                : null;
+            var receiptHash = status == "completed"
+                ? request.RootElement.GetProperty("p_verification_receipt_hash").GetString()
+                : null;
+            var verifiedCount = status == "completed"
+                ? request.RootElement.GetProperty("p_expected_operation_count").GetInt32()
+                : (int?)null;
+            return JsonSerializer.Serialize(new
+            {
+                migration_id = migrationId,
+                account_id = accountId,
+                logbook_id = logbookId,
+                device_id = migrationDeviceId,
+                source_fingerprint = sourceFingerprint,
+                status,
+                attempt_count = status == "pending" ? 1 : 2,
+                expected_operation_count = verifiedCount,
+                verified_operation_count = verifiedCount,
+                verification_receipt_hash = receiptHash,
+                failure_code = failureCode,
+                started_at = "2026-08-28T00:00:00Z",
+                updated_at = "2026-08-28T00:01:00Z",
+                completed_at = status == "completed" ? "2026-08-28T00:01:00Z" : null,
+                failed_at = status == "failed" ? "2026-08-28T00:01:00Z" : null
+            });
         }
 
         private static HttpResponseMessage Json(string body) =>

@@ -91,6 +91,15 @@ jobs:
             if (-not $release.isPrerelease) { continue }
             if ($oldTag -ne "dev-wizard" -and -not $oldTag.StartsWith("dev-wizard-")) { continue }
 
+            $oldRelease = gh release view $oldTag `
+              --repo $env:GITHUB_REPOSITORY `
+              --json assets `
+              | ConvertFrom-Json
+            if ($oldRelease.assets.name -contains "pilot-wizard-channel.txt") {
+              Write-Host "Preserving pilot channel bridge release $oldTag."
+              continue
+            }
+
             Write-Host "Deleting old development wizard release $oldTag."
             gh release delete $oldTag `
               --repo $env:GITHUB_REPOSITORY `

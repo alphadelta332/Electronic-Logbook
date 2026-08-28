@@ -147,6 +147,48 @@ values
     )
 on conflict (id) do nothing;
 
+insert into auth.users (
+    id,
+    instance_id,
+    aud,
+    role,
+    email,
+    encrypted_password,
+    email_confirmed_at,
+    raw_app_meta_data,
+    raw_user_meta_data,
+    created_at,
+    updated_at
+)
+values
+    (
+        '10000000-0000-0000-0000-000000000007',
+        '00000000-0000-0000-0000-000000000000',
+        'authenticated',
+        'authenticated',
+        'migration@example.invalid',
+        '',
+        now(),
+        '{"provider":"google","providers":["google"]}'::jsonb,
+        '{}'::jsonb,
+        now(),
+        now()
+    ),
+    (
+        '10000000-0000-0000-0000-000000000008',
+        '00000000-0000-0000-0000-000000000000',
+        'authenticated',
+        'authenticated',
+        'wrong-google@example.invalid',
+        '',
+        now(),
+        '{"provider":"google","providers":["google"]}'::jsonb,
+        '{}'::jsonb,
+        now(),
+        now()
+    )
+on conflict (id) do nothing;
+
 insert into public.accounts (account_id, invited_email, display_name, status, disabled_at)
 values
     ('10000000-0000-0000-0000-000000000001', 'owner@example.invalid', 'Owner', 'active', null),
@@ -154,6 +196,23 @@ values
     ('10000000-0000-0000-0000-000000000003', 'outsider@example.invalid', 'Outsider', 'active', null),
     ('10000000-0000-0000-0000-000000000004', 'disabled@example.invalid', 'Disabled', 'disabled', now()),
     ('10000000-0000-0000-0000-000000000005', 'invited@example.invalid', 'Invited', 'invited', null);
+
+insert into public.accounts (account_id, invited_email, display_name, status, onboarding_mode)
+values
+    (
+        '10000000-0000-0000-0000-000000000007',
+        'migration@example.invalid',
+        'Workbook Migration',
+        'invited',
+        'workbook_migration'
+    ),
+    (
+        '10000000-0000-0000-0000-000000000008',
+        'expected-google@example.invalid',
+        'Wrong Google Account',
+        'invited',
+        'workbook_migration'
+    );
 
 insert into public.logbooks (logbook_id, owner_account_id, display_name)
 values
@@ -263,6 +322,296 @@ values (
 );
 
 set local role authenticated;
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000007', true);
+
+select elb_rls_test.expect_error(
+    'workbook migration invitation cannot initialize an Android device',
+    $sql$
+        select public.accept_hosted_invitation(
+            'Workbook Migration',
+            'android',
+            'Fresh Android',
+            null,
+            null
+        )
+    $sql$,
+    '%workbook migration required%'
+);
+
+select elb_rls_test.assert_true(
+    'blocked workbook migration invitation remains pending without a device',
+    (
+        select status = 'invited'
+          and not exists (
+              select 1
+              from public.devices
+              where account_id = '10000000-0000-0000-0000-000000000007'
+          )
+        from public.accounts
+        where account_id = '10000000-0000-0000-0000-000000000007'
+    )
+);
+
+savepoint workbook_migration_acceptance;
+
+select public.begin_workbook_migration(
+    repeat('a', 64),
+    'Migrated Logbook',
+    'Windows Updater',
+    null,
+    null
+);
+
+select elb_rls_test.assert_true(
+    'begin creates one pending migration, logbook, membership, and workbook device',
+    (
+        select m.status = 'pending'
+          and m.attempt_count = 1
+          and a.status = 'active'
+          and d.device_type = 'workbook'
+          and d.status = 'active'
+          and lm.role = 'owner'
+          and lm.accepted_at is not null
+        from public.get_workbook_migration_status() m
+        join public.accounts a on a.account_id = m.account_id
+        join public.devices d on d.device_id = m.device_id
+        join public.logbook_memberships lm
+          on lm.logbook_id = m.logbook_id and lm.account_id = m.account_id
+        where m.account_id = '10000000-0000-0000-0000-000000000007'
+    )
+);
+
+select public.begin_workbook_migration(
+    repeat('a', 64),
+    'A retry cannot rename the hosted logbook',
+    'A retry cannot create another device',
+    null,
+    null
+);
+
+select elb_rls_test.assert_true(
+    'pending begin retry returns the same resources without duplicates',
+    (
+        select (select count(*) from public.get_workbook_migration_status()) = 1
+          and (select count(*) from public.logbooks where owner_account_id = m.account_id) = 1
+          and (select count(*) from public.devices where account_id = m.account_id) = 1
+          and attempt_count = 1
+        from public.get_workbook_migration_status() m
+        where m.account_id = '10000000-0000-0000-0000-000000000007'
+    )
+);
+
+select elb_rls_test.expect_error(
+    'retry rejects a different source workbook',
+    $sql$
+        select public.begin_workbook_migration(
+            repeat('b', 64), 'Different Workbook', 'Windows Updater', null, null
+        )
+    $sql$,
+    '%different workbook migration already exists%'
+);
+
+select public.fail_workbook_migration(
+    (select migration_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    'NETWORK_INTERRUPTED'
+);
+
+select public.fail_workbook_migration(
+    (select migration_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    'NETWORK_INTERRUPTED'
+);
+
+select elb_rls_test.assert_true(
+    'failure is idempotent and retains only a redacted code',
+    (
+        select status = 'failed'
+          and failure_code = 'NETWORK_INTERRUPTED'
+          and failed_at is not null
+          and attempt_count = 1
+        from public.get_workbook_migration_status()
+    )
+);
+
+select public.begin_workbook_migration(
+    repeat('a', 64), 'Migrated Logbook', 'Windows Updater', null, null
+);
+
+select elb_rls_test.assert_true(
+    'retry resumes the failed lifecycle without replacing hosted resources',
+    (
+        select status = 'pending'
+          and attempt_count = 2
+          and failure_code is null
+          and failed_at is null
+          and (select count(*) from public.logbooks where owner_account_id = m.account_id) = 1
+          and (select count(*) from public.devices where account_id = m.account_id) = 1
+        from public.get_workbook_migration_status() m
+        where m.account_id = '10000000-0000-0000-0000-000000000007'
+    )
+);
+
+select public.append_hosted_operation(
+    (select logbook_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    (select device_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    '60000000-0000-0000-0000-000000000007',
+    'rev_migration_001',
+    'entry_migration_001',
+    null,
+    '[]'::jsonb,
+    'upsert',
+    1,
+    repeat('c', 32),
+    repeat('n', 24),
+    repeat('t', 32),
+    repeat('d', 64),
+    now(),
+    '{}'::jsonb
+);
+
+select public.append_hosted_operation(
+    (select logbook_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    (select device_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    '60000000-0000-0000-0000-000000000007',
+    'rev_migration_001',
+    'entry_migration_001',
+    null,
+    '[]'::jsonb,
+    'upsert',
+    1,
+    repeat('c', 32),
+    repeat('n', 24),
+    repeat('t', 32),
+    repeat('d', 64),
+    now(),
+    '{}'::jsonb
+);
+
+select elb_rls_test.assert_true(
+    'operation retry is idempotent within the resumed migration logbook',
+    (
+        select count(*) = 1
+        from public.operations o
+        join public.get_workbook_migration_status() m on m.logbook_id = o.logbook_id
+        where m.account_id = '10000000-0000-0000-0000-000000000007'
+    )
+);
+
+select elb_rls_test.expect_error(
+    'completion refuses an unverified hosted operation count',
+    $sql$
+        select public.complete_workbook_migration(
+            (select migration_id from public.get_workbook_migration_status()
+             where account_id = '10000000-0000-0000-0000-000000000007'),
+            2,
+            repeat('e', 64)
+        )
+    $sql$,
+    '%operation count does not match%'
+);
+
+select public.complete_workbook_migration(
+    (select migration_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    1,
+    repeat('e', 64)
+);
+
+select public.complete_workbook_migration(
+    (select migration_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    1,
+    repeat('e', 64)
+);
+
+select elb_rls_test.assert_true(
+    'completion is idempotent and records the verified receipt',
+    (
+        select status = 'completed'
+          and expected_operation_count = 1
+          and verified_operation_count = 1
+          and verification_receipt_hash = repeat('e', 64)
+          and completed_at is not null
+        from public.get_workbook_migration_status()
+    )
+);
+
+select public.begin_workbook_migration(
+    repeat('a', 64), 'Migrated Logbook', 'Windows Updater', null, null
+);
+
+select elb_rls_test.expect_error(
+    'completed workbook migration still requires managed Android recovery',
+    $sql$
+        select public.accept_hosted_invitation(
+            'Workbook Migration', 'android', 'Recovered Android', null, null
+        )
+    $sql$,
+    '%workbook migration required%'
+);
+
+select elb_rls_test.assert_true(
+    'completed retry returns the receipt without another attempt or Android device',
+    (
+        select status = 'completed' and attempt_count = 2
+        from public.get_workbook_migration_status()
+    )
+    and not exists (
+        select 1 from public.devices
+        where account_id = '10000000-0000-0000-0000-000000000007'
+          and device_type = 'android'
+    )
+);
+
+rollback to savepoint workbook_migration_acceptance;
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000008', true);
+
+select elb_rls_test.expect_error(
+    'signed-in Google identity must match the invited email',
+    $sql$
+        select public.begin_workbook_migration(
+            repeat('f', 64),
+            'Wrong Google Account',
+            'Windows Updater',
+            null,
+            null
+        )
+    $sql$,
+    '%does not match invited email%'
+);
+
+select elb_rls_test.assert_true(
+    'wrong Google identity does not activate the invitation or create a device',
+    (
+        select status = 'invited'
+          and not exists (
+              select 1
+              from public.devices
+              where account_id = '10000000-0000-0000-0000-000000000008'
+          )
+        from public.accounts
+        where account_id = '10000000-0000-0000-0000-000000000008'
+    )
+);
+
+select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);
+
+select elb_rls_test.expect_error(
+    'authenticated account cannot change its owner-managed onboarding mode',
+    $sql$
+        update public.accounts
+        set onboarding_mode = 'workbook_migration'
+        where account_id = '10000000-0000-0000-0000-000000000001'
+    $sql$,
+    '%owner-managed%'
+);
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000005', true);
 

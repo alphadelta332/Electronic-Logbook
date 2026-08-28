@@ -678,6 +678,45 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
+    public async Task WorkbookMigrationInvitationStopsAndroidInitializationWithPlainLanguageFailure()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/rest/v1/rpc/accept_hosted_invitation"] =
+            (HttpStatusCode.BadRequest, """
+                {
+                  "code": "P0001",
+                  "message": "workbook migration required before Android sign-in"
+                }
+                """);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-28T00:00:00Z")));
+
+        await client.StartEmailSignInAsync("owner@example.com");
+        var error = await Assert.ThrowsAsync<HostedSignInException>(async () =>
+            await client.CompleteEmailSignInAsync("123456"));
+
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationRequired, error.Reason);
+        Assert.Equal(
+            "Finish moving your spreadsheet to FlightLogX on Windows, then sign in on this phone.",
+            error.Message);
+        Assert.DoesNotContain("Supabase", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("database", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Post && request.Path == "/rest/v1/logbooks");
+        Assert.DoesNotContain(handler.Requests, request =>
+            request.Method == HttpMethod.Post && request.Path == "/rest/v1/logbook_memberships");
+
+        var pending = await store.LoadAsync();
+        Assert.NotNull(pending);
+        Assert.Equal(new DeviceId("dev_pending"), pending.DeviceId);
+        Assert.Null(await client.GetCurrentSessionAsync());
+    }
+
+    [Fact]
     public async Task ReplacementRecoveryReusesStablePendingDeviceAndActivatesOnlyAfterCompletion()
     {
         var handler = new RecordingHandler();

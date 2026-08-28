@@ -19,6 +19,7 @@ Private Const RELEASE_MANIFEST_NAME As String = "release-manifest.json"
 Private Const WIZARD_SIGNATURE_REPORT_NAME As String = "wizard-signature-report.json"
 Private Const DEV_WIZARD_TAG_PREFIX As String = "dev-wizard-"
 Private Const DEV_WIZARD_COMMIT_NAME As String = "dev-wizard-commit.txt"
+Private Const PILOT_MIGRATION_VERSION As String = "3.0.0"
 
 Private mResolvedRef As String
 
@@ -27,17 +28,16 @@ Public Sub CheckForUpdate()
     Dim remoteVer As String
     Dim localVer  As String
     Dim msg       As String
+    Dim title     As String
 
     remoteVer = FetchRemoteVersion()
     If remoteVer = "" Then Exit Sub
 
     localVer = GetLocalVersion()
     If IsNewerVersion(remoteVer, localVer) Then
-        msg = "A new version of the Electronic Logbook is available!" & vbCrLf & vbCrLf & _
-              "  Your version:  " & localVer & vbCrLf & _
-              "  New version:   " & remoteVer & vbCrLf & vbCrLf & _
-              "Update now? Your flight data will not be affected."
-        If MsgBox(msg, vbYesNo + vbInformation, "Logbook Update Available") = vbYes Then
+        msg = BuildUpdateOfferMessage(localVer, remoteVer)
+        title = UpdateOfferTitle(remoteVer)
+        If MsgBox(msg, vbYesNo + vbInformation, title) = vbYes Then
             RunWizardUpdate remoteVer
         End If
     End If
@@ -59,7 +59,7 @@ Public Sub ConnectToElectronicLogbook()
               vbYesNo + vbInformation, "Connect to Electronic Logbook") <> vbYes Then Exit Sub
 
     targetVersion = FetchRemoteVersion()
-    If Not IsStableUpdateBranch(GetGitHubBranch()) Then
+    If RequiresDevelopmentWizardWarning(GetGitHubBranch()) Then
         If Not ConfirmDevelopmentWizardLaunch(targetVersion) Then Exit Sub
     End If
 
@@ -106,6 +106,7 @@ Public Sub CheckForUpdateManual()
     Dim remoteVer As String
     Dim localVer  As String
     Dim msg       As String
+    Dim title     As String
 
     remoteVer = FetchRemoteVersion()
     If remoteVer = "" Then
@@ -116,11 +117,9 @@ Public Sub CheckForUpdateManual()
 
     localVer = GetLocalVersion()
     If IsNewerVersion(remoteVer, localVer) Then
-        msg = "A new version is available!" & vbCrLf & vbCrLf & _
-              "  Your version:  " & localVer & vbCrLf & _
-              "  New version:   " & remoteVer & vbCrLf & vbCrLf & _
-              "Update now? Your flight data will not be affected."
-        If MsgBox(msg, vbYesNo + vbInformation, "Update Available") = vbYes Then
+        msg = BuildUpdateOfferMessage(localVer, remoteVer)
+        title = UpdateOfferTitle(remoteVer)
+        If MsgBox(msg, vbYesNo + vbInformation, title) = vbYes Then
             RunWizardUpdate remoteVer
         End If
     Else
@@ -128,6 +127,37 @@ Public Sub CheckForUpdateManual()
                vbInformation, "No Update Needed"
     End If
 End Sub
+
+Private Function BuildUpdateOfferMessage(ByVal localVer As String, _
+                                         ByVal remoteVer As String) As String
+    If IsPilotMigrationOffer(remoteVer) Then
+        BuildUpdateOfferMessage = _
+            "Your logbook is ready to move to FlightLogX." & vbCrLf & vbCrLf & _
+            "Version " & PILOT_MIGRATION_VERSION & " will guide you through moving the flights " & _
+            "in this workbook to the FlightLogX app." & vbCrLf & vbCrLf & _
+            "Nothing will change if you choose No." & vbCrLf & vbCrLf & _
+            "Start the move now?"
+    Else
+        BuildUpdateOfferMessage = _
+            "A new version of the Electronic Logbook is available!" & vbCrLf & vbCrLf & _
+            "  Your version:  " & localVer & vbCrLf & _
+            "  New version:   " & remoteVer & vbCrLf & vbCrLf & _
+            "Update now? Your flight data will not be affected."
+    End If
+End Function
+
+Private Function UpdateOfferTitle(ByVal remoteVer As String) As String
+    If IsPilotMigrationOffer(remoteVer) Then
+        UpdateOfferTitle = "Move to FlightLogX"
+    Else
+        UpdateOfferTitle = "Logbook Update Available"
+    End If
+End Function
+
+Private Function IsPilotMigrationOffer(ByVal remoteVer As String) As Boolean
+    IsPilotMigrationOffer = IsPilotUpdateBranch(GetGitHubBranch()) And _
+                            NormalizeVersionText(remoteVer) = PILOT_MIGRATION_VERSION
+End Function
 
 Private Sub RunWizardUpdate(ByVal newVersion As String)
     Dim sourceWorkbookPath As String
@@ -148,7 +178,7 @@ Private Sub RunWizardUpdate(ByVal newVersion As String)
     End If
 
     If wizardReason = "" Then
-        If Not releaseChannel Then
+        If RequiresDevelopmentWizardWarning(GetGitHubBranch()) Then
             If Not ConfirmDevelopmentWizardLaunch(newVersion) Then
                 MsgBox "Update cancelled. Your workbook has not been changed.", _
                        vbInformation, "Update Cancelled"
@@ -322,12 +352,23 @@ Private Function IsStableUpdateBranch(ByVal branchName As String) As Boolean
     IsStableUpdateBranch = (LCase$(Trim$(branchName)) = "main")
 End Function
 
+Private Function IsPilotUpdateBranch(ByVal branchName As String) As Boolean
+    IsPilotUpdateBranch = (LCase$(Trim$(branchName)) = "pilot")
+End Function
+
+Private Function RequiresDevelopmentWizardWarning(ByVal branchName As String) As Boolean
+    RequiresDevelopmentWizardWarning = Not IsStableUpdateBranch(branchName) And _
+                                       Not IsPilotUpdateBranch(branchName)
+End Function
+
 Private Function WorkbookUpdateChannelArgument() As String
     Dim branchName As String
 
     branchName = LCase$(Trim$(GetGitHubBranch()))
     If branchName = "hotfix" Then
         WorkbookUpdateChannelArgument = "hotfix"
+    ElseIf branchName = "pilot" Then
+        WorkbookUpdateChannelArgument = "pilot"
     ElseIf branchName = "main" Then
         WorkbookUpdateChannelArgument = "stable"
     Else
@@ -491,6 +532,8 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     If Not IsStableUpdateBranch(GetGitHubBranch()) Then
         If LCase$(Trim$(GetGitHubBranch())) = "hotfix" Then
             tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterHotfix"
+        ElseIf IsPilotUpdateBranch(GetGitHubBranch()) Then
+            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterPilot"
         Else
             tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
         End If

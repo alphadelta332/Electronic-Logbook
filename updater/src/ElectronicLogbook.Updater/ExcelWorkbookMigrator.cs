@@ -1186,6 +1186,19 @@ public sealed class ExcelWorkbookMigrator
             }
         }
 
+        var sourceUpdateChannel = ReadName(sourceWorkbook, "GitHubBranch");
+        if (ShouldPreservePilotUpdateChannel(sourceUpdateChannel))
+        {
+            try
+            {
+                outputWorkbook.Names.Item("GitHubBranch").RefersToRange.Value2 = "pilot";
+            }
+            catch
+            {
+                // Package validation reports a missing GitHubBranch defined name.
+            }
+        }
+
         try
         {
             outputWorkbook.Names.Item("RoutesDirty").RefersToRange.Value2 = routesDirty;
@@ -2105,6 +2118,11 @@ public sealed class ExcelWorkbookMigrator
                 column.Value,
                 column.Key);
         }
+    }
+
+    internal static bool ShouldPreservePilotUpdateChannel(string? sourceUpdateChannel)
+    {
+        return string.Equals(sourceUpdateChannel?.Trim(), "pilot", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LogbookFingerprintColumnIsPreserved(string name)
