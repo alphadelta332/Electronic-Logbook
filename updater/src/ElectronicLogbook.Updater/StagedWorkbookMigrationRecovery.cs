@@ -21,6 +21,40 @@ public sealed class StagedWorkbookMigrationRecovery
         ArgumentException.ThrowIfNullOrWhiteSpace(logbookDisplayName);
         ArgumentNullException.ThrowIfNull(continueWithEncryptedUpload);
 
+        await ValidateStagingAsync(staging, cancellationToken);
+
+        using var recoveryPreparation = await recoveryCoordinator.PrepareAsync(
+            staging.SourceFingerprint,
+            logbookDisplayName,
+            cancellationToken);
+
+        return await continueWithEncryptedUpload(recoveryPreparation, cancellationToken);
+    }
+
+    public async Task<TResult> RunAfterValidatedStagingOrCompletionAsync<TResult>(
+        StagedWorkbookMigration staging,
+        string logbookDisplayName,
+        Func<WorkbookMigrationRecoveryState, CancellationToken, Task<TResult>> continueWithHostedMigration,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(staging);
+        ArgumentException.ThrowIfNullOrWhiteSpace(logbookDisplayName);
+        ArgumentNullException.ThrowIfNull(continueWithHostedMigration);
+
+        await ValidateStagingAsync(staging, cancellationToken);
+
+        using var recoveryState = await recoveryCoordinator.BeginOrResumeAsync(
+            staging.SourceFingerprint,
+            logbookDisplayName,
+            cancellationToken);
+
+        return await continueWithHostedMigration(recoveryState, cancellationToken);
+    }
+
+    private static async Task ValidateStagingAsync(
+        StagedWorkbookMigration staging,
+        CancellationToken cancellationToken)
+    {
         var migrationReport = staging.MigrationReport;
         var originalWorkbookPath = Path.GetFullPath(staging.OriginalWorkbookPath);
         var stagedWorkbookPath = Path.GetFullPath(staging.StagedWorkbookPath);
@@ -77,12 +111,5 @@ public sealed class StagedWorkbookMigrationRecovery
             throw new InvalidDataException(
                 "The original workbook or its timestamped backup changed after staging.");
         }
-
-        using var recoveryPreparation = await recoveryCoordinator.PrepareAsync(
-            staging.SourceFingerprint,
-            logbookDisplayName,
-            cancellationToken);
-
-        return await continueWithEncryptedUpload(recoveryPreparation, cancellationToken);
     }
 }

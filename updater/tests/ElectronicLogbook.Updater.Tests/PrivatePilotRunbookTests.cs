@@ -36,7 +36,9 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("private-pilot database region is ap-southeast-2", preflightScript, StringComparison.Ordinal);
         Assert.Contains("Supabase management token sees active private-pilot project in ap-southeast-2", preflightScript, StringComparison.Ordinal);
         Assert.Contains("private-pilot project is not active and healthy", preflightScript, StringComparison.Ordinal);
-        Assert.Contains("Auth signup disabled with invited-user email and Google recovery only", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Google sign-in allows the Windows updater loopback callback", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("http://127.0.0.1:*/flightlogx-auth/**", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Auth signup disabled with invited-user email and Google only", preflightScript, StringComparison.Ordinal);
         Assert.Contains("Google returning-user recovery is not enabled", preflightScript, StringComparison.Ordinal);
         Assert.Contains("one or more unapproved Auth providers are enabled", preflightScript, StringComparison.Ordinal);
         Assert.Contains("and one hosted logbook", preflightScript, StringComparison.Ordinal);
@@ -58,6 +60,9 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("auth-dev.flightlogx.app", hostedSetup, StringComparison.Ordinal);
         Assert.Contains("auth.flightlogx.app", hostedSetup, StringComparison.Ordinal);
         Assert.Contains("Test-HostedEmailOtpConfiguration.ps1", hostedSetup, StringComparison.Ordinal);
+        Assert.Contains("system browser", hostedSetup, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("PKCE with SHA-256", hostedSetup, StringComparison.Ordinal);
+        Assert.Contains("http://127.0.0.1:*/flightlogx-auth/**", hostedSetup, StringComparison.Ordinal);
         Assert.Contains("mailer_otp_exp", emailOtpConfigScript, StringComparison.Ordinal);
         Assert.Contains("rate_limit_email_sent", emailOtpConfigScript, StringComparison.Ordinal);
         Assert.Contains("rate_limit_otp", emailOtpConfigScript, StringComparison.Ordinal);

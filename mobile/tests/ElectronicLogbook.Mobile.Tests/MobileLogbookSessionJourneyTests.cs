@@ -412,6 +412,40 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.False(session.HasHostedSync);
     }
 
+    [Theory]
+    [InlineData(HostedSignInFailureReason.WorkbookMigrationRequired)]
+    [InlineData(HostedSignInFailureReason.WorkbookMigrationFailed)]
+    [InlineData(HostedSignInFailureReason.WorkbookMigrationInvalid)]
+    public async Task GoogleSignInDoesNotCreateAnEmptyLogbookForIncompleteMigration(
+        HostedSignInFailureReason failureReason)
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var recovery = new RecordingReplacementRecoveryWorkflow();
+        var google = new RecordingGoogleAuthenticator(
+            new HostedSignInException(failureReason, "The spreadsheet migration cannot continue on Android."));
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-29T01:00:00Z"));
+        var session = CreateSession(
+            jsRuntime,
+            hostedAuthenticator: new InMemoryHostedLogbookAuthenticator(
+                new HostedAccountId("acct_private"),
+                new DeviceId("dev_android"),
+                clock),
+            syncClock: clock,
+            googleAuthenticator: google,
+            replacementRecovery: recovery);
+
+        await session.EnsureLoadedWorkbookAsync();
+        var originalLogbookId = session.DocumentV2.LogbookId;
+        var error = await Assert.ThrowsAsync<HostedSignInException>(session.SignInWithGoogleAsync);
+
+        Assert.Equal(failureReason, error.Reason);
+        Assert.Equal(0, recovery.AutomaticRecoveryCount);
+        Assert.Equal(originalLogbookId, session.DocumentV2.LogbookId);
+        Assert.Empty(session.DocumentV2.Operations);
+        Assert.False(session.HasHostedSync);
+        Assert.Empty(jsRuntime.ImportedPackageKeys);
+    }
+
     [Fact]
     public async Task RetainedHostedSessionRetriesIdempotentRecoveryEnrollmentWithUnchangedIdentifiers()
     {
@@ -728,7 +762,9 @@ public sealed class MobileLogbookSessionJourneyTests
                     PortableHostedSyncStatus.Waiting,
                     LedgerCursorVersion: BrowserHostedSyncState.CurrentLedgerCursorVersion),
                 BackgroundSyncReason.ManualRefresh));
-        Assert.Equal(PortableHostedSyncStatus.Synced, seeded.Status);
+        Assert.True(
+            seeded.Status == PortableHostedSyncStatus.Synced,
+            seeded.AttentionRequiredReason);
         Assert.Equal(223, seeded.LastAcknowledgedHostedRevision);
 
         var incompleteDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
@@ -760,7 +796,9 @@ public sealed class MobileLogbookSessionJourneyTests
                 BackgroundSyncReason.ManualRefresh));
         var persisted = legacyHostedState.WithResult(repaired, clock.UtcNow);
 
-        Assert.Equal(PortableHostedSyncStatus.Synced, repaired.Status);
+        Assert.True(
+            repaired.Status == PortableHostedSyncStatus.Synced,
+            repaired.AttentionRequiredReason);
         Assert.Equal(223, repaired.Document.Operations.Count);
         Assert.Equal(23, repaired.DownloadedOperationCount);
         Assert.Equal(223, repaired.LastAcknowledgedHostedRevision);

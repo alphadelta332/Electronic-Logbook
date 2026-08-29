@@ -646,6 +646,47 @@ public sealed class PortableLogbookWorkbookPackageStorageTests : IDisposable
     }
 
     [Fact]
+    public void ReadCurrentRowsForInspectionV2CountsUserRowsThatCannotBecomeFlights()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Custom 1", "Custom 2", "Custom 3", "Custom 4"]);
+        var columns = PortableLogbookWorkbookFieldCatalog.PilotEnteredColumnNames
+            .Concat([
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[0].WorkbookColumnName,
+                PortableLogbookWorkbookMetadata.HiddenLogbookColumns[1].WorkbookColumnName
+            ])
+            .ToArray();
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AT2", columns);
+        }
+
+        PortableLogbookWorkbookPackageStorage.WriteHiddenMetadataColumnValuesV2(
+            workbook,
+            [new PortableLogbookWorkbookRowV2(new EntryId("ent_valid"), new RevisionId("rev_valid"), CompleteWorkbookEntry())],
+            customFields);
+        using (var archive = ZipFile.Open(workbook, ZipArchiveMode.Update))
+        {
+            ReplaceLogbookTable(archive, "A1:AT3", columns);
+            var worksheet = ReadXml(archive, "xl/worksheets/sheet2.xml");
+            UpsertInlineStringCell(worksheet, "A3", "2026");
+            UpsertInlineStringCell(worksheet, "B3", "8");
+            UpsertInlineStringCell(worksheet, "C3", "29");
+            UpsertInlineStringCell(worksheet, "D3", "C172");
+            ReplaceXml(archive, "xl/worksheets/sheet2.xml", worksheet);
+        }
+
+        var inspection = PortableLogbookWorkbookPackageStorage.ReadCurrentRowsForInspectionV2(
+            workbook,
+            customFields);
+
+        Assert.Single(inspection.Rows);
+        Assert.Equal(2, inspection.UserDataRowCount);
+        Assert.Equal(1, inspection.UnrecognizedUserDataRowCount);
+    }
+
+    [Fact]
     public void ReadWorkbookCustomFieldDefinitionsPreservesNamedWorkbookHeaders()
     {
         var workbook = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version);

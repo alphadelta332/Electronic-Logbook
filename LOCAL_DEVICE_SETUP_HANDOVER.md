@@ -68,6 +68,12 @@ and non-secret classification. The internal manifest also records the Git branch
 commit, whether tracked/untracked repository state was clean, and redacted software
 versions.
 
+The Windows updater's Google sign-in uses the system's default HTTPS browser and returns
+through a short-lived listener bound only to `127.0.0.1`. The updater does not consume or
+bundle a Google client secret; its hosted provider credentials stay in Google/Supabase,
+while the hosted redirect allow list permits
+`http://127.0.0.1:*/flightlogx-auth/**`.
+
 It explicitly excludes:
 
 - `.NET` `bin`/`obj`, `node_modules`, Android builds, Gradle caches, and generated PWA

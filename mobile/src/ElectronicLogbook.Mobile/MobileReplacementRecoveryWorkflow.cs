@@ -136,6 +136,10 @@ public sealed class MobileReplacementRecoveryWorkflow(
                 cancellationToken);
             document = result.Document;
             hosted = hosted.WithResult(result, clock.UtcNow);
+            if (result.Status == PortableHostedSyncStatus.Synced)
+            {
+                VerifyCompletedWorkbookMigrationHistory(context.Membership, document);
+            }
             await logbookStore.SaveStateAsync(new BrowserLogbookStateV2(document, [], null, null, hosted));
 
             if (result.Status == PortableHostedSyncStatus.Synced)
@@ -158,6 +162,35 @@ public sealed class MobileReplacementRecoveryWorkflow(
         throw new MobileHostedDiagnosticException(
             "RECOVERY_LEDGER_PAGE_LIMIT",
             "The hosted logbook restore exceeded the safe continuation limit.");
+    }
+
+    private static void VerifyCompletedWorkbookMigrationHistory(
+        MobileHostedLogbookMembership membership,
+        PortableLogbookDocumentV2 document)
+    {
+        var expected = membership.WorkbookMigration;
+        if (expected is null)
+        {
+            return;
+        }
+
+        var migratedOperations = document.Operations
+            .Where(operation => operation.DeviceId == expected.SourceDeviceId)
+            .ToArray();
+        if (migratedOperations.Length != expected.ExpectedOperationCount
+            || migratedOperations.Any(operation =>
+                operation.Kind != PortableOperationKind.Create
+                || operation.Entry is null
+                || operation.LogbookId != document.LogbookId)
+            || migratedOperations.Select(operation => operation.EntryId).Distinct().Count()
+                != expected.ExpectedOperationCount
+            || migratedOperations.Select(operation => operation.RevisionId).Distinct().Count()
+                != expected.ExpectedOperationCount)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_MIGRATION_HISTORY_MISMATCH",
+                "The spreadsheet flights in hosted recovery do not match the completed migration. The replacement device was not activated; contact FlightLogX support.");
+        }
     }
 
     private async ValueTask VerifyDurableReadbackAsync(

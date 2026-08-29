@@ -460,6 +460,90 @@ public sealed class MobileSupabaseHostedSyncClientTests
         }
         """;
 
+    private static async Task<(HostedSignInException Exception, RecordingHandler Handler)> RunWorkbookMigrationGoogleSignInAsync(
+        string migrationJson,
+        string? membershipJson = null)
+    {
+        var handler = new RecordingHandler();
+        ConfigureWorkbookMigrationDiscovery(handler, migrationJson, membershipJson);
+        handler.ResponseOverrides["/auth/v1/token"] = (HttpStatusCode.OK, AuthSessionJson("google-refresh-token"));
+        var jsRuntime = new MemoryJsRuntime { GoogleIdToken = "google-id-token" };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            new BrowserHostedCredentialStore(jsRuntime),
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-29T00:00:00Z")),
+            new BrowserGoogleCredentialProvider(jsRuntime));
+
+        var exception = await Assert.ThrowsAsync<HostedSignInException>(async () =>
+            await client.SignInWithGoogleAsync());
+        return (exception, handler);
+    }
+
+    private static void ConfigureWorkbookMigrationDiscovery(
+        RecordingHandler handler,
+        string migrationJson,
+        string? membershipJson = null)
+    {
+        handler.ResponseOverrides["/rest/v1/accounts"] = (HttpStatusCode.OK, """
+            [{
+              "account_id": "10000000-0000-0000-0000-000000000001",
+              "status": "active",
+              "onboarding_mode": "workbook_migration"
+            }]
+            """);
+        handler.ResponseOverrides["/rest/v1/logbook_memberships"] = (HttpStatusCode.OK, membershipJson ?? """
+            [{
+              "logbook_id": "20000000-0000-0000-0000-000000000001",
+              "role": "owner",
+              "logbooks": {
+                "logbook_id": "20000000-0000-0000-0000-000000000001",
+                "current_schema_version": 2,
+                "operation_format_version": 1,
+                "deletion_requested_at": null,
+                "deleted_at": null
+              }
+            }]
+            """);
+        handler.ResponseOverrides["/rest/v1/rpc/get_workbook_migration_status"] =
+            (HttpStatusCode.OK, migrationJson);
+    }
+
+    private static string WorkbookMigrationJson(
+        string logbookId,
+        string status,
+        bool validCompletion = true,
+        int completedOperationCount = 1)
+    {
+        var completed = string.Equals(status, "completed", StringComparison.Ordinal);
+        var failed = string.Equals(status, "failed", StringComparison.Ordinal);
+        return JsonSerializer.Serialize(new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["logbook_id"] = logbookId,
+                ["device_id"] = "30000000-0000-0000-0000-000000000001",
+                ["source_fingerprint"] = new string('b', 64),
+                ["status"] = status,
+                ["expected_operation_count"] = completed ? completedOperationCount : null,
+                ["verified_operation_count"] = completed ? completedOperationCount : null,
+                ["verification_receipt_hash"] = completed
+                    ? new string(validCompletion ? 'a' : 'z', 64)
+                    : null,
+                ["failure_code"] = failed ? "UPLOAD_INTERRUPTED" : null,
+                ["completed_at"] = completed ? "2026-08-29T00:00:00Z" : null,
+                ["failed_at"] = failed ? "2026-08-29T00:00:00Z" : null
+            }
+        });
+    }
+
+    private static void AssertNoAndroidInitialization(RecordingHandler handler)
+    {
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post && request.Path == "/rest/v1/logbooks");
+        Assert.DoesNotContain(handler.Requests, request => request.Method == HttpMethod.Post && request.Path == "/rest/v1/logbook_memberships");
+    }
+
     private static string CreateJwt(object claims)
     {
         static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -675,6 +759,98 @@ public sealed class MobileSupabaseHostedSyncClientTests
         var pending = await store.LoadAsync();
         Assert.NotNull(pending);
         Assert.Equal(new DeviceId("dev_pending"), pending.DeviceId);
+    }
+
+    [Fact]
+    public async Task GoogleSignInOffersRecoveryOnlyForTheMatchingCompletedWorkbookMigration()
+    {
+        var handler = new RecordingHandler();
+        ConfigureWorkbookMigrationDiscovery(
+            handler,
+            WorkbookMigrationJson("20000000-0000-0000-0000-000000000001", "completed"));
+        handler.ResponseOverrides["/auth/v1/token"] = (HttpStatusCode.OK, AuthSessionJson("google-refresh-token"));
+        var jsRuntime = new MemoryJsRuntime { GoogleIdToken = "google-id-token" };
+        var store = new BrowserHostedCredentialStore(jsRuntime);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-29T00:00:00Z")),
+            new BrowserGoogleCredentialProvider(jsRuntime));
+
+        var error = await Assert.ThrowsAsync<HostedSignInException>(async () =>
+            await client.SignInWithGoogleAsync());
+
+        Assert.Equal(HostedSignInFailureReason.AccountRecoveryRequired, error.Reason);
+        Assert.Contains(handler.Requests, request => request.Path == "/rest/v1/rpc/get_workbook_migration_status");
+        AssertNoAndroidInitialization(handler);
+        Assert.Equal(new DeviceId("dev_pending"), (await store.LoadAsync())?.DeviceId);
+        var membership = Assert.Single(await client.DiscoverActiveLogbooksAsync());
+        var migration = Assert.IsType<MobileWorkbookMigrationRecoveryExpectation>(membership.WorkbookMigration);
+        Assert.Equal(new DeviceId("dev_30000000000000000000000000000001"), migration.SourceDeviceId);
+        Assert.Equal(1, migration.ExpectedOperationCount);
+        Assert.Equal(new string('b', 64), migration.SourceFingerprint);
+        Assert.Equal(new string('a', 64), migration.VerificationReceiptHash);
+    }
+
+    [Fact]
+    public async Task PendingWorkbookMigrationStopsGoogleSignInWithWindowsCompletionAction()
+    {
+        var error = await RunWorkbookMigrationGoogleSignInAsync(
+            WorkbookMigrationJson("20000000-0000-0000-0000-000000000001", "pending"));
+
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationRequired, error.Exception.Reason);
+        Assert.Equal(
+            "Finish moving your spreadsheet to FlightLogX on Windows, then sign in on this phone.",
+            error.Exception.Message);
+        AssertNoAndroidInitialization(error.Handler);
+    }
+
+    [Fact]
+    public async Task FailedWorkbookMigrationStopsGoogleSignInWithWindowsRetryAction()
+    {
+        var error = await RunWorkbookMigrationGoogleSignInAsync(
+            WorkbookMigrationJson("20000000-0000-0000-0000-000000000001", "failed"));
+
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationFailed, error.Exception.Reason);
+        Assert.Equal(
+            "The spreadsheet move did not finish. Retry it from the spreadsheet on Windows, then sign in on this phone.",
+            error.Exception.Message);
+        AssertNoAndroidInitialization(error.Handler);
+    }
+
+    [Fact]
+    public async Task MissingWorkbookMigrationStopsGoogleSignInBeforeAndroidInitialization()
+    {
+        var error = await RunWorkbookMigrationGoogleSignInAsync("[]", membershipJson: "[]");
+
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationRequired, error.Exception.Reason);
+        Assert.Contains("Windows", error.Exception.Message, StringComparison.Ordinal);
+        AssertNoAndroidInitialization(error.Handler);
+    }
+
+    [Fact]
+    public async Task InvalidOrMismatchedCompletedMigrationStopsGoogleSignInWithSupportAction()
+    {
+        var invalid = await RunWorkbookMigrationGoogleSignInAsync(
+            WorkbookMigrationJson("20000000-0000-0000-0000-000000000001", "completed", validCompletion: false));
+        var empty = await RunWorkbookMigrationGoogleSignInAsync(
+            WorkbookMigrationJson(
+                "20000000-0000-0000-0000-000000000001",
+                "completed",
+                completedOperationCount: 0));
+        var mismatched = await RunWorkbookMigrationGoogleSignInAsync(
+            WorkbookMigrationJson("20000000-0000-0000-0000-000000000099", "completed"));
+
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationInvalid, invalid.Exception.Reason);
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationInvalid, empty.Exception.Reason);
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationInvalid, mismatched.Exception.Reason);
+        Assert.Contains("contact FlightLogX support", invalid.Exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("contact FlightLogX support", empty.Exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("contact FlightLogX support", mismatched.Exception.Message, StringComparison.OrdinalIgnoreCase);
+        AssertNoAndroidInitialization(invalid.Handler);
+        AssertNoAndroidInitialization(empty.Handler);
+        AssertNoAndroidInitialization(mismatched.Handler);
     }
 
     [Fact]
@@ -1003,6 +1179,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
                 "/rest/v1/rpc/accept_hosted_invitation" => """
                     { "device_id": "40000000-0000-0000-0000-000000000001" }
                     """,
+                "/rest/v1/rpc/get_workbook_migration_status" => "[]",
                 "/rest/v1/logbooks" => "{}",
                 "/rest/v1/logbook_memberships" => "[]",
                 "/rest/v1/rpc/append_hosted_operation" => OperationJson,

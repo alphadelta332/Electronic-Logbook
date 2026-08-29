@@ -166,6 +166,52 @@ public static class PortableLogbookWorkbookPackageStorage
             string.IsNullOrWhiteSpace(attention) ? null : attention);
     }
 
+    public static WorkbookMigrationStamp? ReadWorkbookMigrationStamp(string workbookPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+
+        using var packageStream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(packageStream, ZipArchiveMode.Read, leaveOpen: false);
+        var status = ReadDefinedNameCellValue(
+            archive,
+            PortableLogbookWorkbookMetadata.FlightLogXMigrationStatusName);
+        var completedAtText = ReadDefinedNameCellValue(
+            archive,
+            PortableLogbookWorkbookMetadata.FlightLogXMigrationCompletedAtName);
+        var migrationIdText = ReadDefinedNameCellValue(
+            archive,
+            PortableLogbookWorkbookMetadata.FlightLogXMigrationIdName);
+
+        if (string.IsNullOrWhiteSpace(status) &&
+            string.IsNullOrWhiteSpace(completedAtText) &&
+            string.IsNullOrWhiteSpace(migrationIdText))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(status) ||
+            string.IsNullOrWhiteSpace(completedAtText) ||
+            string.IsNullOrWhiteSpace(migrationIdText) ||
+            !DateTimeOffset.TryParse(
+                completedAtText,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var completedAt))
+        {
+            throw new InvalidDataException(
+                "The FlightLogX workbook migration stamp is incomplete or invalid.");
+        }
+
+        return new WorkbookMigrationStamp(
+            status,
+            completedAt,
+            new WorkbookMigrationId(migrationIdText));
+    }
+
     public static PortableLogbookCurrencyOverrideDates ReadCurrencyOverrideDates(string workbookPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
@@ -597,6 +643,11 @@ public static class PortableLogbookWorkbookPackageStorage
 
     public static IReadOnlyList<PortableLogbookWorkbookRowV2> ReadCurrentRowsV2(
         string workbookPath,
+        IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null) =>
+        ReadCurrentRowsForInspectionV2(workbookPath, customFieldDefinitions).Rows;
+
+    internal static WorkbookLogbookRowsInspectionV2 ReadCurrentRowsForInspectionV2(
+        string workbookPath,
         IEnumerable<CustomFieldDefinition>? customFieldDefinitions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
@@ -652,6 +703,8 @@ public static class PortableLogbookWorkbookPackageStorage
         var customFieldsByLabel = (customFieldDefinitions ?? [])
             .ToDictionary(field => field.Label, StringComparer.OrdinalIgnoreCase);
         var rows = new List<PortableLogbookWorkbookRowV2>();
+        var userDataRowCount = 0;
+        var unrecognizedUserDataRowCount = 0;
 
         for (var rowNumber = startRow + 1; rowNumber <= endRow; rowNumber++)
         {
@@ -706,8 +759,15 @@ public static class PortableLogbookWorkbookPackageStorage
                 }
             }
 
-            if (!rowHasUserData || !LooksLikeWorkbookFlightEntryV2(values))
+            if (!rowHasUserData)
             {
+                continue;
+            }
+
+            userDataRowCount++;
+            if (!LooksLikeWorkbookFlightEntryV2(values))
+            {
+                unrecognizedUserDataRowCount++;
                 continue;
             }
 
@@ -722,7 +782,10 @@ public static class PortableLogbookWorkbookPackageStorage
                 PortableLogbookWorkbookEntryFields.FromFieldValues(values, (customFieldDefinitions ?? []).ToArray())));
         }
 
-        return rows;
+        return new WorkbookLogbookRowsInspectionV2(
+            rows,
+            userDataRowCount,
+            unrecognizedUserDataRowCount);
     }
 
     public static IReadOnlyList<CustomFieldDefinition> ReadWorkbookCustomFieldDefinitions(string workbookPath)
@@ -1212,6 +1275,46 @@ public static class PortableLogbookWorkbookPackageStorage
             status,
             statusAt,
             attentionRequiredReason,
+            result.NamesAdded,
+            result.CellsWritten);
+    }
+
+    public static WorkbookMigrationStampPackageResult EnsureWorkbookMigrationStamp(
+        string workbookPath,
+        WorkbookMigrationStamp stamp)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(workbookPath);
+        ArgumentNullException.ThrowIfNull(stamp);
+        ArgumentException.ThrowIfNullOrWhiteSpace(stamp.Status);
+
+        var existing = ReadWorkbookMigrationStamp(workbookPath);
+        if (existing is not null)
+        {
+            if (existing != stamp)
+            {
+                throw new InvalidDataException(
+                    "The staged workbook already contains a different FlightLogX migration stamp.");
+            }
+
+            return new WorkbookMigrationStampPackageResult(stamp, [], []);
+        }
+
+        var values = new (string Name, string Value)[]
+        {
+            (PortableLogbookWorkbookMetadata.FlightLogXMigrationStatusName, stamp.Status),
+            (PortableLogbookWorkbookMetadata.FlightLogXMigrationCompletedAtName, stamp.CompletedAt.ToString("O", System.Globalization.CultureInfo.InvariantCulture)),
+            (PortableLogbookWorkbookMetadata.FlightLogXMigrationIdName, stamp.MigrationId.Value)
+        };
+        var result = WriteMetadataValues(workbookPath, values);
+        var readBack = ReadWorkbookMigrationStamp(workbookPath);
+        if (readBack != stamp)
+        {
+            throw new InvalidDataException(
+                "The FlightLogX workbook migration stamp could not be verified after it was written.");
+        }
+
+        return new WorkbookMigrationStampPackageResult(
+            stamp,
             result.NamesAdded,
             result.CellsWritten);
     }
@@ -2756,6 +2859,19 @@ public sealed record PortableHostedWorkbookMetadataPackageResult(
     string Status,
     DateTimeOffset StatusAt,
     string? AttentionRequiredReason,
+    IReadOnlyList<string> NamesAdded,
+    IReadOnlyList<string> CellsWritten)
+{
+    public bool WorkbookMutated => NamesAdded.Count > 0 || CellsWritten.Count > 0;
+}
+
+public sealed record WorkbookMigrationStamp(
+    string Status,
+    DateTimeOffset CompletedAt,
+    WorkbookMigrationId MigrationId);
+
+public sealed record WorkbookMigrationStampPackageResult(
+    WorkbookMigrationStamp Stamp,
     IReadOnlyList<string> NamesAdded,
     IReadOnlyList<string> CellsWritten)
 {

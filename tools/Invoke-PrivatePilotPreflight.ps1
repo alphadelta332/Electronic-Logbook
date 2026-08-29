@@ -201,7 +201,32 @@ $runtimeConfig = $null
     }
 }))
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "Auth signup disabled with invited-user email and Google recovery only" -Action {
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Google sign-in allows the Windows updater loopback callback" -Action {
+    if ([string]::IsNullOrWhiteSpace($supabaseManagementToken)) {
+        throw "Supabase management access token is not configured"
+    }
+    if ($null -eq $localSupabaseConfig -or $null -eq $localSupabaseConfig.privatePilot) {
+        throw "local private-pilot project metadata is not configured"
+    }
+    $projectRef = $localSupabaseConfig.privatePilot.project_ref
+    if ([string]::IsNullOrWhiteSpace($projectRef)) {
+        throw "local private-pilot project ref is not configured"
+    }
+
+    $authConfig = Invoke-RestMethod `
+        -Uri "https://api.supabase.com/v1/projects/$projectRef/config/auth" `
+        -Headers @{ Authorization = "Bearer $supabaseManagementToken" } `
+        -Method Get
+    if ($authConfig.external_google_enabled -ne $true) {
+        throw "Google sign-in is not enabled"
+    }
+    $redirects = @($authConfig.uri_allow_list -split ',' | ForEach-Object { $_.Trim() })
+    if ($redirects -notcontains "http://127.0.0.1:*/flightlogx-auth/**") {
+        throw "Windows updater loopback callback is not allow-listed"
+    }
+}))
+
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Auth signup disabled with invited-user email and Google only" -Action {
     if ($null -eq $runtimeConfig) {
         $script:runtimeConfig = Get-Content -LiteralPath $runtimeConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     }

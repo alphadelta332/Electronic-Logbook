@@ -30,7 +30,8 @@ public sealed class WorkbookMigrationStager
 
     public async Task<StagedWorkbookMigration> StageAsync(
         MigrationRequest request,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? expectedSourceFingerprint = null)
     {
         request = MigrationRequestValidator.Validate(request);
         cancellationToken.ThrowIfCancellationRequested();
@@ -38,6 +39,12 @@ public sealed class WorkbookMigrationStager
         var sourceVersion = WorkbookPackageValidator.ValidateWorkbookPackage(request.SourcePath);
         CompatibilityPolicy.LoadDefault().ThrowIfUnsupported(sourceVersion);
         var sourceFingerprint = await Integrity.Sha256Async(request.SourcePath, cancellationToken);
+        if (!string.IsNullOrWhiteSpace(expectedSourceFingerprint) &&
+            !string.Equals(sourceFingerprint, expectedSourceFingerprint, StringComparison.Ordinal))
+        {
+            throw new InvalidDataException(
+                "The source workbook changed after its pre-migration summary was shown. Run the checks again before continuing.");
+        }
 
         var backupPath = BuildBackupPath(request.SourcePath, utcNow());
         var backupVerified = false;

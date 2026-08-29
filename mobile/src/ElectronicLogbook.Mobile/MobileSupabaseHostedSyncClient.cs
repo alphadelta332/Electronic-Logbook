@@ -493,14 +493,108 @@ public sealed class MobileSupabaseHostedSyncClient(
             + "&logbooks.deletion_requested_at=is.null&logbooks.deleted_at=is.null"
             + "&order=granted_at.asc",
             cancellationToken);
-        return rows
+        var memberships = rows
             .Select(row => new MobileHostedLogbookMembership(
                 FromHostedLogbookUuid(row.LogbookId),
                 row.Role,
                 row.Logbook.CurrentSchemaVersion,
                 row.Logbook.OperationFormatVersion))
             .ToArray();
+        var accountRows = await GetRestAsync<HostedAccountRow[]>(
+            options,
+            "/rest/v1/accounts?select=account_id,status,onboarding_mode"
+            + $"&account_id=eq.{accountUuid}",
+            cancellationToken);
+        var account = accountRows.SingleOrDefault()
+            ?? throw new HostedSignInException(
+                HostedSignInFailureReason.InvitationRequired,
+                "This Google account is not the invited FlightLogX account. Sign out and use the same Google account as the spreadsheet migration.");
+        if (!string.Equals(account.OnboardingMode, "workbook_migration", StringComparison.OrdinalIgnoreCase))
+        {
+            return memberships;
+        }
+
+        var migrations = await RpcAsync<EmptyRpcRequest, WorkbookMigrationDiscoveryRow[]>(
+            options,
+            "get_workbook_migration_status",
+            new EmptyRpcRequest(),
+            cancellationToken);
+        return ValidateWorkbookMigrationRecovery(memberships, migrations);
     }
+
+    private static IReadOnlyList<MobileHostedLogbookMembership> ValidateWorkbookMigrationRecovery(
+        IReadOnlyList<MobileHostedLogbookMembership> memberships,
+        IReadOnlyList<WorkbookMigrationDiscoveryRow> migrations)
+    {
+        if (migrations.Count == 0)
+        {
+            if (memberships.Count > 0)
+            {
+                throw WorkbookMigrationInvalid();
+            }
+
+            throw new HostedSignInException(
+                HostedSignInFailureReason.WorkbookMigrationRequired,
+                "Finish moving your spreadsheet to FlightLogX on Windows, then sign in on this phone.");
+        }
+        if (migrations.Count != 1)
+        {
+            throw WorkbookMigrationInvalid();
+        }
+
+        var migration = migrations[0];
+        if (string.Equals(migration.Status, "pending", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.WorkbookMigrationRequired,
+                "Finish moving your spreadsheet to FlightLogX on Windows, then sign in on this phone.");
+        }
+        if (string.Equals(migration.Status, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.WorkbookMigrationFailed,
+                "The spreadsheet move did not finish. Retry it from the spreadsheet on Windows, then sign in on this phone.");
+        }
+        if (!string.Equals(migration.Status, "completed", StringComparison.OrdinalIgnoreCase)
+            || migration.CompletedAt is null
+            || migration.FailedAt is not null
+            || !string.IsNullOrWhiteSpace(migration.FailureCode)
+            || migration.ExpectedOperationCount is null or <= 0
+            || migration.VerifiedOperationCount != migration.ExpectedOperationCount
+            || !IsSha256(migration.SourceFingerprint)
+            || !IsSha256(migration.VerificationReceiptHash))
+        {
+            throw WorkbookMigrationInvalid();
+        }
+
+        var migratedLogbookId = FromHostedLogbookUuid(migration.LogbookId);
+        if (memberships.Count != 1
+            || memberships[0].LogbookId != migratedLogbookId
+            || !string.Equals(memberships[0].Role, "owner", StringComparison.OrdinalIgnoreCase))
+        {
+            throw WorkbookMigrationInvalid();
+        }
+
+        return
+        [
+            memberships[0] with
+            {
+                WorkbookMigration = new MobileWorkbookMigrationRecoveryExpectation(
+                    FromHostedUuid(migration.DeviceId, "dev_"),
+                    migration.ExpectedOperationCount.Value,
+                    migration.SourceFingerprint,
+                    migration.VerificationReceiptHash!)
+            }
+        ];
+    }
+
+    private static HostedSignInException WorkbookMigrationInvalid() =>
+        new(
+            HostedSignInFailureReason.WorkbookMigrationInvalid,
+            "This spreadsheet move cannot be verified on this account. Do not create a new logbook; contact FlightLogX support.");
+
+    private static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     public async ValueTask<HostedSyncSession> RefreshAsync(CancellationToken cancellationToken = default)
     {
@@ -1441,7 +1535,8 @@ public sealed class MobileSupabaseHostedSyncClient(
 
     private sealed record HostedAccountRow(
         [property: JsonPropertyName("account_id")] string AccountId,
-        string Status);
+        string Status,
+        [property: JsonPropertyName("onboarding_mode")] string? OnboardingMode = null);
 
     private sealed record HostedDeviceRow(
         [property: JsonPropertyName("device_id")] string DeviceId,
@@ -1459,6 +1554,20 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonPropertyName("operation_format_version")] int OperationFormatVersion,
         [property: JsonPropertyName("deletion_requested_at")] DateTimeOffset? DeletionRequestedAt,
         [property: JsonPropertyName("deleted_at")] DateTimeOffset? DeletedAt);
+
+    private sealed record EmptyRpcRequest;
+
+    private sealed record WorkbookMigrationDiscoveryRow(
+        [property: JsonPropertyName("logbook_id")] string LogbookId,
+        [property: JsonPropertyName("device_id")] string DeviceId,
+        [property: JsonPropertyName("source_fingerprint")] string SourceFingerprint,
+        string Status,
+        [property: JsonPropertyName("expected_operation_count")] int? ExpectedOperationCount,
+        [property: JsonPropertyName("verified_operation_count")] int? VerifiedOperationCount,
+        [property: JsonPropertyName("verification_receipt_hash")] string? VerificationReceiptHash,
+        [property: JsonPropertyName("failure_code")] string? FailureCode,
+        [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
+        [property: JsonPropertyName("failed_at")] DateTimeOffset? FailedAt);
 
     private sealed record AuthUserResponse(
         [property: JsonPropertyName("id")] string? Id);
@@ -1538,4 +1647,11 @@ public sealed record MobileHostedLogbookMembership(
     LogbookId LogbookId,
     string Role,
     int CurrentSchemaVersion,
-    int OperationFormatVersion);
+    int OperationFormatVersion,
+    MobileWorkbookMigrationRecoveryExpectation? WorkbookMigration = null);
+
+public sealed record MobileWorkbookMigrationRecoveryExpectation(
+    DeviceId SourceDeviceId,
+    int ExpectedOperationCount,
+    string SourceFingerprint,
+    string VerificationReceiptHash);

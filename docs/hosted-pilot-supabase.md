@@ -72,9 +72,18 @@ Configure Auth in the Supabase dashboard for each project:
   request only the six-digit code and tell the user to check junk or spam if the message
   does not arrive. The clients retain URL parsing as an undisclosed support fallback for
   already-issued links; do not advertise it in normal UI or participant steps.
-- Keep phone, anonymous, and public signup providers disabled. Email is the first-invitation
-  method. Google is the only enabled OAuth provider and is used only for the implemented
-  returning-user recovery path documented in `docs/account-recovery-threat-model.md`.
+- Keep phone, anonymous, and public signup providers disabled. Email creates the
+  owner-managed invitation and remains an Advanced/support fallback. Google is the only
+  enabled OAuth provider; it is the normal Windows migration sign-in and returning-user
+  recovery identity documented in `docs/account-recovery-threat-model.md`.
+- Add `http://127.0.0.1:*/flightlogx-auth/**` to the Auth redirect allow list. The Windows
+  updater opens the system browser, binds a random loopback port and one-time callback path,
+  and uses PKCE with SHA-256. Do not replace this with an embedded browser, a non-loopback
+  callback, or a fixed authorization-code verifier.
+- Keep the Google OAuth client ID and secret in Google/Supabase configuration. Neither value
+  is required in the updater executable: it contains only the public Supabase project URL
+  and publishable/anonymous key and shows the signed-in Google account email after the code
+  exchange succeeds.
 - Client sign-in calls must pass the SDK option `shouldCreateUser: false`, which maps to
   the REST field `create_user: false`, so an unknown email address cannot create a new
   account from the app.
@@ -100,7 +109,8 @@ receipt. The underlying lifecycle table has no authenticated table access. Even 
 completion, the invitation RPC does not directly activate Android: the app must use the
 managed recovery path before a replacement device becomes active.
 
-Verify the redacted remote configuration after setup and before each canary:
+Verify the redacted remote configuration after setup and before each canary. The private
+pilot preflight also fails if Google or the Windows loopback callback is missing:
 
 ```powershell
 .\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment development

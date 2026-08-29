@@ -11,6 +11,9 @@ public static class PortableLogbookWorkbookMetadata
     public const string HostedSyncStatusName = "PortableHostedSyncStatus";
     public const string HostedSyncStatusAtName = "PortableHostedSyncStatusAt";
     public const string HostedSyncAttentionName = "PortableHostedSyncAttention";
+    public const string FlightLogXMigrationStatusName = "FlightLogXMigrationStatus";
+    public const string FlightLogXMigrationCompletedAtName = "FlightLogXMigrationCompletedAt";
+    public const string FlightLogXMigrationIdName = "FlightLogXMigrationId";
     public const string OperationHistoryPartName = "portable-logbook-history.elogbook";
     public const string ImportLedgerPartName = "portable-logbook-import-ledger.json";
     public const string StorageCustomXmlPartPath = "customXml/portable-logbook-storage.xml";

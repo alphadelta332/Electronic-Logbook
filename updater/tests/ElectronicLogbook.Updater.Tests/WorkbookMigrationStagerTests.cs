@@ -94,6 +94,33 @@ public sealed class WorkbookMigrationStagerTests : IDisposable
     }
 
     [Fact]
+    public async Task StageAsync_SourceChangedAfterSummary_StopsBeforeBackupOrMigration()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(directory, "2.0.3", "Electronic_Logbook.xlsm");
+        var master = TestRepo.CreateMinimalWorkbookPackage(directory, "3.0.0", "Electronic_Logbook_Master.xlsm");
+        var staged = Path.Combine(directory, "Electronic_Logbook_Staged.xlsm");
+        var migrationCallCount = 0;
+        var stager = new WorkbookMigrationStager(
+            (_, _) =>
+            {
+                migrationCallCount++;
+                throw new InvalidOperationException("Migration must not run.");
+            },
+            () => Timestamp);
+
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            stager.StageAsync(
+                new MigrationRequest(source, master, staged, Manifest: null),
+                CancellationToken.None,
+                expectedSourceFingerprint: new string('0', 64)));
+
+        Assert.Contains("changed after its pre-migration summary", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, migrationCallCount);
+        Assert.Empty(Directory.EnumerateFiles(directory, "*_MigrationBackup_*.xlsm"));
+        Assert.False(File.Exists(staged));
+    }
+
+    [Fact]
     public async Task StageAsync_MigrationFails_CleansPartialStageWithoutCreatingBackup()
     {
         var source = TestRepo.CreateMinimalWorkbookPackage(directory, "2.0.3", "Electronic_Logbook.xlsm");

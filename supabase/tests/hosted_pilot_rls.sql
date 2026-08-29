@@ -321,6 +321,33 @@ values (
     now()
 );
 
+insert into public.configuration_revisions (
+    logbook_id,
+    revision,
+    configuration_id,
+    portable_revision_id,
+    author_device_id,
+    configuration_format_version,
+    payload_ciphertext,
+    payload_nonce,
+    payload_tag,
+    payload_hash,
+    client_created_at
+)
+values (
+    '20000000-0000-0000-0000-000000000001',
+    1,
+    '51000000-0000-0000-0000-000000000001',
+    'owner-config-seed-1',
+    '40000000-0000-0000-0000-000000000001',
+    1,
+    repeat('g', 32),
+    repeat('h', 16),
+    repeat('i', 32),
+    repeat('9', 64),
+    now()
+);
+
 set local role authenticated;
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000007', true);
@@ -501,6 +528,100 @@ select elb_rls_test.assert_true(
         join public.get_workbook_migration_status() m on m.logbook_id = o.logbook_id
         where m.account_id = '10000000-0000-0000-0000-000000000007'
     )
+);
+
+select public.append_hosted_configuration_revision(
+    (select logbook_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    (select device_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    '61000000-0000-0000-0000-000000000007',
+    'rev_61000000000000000000000000000007',
+    1,
+    repeat('q', 32),
+    repeat('r', 24),
+    repeat('s', 32),
+    repeat('7', 64),
+    '2026-08-29T00:00:00Z'::timestamptz
+);
+
+select public.append_hosted_configuration_revision(
+    (select logbook_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    (select device_id from public.get_workbook_migration_status()
+     where account_id = '10000000-0000-0000-0000-000000000007'),
+    '61000000-0000-0000-0000-000000000007',
+    'rev_61000000000000000000000000000007',
+    1,
+    repeat('q', 32),
+    repeat('r', 24),
+    repeat('s', 32),
+    repeat('7', 64),
+    '2026-08-29T00:00:00Z'::timestamptz
+);
+
+select elb_rls_test.assert_true(
+    'encrypted configuration retry is idempotent and readback is revision ordered',
+    (
+        select count(*) = 1
+        from public.configuration_revisions c
+        join public.get_workbook_migration_status() m on m.logbook_id = c.logbook_id
+        where m.account_id = '10000000-0000-0000-0000-000000000007'
+    )
+    and (
+        select count(*) = 1
+          and min(revision) = 1
+          and max(revision) = 1
+          and not bool_or(has_more)
+        from public.read_hosted_configuration_revisions(
+            (select logbook_id from public.get_workbook_migration_status()
+             where account_id = '10000000-0000-0000-0000-000000000007'),
+            0,
+            200
+        )
+    )
+);
+
+select elb_rls_test.expect_error(
+    'configuration revision retry rejects changed encrypted payload',
+    $sql$
+        select public.append_hosted_configuration_revision(
+            (select logbook_id from public.get_workbook_migration_status()
+             where account_id = '10000000-0000-0000-0000-000000000007'),
+            (select device_id from public.get_workbook_migration_status()
+             where account_id = '10000000-0000-0000-0000-000000000007'),
+            '61000000-0000-0000-0000-000000000007',
+            'rev_61000000000000000000000000000007',
+            1,
+            repeat('x', 32),
+            repeat('r', 24),
+            repeat('s', 32),
+            repeat('8', 64),
+            '2026-08-29T00:00:00Z'::timestamptz
+        )
+    $sql$,
+    '%configuration revision id replayed with different payload%'
+);
+
+select elb_rls_test.expect_error(
+    'configuration revision rejects recognizable plaintext',
+    $sql$
+        select public.append_hosted_configuration_revision(
+            (select logbook_id from public.get_workbook_migration_status()
+             where account_id = '10000000-0000-0000-0000-000000000007'),
+            (select device_id from public.get_workbook_migration_status()
+             where account_id = '10000000-0000-0000-0000-000000000007'),
+            '61000000-0000-0000-0000-000000000008',
+            'rev_61000000000000000000000000000008',
+            1,
+            '{"customFields":["plaintext"]}',
+            repeat('r', 24),
+            repeat('s', 32),
+            repeat('8', 64),
+            '2026-08-29T00:00:01Z'::timestamptz
+        )
+    $sql$,
+    '%plaintext configuration payloads are not allowed%'
 );
 
 select elb_rls_test.expect_error(
@@ -691,6 +812,11 @@ select elb_rls_test.assert_true(
 select elb_rls_test.assert_true(
     'outsider cannot read another account operations',
     (select count(*) = 0 from public.operations where logbook_id = '20000000-0000-0000-0000-000000000001')
+);
+
+select elb_rls_test.assert_true(
+    'outsider cannot read another account configuration revisions',
+    (select count(*) = 0 from public.configuration_revisions where logbook_id = '20000000-0000-0000-0000-000000000001')
 );
 
 select elb_rls_test.expect_error(

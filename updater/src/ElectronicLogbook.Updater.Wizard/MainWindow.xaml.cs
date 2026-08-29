@@ -38,6 +38,8 @@ public partial class MainWindow : Window
     private bool _isCheckingAvailability = true;
     private bool _availabilityReady;
     private bool _preflightPassed;
+    private WorkbookPreMigrationSummary? _preMigrationSummary;
+    private string? _preMigrationSummarySourceFingerprint;
     private string? _latestTag;
     private string? _lastOutputPath;
     private string? _lastBackupPath;
@@ -146,7 +148,11 @@ public partial class MainWindow : Window
         NextButton.IsEnabled = !_isUpdating && CanAdvanceFromCurrentStep();
         NextButton.Content = _stepIndex == 0 && !_availabilityReady
             ? "Retry"
-            : (_stepIndex == 3 ? "Start" : (_stepIndex == 5 ? "Finish" : "Next"));
+            : (_stepIndex == 3
+                ? (_context.Channel == UpdateChannel.Pilot ? "Continue" : "Start")
+                : (_stepIndex == 5 ? "Finish" : "Next"));
+
+        UpdatePreMigrationSummaryView();
 
         CancelButton.Content = _isUpdating ? "Cancel Update" : "Cancel";
 
@@ -1238,6 +1244,8 @@ public partial class MainWindow : Window
     private async Task RunPreflightAsync()
     {
         _preflightPassed = false;
+        _preMigrationSummary = null;
+        _preMigrationSummarySourceFingerprint = null;
 
         var source = _context.SourcePath;
         var stagedOutput = _context.MigrationOutputPath ?? (_context.UseInPlaceSwap
@@ -1253,8 +1261,38 @@ public partial class MainWindow : Window
         }
         var sourceCheck = await WaitForSourceWorkbookAsync(source);
         var sourceOk = sourceCheck.IsOk;
+        if (sourceOk && _context.Channel == UpdateChannel.Pilot)
+        {
+            try
+            {
+                var fingerprintBeforeInspection = await Integrity.Sha256Async(source, CancellationToken.None);
+                _preMigrationSummary = await Task.Run(() =>
+                    WorkbookPreMigrationInspector.Inspect(source));
+                var fingerprintAfterInspection = await Integrity.Sha256Async(source, CancellationToken.None);
+                if (!string.Equals(
+                        fingerprintBeforeInspection,
+                        fingerprintAfterInspection,
+                        StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The workbook changed while its summary was being prepared. Close it and run the checks again.");
+                }
+
+                _preMigrationSummarySourceFingerprint = fingerprintAfterInspection;
+                sourceCheck = new(true, "Source workbook is ready and its flight summary was inspected.");
+            }
+            catch (Exception ex)
+            {
+                sourceOk = false;
+                _preMigrationSummary = null;
+                _preMigrationSummarySourceFingerprint = null;
+                sourceCheck = new(false, $"The workbook summary could not be read: {ex.Message}");
+            }
+        }
         CheckSourcePathText.Text = sourceOk
-            ? "[OK] Source workbook exists, is .xlsm, and is closed"
+            ? (_context.Channel == UpdateChannel.Pilot
+                ? "[OK] Source workbook is closed, valid, and its flight summary was read"
+                : "[OK] Source workbook exists, is .xlsm, and is closed")
             : $"[FAIL] {sourceCheck.Message}";
 
         var finalOutput = _context.UseInPlaceSwap
@@ -1326,7 +1364,9 @@ public partial class MainWindow : Window
 
         _preflightPassed = sourceOk && outputOk && channelOk && diskOk;
         PreflightSummaryText.Text = _preflightPassed
-            ? "All checks passed. You can continue."
+            ? (_context.Channel == UpdateChannel.Pilot
+                ? "All checks passed. Review the workbook summary before continuing."
+                : "All checks passed. You can continue.")
             : "One or more checks failed. Resolve environment issues and run checks again.";
 
         UpdateWizardView();
@@ -1449,6 +1489,9 @@ public partial class MainWindow : Window
             : null;
         string? resolvedMasterForDiagnostics = null;
         MigrationReport? report = null;
+        string? pilotAccountEmail = null;
+        PilotWorkbookHostedMigrationResult? pilotHostedMigration = null;
+        PilotWorkbookPostMigrationHandoffResult? pilotHandoff = null;
 
         try
         {
@@ -1495,12 +1538,58 @@ public partial class MainWindow : Window
             {
                 AppendLog("validating the source and creating its untouched timestamped backup...");
                 var stager = new WorkbookMigrationStager(progressSink);
-                pilotStaging = await stager.StageAsync(migrationRequest, _updateCts.Token);
+                pilotStaging = await stager.StageAsync(
+                    migrationRequest,
+                    _updateCts.Token,
+                    _preMigrationSummarySourceFingerprint);
                 report = pilotStaging.MigrationReport;
                 _lastBackupPath = pilotStaging.BackupWorkbookPath;
                 _lastBackupExpectedVersion = report.SourceVersion;
                 AppendLog($"Untouched source backup: {_lastBackupPath}");
                 AppendLog("The original workbook remains unchanged until hosted migration is verified.");
+
+                if (!SupabaseHostedSyncConfiguration.TryLoad(out var configuration, out _))
+                {
+                    throw new InvalidOperationException(
+                        "Google sign-in is not configured in this pilot updater. Ask FlightLogX support for the correct pilot installer.");
+                }
+
+                using var connectionClient = new SupabaseWorkbookConnectionClient(
+                    configuration ?? throw new InvalidOperationException(
+                        "Google sign-in is not configured in this pilot updater."));
+                FooterStatusText.Text = "Opening Google sign-in in your browser...";
+                AppendLog("Opening secure Google sign-in in the system browser...");
+                var pilotSession = await connectionClient.SignInWithGoogleAsync(_updateCts.Token);
+                pilotAccountEmail = pilotSession.AccountDisplay;
+                AppendLog("Google sign-in completed.");
+
+                FooterStatusText.Text = "Securely moving your logbook to FlightLogX...";
+                AppendLog("Preparing account recovery before encrypted upload...");
+                var hostedMigration = new PilotWorkbookHostedMigration(
+                    connectionClient,
+                    pilotSession,
+                    configuration);
+                pilotHostedMigration = await hostedMigration.RunAsync(
+                    pilotStaging,
+                    "FlightLogX Logbook",
+                    _updateCts.Token);
+                AppendLog(
+                    $"Encrypted hosted readback verified for {pilotHostedMigration.VerifiedFlightCount:N0} flights.");
+                AppendLog("Hosted migration completed and temporary recovery keys were removed.");
+
+                FooterStatusText.Text = "Finalising your updated workbook...";
+                AppendLog("Stamping the verified workbook and installing it at the original filename...");
+                var postMigrationHandoff = new PilotWorkbookPostMigrationHandoff();
+                pilotHandoff = await postMigrationHandoff.InstallAsync(
+                    pilotStaging,
+                    pilotHostedMigration,
+                    _updateCts.Token);
+                _lastBackupPath = pilotHandoff.UntouchedBackupWorkbookPath;
+                _lastBackupExpectedVersion = report.SourceVersion;
+                AppendLog(
+                    $"Workbook stamped '{pilotHandoff.Stamp.Status}' at {pilotHandoff.Stamp.CompletedAt:O}.");
+                AppendLog("The verified 3.0.0 workbook now uses the original workbook filename.");
+                AppendLog($"Untouched timestamped backup retained: {_lastBackupPath}");
             }
             else
             {
@@ -1512,7 +1601,7 @@ public partial class MainWindow : Window
                 _lastBackupExpectedVersion = null;
             }
 
-            _lastOutputPath = stagedOutput;
+            _lastOutputPath = pilotHandoff?.FinalWorkbookPath ?? stagedOutput;
             _lastReportPath = null;
             if (!string.IsNullOrWhiteSpace(diagnosticReportPath))
             {
@@ -1541,7 +1630,7 @@ public partial class MainWindow : Window
 
             if (pilotStaging is not null)
             {
-                AppendLog("Pilot workbook staging complete; final installation is waiting for hosted verification.");
+                AppendLog("Pilot hosted migration and workbook installation are complete.");
             }
             else if (_context.UseInPlaceSwap)
             {
@@ -1584,24 +1673,22 @@ public partial class MainWindow : Window
             }
 
             CompleteTitleText.Text = pilotStaging is not null
-                ? (finalWorkbookReady ? "Workbook Prepared" : "Workbook Preparation Needs Attention")
+                ? (finalWorkbookReady ? "Migration Complete" : "Migration Complete With Warnings")
                 : (finalWorkbookReady ? "Update Complete" : "Update Complete With Warnings");
             CompleteSummaryText.Text = pilotStaging is not null
                 ? (finalWorkbookReady
-                    ? "The original workbook is unchanged. Its exact backup and the staged FlightLogX workbook are ready for the sign-in and hosted verification steps."
-                    : "The original workbook is unchanged, but the staged workbook file is still settling. Wait for OneDrive sync before continuing.")
+                    ? $"Signed in as {pilotAccountEmail}. FlightLogX verified {pilotHostedMigration!.VerifiedFlightCount:N0} flights against the encrypted hosted copy. The updated workbook is stamped 'Moved to FlightLogX' and installed at the original filename; the untouched timestamped backup was retained."
+                    : "The hosted migration and workbook installation completed, but the workbook file is still settling. Wait for OneDrive sync before opening it.")
                 : (finalWorkbookReady
                     ? (_context.UseInPlaceSwap
                         ? "Update complete. The original filename now points to the updated workbook."
                         : "The updated workbook was created as a separate file and validated.")
                     : "Update complete, but the workbook file is still settling. Wait for OneDrive sync to finish before opening it.");
             CompleteOutputPathText.Text = await BuildWorkbookDisplayTextAsync(
-                pilotStaging is not null ? "Staged workbook" : "Current workbook",
+                "Current workbook",
                 _lastOutputPath,
                 _lastOutputExpectedVersion,
-                pilotStaging is not null
-                    ? "Staged workbook: not available"
-                    : "Current workbook: not available");
+                "Current workbook: not available");
             CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
                 "Retained backup",
                 _lastBackupPath,
@@ -1611,14 +1698,14 @@ public partial class MainWindow : Window
                 finalWorkbookReady &&
                 _context.UseInPlaceSwap &&
                 !string.IsNullOrWhiteSpace(_lastBackupPath);
-            OpenUpdatedCheckBox.IsEnabled = pilotStaging is null && finalWorkbookReady;
-            OpenUpdatedCheckBox.IsChecked = pilotStaging is null && finalWorkbookReady;
+            OpenUpdatedCheckBox.IsEnabled = finalWorkbookReady;
+            OpenUpdatedCheckBox.IsChecked = finalWorkbookReady;
             OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
                 File.Exists(_lastReportPath);
             FooterStatusText.Text = pilotStaging is not null
                 ? (finalWorkbookReady
-                    ? "Workbook preparation completed; sign-in is the next step."
-                    : "Workbook preparation completed. Wait for sync before continuing.")
+                    ? "Migration and workbook installation completed."
+                    : "Migration completed. Wait for sync before opening the workbook.")
                 : (finalWorkbookReady
                     ? "Update completed."
                     : "Update completed. Wait for sync before opening.");
@@ -2565,6 +2652,30 @@ public partial class MainWindow : Window
             UpdateChannel.LocalMaster => "Local Master",
             _ => "Stable"
         };
+    }
+
+    private void UpdatePreMigrationSummaryView()
+    {
+        var showSummary = _context.Channel == UpdateChannel.Pilot &&
+            _preMigrationSummary is not null;
+        PreMigrationSummaryPanel.Visibility = showSummary
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ReadyTitleText.Text = showSummary ? "Review Your Logbook" : "Ready to Update";
+        ReadyDescriptionText.Text = showSummary
+            ? "Confirm these saved workbook totals before signing in and moving your logbook to FlightLogX."
+            : "Click Start to begin the update.";
+
+        if (!showSummary)
+        {
+            return;
+        }
+
+        var summary = _preMigrationSummary!;
+        PreMigrationFlightCountText.Text = $"Flights: {summary.FlightCount:N0}";
+        PreMigrationLoggedHoursText.Text = $"Logged hours: {summary.LoggedHoursDisplay}";
+        PreMigrationDateRangeText.Text = $"Date range: {summary.DateRangeDisplay}";
+        PreMigrationWarningsText.Text = WorkbookPreMigrationInspector.FormatWarnings(summary);
     }
 
     private sealed record HostedLogbookChoice(int Index, string Label);

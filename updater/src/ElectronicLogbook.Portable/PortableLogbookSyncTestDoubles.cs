@@ -229,11 +229,19 @@ public sealed class InMemoryHostedLogbookLedger : IHostedLogbookLedger
         && string.Equals(existing.PayloadTag, upload.PayloadTag, StringComparison.Ordinal)
         && string.Equals(existing.PayloadHash, upload.PayloadHash, StringComparison.Ordinal);
 
-    private static bool LooksLikePlaintextPayload(string payload) =>
-        payload.Contains("\"kind\"", StringComparison.OrdinalIgnoreCase)
-        || payload.Contains("\"entry\"", StringComparison.OrdinalIgnoreCase)
-        || payload.Contains("aircraft", StringComparison.OrdinalIgnoreCase)
-        || payload.Contains("route", StringComparison.OrdinalIgnoreCase);
+    private static bool LooksLikePlaintextPayload(string payload)
+    {
+        var trimmed = payload.TrimStart();
+        if (!trimmed.StartsWith('{') && !trimmed.StartsWith('['))
+        {
+            return false;
+        }
+
+        return trimmed.Contains("\"kind\"", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("\"entry\"", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("\"aircraft", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("\"route\"", StringComparison.OrdinalIgnoreCase);
+    }
 
     private static bool IsLowerHex(char value) =>
         value is >= '0' and <= '9' or >= 'a' and <= 'f';

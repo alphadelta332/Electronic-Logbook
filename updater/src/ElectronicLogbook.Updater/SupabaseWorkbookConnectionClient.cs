@@ -8,7 +8,9 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater;
 
-public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMigrationRecoveryClient
+public sealed class SupabaseWorkbookConnectionClient :
+    IDisposable,
+    IWorkbookMigrationHostedClient
 {
     private const string RecoveryEnvelopePath = "/functions/v1/recovery-envelope";
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
@@ -90,15 +92,73 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
                 "Hosted sign-in returned an invalid account session.");
         }
 
-        var credential = new PortableHostedCredential(
-            verified.AccessToken,
-            verified.RefreshToken,
-            DateTimeOffset.UtcNow.AddSeconds(Math.Max(verified.ExpiresIn, 60)));
-        session = new SupabaseWorkbookSession(
-            new HostedAccountId("acct_" + accountUuid.ToString("N")),
-            credential,
-            MaskEmail(pendingEmail));
+        session = CreateSession(verified, accountUuid, MaskEmail(pendingEmail));
         pendingEmail = null;
+        return session;
+    }
+
+    public Task<SupabaseWorkbookSession> SignInWithGoogleAsync(
+        CancellationToken cancellationToken = default) =>
+        SignInWithGoogleAsync(SystemBrowserGoogleOAuthFlow.Instance, cancellationToken);
+
+    internal async Task<SupabaseWorkbookSession> SignInWithGoogleAsync(
+        ISystemBrowserGoogleOAuthFlow browserFlow,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(browserFlow);
+        var verifier = SystemBrowserGoogleOAuthFlow.Base64UrlEncode(RandomNumberGenerator.GetBytes(48));
+        var challenge = SystemBrowserGoogleOAuthFlow.Base64UrlEncode(
+            SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        var callback = await browserFlow.AuthorizeAsync(
+            redirectUri => CreateGoogleAuthorizationUri(redirectUri, challenge),
+            cancellationToken);
+        Dictionary<string, string> callbackValues;
+        try
+        {
+            callbackValues = ParseQuery(callback.Query);
+        }
+        catch (HostedSignInException)
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvalidVerificationCode,
+                "Google sign-in returned an invalid browser response. Please try again.");
+        }
+        if (callbackValues.TryGetValue("error", out _))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvitationRequired,
+                "Google sign-in was cancelled or could not be completed. No workbook changes were made.");
+        }
+        if (!callbackValues.TryGetValue("code", out var authorizationCode)
+            || string.IsNullOrWhiteSpace(authorizationCode))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvalidVerificationCode,
+                "Google sign-in returned no usable authorization code. Please try again.");
+        }
+
+        using var request = NewRequest(HttpMethod.Post, "/auth/v1/token?grant_type=pkce", includeAuthorization: false);
+        request.Content = JsonContent(new PkceTokenRequest(authorizationCode, verifier));
+        using var response = await http.SendAsync(request, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw ToGoogleSignInException(response.StatusCode);
+        }
+
+        var verified = JsonSerializer.Deserialize<AuthSessionResponse>(body, WebJson)
+            ?? throw new HostedSignInException(
+                HostedSignInFailureReason.InvalidVerificationCode,
+                "Google sign-in returned no account session.");
+        if (!Guid.TryParse(verified.User?.Id, out var accountUuid)
+            || string.IsNullOrWhiteSpace(verified.User.Email))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvitationRequired,
+                "Google sign-in did not return the invited account email.");
+        }
+
+        session = CreateSession(verified, accountUuid, verified.User.Email.Trim());
         return session;
     }
 
@@ -197,6 +257,58 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
                 completed.LogbookId,
                 completed.DeviceId));
         return completed;
+    }
+
+    public async Task<HostedConfigurationRevisionEnvelope> AppendWorkbookConfigurationRevisionAsync(
+        HostedWorkbookMigration migration,
+        HostedConfigurationRevisionUpload revision,
+        CancellationToken cancellationToken = default)
+    {
+        ValidatePendingMigrationScope(migration);
+        ArgumentNullException.ThrowIfNull(revision);
+        if (revision.DeviceId != migration.DeviceId)
+        {
+            throw new InvalidOperationException(
+                "The configuration revision does not belong to the temporary spreadsheet device.");
+        }
+
+        var row = await SendPayloadRpcAsync<AppendConfigurationRevisionRequest, ConfigurationRevisionRow>(
+            "append_hosted_configuration_revision",
+            new AppendConfigurationRevisionRequest(
+                ToUuid(migration.LogbookId.Value, "log_"),
+                ToUuid(migration.DeviceId.Value, "dev_"),
+                ToUuid(revision.RevisionId.Value, "rev_"),
+                revision.RevisionId.Value,
+                revision.SchemaVersion - 1,
+                revision.PayloadCiphertext,
+                revision.PayloadNonce,
+                revision.PayloadTag,
+                revision.PayloadHash,
+                revision.CreatedAt),
+            objectResponse: true,
+            cancellationToken);
+        return ToConfigurationRevisionEnvelope(row);
+    }
+
+    public async Task<HostedConfigurationRevisionPage> ReadWorkbookConfigurationRevisionsAsync(
+        HostedWorkbookMigration migration,
+        long afterHostedRevision = 0,
+        int pageSize = 200,
+        CancellationToken cancellationToken = default)
+    {
+        ValidatePendingMigrationScope(migration);
+        var rows = await SendPayloadRpcAsync<ReadConfigurationRevisionsRequest, ConfigurationRevisionRow[]>(
+            "read_hosted_configuration_revisions",
+            new ReadConfigurationRevisionsRequest(
+                ToUuid(migration.LogbookId.Value, "log_"),
+                afterHostedRevision,
+                pageSize),
+            objectResponse: false,
+            cancellationToken);
+        return new HostedConfigurationRevisionPage(
+            rows.Select(ToConfigurationRevisionEnvelope).ToArray(),
+            rows.Length == 0 ? afterHostedRevision : rows.Max(row => row.Revision),
+            rows.Any(row => row.HasMore));
     }
 
     public async Task<PortableLogbookKey> RestoreWorkbookKeyAsync(
@@ -388,6 +500,63 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
             ?? throw new InvalidDataException("The spreadsheet migration returned no resumable hosted state.");
     }
 
+    private async Task<TResponse> SendPayloadRpcAsync<TRequest, TResponse>(
+        string functionName,
+        TRequest payload,
+        bool objectResponse,
+        CancellationToken cancellationToken)
+    {
+        using var request = NewRequest(
+            HttpMethod.Post,
+            $"/rest/v1/rpc/{functionName}",
+            includeAuthorization: true);
+        if (objectResponse)
+        {
+            request.Headers.Accept.Clear();
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/vnd.pgrst.object+json"));
+        }
+        request.Content = JsonContent(payload);
+        using var response = await http.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                "The encrypted spreadsheet configuration could not be stored or verified.");
+        }
+
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
+        return JsonSerializer.Deserialize<TResponse>(body, WebJson)
+            ?? throw new InvalidDataException(
+                "The encrypted spreadsheet configuration returned no hosted result.");
+    }
+
+    private void ValidatePendingMigrationScope(HostedWorkbookMigration migration)
+    {
+        ArgumentNullException.ThrowIfNull(migration);
+        if (migration.Status != HostedWorkbookMigrationStatus.Pending)
+        {
+            throw new InvalidOperationException(
+                "Spreadsheet configuration can be transferred only while migration is pending.");
+        }
+        if (migration.AccountId != RequireSession().AccountId)
+        {
+            throw new InvalidOperationException(
+                "The spreadsheet migration does not belong to the signed-in account.");
+        }
+    }
+
+    private static HostedConfigurationRevisionEnvelope ToConfigurationRevisionEnvelope(
+        ConfigurationRevisionRow row) =>
+        new(
+            row.Revision,
+            new RevisionId(row.PortableRevisionId),
+            new DeviceId("dev_" + Guid.Parse(row.AuthorDeviceId).ToString("N")),
+            row.ClientCreatedAt,
+            row.ConfigurationFormatVersion + 1,
+            row.PayloadCiphertext,
+            row.PayloadNonce,
+            row.PayloadTag,
+            row.PayloadHash);
+
     private static HostedWorkbookMigration ToWorkbookMigration(WorkbookMigrationRow row) =>
         new(
             new WorkbookMigrationId("mig_" + Guid.Parse(row.MigrationId).ToString("N")),
@@ -494,6 +663,44 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
             HostedSignInFailureReason.SignedOut,
             "Sign in to the invited account before connecting this workbook.");
 
+    private Uri CreateGoogleAuthorizationUri(Uri redirectUri, string codeChallenge)
+    {
+        var query = string.Join(
+            "&",
+            new Dictionary<string, string>
+            {
+                ["provider"] = "google",
+                ["redirect_to"] = redirectUri.AbsoluteUri,
+                ["code_challenge"] = codeChallenge,
+                ["code_challenge_method"] = "s256"
+            }.Select(item =>
+                $"{Uri.EscapeDataString(item.Key)}={Uri.EscapeDataString(item.Value)}"));
+        return new Uri(configuration.SupabaseUrl, "/auth/v1/authorize?" + query);
+    }
+
+    private static SupabaseWorkbookSession CreateSession(
+        AuthSessionResponse verified,
+        Guid accountUuid,
+        string accountDisplay)
+    {
+        if (string.IsNullOrWhiteSpace(verified.AccessToken)
+            || string.IsNullOrWhiteSpace(verified.RefreshToken))
+        {
+            throw new HostedSignInException(
+                HostedSignInFailureReason.InvalidVerificationCode,
+                "Hosted sign-in returned an invalid account session.");
+        }
+
+        var credential = new PortableHostedCredential(
+            verified.AccessToken,
+            verified.RefreshToken,
+            DateTimeOffset.UtcNow.AddSeconds(Math.Max(verified.ExpiresIn, 60)));
+        return new SupabaseWorkbookSession(
+            new HostedAccountId("acct_" + accountUuid.ToString("N")),
+            credential,
+            accountDisplay);
+    }
+
     private static StringContent JsonContent<T>(T payload) =>
         new(JsonSerializer.Serialize(payload, WebJson), Encoding.UTF8, "application/json");
 
@@ -587,6 +794,13 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
                 : HostedSignInFailureReason.InvitationRequired,
             "Sign-in could not be verified. Check the invited email and request a new code if necessary.");
 
+    private static HostedSignInException ToGoogleSignInException(HttpStatusCode statusCode) =>
+        new(
+            statusCode is HttpStatusCode.BadRequest or HttpStatusCode.UnprocessableEntity
+                ? HostedSignInFailureReason.InvitationRequired
+                : HostedSignInFailureReason.InvalidVerificationCode,
+            "Google sign-in could not open the invited FlightLogX account. Confirm that you selected the invited Google account and try again.");
+
     private static string ToUuid(string value, string prefix)
     {
         var raw = value.StartsWith(prefix, StringComparison.Ordinal) ? value[prefix.Length..] : value;
@@ -614,13 +828,17 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
         [property: JsonPropertyName("token_hash")] string TokenHash,
         string Type);
 
+    private sealed record PkceTokenRequest(
+        [property: JsonPropertyName("auth_code")] string AuthorizationCode,
+        [property: JsonPropertyName("code_verifier")] string CodeVerifier);
+
     private sealed record AuthSessionResponse(
         [property: JsonPropertyName("access_token")] string AccessToken,
         [property: JsonPropertyName("refresh_token")] string RefreshToken,
         [property: JsonPropertyName("expires_in")] int ExpiresIn,
         AuthUser? User);
 
-    private sealed record AuthUser(string Id);
+    private sealed record AuthUser(string Id, string? Email);
 
     private sealed record MembershipRow(
         [property: JsonPropertyName("logbook_id")] string LogbookId,
@@ -667,6 +885,23 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
         [property: JsonPropertyName("p_migration_id")] string MigrationId,
         [property: JsonPropertyName("p_failure_code")] string FailureCode);
 
+    private sealed record AppendConfigurationRevisionRequest(
+        [property: JsonPropertyName("p_logbook_id")] string PLogbookId,
+        [property: JsonPropertyName("p_device_id")] string PDeviceId,
+        [property: JsonPropertyName("p_configuration_id")] string PConfigurationId,
+        [property: JsonPropertyName("p_portable_revision_id")] string PPortableRevisionId,
+        [property: JsonPropertyName("p_configuration_format_version")] int PConfigurationFormatVersion,
+        [property: JsonPropertyName("p_payload_ciphertext")] string PPayloadCiphertext,
+        [property: JsonPropertyName("p_payload_nonce")] string PPayloadNonce,
+        [property: JsonPropertyName("p_payload_tag")] string PPayloadTag,
+        [property: JsonPropertyName("p_payload_hash")] string PPayloadHash,
+        [property: JsonPropertyName("p_client_created_at")] DateTimeOffset PClientCreatedAt);
+
+    private sealed record ReadConfigurationRevisionsRequest(
+        [property: JsonPropertyName("p_logbook_id")] string PLogbookId,
+        [property: JsonPropertyName("p_after_revision")] long PAfterRevision,
+        [property: JsonPropertyName("p_page_size")] int PPageSize);
+
     private sealed record CompleteWorkbookMigrationRequest(
         [property: JsonPropertyName("p_migration_id")] string MigrationId,
         [property: JsonPropertyName("p_expected_operation_count")] int ExpectedOperationCount,
@@ -688,6 +923,21 @@ public sealed class SupabaseWorkbookConnectionClient : IDisposable, IWorkbookMig
         [property: JsonPropertyName("updated_at")] DateTimeOffset UpdatedAt,
         [property: JsonPropertyName("completed_at")] DateTimeOffset? CompletedAt,
         [property: JsonPropertyName("failed_at")] DateTimeOffset? FailedAt);
+
+    private sealed record ConfigurationRevisionRow(
+        long Revision,
+        [property: JsonPropertyName("configuration_id")] string ConfigurationId,
+        [property: JsonPropertyName("portable_revision_id")] string PortableRevisionId,
+        [property: JsonPropertyName("author_device_id")] string AuthorDeviceId,
+        [property: JsonPropertyName("configuration_format_version")] int ConfigurationFormatVersion,
+        [property: JsonPropertyName("payload_ciphertext")] string PayloadCiphertext,
+        [property: JsonPropertyName("payload_nonce")] string PayloadNonce,
+        [property: JsonPropertyName("payload_tag")] string PayloadTag,
+        [property: JsonPropertyName("payload_hash")] string PayloadHash,
+        [property: JsonPropertyName("client_created_at")] DateTimeOffset ClientCreatedAt,
+        [property: JsonPropertyName("received_at")] DateTimeOffset? ReceivedAt,
+        [property: JsonPropertyName("highest_revision")] long HighestRevision,
+        [property: JsonPropertyName("has_more")] bool HasMore);
 
 }
 

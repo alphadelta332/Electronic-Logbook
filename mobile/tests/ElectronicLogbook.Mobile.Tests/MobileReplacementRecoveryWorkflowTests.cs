@@ -156,6 +156,116 @@ public sealed class MobileReplacementRecoveryWorkflowTests
         Assert.Null(await new BrowserLogbookStore(js).LoadStateV2Async());
     }
 
+    [Fact]
+    public async Task CompletedWorkbookMigrationRestoresExactEncryptedFlightsBeforeDurableSaveAndActivation()
+    {
+        var js = new RecoveryJsRuntime();
+        var sourceDeviceId = new DeviceId("dev_workbook");
+        var clock = new ManualSyncClock(Now);
+        var expected = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            LogbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [
+                PortableLogbookOperationV2.Create(
+                    LogbookId,
+                    new EntryId("ent_first"),
+                    new RevisionId("rev_first"),
+                    sourceDeviceId,
+                    Now.AddMinutes(-2),
+                    PortableLogbookWorkbookEntry.Empty with
+                    {
+                        FlightId = "MIG-001",
+                        Year = 2026,
+                        Month = 8,
+                        Day = 27,
+                        Reg = "VH-ABC",
+                        From = "YSCN",
+                        To = "YMML",
+                        SeCommandDay = 1.2m
+                    }),
+                PortableLogbookOperationV2.Create(
+                    LogbookId,
+                    new EntryId("ent_second"),
+                    new RevisionId("rev_second"),
+                    sourceDeviceId,
+                    Now.AddMinutes(-1),
+                    PortableLogbookWorkbookEntry.Empty with
+                    {
+                        FlightId = "MIG-002",
+                        Year = 2026,
+                        Month = 8,
+                        Day = 28,
+                        Reg = "VH-XYZ",
+                        From = "YMML",
+                        To = "YSSY",
+                        MeDualNight = 2.3m
+                    })
+            ]);
+        var ledger = new InMemoryHostedLogbookLedger();
+        var sourceAuthenticator = new RecordingAuthenticator(
+            new HostedSyncSession(AccountId, sourceDeviceId, Now.AddHours(1)),
+            currentSession: new HostedSyncSession(AccountId, sourceDeviceId, Now.AddHours(1)));
+        var seeded = await new MobileHostedSyncWorkflow(
+                new BrowserPackageKeyStore(js),
+                ledger,
+                sourceAuthenticator,
+                new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+                clock)
+            .SyncAsync(new PortableHostedSyncRequestContext(
+                expected,
+                new BrowserHostedSyncState(
+                    AccountId,
+                    LogbookId,
+                    sourceDeviceId,
+                    0,
+                    PortableHostedSyncStatus.Waiting,
+                    LedgerCursorVersion: BrowserHostedSyncState.CurrentLedgerCursorVersion),
+                BackgroundSyncReason.ManualRefresh));
+        Assert.Equal(PortableHostedSyncStatus.Synced, seeded.Status);
+
+        var client = new RecordingRecoveryClient(Session())
+        {
+            Memberships = [WorkbookMigrationMembership(LogbookId, sourceDeviceId, 2)]
+        };
+        var service = new RecordingRecoveryEnvelopeService();
+        var recovered = await CreateWorkflow(js, client, ledger, recoveryService: service)
+            .RecoverOnlyLogbookAsync();
+
+        Assert.Equal(1, service.RestoreCount);
+        Assert.Equal(1, client.CompleteCount);
+        Assert.Equal(DeviceId, client.CompletedDeviceId);
+        Assert.Equal(
+            PortableLogbookJson.SerializeV2(expected),
+            PortableLogbookJson.SerializeV2(recovered.Document));
+        var durable = await new BrowserLogbookStore(js).LoadStateV2Async();
+        Assert.Equal(
+            PortableLogbookJson.SerializeV2(expected),
+            PortableLogbookJson.SerializeV2(Assert.IsType<PortableLogbookDocumentV2>(durable?.Document)));
+        Assert.Equal(PortableHostedSyncStatus.Synced, durable?.HostedSync?.LastStatus);
+    }
+
+    [Fact]
+    public async Task CompletedWorkbookMigrationWithMissingHostedFlightsDoesNotSaveOrActivateAnEmptyLogbook()
+    {
+        var js = new RecoveryJsRuntime();
+        var client = new RecordingRecoveryClient(Session())
+        {
+            Memberships = [WorkbookMigrationMembership(LogbookId, new DeviceId("dev_workbook"), 1)]
+        };
+        var service = new RecordingRecoveryEnvelopeService();
+        var workflow = CreateWorkflow(js, client, recoveryService: service);
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await workflow.RecoverOnlyLogbookAsync());
+
+        Assert.Equal("RECOVERY_MIGRATION_HISTORY_MISMATCH", error.ErrorCode);
+        Assert.Contains("not activated", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, service.RestoreCount);
+        Assert.Equal(0, client.CompleteCount);
+        Assert.Null(await new BrowserLogbookStore(js).LoadStateV2Async());
+    }
+
     private static MobileReplacementRecoveryWorkflow CreateWorkflow(
         RecoveryJsRuntime js,
         RecordingRecoveryClient client,
@@ -178,6 +288,21 @@ public sealed class MobileReplacementRecoveryWorkflowTests
     private static MobileHostedLogbookMembership Membership(LogbookId logbookId) =>
         new(logbookId, "owner", PortableLogbookDocumentV2.CurrentSchemaVersion, 1);
 
+    private static MobileHostedLogbookMembership WorkbookMigrationMembership(
+        LogbookId logbookId,
+        DeviceId sourceDeviceId,
+        int expectedOperationCount) =>
+        new(
+            logbookId,
+            "owner",
+            PortableLogbookDocumentV2.CurrentSchemaVersion,
+            1,
+            new MobileWorkbookMigrationRecoveryExpectation(
+                sourceDeviceId,
+                expectedOperationCount,
+                new string('a', 64),
+                new string('b', 64)));
+
     private sealed class RecordingRecoveryClient(HostedSyncSession session) : IMobileReplacementRecoveryClient
     {
         public IReadOnlyList<MobileHostedLogbookMembership> Memberships { get; set; } = [Membership(LogbookId)];
@@ -195,7 +320,8 @@ public sealed class MobileReplacementRecoveryWorkflowTests
         {
             PrepareCount++;
             PreparedDeviceIds.Add(session.DeviceId);
-            return ValueTask.FromResult(new MobileReplacementRecoveryContext(session, Membership(logbookId), "Pixel 8 Pro"));
+            var membership = Memberships.Single(value => value.LogbookId == logbookId);
+            return ValueTask.FromResult(new MobileReplacementRecoveryContext(session, membership, "Pixel 8 Pro"));
         }
 
         public ValueTask CompleteReplacementRecoveryAsync(
@@ -239,13 +365,21 @@ public sealed class MobileReplacementRecoveryWorkflowTests
     private sealed class RecordingAuthenticator : IHostedLogbookAuthenticator
     {
         private readonly HostedSyncSession? refreshedSession;
+        private readonly HostedSyncSession? currentSession;
         private readonly Exception? refreshError;
 
-        public RecordingAuthenticator(HostedSyncSession refreshedSession) => this.refreshedSession = refreshedSession;
+        public RecordingAuthenticator(
+            HostedSyncSession refreshedSession,
+            HostedSyncSession? currentSession = null)
+        {
+            this.refreshedSession = refreshedSession;
+            this.currentSession = currentSession;
+        }
         public RecordingAuthenticator(Exception refreshError) => this.refreshError = refreshError;
         public int RefreshCount { get; private set; }
 
-        public ValueTask<HostedSyncSession?> GetCurrentSessionAsync(CancellationToken cancellationToken = default) => ValueTask.FromResult<HostedSyncSession?>(null);
+        public ValueTask<HostedSyncSession?> GetCurrentSessionAsync(CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(currentSession);
         public ValueTask<HostedSignInStart> StartEmailSignInAsync(string email, bool shouldCreateUser = false, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<HostedSyncSession> CompleteEmailSignInAsync(string verificationCode, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public ValueTask<HostedSyncSession> ResumeEmailSignInAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

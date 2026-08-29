@@ -119,6 +119,7 @@
         'Launch Docker Desktop once, accept its terms, and allow WSL2 setup or a restart if requested.'
         'Run gh auth login on the new device; GitHub authentication is never transferred.'
         'Open the Codex VS Code extension and sign in; Codex authentication and session databases are never transferred.'
+        'Confirm Windows has a default HTTPS browser; updater Google sign-in returns through a temporary 127.0.0.1 loopback callback and needs no local Google client secret.'
         'Review and accept Android SDK licenses, then authorize USB debugging on the unlocked Android device.'
         'Restart Windows or the terminal when an installer or environment-variable change requires it.'
     )

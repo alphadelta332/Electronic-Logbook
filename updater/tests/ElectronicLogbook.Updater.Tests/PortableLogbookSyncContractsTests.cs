@@ -307,6 +307,22 @@ public sealed class PortableLogbookSyncContractsTests
     }
 
     [Fact]
+    public async Task InMemoryLedgerDoesNotMistakeBase64CiphertextContainingRouteForPlaintext()
+    {
+        var ledger = new InMemoryHostedLogbookLedger();
+        var logbookId = new LogbookId("log_sync");
+        var deviceId = new DeviceId("dev_android");
+        var upload = CreateUpload("rev_route_ciphertext", deviceId) with
+        {
+            PayloadCiphertext = "routeAAAAAAAAAAAAAAA"
+        };
+
+        var result = await ledger.AppendOperationsAsync(logbookId, deviceId, [upload]);
+
+        Assert.Single(result.AcceptedOperations);
+    }
+
+    [Fact]
     public async Task InMemoryLedgerClampsMissingOperationPagesToPilotBound()
     {
         var ledger = new InMemoryHostedLogbookLedger();

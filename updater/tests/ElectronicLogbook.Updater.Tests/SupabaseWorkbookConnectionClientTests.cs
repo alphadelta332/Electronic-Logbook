@@ -75,6 +75,73 @@ public sealed class SupabaseWorkbookConnectionClientTests
     }
 
     [Fact]
+    public async Task GoogleSignInUsesSystemBrowserPkceAndReturnsExactAccountEmail()
+    {
+        var accountId = Guid.NewGuid();
+        var handler = new WorkbookConnectionHandler(
+            accountId,
+            Guid.NewGuid(),
+            PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+        var browser = new RecordingGoogleOAuthFlow("code=one-time-google-code");
+
+        var session = await client.SignInWithGoogleAsync(browser);
+
+        Assert.Equal("acct_" + accountId.ToString("N"), session.AccountId.Value);
+        Assert.Equal("pilot@example.com", session.AccountDisplay);
+        Assert.NotNull(browser.AuthorizationUri);
+        var authorization = QueryValues(browser.AuthorizationUri!.Query);
+        Assert.Equal("google", authorization["provider"]);
+        Assert.Equal("s256", authorization["code_challenge_method"]);
+        Assert.Equal(browser.CallbackUri, new Uri(authorization["redirect_to"]));
+        Assert.DoesNotContain("public-anon-key", browser.AuthorizationUri.AbsoluteUri, StringComparison.Ordinal);
+
+        var exchange = handler.Requests.Single(request => request.Path == "/auth/v1/token");
+        Assert.Equal("grant_type=pkce", exchange.Query.TrimStart('?'));
+        Assert.Null(exchange.AuthorizationScheme);
+        using var payload = JsonDocument.Parse(exchange.Body);
+        Assert.Equal("one-time-google-code", payload.RootElement.GetProperty("auth_code").GetString());
+        var verifier = payload.RootElement.GetProperty("code_verifier").GetString();
+        Assert.NotNull(verifier);
+        Assert.InRange(verifier.Length, 43, 128);
+        var expectedChallenge = SystemBrowserGoogleOAuthFlow.Base64UrlEncode(
+            SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
+        Assert.Equal(expectedChallenge, authorization["code_challenge"]);
+        Assert.DoesNotContain(verifier, browser.AuthorizationUri.AbsoluteUri, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GoogleSignInCancellationDoesNotExchangeOrCreateSession()
+    {
+        var handler = new WorkbookConnectionHandler(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+        var browser = new RecordingGoogleOAuthFlow("error=access_denied");
+
+        var error = await Assert.ThrowsAsync<HostedSignInException>(() =>
+            client.SignInWithGoogleAsync(browser));
+
+        Assert.Equal(HostedSignInFailureReason.InvitationRequired, error.Reason);
+        Assert.DoesNotContain("Supabase", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("database", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("code", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/auth/v1/token");
+        await Assert.ThrowsAsync<HostedSignInException>(() => client.DiscoverActiveLogbooksAsync());
+    }
+
+    [Fact]
     public async Task WorkbookMigrationLifecycleUsesNarrowAuthenticatedRpcCallsAndStableResources()
     {
         var accountId = Guid.NewGuid();
@@ -114,6 +181,64 @@ public sealed class SupabaseWorkbookConnectionClientTests
         Assert.All(
             handler.Requests.Where(request => request.Path.Contains("workbook_migration", StringComparison.Ordinal)),
             request => Assert.Equal("Bearer", request.AuthorizationScheme));
+    }
+
+    [Fact]
+    public async Task WorkbookMigrationConfigurationUploadAndReadbackAreScopedAndRetryStable()
+    {
+        var accountId = Guid.NewGuid();
+        var logbookId = Guid.NewGuid();
+        var handler = new WorkbookConnectionHandler(accountId, logbookId, PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
+        var revision = new HostedConfigurationRevisionUpload(
+            new RevisionId("rev_" + Guid.NewGuid().ToString("N")),
+            migration.DeviceId,
+            DateTimeOffset.Parse("2026-08-29T01:02:03Z"),
+            SchemaVersion: 2,
+            PayloadCiphertext: new string('c', 32),
+            PayloadNonce: new string('n', 24),
+            PayloadTag: new string('t', 32),
+            PayloadHash: new string('d', 64));
+
+        var appended = await client.AppendWorkbookConfigurationRevisionAsync(migration, revision);
+        var retry = await client.AppendWorkbookConfigurationRevisionAsync(migration, revision);
+        var readback = await client.ReadWorkbookConfigurationRevisionsAsync(migration);
+
+        Assert.Equal(appended, retry);
+        Assert.Equal(revision.RevisionId, appended.RevisionId);
+        Assert.Equal(migration.DeviceId, appended.DeviceId);
+        Assert.Equal(2, appended.SchemaVersion);
+        Assert.Equal(appended, Assert.Single(readback.Revisions));
+        Assert.Equal(1, readback.ThroughHostedRevision);
+        Assert.False(readback.HasMore);
+
+        var uploads = handler.Requests.Where(request =>
+            request.Path.EndsWith("/append_hosted_configuration_revision", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(2, uploads.Length);
+        Assert.Equal(uploads[0].Body, uploads[1].Body);
+        using var uploadJson = JsonDocument.Parse(uploads[0].Body);
+        Assert.Equal(logbookId.ToString("D"), uploadJson.RootElement.GetProperty("p_logbook_id").GetString());
+        Assert.Equal(1, uploadJson.RootElement.GetProperty("p_configuration_format_version").GetInt32());
+        Assert.DoesNotContain("custom field", uploads[0].Body, StringComparison.OrdinalIgnoreCase);
+        Assert.All(
+            handler.Requests.Where(request => request.Path.Contains("configuration_revision", StringComparison.Ordinal)),
+            request => Assert.Equal("Bearer", request.AuthorizationScheme));
+
+        var wrongDevice = revision with { DeviceId = DeviceId.New() };
+        var requestCount = handler.Requests.Count;
+        var scopeError = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            client.AppendWorkbookConfigurationRevisionAsync(migration, wrongDevice));
+        Assert.Contains("temporary spreadsheet device", scopeError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(requestCount, handler.Requests.Count);
     }
 
     [Fact]
@@ -203,6 +328,60 @@ public sealed class SupabaseWorkbookConnectionClientTests
                 expectedOperationCount: 321,
                 verificationReceiptHash: new string('e', 64));
 
+            Assert.Null(PortableWorkbookMigrationRecoveryStore.Load(targetName));
+        }
+        finally
+        {
+            PortableWorkbookMigrationRecoveryStore.Delete(targetName);
+        }
+    }
+
+    [Fact]
+    public async Task CompletedMigrationRetryRemovesCredentialRetainedAfterLostCompletionResponse()
+    {
+        var handler = new WorkbookConnectionHandler(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            PortableLogbookKey.Generate());
+        using var http = new HttpClient(handler);
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri("https://pilot.supabase.co"),
+            "public-anon-key",
+            "Windows Migration");
+        using var client = new SupabaseWorkbookConnectionClient(configuration, http);
+        var coordinator = new WorkbookMigrationRecoveryCoordinator(client);
+        var sourceFingerprint = new string('a', 64);
+
+        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.CompleteEmailSignInAsync("123456");
+        var migration = await client.BeginWorkbookMigrationAsync(
+            sourceFingerprint,
+            "Migrated Logbook");
+        var targetName = PortableWorkbookMigrationRecoveryStore.CreateTargetName(
+            migration.LogbookId,
+            migration.DeviceId);
+
+        try
+        {
+            await client.CompleteWorkbookMigrationAsync(
+                migration.MigrationId,
+                expectedOperationCount: 1,
+                verificationReceiptHash: new string('e', 64));
+
+            using (PortableWorkbookMigrationRecoveryStore.LoadOrCreate(
+                migration.LogbookId,
+                migration.DeviceId))
+            {
+                using var retained = PortableWorkbookMigrationRecoveryStore.Load(targetName);
+                Assert.NotNull(retained);
+            }
+
+            using var resumed = await coordinator.BeginOrResumeAsync(
+                sourceFingerprint,
+                "Migrated Logbook");
+
+            Assert.True(resumed.IsAlreadyCompleted);
+            Assert.Null(resumed.RecoveryMaterial);
             Assert.Null(PortableWorkbookMigrationRecoveryStore.Load(targetName));
         }
         finally
@@ -421,6 +600,11 @@ public sealed class SupabaseWorkbookConnectionClientTests
         private readonly Guid migrationId = Guid.NewGuid();
         private readonly Guid migrationDeviceId = Guid.NewGuid();
         private readonly RSA ingressKey = RSA.Create(2048);
+        private string migrationStatus = "pending";
+        private string migrationSourceFingerprint = new string('a', 64);
+        private string? migrationFailureCode;
+        private string? migrationReceiptHash;
+        private int? migrationVerifiedCount;
 
         public List<RecordedRequest> Requests { get; } = [];
 
@@ -437,6 +621,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
                 : await request.Content.ReadAsStringAsync(cancellationToken);
             Requests.Add(new RecordedRequest(
                 request.RequestUri?.AbsolutePath ?? string.Empty,
+                request.RequestUri?.Query ?? string.Empty,
                 body,
                 request.Headers.Authorization?.Scheme));
 
@@ -458,6 +643,21 @@ public sealed class SupabaseWorkbookConnectionClientTests
                     """);
             }
 
+            if (path == "/auth/v1/token")
+            {
+                return Json($$"""
+                    {
+                      "access_token": "google-access-token",
+                      "refresh_token": "google-refresh-token",
+                      "expires_in": 3600,
+                      "user": {
+                        "id": "{{accountId:D}}",
+                        "email": "pilot@example.com"
+                      }
+                    }
+                    """);
+            }
+
             if (path == "/rest/v1/logbook_memberships")
             {
                 return Json($$"""
@@ -473,14 +673,48 @@ public sealed class SupabaseWorkbookConnectionClientTests
                     """);
             }
 
+            if (path?.EndsWith("/append_hosted_configuration_revision", StringComparison.Ordinal) == true)
+            {
+                return Json(ConfigurationRevisionJson(body));
+            }
+
+            if (path?.EndsWith("/read_hosted_configuration_revisions", StringComparison.Ordinal) == true)
+            {
+                var upload = Requests.Last(request =>
+                    request.Path.EndsWith("/append_hosted_configuration_revision", StringComparison.Ordinal));
+                return Json("[" + ConfigurationRevisionJson(upload.Body) + "]");
+            }
+
             if (path?.StartsWith("/rest/v1/rpc/", StringComparison.Ordinal) == true)
             {
-                var status = path.EndsWith("/fail_workbook_migration", StringComparison.Ordinal)
-                    ? "failed"
-                    : path.EndsWith("/complete_workbook_migration", StringComparison.Ordinal)
-                        ? "completed"
-                        : "pending";
-                return Json(MigrationJson(status, body));
+                using var requestJson = JsonDocument.Parse(
+                    string.IsNullOrWhiteSpace(body) ? "{}" : body);
+                if (requestJson.RootElement.TryGetProperty("p_source_fingerprint", out var source))
+                {
+                    migrationSourceFingerprint = source.GetString() ?? migrationSourceFingerprint;
+                    if (migrationStatus == "failed")
+                    {
+                        migrationStatus = "pending";
+                        migrationFailureCode = null;
+                    }
+                }
+                if (path.EndsWith("/fail_workbook_migration", StringComparison.Ordinal))
+                {
+                    migrationStatus = "failed";
+                    migrationFailureCode = requestJson.RootElement.GetProperty("p_failure_code").GetString();
+                }
+                else if (path.EndsWith("/complete_workbook_migration", StringComparison.Ordinal))
+                {
+                    migrationStatus = "completed";
+                    migrationFailureCode = null;
+                    migrationReceiptHash = requestJson.RootElement
+                        .GetProperty("p_verification_receipt_hash")
+                        .GetString();
+                    migrationVerifiedCount = requestJson.RootElement
+                        .GetProperty("p_expected_operation_count")
+                        .GetInt32();
+                }
+                return Json(MigrationJson());
             }
 
             if (path == "/functions/v1/recovery-envelope")
@@ -567,38 +801,47 @@ public sealed class SupabaseWorkbookConnectionClientTests
             base.Dispose(disposing);
         }
 
-        private string MigrationJson(string status, string requestBody)
+        private string MigrationJson()
         {
-            using var request = JsonDocument.Parse(string.IsNullOrWhiteSpace(requestBody) ? "{}" : requestBody);
-            var sourceFingerprint = request.RootElement.TryGetProperty("p_source_fingerprint", out var source)
-                ? source.GetString()
-                : new string('a', 64);
-            var failureCode = status == "failed"
-                ? request.RootElement.GetProperty("p_failure_code").GetString()
-                : null;
-            var receiptHash = status == "completed"
-                ? request.RootElement.GetProperty("p_verification_receipt_hash").GetString()
-                : null;
-            var verifiedCount = status == "completed"
-                ? request.RootElement.GetProperty("p_expected_operation_count").GetInt32()
-                : (int?)null;
             return JsonSerializer.Serialize(new
             {
                 migration_id = migrationId,
                 account_id = accountId,
                 logbook_id = logbookId,
                 device_id = migrationDeviceId,
-                source_fingerprint = sourceFingerprint,
-                status,
-                attempt_count = status == "pending" ? 1 : 2,
-                expected_operation_count = verifiedCount,
-                verified_operation_count = verifiedCount,
-                verification_receipt_hash = receiptHash,
-                failure_code = failureCode,
+                source_fingerprint = migrationSourceFingerprint,
+                status = migrationStatus,
+                attempt_count = migrationStatus == "pending" ? 1 : 2,
+                expected_operation_count = migrationVerifiedCount,
+                verified_operation_count = migrationVerifiedCount,
+                verification_receipt_hash = migrationReceiptHash,
+                failure_code = migrationFailureCode,
                 started_at = "2026-08-28T00:00:00Z",
                 updated_at = "2026-08-28T00:01:00Z",
-                completed_at = status == "completed" ? "2026-08-28T00:01:00Z" : null,
-                failed_at = status == "failed" ? "2026-08-28T00:01:00Z" : null
+                completed_at = migrationStatus == "completed" ? "2026-08-28T00:01:00Z" : null,
+                failed_at = migrationStatus == "failed" ? "2026-08-28T00:01:00Z" : null
+            });
+        }
+
+        private string ConfigurationRevisionJson(string requestBody)
+        {
+            using var request = JsonDocument.Parse(requestBody);
+            var root = request.RootElement;
+            return JsonSerializer.Serialize(new
+            {
+                revision = 1,
+                configuration_id = root.GetProperty("p_configuration_id").GetString(),
+                portable_revision_id = root.GetProperty("p_portable_revision_id").GetString(),
+                author_device_id = migrationDeviceId,
+                configuration_format_version = root.GetProperty("p_configuration_format_version").GetInt32(),
+                payload_ciphertext = root.GetProperty("p_payload_ciphertext").GetString(),
+                payload_nonce = root.GetProperty("p_payload_nonce").GetString(),
+                payload_tag = root.GetProperty("p_payload_tag").GetString(),
+                payload_hash = root.GetProperty("p_payload_hash").GetString(),
+                client_created_at = root.GetProperty("p_client_created_at").GetString(),
+                received_at = "2026-08-29T01:02:04Z",
+                highest_revision = 1,
+                has_more = false
             });
         }
 
@@ -609,5 +852,35 @@ public sealed class SupabaseWorkbookConnectionClientTests
             };
     }
 
-    private sealed record RecordedRequest(string Path, string Body, string? AuthorizationScheme);
+    private static Dictionary<string, string> QueryValues(string query) =>
+        query.TrimStart('?')
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(item => item.Split('=', 2))
+            .ToDictionary(
+                item => Uri.UnescapeDataString(item[0]),
+                item => item.Length == 2 ? Uri.UnescapeDataString(item[1]) : string.Empty,
+                StringComparer.OrdinalIgnoreCase);
+
+    private sealed class RecordingGoogleOAuthFlow(string callbackQuery) : ISystemBrowserGoogleOAuthFlow
+    {
+        public Uri? AuthorizationUri { get; private set; }
+
+        public Uri? CallbackUri { get; private set; }
+
+        public Task<Uri> AuthorizeAsync(
+            Func<Uri, Uri> createAuthorizationUri,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CallbackUri = new Uri("http://127.0.0.1:49152/flightlogx-auth/test-token/");
+            AuthorizationUri = createAuthorizationUri(CallbackUri);
+            return Task.FromResult(new Uri(CallbackUri, "?" + callbackQuery));
+        }
+    }
+
+    private sealed record RecordedRequest(
+        string Path,
+        string Query,
+        string Body,
+        string? AuthorizationScheme);
 }

@@ -132,6 +132,32 @@ public sealed record HostedAppendResult(
     IReadOnlyList<HostedOperationEnvelope> AcceptedOperations,
     long ThroughHostedRevision);
 
+public sealed record HostedConfigurationRevisionUpload(
+    RevisionId RevisionId,
+    DeviceId DeviceId,
+    DateTimeOffset CreatedAt,
+    int SchemaVersion,
+    string PayloadCiphertext,
+    string PayloadNonce,
+    string PayloadTag,
+    string PayloadHash);
+
+public sealed record HostedConfigurationRevisionEnvelope(
+    long HostedRevision,
+    RevisionId RevisionId,
+    DeviceId DeviceId,
+    DateTimeOffset CreatedAt,
+    int SchemaVersion,
+    string PayloadCiphertext,
+    string PayloadNonce,
+    string PayloadTag,
+    string PayloadHash);
+
+public sealed record HostedConfigurationRevisionPage(
+    IReadOnlyList<HostedConfigurationRevisionEnvelope> Revisions,
+    long ThroughHostedRevision,
+    bool HasMore);
+
 public sealed record HostedSyncSession(
     HostedAccountId AccountId,
     DeviceId DeviceId,
@@ -195,7 +221,9 @@ public enum HostedSignInFailureReason
     DeviceRevoked,
     SignedOut,
     PublicRegistrationBlocked,
-    WorkbookMigrationRequired
+    WorkbookMigrationRequired,
+    WorkbookMigrationFailed,
+    WorkbookMigrationInvalid
 }
 
 public sealed class HostedSignInException(
