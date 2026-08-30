@@ -161,6 +161,7 @@ public sealed class MobileReplacementRecoveryWorkflowTests
     {
         var js = new RecoveryJsRuntime();
         var sourceDeviceId = new DeviceId("dev_workbook");
+        var sourceFingerprint = new string('a', 64);
         var clock = new ManualSyncClock(Now);
         var expected = PortableLogbookDocumentV2.CreateAustraliaFirst(
             LogbookId,
@@ -205,6 +206,9 @@ public sealed class MobileReplacementRecoveryWorkflowTests
                         MeDualNight = 2.3m
                     })
             ]);
+        var migrationReceipt = PortableWorkbookMigrationVerification.CreateReceipt(
+            sourceFingerprint,
+            expected);
         var ledger = new InMemoryHostedLogbookLedger();
         var sourceAuthenticator = new RecordingAuthenticator(
             new HostedSyncSession(AccountId, sourceDeviceId, Now.AddHours(1)),
@@ -227,19 +231,23 @@ public sealed class MobileReplacementRecoveryWorkflowTests
                 BackgroundSyncReason.ManualRefresh));
         Assert.Equal(PortableHostedSyncStatus.Synced, seeded.Status);
 
+        var restoreOrder = new List<string>();
         var client = new RecordingRecoveryClient(Session())
         {
-            Memberships = [WorkbookMigrationMembership(LogbookId, sourceDeviceId, 2)]
+            Memberships = [WorkbookMigrationMembership(migrationReceipt)]
         };
         var service = new RecordingRecoveryEnvelopeService();
         var recovered = await CreateWorkflow(
                 js,
                 client,
-                ledger,
-                ConfigurationLedgerFor(expected, sourceDeviceId),
+                new ReadOrderLedger(ledger, restoreOrder),
+                new ReadOrderConfigurationLedger(
+                    ConfigurationLedgerFor(expected, sourceDeviceId),
+                    restoreOrder),
                 recoveryService: service)
             .RecoverOnlyLogbookAsync();
 
+        Assert.Equal(["configuration", "operations"], restoreOrder);
         Assert.Equal(1, service.RestoreCount);
         Assert.Equal(1, client.CompleteCount);
         Assert.Equal(DeviceId, client.CompletedDeviceId);
@@ -251,6 +259,86 @@ public sealed class MobileReplacementRecoveryWorkflowTests
             PortableLogbookJson.SerializeV2(expected),
             PortableLogbookJson.SerializeV2(Assert.IsType<PortableLogbookDocumentV2>(durable?.Document)));
         Assert.Equal(PortableHostedSyncStatus.Synced, durable?.HostedSync?.LastStatus);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CompletedWorkbookMigrationRejectsChangedSourceFingerprintOrReceiptBeforeActivation(
+        bool changeSourceFingerprint)
+    {
+        var js = new RecoveryJsRuntime();
+        var sourceDeviceId = new DeviceId("dev_workbook");
+        var clock = new ManualSyncClock(Now);
+        var expected = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            LogbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [
+                PortableLogbookOperationV2.Create(
+                    LogbookId,
+                    new EntryId("ent_first"),
+                    new RevisionId("rev_first"),
+                    sourceDeviceId,
+                    Now.AddMinutes(-1),
+                    PortableLogbookWorkbookEntry.Empty with
+                    {
+                        FlightId = "MIG-001",
+                        Year = 2026,
+                        Month = 8,
+                        Day = 28,
+                        Reg = "VH-ABC",
+                        From = "YSCN",
+                        To = "YMML",
+                        SeCommandDay = 1.2m
+                    })
+            ]);
+        var receipt = PortableWorkbookMigrationVerification.CreateReceipt(
+            new string('a', 64),
+            expected);
+        var ledger = new InMemoryHostedLogbookLedger();
+        var sourceSession = new HostedSyncSession(AccountId, sourceDeviceId, Now.AddHours(1));
+        var seeded = await new MobileHostedSyncWorkflow(
+                new BrowserPackageKeyStore(js),
+                ledger,
+                new RecordingAuthenticator(sourceSession, currentSession: sourceSession),
+                new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+                clock)
+            .SyncAsync(new PortableHostedSyncRequestContext(
+                expected,
+                new BrowserHostedSyncState(
+                    AccountId,
+                    LogbookId,
+                    sourceDeviceId,
+                    0,
+                    PortableHostedSyncStatus.Waiting,
+                    LedgerCursorVersion: BrowserHostedSyncState.CurrentLedgerCursorVersion),
+                BackgroundSyncReason.ManualRefresh));
+        Assert.Equal(PortableHostedSyncStatus.Synced, seeded.Status);
+
+        var client = new RecordingRecoveryClient(Session())
+        {
+            Memberships =
+            [
+                WorkbookMigrationMembership(
+                    receipt,
+                    sourceFingerprint: changeSourceFingerprint ? new string('c', 64) : null,
+                    verificationReceiptHash: changeSourceFingerprint ? null : new string('d', 64))
+            ]
+        };
+        var workflow = CreateWorkflow(
+            js,
+            client,
+            ledger,
+            ConfigurationLedgerFor(expected, sourceDeviceId));
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await workflow.RecoverOnlyLogbookAsync());
+
+        Assert.Equal("RECOVERY_MIGRATION_RECEIPT_MISMATCH", error.ErrorCode);
+        Assert.Contains("receipt does not match", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, client.CompleteCount);
+        Assert.Null(await new BrowserLogbookStore(js).LoadStateV2Async());
     }
 
     [Fact]
@@ -402,6 +490,21 @@ public sealed class MobileReplacementRecoveryWorkflowTests
                 new string('a', 64),
                 new string('b', 64)));
 
+    private static MobileHostedLogbookMembership WorkbookMigrationMembership(
+        PortableWorkbookMigrationReceipt receipt,
+        string? sourceFingerprint = null,
+        string? verificationReceiptHash = null) =>
+        new(
+            receipt.LogbookId,
+            "owner",
+            PortableLogbookDocumentV2.CurrentSchemaVersion,
+            1,
+            new MobileWorkbookMigrationRecoveryExpectation(
+                receipt.DeviceId,
+                receipt.EntryCount,
+                sourceFingerprint ?? receipt.SourceFingerprint,
+                verificationReceiptHash ?? receipt.VerificationReceiptSha256));
+
     private sealed class RecordingRecoveryClient(HostedSyncSession session) : IMobileReplacementRecoveryClient
     {
         public IReadOnlyList<MobileHostedLogbookMembership> Memberships { get; set; } = [Membership(LogbookId)];
@@ -514,6 +617,43 @@ public sealed class MobileReplacementRecoveryWorkflowTests
         }
     }
 
+    private sealed class ReadOrderLedger(
+        IHostedLogbookLedger inner,
+        List<string> restoreOrder) : IHostedLogbookLedger
+    {
+        public ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            restoreOrder.Add("operations");
+            return inner.ReadMissingOperationsAsync(
+                logbookId,
+                afterHostedRevision,
+                pageSize,
+                cancellationToken);
+        }
+
+        public ValueTask<HostedAppendResult> AppendOperationsAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            IReadOnlyList<HostedOperationUpload> operations,
+            CancellationToken cancellationToken = default) =>
+            inner.AppendOperationsAsync(logbookId, deviceId, operations, cancellationToken);
+
+        public ValueTask RecordAcknowledgementAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            long throughHostedRevision,
+            CancellationToken cancellationToken = default) =>
+            inner.RecordAcknowledgementAsync(
+                logbookId,
+                deviceId,
+                throughHostedRevision,
+                cancellationToken);
+    }
+
     private class EmptyConfigurationLedger : IHostedConfigurationRevisionLedger
     {
         public virtual ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
@@ -535,6 +675,25 @@ public sealed class MobileReplacementRecoveryWorkflowTests
             ValueTask.FromResult(afterHostedRevision < revision.HostedRevision
                 ? new HostedConfigurationRevisionPage([revision], revision.HostedRevision, HasMore: false)
                 : new HostedConfigurationRevisionPage([], afterHostedRevision, HasMore: false));
+    }
+
+    private sealed class ReadOrderConfigurationLedger(
+        IHostedConfigurationRevisionLedger inner,
+        List<string> restoreOrder) : IHostedConfigurationRevisionLedger
+    {
+        public ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            restoreOrder.Add("configuration");
+            return inner.ReadConfigurationRevisionsAsync(
+                logbookId,
+                afterHostedRevision,
+                pageSize,
+                cancellationToken);
+        }
     }
 
     private sealed class RecoveryJsRuntime : IJSRuntime

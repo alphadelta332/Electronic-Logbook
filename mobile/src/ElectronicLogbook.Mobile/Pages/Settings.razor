@@ -88,26 +88,6 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <div>
-                    <span class="eyebrow">Existing records</span>
-                    <h2>One-time workbook migration</h2>
-                </div>
-                <span class="draft-pill">@MigrationStatus</span>
-            </div>
-            <div class="settings-connection-summary">
-                <MudIcon Icon="@Icons.Material.Filled.UploadFile" />
-                <div>
-                    <strong>@MigrationStatus</strong>
-                    <span>@MigrationDetail</span>
-                </div>
-            </div>
-            <MudButton Href="/migrate" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.FactCheck">
-                @(Session.WorkbookMigration is null ? "Preview workbook migration" : "View migration verification")
-            </MudButton>
-        </section>
-
-        <section class="form-section">
-            <div class="section-title-row">
-                <div>
                     <span class="eyebrow">Device health</span>
                     <h2>Offline copy and backup</h2>
                 </div>
@@ -160,54 +140,8 @@ else
                     </MudButton>
                     <MudText Typo="Typo.caption">@(Session.HasHostedSync
                         ? "The connection preflight found a retained sign-in or device-access problem. Reauthenticate without deleting the local logbook."
-                        : "Returning pilots: use the Google account previously added to your invited account.")</MudText>
-                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Immediate="true" Disabled="@IsAccountBusy" />
-                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
-                        Send sign-in code
-                    </MudButton>
-                    <MudTextField @bind-Value="HostedVerificationCode"
-                                  InputType="InputType.Text"
-                                  Label="Six-digit sign-in code"
-                                  HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive."
-                                  Immediate="true"
-                                  Disabled="@IsAccountBusy" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
-                        @(Session.HasHostedSync ? "Reauthenticate account" : "Connect account")
-                    </MudButton>
-                    <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResumeHostedSignInAsync" Disabled="@IsAccountBusy">
-                        Resume verified sign-in
-                    </MudButton>
-                    <MudText Typo="Typo.caption">Recovery only: use after support confirms that email verification succeeded but device setup was interrupted.</MudText>
-                    <MudTextField @bind-Value="AccountRecoveryCode" InputType="InputType.Password" Label="Recovery code" Immediate="true" Disabled="@IsAccountBusy" />
-                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RecoverWithCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(AccountRecoveryCode))">
-                        Recover with code
-                    </MudButton>
-                    <MudText Typo="Typo.caption">Fallback only: sign in first, then use the code saved when this logbook was created.</MudText>
+                        : "Use the same Google account that completed the spreadsheet migration on Windows.")</MudText>
                 </div>
-            }
-            else if (Session.HostedSyncStatusLabel != "Needs attention")
-            {
-                <div class="connection-diagnostic-actions">
-                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AddModerator" OnClick="LinkGoogleIdentityAsync" Disabled="@IsAccountBusy">
-                        Add Google sign-in
-                    </MudButton>
-                </div>
-                <MudText Typo="Typo.caption">Do this once after accepting the email invitation. It links Google to this existing account; it does not create another logbook.</MudText>
-                @if (Session.IsRecoveryCodeConfirmationPending)
-                {
-                    <section class="notice-panel" role="status" aria-live="polite">
-                        <MudIcon Icon="@Icons.Material.Filled.Key" />
-                        <div>
-                            <strong>Save your recovery code</strong>
-                            <span class="recovery-code-value">@Session.PendingRecoveryCode</span>
-                            <span>Store it away from this phone. Enter it below to prove the saved copy works.</span>
-                        </div>
-                    </section>
-                    <MudTextField @bind-Value="RecoveryCodeConfirmation" InputType="InputType.Password" Label="Enter saved recovery code" Immediate="true" Disabled="@IsAccountBusy" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.VerifiedUser" OnClick="ConfirmRecoveryCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(RecoveryCodeConfirmation))">
-                        Confirm recovery code
-                    </MudButton>
-                }
             }
             @if (!Session.HasHostedSync || Session.HostedSyncStatusLabel == "Needs attention")
             {
@@ -373,6 +307,59 @@ else
                     <small>Use the support summary when requesting account deletion or revoked-device recovery.</small>
                 </article>
             </div>
+            <details class="sync-diagnostics">
+                <summary>Account sign-in and recovery fallback</summary>
+                <MudText Typo="Typo.caption">Open these controls only when FlightLogX support asks you to use the email-code or recovery-code fallback.</MudText>
+                <div class="field-grid">
+                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Immediate="true" Disabled="@IsAccountBusy" />
+                    <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
+                        Send sign-in code
+                    </MudButton>
+                    <MudTextField @bind-Value="HostedVerificationCode"
+                                  InputType="InputType.Text"
+                                  Label="Six-digit sign-in code"
+                                  HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive."
+                                  Immediate="true"
+                                  Disabled="@IsAccountBusy" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
+                        @(Session.HasHostedSync ? "Reauthenticate account" : "Connect account")
+                    </MudButton>
+                    @if (Session.ShouldOfferHostedAuthentication)
+                    {
+                        <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResumeHostedSignInAsync" Disabled="@IsAccountBusy">
+                            Resume verified sign-in
+                        </MudButton>
+                        <MudText Typo="Typo.caption">Recovery only: use after support confirms that email verification succeeded but device setup was interrupted.</MudText>
+                        <MudTextField @bind-Value="AccountRecoveryCode" InputType="InputType.Password" Label="Recovery code" Immediate="true" Disabled="@IsAccountBusy" />
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Key" OnClick="RecoverWithCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(AccountRecoveryCode))">
+                            Recover with code
+                        </MudButton>
+                        <MudText Typo="Typo.caption">Fallback only: sign in first, then use the code saved when this logbook was created.</MudText>
+                    }
+                    else if (Session.HostedSyncStatusLabel != "Needs attention")
+                    {
+                        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.AddModerator" OnClick="LinkGoogleIdentityAsync" Disabled="@IsAccountBusy">
+                            Add Google sign-in
+                        </MudButton>
+                        <MudText Typo="Typo.caption">Use this only for an older account that support confirms was first connected by email code. It does not create another logbook.</MudText>
+                    }
+                    @if (Session.IsRecoveryCodeConfirmationPending)
+                    {
+                        <section class="notice-panel" role="status" aria-live="polite">
+                            <MudIcon Icon="@Icons.Material.Filled.Key" />
+                            <div>
+                                <strong>Save your recovery code</strong>
+                                <span class="recovery-code-value">@Session.PendingRecoveryCode</span>
+                                <span>Store it away from this phone. Enter it below to prove the saved copy works.</span>
+                            </div>
+                        </section>
+                        <MudTextField @bind-Value="RecoveryCodeConfirmation" InputType="InputType.Password" Label="Enter saved recovery code" Immediate="true" Disabled="@IsAccountBusy" />
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.VerifiedUser" OnClick="ConfirmRecoveryCodeAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(RecoveryCodeConfirmation))">
+                            Confirm recovery code
+                        </MudButton>
+                    }
+                </div>
+            </details>
             <MudButton Href="/exchange" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Construction">
                 Advanced recovery workspace
             </MudButton>
@@ -694,6 +681,8 @@ else
     private static string AccountFailureMessage(Exception exception) => exception switch
     {
         InvalidOperationException or HostedSignInException or JSException => exception.Message,
+        MobileHostedDiagnosticException diagnostic =>
+            $"Account recovery could not finish, so no new logbook was created. Contact FlightLogX support and provide code {MobileDiagnosticRedactor.Redact(diagnostic.ErrorCode)}.",
         HostedLedgerException =>
             "Account verification reached hosted sync, but device registration could not be completed. Do not request another email; report this message for recovery.",
         HttpRequestException =>

@@ -421,6 +421,63 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
+    public async Task EmailCodeReauthenticationRefreshesTokensAndKeepsTheActiveRegisteredDevice()
+    {
+        var handler = new RecordingHandler();
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-30T00:00:00Z")));
+
+        await client.StartEmailSignInAsync("owner@example.com");
+        var session = await client.CompleteEmailSignInAsync("123456");
+
+        var refreshed = Assert.IsType<BrowserHostedCredential>(await store.LoadAsync());
+        Assert.Equal(ValidCredential().AccountId, session.AccountId);
+        Assert.Equal(ValidCredential().DeviceId, session.DeviceId);
+        Assert.Equal(ValidCredential().DeviceId, refreshed.DeviceId);
+        Assert.Equal("access-token", refreshed.AccessToken);
+        Assert.Equal("refresh-token", refreshed.RefreshToken);
+        Assert.False(refreshed.DeviceRegistrationPending);
+        Assert.Contains(handler.Requests, request => request.Path == "/rest/v1/devices");
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/logbook_memberships");
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+    }
+
+    [Fact]
+    public async Task EmailCodeReauthenticationRejectsAnotherAccountAndKeepsTheRetainedCredential()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/auth/v1/verify"] = (HttpStatusCode.OK, """
+            {
+              "access_token": "other-access-token",
+              "refresh_token": "other-refresh-token",
+              "expires_in": 3600,
+              "user": { "id": "90000000-0000-0000-0000-000000000009" }
+            }
+            """);
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-30T00:00:00Z")));
+
+        await client.StartEmailSignInAsync("other@example.com");
+        var error = await Assert.ThrowsAsync<HostedSignInException>(async () =>
+            await client.CompleteEmailSignInAsync("123456"));
+
+        Assert.Equal(HostedSignInFailureReason.AccountDisabled, error.Reason);
+        Assert.Equal(ValidCredential(), await store.LoadAsync());
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/devices");
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/rest/v1/rpc/accept_hosted_invitation");
+    }
+
+    [Fact]
     public async Task GoogleSignInFailsBeforeOAuthExchangeWhenPlatformCredentialProviderIsUnavailable()
     {
         var handler = new RecordingHandler();
@@ -874,6 +931,19 @@ public sealed class MobileSupabaseHostedSyncClientTests
 
         Assert.Equal(HostedSignInFailureReason.WorkbookMigrationRequired, error.Exception.Reason);
         Assert.Contains("Windows", error.Exception.Message, StringComparison.Ordinal);
+        AssertNoAndroidInitialization(error.Handler);
+    }
+
+    [Fact]
+    public async Task MoreThanOneCompletedWorkbookMigrationStopsAutomaticGoogleRecovery()
+    {
+        using var completed = JsonDocument.Parse(
+            WorkbookMigrationJson("20000000-0000-0000-0000-000000000001", "completed"));
+        var row = completed.RootElement[0].GetRawText();
+        var error = await RunWorkbookMigrationGoogleSignInAsync($"[{row},{row}]");
+
+        Assert.Equal(HostedSignInFailureReason.WorkbookMigrationInvalid, error.Exception.Reason);
+        Assert.Contains("contact FlightLogX support", error.Exception.Message, StringComparison.OrdinalIgnoreCase);
         AssertNoAndroidInitialization(error.Handler);
     }
 

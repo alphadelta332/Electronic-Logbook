@@ -824,7 +824,45 @@ public sealed class MobileLogbookSession(
     {
         try
         {
-            await CompleteHostedInviteSetupAsync(await completeSignIn());
+            var signedIn = await completeSignIn();
+            if (HostedSync is { } retainedHostedSync)
+            {
+                if (signedIn.AccountId != retainedHostedSync.AccountId
+                    || signedIn.DeviceId != retainedHostedSync.DeviceId)
+                {
+                    throw new MobileHostedDiagnosticException(
+                        "EMAIL_REAUTH_SESSION_MISMATCH",
+                        "Email reauthentication did not match the connected account and device. The local logbook was not replaced; contact FlightLogX support.");
+                }
+
+                HostedSync = retainedHostedSync with
+                {
+                    LastStatus = PortableHostedSyncStatus.Waiting,
+                    LastAttemptedAt = syncClock.UtcNow,
+                    AttentionRequiredReason = null
+                };
+                PendingHostedSignIn = null;
+                await SaveStateV2Async();
+
+                if (hostedLedger is not null && networkStatus is not null)
+                {
+                    var sync = await SyncHostedAsync(BackgroundSyncReason.ManualRefresh);
+                    if (sync?.Status != PortableHostedSyncStatus.Synced)
+                    {
+                        throw new MobileHostedDiagnosticException(
+                            "EMAIL_REAUTH_SYNC_INCOMPLETE",
+                            "Email reauthentication succeeded, but the logbook has not finished syncing. Retry Sync now before continuing.");
+                    }
+                    SetLastActionMessage("Account reauthenticated and synced.");
+                }
+                else
+                {
+                    SetLastActionMessage("Account reauthenticated.");
+                }
+                return;
+            }
+
+            await CompleteHostedInviteSetupAsync(signedIn);
         }
         catch (HostedSignInException exception)
             when (exception.Reason == HostedSignInFailureReason.AccountRecoveryRequired)
@@ -832,7 +870,7 @@ public sealed class MobileLogbookSession(
             if (replacementRecovery is null)
             {
                 throw new InvalidOperationException(
-                    "Automatic account recovery is not configured on this device.",
+                    "Automatic account recovery is unavailable in this app build. No new logbook was created; contact FlightLogX support.",
                     exception);
             }
 
@@ -856,7 +894,7 @@ public sealed class MobileLogbookSession(
             if (replacementRecovery is null)
             {
                 throw new InvalidOperationException(
-                    "Automatic account recovery is not configured on this device.",
+                    "Automatic account recovery is unavailable in this app build. No new logbook was created; contact FlightLogX support.",
                     exception);
             }
 
@@ -1029,12 +1067,6 @@ public sealed class MobileLogbookSession(
 
         if (HasHostedSync)
         {
-            if (!ShouldOfferHostedAuthentication)
-            {
-                throw new InvalidOperationException(
-                    "Run connection preflight before reauthenticating this connected logbook.");
-            }
-
             return;
         }
 

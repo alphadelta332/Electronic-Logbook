@@ -220,6 +220,7 @@ public sealed class MobileSupabaseHostedSyncClient(
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(verificationCode);
+        var retainedCredential = credential ?? await credentialStore.LoadAsync();
         var options = await GetConfigAsync(cancellationToken);
         using var verify = NewRequest(options, HttpMethod.Post, "/auth/v1/verify", includeAuthorization: false);
         verify.Content = CreateVerifyContent(options, pendingEmail, verificationCode);
@@ -242,6 +243,32 @@ public sealed class MobileSupabaseHostedSyncClient(
             verified.RefreshToken,
             expiresAt,
             DeviceRegistrationPending: true);
+
+        if (retainedCredential is not null && !IsPendingCredential(retainedCredential))
+        {
+            if (retainedCredential.AccountId != accountId)
+            {
+                throw new HostedSignInException(
+                    HostedSignInFailureReason.AccountDisabled,
+                    "The verified email does not match the connected FlightLogX account. The existing connection was kept unchanged.");
+            }
+
+            var refreshedCredential = temporaryCredential with
+            {
+                DeviceId = retainedCredential.DeviceId,
+                DeviceRegistrationPending = false
+            };
+            credential = refreshedCredential;
+            await credentialStore.SaveAsync(refreshedCredential);
+
+            var retainedDevice = await ReadDeviceAsync(cancellationToken);
+            if (retainedDevice is { Exists: true, IsActive: true, MatchesAccountAndCredential: true })
+            {
+                pendingEmail = null;
+                return new HostedSyncSession(accountId, refreshedCredential.DeviceId, expiresAt);
+            }
+        }
+
         credential = temporaryCredential;
         await credentialStore.SaveAsync(temporaryCredential);
 

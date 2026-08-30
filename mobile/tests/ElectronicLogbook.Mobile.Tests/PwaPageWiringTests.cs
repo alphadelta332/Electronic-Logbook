@@ -5,18 +5,26 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class PwaPageWiringTests
 {
     [Fact]
-    public void WorkbookMigrationRequiresPreviewExplicitChecksAndDurableVerification()
+    public void WorkbookVerificationIsAdvancedReadOnlyAndKeepsReusableComparison()
     {
         var settings = ReadMobilePage("Settings.razor");
         var migration = ReadMobilePage("WorkbookMigration.razor");
+        var advancedStart = settings.IndexOf(
+            "<span class=\"eyebrow\">Advanced recovery</span>",
+            StringComparison.Ordinal);
 
-        Assert.Contains("Href=\"/migrate\"", settings, StringComparison.Ordinal);
-        Assert.Contains("One-time workbook migration", settings, StringComparison.Ordinal);
-        Assert.Contains("@page \"/migrate\"", migration, StringComparison.Ordinal);
+        Assert.True(advancedStart >= 0);
+        Assert.DoesNotContain("workbook verification", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("One-time workbook migration", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Href=\"/migrate\"", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Href=\"/advanced/workbook-verification\"", settings, StringComparison.Ordinal);
+        Assert.Contains("@page \"/advanced/workbook-verification\"", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("@page \"/migrate\"", migration, StringComparison.Ordinal);
+        Assert.Contains("<PageTitle>Advanced workbook verification</PageTitle>", migration, StringComparison.Ordinal);
+        Assert.Contains("Support-only comparison", migration, StringComparison.Ordinal);
+        Assert.Contains("Comparison only — app data cannot be changed here", migration, StringComparison.Ordinal);
         Assert.Contains("Select workbook copy", migration, StringComparison.Ordinal);
         Assert.Contains("MobileWorkbookMigrationReader.Inspect", migration, StringComparison.Ordinal);
-        Assert.Contains("Session.CanPreviewWorkbookMigration", migration, StringComparison.Ordinal);
-        Assert.Contains("Comparison only — app data cannot be changed here", migration, StringComparison.Ordinal);
         Assert.Contains("MobileWorkbookMigrationWorkflow.CompareWithApp", migration, StringComparison.Ordinal);
         Assert.Contains("Workbook versus this app", migration, StringComparison.Ordinal);
         Assert.Contains("Custom-field label differences", migration, StringComparison.Ordinal);
@@ -24,6 +32,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Only in app", migration, StringComparison.Ordinal);
         Assert.Contains("HoursComparison", migration, StringComparison.Ordinal);
         Assert.Contains("This comparison does not save, import, delete, or replace any app data", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.CanMigrateWorkbook", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.CanPreviewWorkbookMigration", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Session.ApplyWorkbookMigrationAsync", migration, StringComparison.Ordinal);
+        Assert.DoesNotContain("Confirm and migrate", migration, StringComparison.Ordinal);
         var export = ReadMobilePage("LogbookExport.razor");
         Assert.Contains("@page \"/export\"", export, StringComparison.Ordinal);
         Assert.Contains("Every export is a new file", export, StringComparison.Ordinal);
@@ -34,11 +46,6 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Custom fields", migration, StringComparison.Ordinal);
         Assert.Contains("Totals from visible flight rows", migration, StringComparison.Ordinal);
         Assert.Contains("Sample values", migration, StringComparison.Ordinal);
-        Assert.Contains("ConfirmedDisposableCopy", migration, StringComparison.Ordinal);
-        Assert.Contains("ConfirmedIdentity", migration, StringComparison.Ordinal);
-        Assert.Contains("ConfirmedValues", migration, StringComparison.Ordinal);
-        Assert.Contains("Session.ApplyWorkbookMigrationAsync", migration, StringComparison.Ordinal);
-        Assert.Contains("Durable verification passed", migration, StringComparison.Ordinal);
         Assert.DoesNotContain("Save workbook", migration, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -375,6 +382,50 @@ public sealed class PwaPageWiringTests
         Assert.Contains("revoked device", settings, StringComparison.Ordinal);
         Assert.Contains("Needs attention", session, StringComparison.Ordinal);
         Assert.Contains("PendingLocalOperationCount", session, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsKeepsGoogleArrivalNormalAndEmailCodeRecoveryAdvanced()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var connectionStart = settings.IndexOf(
+            "<span class=\"eyebrow\">Connection</span>",
+            StringComparison.Ordinal);
+        var advancedStart = settings.IndexOf(
+            "<span class=\"eyebrow\">Advanced recovery</span>",
+            StringComparison.Ordinal);
+
+        Assert.True(connectionStart >= 0);
+        Assert.True(advancedStart > connectionStart);
+        var normalConnection = settings[connectionStart..advancedStart];
+        var advancedRecovery = settings[advancedStart..];
+
+        Assert.Contains("Sign in with Google", normalConnection, StringComparison.Ordinal);
+        Assert.Contains(
+            "Use the same Google account that completed the spreadsheet migration on Windows.",
+            normalConnection,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("HostedEmail", normalConnection, StringComparison.Ordinal);
+        Assert.DoesNotContain("HostedVerificationCode", normalConnection, StringComparison.Ordinal);
+        Assert.DoesNotContain("Send sign-in code", normalConnection, StringComparison.Ordinal);
+        Assert.DoesNotContain("Recovery code", normalConnection, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add Google sign-in", normalConnection, StringComparison.Ordinal);
+
+        Assert.Contains("Account sign-in and recovery fallback", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains("HostedEmail", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains("HostedVerificationCode", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains("Send sign-in code", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains("Session.HasHostedSync ? \"Reauthenticate account\" : \"Connect account\"", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains("Recover with code", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains("Add Google sign-in", advancedRecovery, StringComparison.Ordinal);
+        Assert.Contains(
+            "MobileHostedDiagnosticException diagnostic",
+            advancedRecovery,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Contact FlightLogX support and provide code",
+            advancedRecovery,
+            StringComparison.Ordinal);
     }
 
     [Fact]

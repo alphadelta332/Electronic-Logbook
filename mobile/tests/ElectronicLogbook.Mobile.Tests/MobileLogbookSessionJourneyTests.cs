@@ -191,6 +191,34 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public async Task HealthyEmailCodeReauthenticationKeepsTheConnectedLogbookDeviceAndOperations()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-30T00:00:00Z"));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            new HostedAccountId("acct_private"),
+            new DeviceId("dev_android"),
+            clock);
+        var session = CreateSession(jsRuntime, authenticator, clock);
+        await session.EnsureLoadedWorkbookAsync();
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+        FillWorkbookDraft(session.WorkbookDraft);
+        await session.SaveWorkbookEntryAsync();
+        var retainedLogbookId = session.DocumentV2.LogbookId;
+        var retainedDeviceId = Assert.IsType<BrowserHostedSyncState>(session.HostedSync).DeviceId;
+
+        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.CompleteHostedInviteAcceptanceAsync("123456");
+
+        Assert.Equal(retainedLogbookId, session.DocumentV2.LogbookId);
+        Assert.Equal(retainedDeviceId, session.HostedSync?.DeviceId);
+        Assert.Single(session.DocumentV2.Operations);
+        Assert.Equal(PortableHostedSyncStatus.Waiting, session.HostedSync?.LastStatus);
+        Assert.Equal("Account reauthenticated.", session.LastActionMessage);
+    }
+
+    [Fact]
     public async Task HostedInviteAcceptanceResumesLocalSetupAfterDeviceRegistrationSucceeded()
     {
         var jsRuntime = new JourneyJsRuntime { FailNextPackageKeyImport = true };
@@ -416,6 +444,37 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(HostedSignInFailureReason.AccountDisabled, error.Reason);
         Assert.Equal(0, recovery.AutomaticRecoveryCount);
         Assert.False(session.HasHostedSync);
+    }
+
+    [Fact]
+    public async Task GoogleSignInWithoutAutomaticRecoveryStopsWithSupportActionAndDoesNotPersistEmptyLogbook()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var google = new RecordingGoogleAuthenticator(
+            new HostedSignInException(
+                HostedSignInFailureReason.AccountRecoveryRequired,
+                "Existing account recovery is required."));
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-08-29T01:00:00Z"));
+        var session = CreateSession(
+            jsRuntime,
+            hostedAuthenticator: new InMemoryHostedLogbookAuthenticator(
+                new HostedAccountId("acct_private"),
+                new DeviceId("dev_android"),
+                clock),
+            syncClock: clock,
+            googleAuthenticator: google);
+
+        await session.EnsureLoadedWorkbookAsync();
+        var originalLogbookId = session.DocumentV2.LogbookId;
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(session.SignInWithGoogleAsync);
+
+        Assert.Contains("No new logbook was created", error.Message, StringComparison.Ordinal);
+        Assert.Contains("contact FlightLogX support", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(originalLogbookId, session.DocumentV2.LogbookId);
+        Assert.Empty(session.DocumentV2.Operations);
+        Assert.False(session.HasHostedSync);
+        Assert.Null(await new BrowserLogbookStore(jsRuntime).LoadStateV2Async());
+        Assert.Empty(jsRuntime.ImportedPackageKeys);
     }
 
     [Theory]

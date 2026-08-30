@@ -210,19 +210,36 @@ public sealed class MobileReplacementRecoveryWorkflow(
         var migratedOperations = document.Operations
             .Where(operation => operation.DeviceId == expected.SourceDeviceId)
             .ToArray();
-        if (migratedOperations.Length != expected.ExpectedOperationCount
-            || migratedOperations.Any(operation =>
-                operation.Kind != PortableOperationKind.Create
-                || operation.Entry is null
-                || operation.LogbookId != document.LogbookId)
-            || migratedOperations.Select(operation => operation.EntryId).Distinct().Count()
-                != expected.ExpectedOperationCount
-            || migratedOperations.Select(operation => operation.RevisionId).Distinct().Count()
-                != expected.ExpectedOperationCount)
+        PortableWorkbookMigrationReceipt actual;
+        try
+        {
+            var migratedDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
+                document.LogbookId,
+                document.CustomFieldDefinitions,
+                document.CurrencyOverrideDates,
+                migratedOperations);
+            actual = PortableWorkbookMigrationVerification.CreateReceipt(
+                expected.SourceFingerprint,
+                migratedDocument);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException)
         {
             throw new MobileHostedDiagnosticException(
                 "RECOVERY_MIGRATION_HISTORY_MISMATCH",
-                "The spreadsheet flights in hosted recovery do not match the completed migration. The replacement device was not activated; contact FlightLogX support.");
+                "The spreadsheet flights in hosted recovery do not match the completed migration. The replacement device was not activated; contact FlightLogX support.",
+                innerException: ex);
+        }
+
+        if (actual.DeviceId != expected.SourceDeviceId
+            || actual.EntryCount != expected.ExpectedOperationCount
+            || !string.Equals(
+                actual.VerificationReceiptSha256,
+                expected.VerificationReceiptHash,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_MIGRATION_RECEIPT_MISMATCH",
+                "The spreadsheet migration receipt does not match the hosted logbook. The replacement device was not activated; contact FlightLogX support.");
         }
     }
 
