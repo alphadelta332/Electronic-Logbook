@@ -684,6 +684,54 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
+    public async Task ReadConfigurationRevisionsMapsEncryptedHostedPageWithoutExposingConfiguration()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/rest/v1/rpc/read_hosted_configuration_revisions"] =
+            (HttpStatusCode.OK, """
+                [{
+                  "revision": 3,
+                  "configuration_id": "60000000-0000-0000-0000-000000000003",
+                  "portable_revision_id": "rev_configuration_three",
+                  "author_device_id": "40000000-0000-0000-0000-000000000001",
+                  "configuration_format_version": 1,
+                  "payload_ciphertext": "AQIDBA==",
+                  "payload_nonce": "AAAAAAAAAAAAAAAA",
+                  "payload_tag": "AAAAAAAAAAAAAAAAAAAAAA==",
+                  "payload_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "client_created_at": "2026-08-30T00:00:00Z",
+                  "received_at": "2026-08-30T00:00:01Z",
+                  "highest_revision": 4,
+                  "has_more": true
+                }]
+                """);
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-30T00:00:00Z")));
+
+        var page = await client.ReadConfigurationRevisionsAsync(
+            new LogbookId("log_20000000000000000000000000000001"),
+            afterHostedRevision: 2,
+            pageSize: 200);
+
+        var revision = Assert.Single(page.Revisions);
+        Assert.Equal(3, page.ThroughHostedRevision);
+        Assert.True(page.HasMore);
+        Assert.Equal(new RevisionId("rev_configuration_three"), revision.RevisionId);
+        Assert.Equal(new DeviceId("dev_40000000000000000000000000000001"), revision.DeviceId);
+        Assert.Equal(PortableHostedConfigurationRevision.CurrentSchemaVersion, revision.SchemaVersion);
+        Assert.Contains(handler.Requests, request =>
+            request.Path == "/rest/v1/rpc/read_hosted_configuration_revisions"
+            && request.Body.GetProperty("p_after_revision").GetInt64() == 2
+            && request.Body.GetProperty("p_page_size").GetInt32() == 200
+            && !request.Body.ToString().Contains("custom field", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public async Task ClientPersistsVerifiedCredentialAndResumesInterruptedDeviceRegistrationWithoutAnotherEmail()
     {
         var handler = new RecordingHandler();

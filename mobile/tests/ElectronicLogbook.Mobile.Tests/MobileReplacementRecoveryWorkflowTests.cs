@@ -164,8 +164,11 @@ public sealed class MobileReplacementRecoveryWorkflowTests
         var clock = new ManualSyncClock(Now);
         var expected = PortableLogbookDocumentV2.CreateAustraliaFirst(
             LogbookId,
-            MobileLogbookSession.CustomFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
+            [new CustomFieldDefinition(new CustomFieldId("cf_training_kind"), "Training kind", 1)],
+            new PortableLogbookCurrencyOverrideDates(
+                new DateOnly(2026, 7, 1),
+                new DateOnly(2026, 7, 2),
+                new DateOnly(2026, 7, 3)),
             [
                 PortableLogbookOperationV2.Create(
                     LogbookId,
@@ -229,7 +232,12 @@ public sealed class MobileReplacementRecoveryWorkflowTests
             Memberships = [WorkbookMigrationMembership(LogbookId, sourceDeviceId, 2)]
         };
         var service = new RecordingRecoveryEnvelopeService();
-        var recovered = await CreateWorkflow(js, client, ledger, recoveryService: service)
+        var recovered = await CreateWorkflow(
+                js,
+                client,
+                ledger,
+                ConfigurationLedgerFor(expected, sourceDeviceId),
+                recoveryService: service)
             .RecoverOnlyLogbookAsync();
 
         Assert.Equal(1, service.RestoreCount);
@@ -246,6 +254,57 @@ public sealed class MobileReplacementRecoveryWorkflowTests
     }
 
     [Fact]
+    public async Task CompletedWorkbookMigrationWithMissingConfigurationDoesNotSaveOrActivateDefaults()
+    {
+        var js = new RecoveryJsRuntime();
+        var sourceDeviceId = new DeviceId("dev_workbook");
+        var client = new RecordingRecoveryClient(Session())
+        {
+            Memberships = [WorkbookMigrationMembership(LogbookId, sourceDeviceId, 1)]
+        };
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await CreateWorkflow(js, client).RecoverOnlyLogbookAsync());
+
+        Assert.Equal("RECOVERY_CONFIGURATION_MISSING", error.ErrorCode);
+        Assert.Contains("not activated", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, client.CompleteCount);
+        Assert.Null(await new BrowserLogbookStore(js).LoadStateV2Async());
+    }
+
+    [Fact]
+    public async Task CompletedWorkbookMigrationWithInvalidConfigurationDoesNotSaveOrActivateDefaults()
+    {
+        var js = new RecoveryJsRuntime();
+        var sourceDeviceId = new DeviceId("dev_workbook");
+        var client = new RecordingRecoveryClient(Session())
+        {
+            Memberships = [WorkbookMigrationMembership(LogbookId, sourceDeviceId, 1)]
+        };
+        var source = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            LogbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        var invalid = ConfigurationEnvelopeFor(source, sourceDeviceId) with
+        {
+            PayloadHash = new string('0', 64)
+        };
+
+        var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
+            await CreateWorkflow(
+                    js,
+                    client,
+                    configurationLedger: new SingleConfigurationLedger(invalid))
+                .RecoverOnlyLogbookAsync());
+
+        Assert.Equal("RECOVERY_CONFIGURATION_RESTORE_FAILED", error.ErrorCode);
+        Assert.Contains("not activated", error.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, client.CompleteCount);
+        Assert.Null(await new BrowserLogbookStore(js).LoadStateV2Async());
+    }
+
+    [Fact]
     public async Task CompletedWorkbookMigrationWithMissingHostedFlightsDoesNotSaveOrActivateAnEmptyLogbook()
     {
         var js = new RecoveryJsRuntime();
@@ -254,7 +313,16 @@ public sealed class MobileReplacementRecoveryWorkflowTests
             Memberships = [WorkbookMigrationMembership(LogbookId, new DeviceId("dev_workbook"), 1)]
         };
         var service = new RecordingRecoveryEnvelopeService();
-        var workflow = CreateWorkflow(js, client, recoveryService: service);
+        var configurationSource = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            LogbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        var workflow = CreateWorkflow(
+            js,
+            client,
+            configurationLedger: ConfigurationLedgerFor(configurationSource, new DeviceId("dev_workbook")),
+            recoveryService: service);
 
         var error = await Assert.ThrowsAsync<MobileHostedDiagnosticException>(async () =>
             await workflow.RecoverOnlyLogbookAsync());
@@ -270,6 +338,7 @@ public sealed class MobileReplacementRecoveryWorkflowTests
         RecoveryJsRuntime js,
         RecordingRecoveryClient client,
         IHostedLogbookLedger? ledger = null,
+        IHostedConfigurationRevisionLedger? configurationLedger = null,
         IHostedLogbookAuthenticator? authenticator = null,
         RecordingRecoveryEnvelopeService? recoveryService = null) =>
         new(
@@ -278,9 +347,39 @@ public sealed class MobileReplacementRecoveryWorkflowTests
             client,
             recoveryService ?? new RecordingRecoveryEnvelopeService(),
             ledger ?? new EmptyLedger(),
+            configurationLedger ?? new EmptyConfigurationLedger(),
             authenticator ?? new RecordingAuthenticator(Session()),
             new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
             new ManualSyncClock(Now));
+
+    private static IHostedConfigurationRevisionLedger ConfigurationLedgerFor(
+        PortableLogbookDocumentV2 document,
+        DeviceId sourceDeviceId) =>
+        new SingleConfigurationLedger(ConfigurationEnvelopeFor(document, sourceDeviceId));
+
+    private static HostedConfigurationRevisionEnvelope ConfigurationEnvelopeFor(
+        PortableLogbookDocumentV2 document,
+        DeviceId sourceDeviceId)
+    {
+        var revision = PortableHostedConfigurationRevision.Create(
+            document,
+            new RevisionId("rev_workbook_configuration"),
+            sourceDeviceId,
+            Now.AddMinutes(-3));
+        var upload = HostedConfigurationRevisionCipher.Encrypt(
+            revision,
+            PortableLogbookKey.FromBytes(Enumerable.Repeat((byte)7, 32).ToArray()));
+        return new HostedConfigurationRevisionEnvelope(
+            1,
+            upload.RevisionId,
+            upload.DeviceId,
+            upload.CreatedAt,
+            upload.SchemaVersion,
+            upload.PayloadCiphertext,
+            upload.PayloadNonce,
+            upload.PayloadTag,
+            upload.PayloadHash);
+    }
 
     private static HostedSyncSession Session(DateTimeOffset? expiresAt = null) =>
         new(AccountId, DeviceId, expiresAt ?? Now.AddHours(1));
@@ -413,6 +512,29 @@ public sealed class MobileReplacementRecoveryWorkflowTests
                 ? ValueTask.FromException<HostedOperationPage>(new HostedLedgerException(HostedLedgerFailureReason.CheckpointOutsideHostedHistory, "Interrupted hosted read."))
                 : base.ReadMissingOperationsAsync(logbookId, afterHostedRevision, pageSize, cancellationToken);
         }
+    }
+
+    private class EmptyConfigurationLedger : IHostedConfigurationRevisionLedger
+    {
+        public virtual ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(new HostedConfigurationRevisionPage([], afterHostedRevision, HasMore: false));
+    }
+
+    private sealed class SingleConfigurationLedger(HostedConfigurationRevisionEnvelope revision)
+        : EmptyConfigurationLedger
+    {
+        public override ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(afterHostedRevision < revision.HostedRevision
+                ? new HostedConfigurationRevisionPage([revision], revision.HostedRevision, HasMore: false)
+                : new HostedConfigurationRevisionPage([], afterHostedRevision, HasMore: false));
     }
 
     private sealed class RecoveryJsRuntime : IJSRuntime

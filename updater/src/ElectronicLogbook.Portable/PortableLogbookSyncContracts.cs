@@ -24,6 +24,17 @@ public interface IHostedLogbookLedger
         CancellationToken cancellationToken = default);
 }
 
+public interface IHostedConfigurationRevisionLedger
+{
+    public const int MaxConfigurationPageSize = 200;
+
+    ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+        LogbookId logbookId,
+        long afterHostedRevision,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+}
+
 public interface IHostedPilotHealthReporter
 {
     ValueTask<HostedPilotHealthSnapshot> GetHealthAsync(CancellationToken cancellationToken = default);

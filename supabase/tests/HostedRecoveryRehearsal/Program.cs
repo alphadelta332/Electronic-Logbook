@@ -6,8 +6,10 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 using ElectronicLogbook.Updater;
+using Microsoft.JSInterop;
 
 var supabaseUrl = RequiredEnvironment("ELB_REHEARSAL_SUPABASE_URL");
 var anonKey = RequiredEnvironment("ELB_REHEARSAL_ANON_KEY");
@@ -25,9 +27,25 @@ var workbookClientInvestigation = string.Equals(
     Environment.GetEnvironmentVariable("ELB_REHEARSAL_WORKBOOK_CLIENT"),
     "1",
     StringComparison.Ordinal);
-if (liveWorkbookOtp && workbookClientInvestigation)
+var workbookMigrationJourney = string.Equals(
+    Environment.GetEnvironmentVariable("ELB_REHEARSAL_WORKBOOK_MIGRATION"),
+    "1",
+    StringComparison.Ordinal);
+if (new[] { liveWorkbookOtp, workbookClientInvestigation, workbookMigrationJourney }.Count(value => value) > 1)
 {
-    throw new InvalidOperationException("Live workbook OTP and workbook-client investigation modes cannot run together.");
+    throw new InvalidOperationException("Hosted recovery rehearsal modes cannot run together.");
+}
+if (workbookMigrationJourney)
+{
+    return await RunWorkbookMigrationJourneyAsync(
+        supabaseUrl,
+        anonKey,
+        serviceRoleKey,
+        evidencePath,
+        psqlPath,
+        dbHost,
+        dbUser,
+        dbPassword);
 }
 var liveWorkbookPath = liveWorkbookOtp
     ? Path.GetFullPath(RequiredEnvironment("ELB_REHEARSAL_LIVE_WORKBOOK_PATH"))
@@ -993,6 +1011,12 @@ static async Task DeleteAppendOnlyOperationsAsync(
     await process.StandardInput.WriteLineAsync("begin;");
     await process.StandardInput.WriteLineAsync("set local session_replication_role = replica;");
     await process.StandardInput.WriteLineAsync($"delete from public.operations where logbook_id = '{logbookId}';");
+    await process.StandardInput.WriteLineAsync(
+        $"do $$ begin if to_regclass('public.configuration_revisions') is not null then " +
+        $"delete from public.configuration_revisions where logbook_id = '{logbookId}'; end if; end $$;");
+    await process.StandardInput.WriteLineAsync(
+        $"do $$ begin if to_regclass('public.workbook_migrations') is not null then " +
+        $"delete from public.workbook_migrations where logbook_id = '{logbookId}'; end if; end $$;");
     await process.StandardInput.WriteLineAsync("commit;");
     process.StandardInput.Close();
     _ = await process.StandardOutput.ReadToEndAsync();
@@ -1190,6 +1214,469 @@ static JsonSerializerOptions JsonOptions(bool indented = false) => new(JsonSeria
     WriteIndented = indented
 };
 
+static async Task<int> RunWorkbookMigrationJourneyAsync(
+    string supabaseUrl,
+    string anonKey,
+    string serviceRoleKey,
+    string evidencePath,
+    string psqlPath,
+    string dbHost,
+    string dbUser,
+    string dbPassword)
+{
+    var startedAt = DateTimeOffset.UtcNow;
+    var checkNames = new[]
+    {
+        "workbookMigrationAccountInvited",
+        "windowsWorkbookSessionAuthenticated",
+        "pendingRetryReusedMigrationLogbookDeviceAndKeys",
+        "temporaryWindowsCredentialReadBackVerified",
+        "encryptedWorkbookLedgerReadBackExact",
+        "completedRetryReconciledWithoutNewHostedState",
+        "temporaryWindowsCredentialRemovedAfterCompletion",
+        "missingEnvelopeFailedWithoutEmptyLogbook",
+        "invalidEnvelopeFailedWithoutEmptyLogbook",
+        "wrongAccountRejectedWithoutHostedState",
+        "cleanAndroidRecoveredSameLogbook",
+        "cleanAndroidLedgerReadBackExact",
+        "cleanAndroidDurableStateVerified",
+        "disposableIdentityCleaned"
+    };
+    var checks = checkNames.ToDictionary(value => value, _ => false, StringComparer.Ordinal);
+    void Pass(string name) => checks[name] = true;
+
+    var suffix = Guid.NewGuid().ToString("N")[..12];
+    var email = $"workbook-migration-{suffix}@example.invalid";
+    var wrongEmail = $"workbook-migration-wrong-{suffix}@example.invalid";
+    var accountId = Guid.Empty;
+    var wrongAccountId = Guid.Empty;
+    var logbookId = Guid.Empty;
+    var migrationId = string.Empty;
+    var credentialTarget = string.Empty;
+    var stage = "startup";
+    var cleanupVerified = false;
+    Exception? failure = null;
+    string? failureStage = null;
+    ManagedEnvelopeSnapshot? managedEnvelope = null;
+
+    using var adminHttp = new HttpClient { BaseAddress = new Uri(supabaseUrl.TrimEnd('/') + "/") };
+    try
+    {
+        stage = "create-workbook-migration-account";
+        accountId = await CreateAuthUserAsync(adminHttp, serviceRoleKey, email);
+        await InsertRestAsync(adminHttp, serviceRoleKey, "accounts", new[]
+        {
+            new
+            {
+                account_id = accountId,
+                invited_email = email,
+                display_name = "Disposable workbook migration",
+                status = "invited",
+                onboarding_mode = "workbook_migration"
+            }
+        });
+        Pass("workbookMigrationAccountInvited");
+
+        stage = "authenticate-windows-workbook-client";
+        var configuration = new SupabaseHostedSyncConfiguration(
+            new Uri(supabaseUrl.TrimEnd('/') + "/"),
+            anonKey,
+            "Disposable Windows migration");
+        using var workbookClient = new SupabaseWorkbookConnectionClient(configuration);
+        _ = await workbookClient.StartEmailSignInAsync(email);
+        var workbookOtp = await GenerateOtpAsync(adminHttp, serviceRoleKey, email);
+        var workbookSession = await workbookClient.CompleteEmailSignInAsync(workbookOtp);
+        Expect(
+            PortableIdToGuid(workbookSession.AccountId.Value, "acct_") == accountId,
+            "The Windows migration session belonged to the wrong disposable account.");
+        Pass("windowsWorkbookSessionAuthenticated");
+
+        stage = "prepare-and-resume-windows-migration";
+        var sourceFingerprint = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        var coordinator = new WorkbookMigrationRecoveryCoordinator(workbookClient);
+        HostedWorkbookMigration migration;
+        PortableLogbookKey migrationKey;
+        string recoveryFingerprint;
+        using (var first = await coordinator.BeginOrResumeAsync(
+                   sourceFingerprint,
+                   "Disposable workbook migration"))
+        {
+            Expect(!first.IsAlreadyCompleted && first.RecoveryMaterial is not null,
+                "The first Windows migration preparation was not pending with temporary keys.");
+            migration = first.Migration;
+            migrationKey = first.RecoveryMaterial!.LogbookKey;
+            recoveryFingerprint = first.RecoveryMaterial.RecoveryKeyPair.Fingerprint;
+            credentialTarget = first.RecoveryMaterial.CredentialTargetName;
+            Expect(!first.RecoveryMaterial.Resumed,
+                "The first Windows migration unexpectedly reported resumed key material.");
+            using var stored = PortableWorkbookMigrationRecoveryStore.Load(credentialTarget);
+            Expect(stored is not null
+                && stored.LogbookKey.Equals(migrationKey)
+                && string.Equals(stored.RecoveryKeyPair.Fingerprint, recoveryFingerprint, StringComparison.Ordinal),
+                "Windows Credential Manager read-back did not match the prepared migration keys.");
+            Pass("temporaryWindowsCredentialReadBackVerified");
+        }
+
+        using var resumed = await coordinator.BeginOrResumeAsync(
+            sourceFingerprint,
+            "Disposable workbook migration");
+        Expect(resumed.RecoveryMaterial is not null && resumed.RecoveryMaterial.Resumed,
+            "The retry did not reuse the retained Windows migration credential.");
+        var resumedMaterial = resumed.RecoveryMaterial
+            ?? throw new InvalidOperationException(
+                "The retry returned no retained Windows migration credential.");
+        Expect(resumed.Migration.MigrationId == migration.MigrationId
+            && resumed.Migration.LogbookId == migration.LogbookId
+            && resumed.Migration.DeviceId == migration.DeviceId
+            && resumedMaterial.LogbookKey.Equals(migrationKey)
+            && string.Equals(
+                resumedMaterial.RecoveryKeyPair.Fingerprint,
+                recoveryFingerprint,
+                StringComparison.Ordinal),
+            "The retry changed the migration, logbook, device, package key, or recovery key.");
+        Pass("pendingRetryReusedMigrationLogbookDeviceAndKeys");
+        migration = resumed.Migration;
+        logbookId = PortableIdToGuid(migration.LogbookId.Value, "log_");
+        migrationId = migration.MigrationId.Value;
+
+        stage = "upload-and-verify-workbook-ledger";
+        var payload = WorkbookMigrationPayloadConverter.ConvertRows(
+            [
+                new PortableLogbookWorkbookRowV2(
+                    null,
+                    null,
+                    PortableLogbookWorkbookEntry.Empty with
+                    {
+                        Year = 2026,
+                        Month = 8,
+                        Day = 29,
+                        Type = "C172",
+                        Reg = "VH-DSP",
+                        FlightId = "DSP-001",
+                        From = "YSBK",
+                        To = "YSCN",
+                        SeCommandDay = 1.2m,
+                        LandingsDay = 1
+                    }),
+                new PortableLogbookWorkbookRowV2(
+                    null,
+                    null,
+                    PortableLogbookWorkbookEntry.Empty with
+                    {
+                        Year = 2026,
+                        Month = 8,
+                        Day = 30,
+                        Type = "PA44",
+                        Reg = "VH-TST",
+                        FlightId = "DSP-002",
+                        From = "YSCN",
+                        To = "YSSY",
+                        MeDualNight = 2.3m,
+                        IfrIf = 0.7m,
+                        LandingsNight = 1
+                    })
+            ],
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            migration);
+        using var workbookLedger = new SupabaseHostedSyncClient(
+            configuration.SupabaseUrl,
+            anonKey,
+            workbookSession.AccountId,
+            migration.DeviceId,
+            workbookSession.Credential);
+        var transfer = await new WorkbookMigrationHostedTransfer(workbookLedger, workbookClient)
+            .UploadAndVerifyAsync(migration, payload, resumedMaterial.LogbookKey);
+        Expect(transfer.UploadedOperationCount == payload.Receipt.EntryCount,
+            "The verified hosted operation count did not match the disposable workbook payload.");
+        Pass("encryptedWorkbookLedgerReadBackExact");
+
+        stage = "complete-and-reconcile-windows-migration";
+        var completed = await workbookClient.CompleteWorkbookMigrationAsync(
+            migration.MigrationId,
+            transfer.UploadedOperationCount,
+            transfer.VerifiedReceipt.VerificationReceiptSha256);
+        Expect(completed.Status == HostedWorkbookMigrationStatus.Completed,
+            "The hosted workbook migration did not complete.");
+        using var completedRetry = await coordinator.BeginOrResumeAsync(
+            sourceFingerprint,
+            "Disposable workbook migration");
+        Expect(completedRetry.IsAlreadyCompleted
+            && completedRetry.RecoveryMaterial is null
+            && completedRetry.Migration.MigrationId == migration.MigrationId
+            && completedRetry.Migration.LogbookId == migration.LogbookId
+            && completedRetry.Migration.DeviceId == migration.DeviceId,
+            "The completion retry did not reconcile the exact hosted migration.");
+        Pass("completedRetryReconciledWithoutNewHostedState");
+        Expect(PortableWorkbookMigrationRecoveryStore.Load(credentialTarget) is null,
+            "The temporary Windows migration credential remained after confirmed completion.");
+        Pass("temporaryWindowsCredentialRemovedAfterCompletion");
+
+        stage = "capture-managed-envelope";
+        managedEnvelope = (await GetRestAsync<ManagedEnvelopeSnapshot[]>(
+            adminHttp,
+            serviceRoleKey,
+            $"key_envelopes?select=key_envelope_id,logbook_id,recipient_device_id,recovery_method,wrapping_algorithm,key_version_id,ciphertext,nonce,created_at,created_by_device_id,expires_at,revoked_at" +
+            $"&logbook_id=eq.{logbookId}&recovery_method=eq.managed-service-v1&revoked_at=is.null"))
+            .Single();
+        var logbookCount = (await GetRestAsync<JsonElement[]>(
+            adminHttp,
+            serviceRoleKey,
+            $"logbooks?select=logbook_id&owner_account_id=eq.{accountId}")).Length;
+        Expect(logbookCount == 1, "The completed migration did not retain exactly one hosted logbook.");
+
+        stage = "missing-envelope-fail-closed";
+        await DeleteRestAsync(
+            adminHttp,
+            serviceRoleKey,
+            $"key_envelopes?key_envelope_id=eq.{managedEnvelope.KeyEnvelopeId}");
+        using (var missing = await HeadlessMobileRecoveryContext.CreateAsync(
+                   supabaseUrl,
+                   anonKey,
+                   workbookSession,
+                   DateTimeOffset.UtcNow))
+        {
+            var missingFailure = await CaptureFailureAsync(
+                () => missing.Workflow.RecoverOnlyLogbookAsync().AsTask());
+            var missingDiagnostic = missingFailure as MobileHostedDiagnosticException;
+            Expect(missingFailure is MobileHostedDiagnosticException
+                { ErrorCode: "RECOVERY_ACCESS_DENIED" },
+                "Clean Android recovery did not fail at the missing managed envelope " +
+                $"(type={SanitizeToken(missingFailure?.GetType().Name ?? "none")}, " +
+                $"code={SanitizeToken(missingDiagnostic?.ErrorCode ?? "none")}).");
+            Expect(await missing.LogbookStore.LoadStateV2Async() is null,
+                "Missing-envelope recovery retained a plausible empty local logbook.");
+        }
+        Expect((await GetRestAsync<JsonElement[]>(
+            adminHttp,
+            serviceRoleKey,
+            $"logbooks?select=logbook_id&owner_account_id=eq.{accountId}")).Length == logbookCount,
+            "Missing-envelope recovery created or removed a hosted logbook.");
+        Pass("missingEnvelopeFailedWithoutEmptyLogbook");
+        await InsertRestAsync(adminHttp, serviceRoleKey, "key_envelopes", managedEnvelope);
+
+        stage = "invalid-envelope-fail-closed";
+        var invalidCiphertext = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
+        await PatchRestAsync(
+            adminHttp,
+            serviceRoleKey,
+            $"key_envelopes?key_envelope_id=eq.{managedEnvelope.KeyEnvelopeId}",
+            new { ciphertext = invalidCiphertext });
+        using (var invalid = await HeadlessMobileRecoveryContext.CreateAsync(
+                   supabaseUrl,
+                   anonKey,
+                   workbookSession,
+                   DateTimeOffset.UtcNow))
+        {
+            var invalidFailure = await CaptureFailureAsync(
+                () => invalid.Workflow.RecoverOnlyLogbookAsync().AsTask());
+            var invalidDiagnostic = invalidFailure as MobileHostedDiagnosticException;
+            Expect(invalidFailure is MobileHostedDiagnosticException
+                { ErrorCode: "RECOVERY_ENVELOPE_UNAVAILABLE" },
+                "Clean Android recovery did not fail at the corrupt managed envelope " +
+                $"(type={SanitizeToken(invalidFailure?.GetType().Name ?? "none")}, " +
+                $"code={SanitizeToken(invalidDiagnostic?.ErrorCode ?? "none")}).");
+            Expect(await invalid.LogbookStore.LoadStateV2Async() is null,
+                "Invalid-envelope recovery retained a plausible empty local logbook.");
+        }
+        Expect((await GetRestAsync<JsonElement[]>(
+            adminHttp,
+            serviceRoleKey,
+            $"logbooks?select=logbook_id&owner_account_id=eq.{accountId}")).Length == logbookCount,
+            "Invalid-envelope recovery created or removed a hosted logbook.");
+        Pass("invalidEnvelopeFailedWithoutEmptyLogbook");
+        await PatchRestAsync(
+            adminHttp,
+            serviceRoleKey,
+            $"key_envelopes?key_envelope_id=eq.{managedEnvelope.KeyEnvelopeId}",
+            new { ciphertext = managedEnvelope.Ciphertext, nonce = managedEnvelope.Nonce });
+
+        stage = "wrong-account-fail-closed";
+        wrongAccountId = await CreateAuthUserAsync(adminHttp, serviceRoleKey, wrongEmail);
+        var wrongSession = await GenerateAndVerifyOtpAsync(
+            adminHttp,
+            anonKey,
+            serviceRoleKey,
+            wrongEmail,
+            wrongAccountId);
+        using (var wrong = await HeadlessMobileRecoveryContext.CreateAsync(
+                   supabaseUrl,
+                   anonKey,
+                   wrongAccountId,
+                   wrongSession,
+                   DateTimeOffset.UtcNow))
+        {
+            var wrongFailure = await CaptureFailureAsync(
+                () => wrong.Client.DiscoverActiveLogbooksAsync().AsTask());
+            Expect(wrongFailure is HostedSignInException signIn
+                && signIn.Reason == HostedSignInFailureReason.InvitationRequired,
+                "The wrong account was not rejected as an uninvited account.");
+            Expect(await wrong.LogbookStore.LoadStateV2Async() is null,
+                "Wrong-account recovery retained a local logbook.");
+        }
+        Expect((await GetRestAsync<JsonElement[]>(
+            adminHttp,
+            serviceRoleKey,
+            $"devices?select=device_id&account_id=eq.{wrongAccountId}")).Length == 0,
+            "Wrong-account recovery created a hosted device.");
+        Pass("wrongAccountRejectedWithoutHostedState");
+
+        stage = "clean-android-recovery";
+        using (var cleanAndroid = await HeadlessMobileRecoveryContext.CreateAsync(
+                   supabaseUrl,
+                   anonKey,
+                   workbookSession,
+                   DateTimeOffset.UtcNow))
+        {
+            var recovered = await cleanAndroid.Workflow.RecoverOnlyLogbookAsync();
+            Expect(recovered.Document.LogbookId == migration.LogbookId,
+                "Clean Android recovered a different hosted logbook.");
+            Pass("cleanAndroidRecoveredSameLogbook");
+            PortableWorkbookMigrationVerification.VerifyExact(payload.Receipt, recovered.Document);
+            Pass("cleanAndroidLedgerReadBackExact");
+            var durable = await cleanAndroid.LogbookStore.LoadStateV2Async();
+            Expect(durable?.HostedSync is not null
+                && durable.Document.LogbookId == migration.LogbookId
+                && durable.HostedSync.LastStatus == PortableHostedSyncStatus.Synced
+                && durable.HostedSync.DeviceId == recovered.HostedSync.DeviceId
+                && PortableLogbookJson.SerializeV2(durable.Document)
+                    == PortableLogbookJson.SerializeV2(recovered.Document),
+                "Clean Android durable read-back did not match the recovered hosted logbook.");
+            Pass("cleanAndroidDurableStateVerified");
+        }
+    }
+    catch (Exception ex)
+    {
+        failure = ex;
+        failureStage = stage;
+    }
+    finally
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(credentialTarget))
+            {
+                _ = PortableWorkbookMigrationRecoveryStore.Delete(credentialTarget);
+            }
+            if (wrongAccountId != Guid.Empty)
+            {
+                await DeleteAuthUserAsync(adminHttp, serviceRoleKey, wrongAccountId);
+            }
+            if (accountId != Guid.Empty && logbookId != Guid.Empty)
+            {
+                await CleanupAsync(
+                    adminHttp,
+                    serviceRoleKey,
+                    accountId,
+                    logbookId,
+                    psqlPath,
+                    dbHost,
+                    dbUser,
+                    dbPassword);
+                cleanupVerified = await VerifyCleanupAsync(
+                    adminHttp,
+                    serviceRoleKey,
+                    accountId,
+                    logbookId);
+                if (cleanupVerified)
+                {
+                    Pass("disposableIdentityCleaned");
+                }
+            }
+        }
+        catch (Exception cleanupFailure)
+        {
+            failure = failure is null
+                ? cleanupFailure
+                : new AggregateException(failure, cleanupFailure);
+            failureStage ??= "cleanup-disposable-workbook-migration";
+        }
+
+        var evidence = new
+        {
+            schemaVersion = 1,
+            rehearsal = "hosted-development-workbook-migration-clean-android",
+            startedAtUtc = startedAt,
+            completedAtUtc = DateTimeOffset.UtcNow,
+            passed = failure is null && cleanupVerified && checks.Values.All(value => value),
+            cleanupVerified,
+            checks,
+            verifiedFlightCount = checks["cleanAndroidLedgerReadBackExact"] ? 2 : 0,
+            failureStage,
+            failure = failure is null ? null : SanitizeFailure(failure)
+        };
+        var evidenceJson = JsonSerializer.Serialize(evidence, JsonOptions(indented: true));
+        EnsureEvidenceRedacted(
+            evidenceJson,
+            email,
+            wrongEmail,
+            accountId,
+            wrongAccountId,
+            logbookId,
+            migrationId,
+            credentialTarget,
+            managedEnvelope?.Ciphertext ?? string.Empty,
+            managedEnvelope?.Nonce ?? string.Empty);
+        Directory.CreateDirectory(Path.GetDirectoryName(evidencePath)!);
+        await File.WriteAllTextAsync(evidencePath, evidenceJson + Environment.NewLine, Encoding.UTF8);
+    }
+
+    if (failure is not null)
+    {
+        Console.Error.WriteLine(
+            $"Workbook migration recovery rehearsal failed at {failureStage}: {SanitizeFailure(failure)}");
+        return 1;
+    }
+
+    Console.WriteLine("Workbook migration to clean Android rehearsal passed.");
+    Console.WriteLine($"- {checks.Count} redacted checks passed");
+    Console.WriteLine("- disposable Auth identities and hosted rows were removed");
+    return 0;
+}
+
+static async Task<Exception?> CaptureFailureAsync(Func<Task> action)
+{
+    try
+    {
+        await action();
+        return null;
+    }
+    catch (Exception ex)
+    {
+        return ex;
+    }
+}
+
+static async Task PatchRestAsync(
+    HttpClient http,
+    string serviceRoleKey,
+    string query,
+    object payload)
+{
+    using var request = NewRequest(HttpMethod.Patch, "rest/v1/" + query, serviceRoleKey, serviceRoleKey);
+    request.Headers.TryAddWithoutValidation("Prefer", "return=minimal");
+    request.Content = JsonContent(payload);
+    using var response = await http.SendAsync(request);
+    if (!response.IsSuccessStatusCode)
+    {
+        throw await HttpFailureAsync(response, "update disposable hosted rows");
+    }
+}
+
+static async Task DeleteAuthUserAsync(HttpClient http, string serviceRoleKey, Guid accountId)
+{
+    using var request = NewRequest(
+        HttpMethod.Delete,
+        "auth/v1/admin/users/" + accountId,
+        serviceRoleKey,
+        serviceRoleKey);
+    using var response = await http.SendAsync(request);
+    if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotFound)
+    {
+        throw await HttpFailureAsync(response, "delete disposable Auth user");
+    }
+}
+
 sealed class SensitiveKey : IDisposable
 {
     private SensitiveKey(byte[] bytes) => Bytes = bytes;
@@ -1215,3 +1702,267 @@ sealed record DeviceObservation(bool Exists, bool StatusMatches, bool TypeMatche
     public bool AllMatched => Exists && StatusMatches && TypeMatches && AccountMatches;
 }
 sealed record DeviceObservationPair(DeviceObservation Rest, DeviceObservation Sql);
+
+sealed record ManagedEnvelopeSnapshot(
+    [property: JsonPropertyName("key_envelope_id")] Guid KeyEnvelopeId,
+    [property: JsonPropertyName("logbook_id")] Guid LogbookId,
+    [property: JsonPropertyName("recipient_device_id")] Guid? RecipientDeviceId,
+    [property: JsonPropertyName("recovery_method")] string? RecoveryMethod,
+    [property: JsonPropertyName("wrapping_algorithm")] string WrappingAlgorithm,
+    [property: JsonPropertyName("key_version_id")] string KeyVersionId,
+    string Ciphertext,
+    string Nonce,
+    [property: JsonPropertyName("created_at")] DateTimeOffset CreatedAt,
+    [property: JsonPropertyName("created_by_device_id")] Guid? CreatedByDeviceId,
+    [property: JsonPropertyName("expires_at")] DateTimeOffset? ExpiresAt,
+    [property: JsonPropertyName("revoked_at")] DateTimeOffset? RevokedAt);
+
+sealed class HeadlessMobileRecoveryContext : IDisposable
+{
+    private readonly HttpClient http;
+
+    private HeadlessMobileRecoveryContext(
+        HttpClient http,
+        HeadlessAndroidJsRuntime jsRuntime,
+        MobileSupabaseHostedSyncClient client,
+        BrowserLogbookStore logbookStore,
+        MobileReplacementRecoveryWorkflow workflow)
+    {
+        this.http = http;
+        JsRuntime = jsRuntime;
+        Client = client;
+        LogbookStore = logbookStore;
+        Workflow = workflow;
+    }
+
+    public HeadlessAndroidJsRuntime JsRuntime { get; }
+    public MobileSupabaseHostedSyncClient Client { get; }
+    public BrowserLogbookStore LogbookStore { get; }
+    public MobileReplacementRecoveryWorkflow Workflow { get; }
+
+    public static Task<HeadlessMobileRecoveryContext> CreateAsync(
+        string supabaseUrl,
+        string anonKey,
+        SupabaseWorkbookSession session,
+        DateTimeOffset now) =>
+        CreateAsync(
+            supabaseUrl,
+            anonKey,
+            PortableId(session.AccountId.Value, "acct_"),
+            new AuthSession(
+                session.Credential.AccessToken,
+                session.Credential.RefreshToken,
+                Math.Max(60, (int)(session.Credential.AccessTokenExpiresAt - now).TotalSeconds),
+                null),
+            now);
+
+    public static async Task<HeadlessMobileRecoveryContext> CreateAsync(
+        string supabaseUrl,
+        string anonKey,
+        Guid accountId,
+        AuthSession session,
+        DateTimeOffset now)
+    {
+        var js = new HeadlessAndroidJsRuntime();
+        var credentialStore = new BrowserHostedCredentialStore(js);
+        await credentialStore.SaveAsync(new BrowserHostedCredential(
+            new HostedAccountId("acct_" + accountId.ToString("N")),
+            new DeviceId("dev_pending"),
+            session.AccessToken,
+            session.RefreshToken,
+            now.AddSeconds(Math.Max(session.ExpiresIn, 60)),
+            DeviceRegistrationPending: true));
+        var handler = new MobileConfigMessageHandler(supabaseUrl, anonKey)
+        {
+            InnerHandler = new HttpClientHandler()
+        };
+        var http = new HttpClient(handler) { BaseAddress = new Uri("https://headless-android.invalid/") };
+        var clock = new ManualSyncClock(now);
+        var client = new MobileSupabaseHostedSyncClient(http, credentialStore, clock);
+        var logbookStore = new BrowserLogbookStore(js);
+        var workflow = new MobileReplacementRecoveryWorkflow(
+            new BrowserPackageKeyStore(js),
+            logbookStore,
+            client,
+            client,
+            client,
+            client,
+            client,
+            new StaticNetworkStatus(new NetworkAvailability(true)),
+            clock);
+        return new HeadlessMobileRecoveryContext(http, js, client, logbookStore, workflow);
+    }
+
+    public void Dispose()
+    {
+        http.Dispose();
+        JsRuntime.Dispose();
+    }
+
+    private static Guid PortableId(string value, string prefix)
+    {
+        if (!value.StartsWith(prefix, StringComparison.Ordinal)
+            || !Guid.TryParseExact(value[prefix.Length..], "N", out var parsed))
+        {
+            throw new InvalidDataException("A hosted identifier was invalid.");
+        }
+        return parsed;
+    }
+}
+
+sealed class MobileConfigMessageHandler(string supabaseUrl, string anonKey) : DelegatingHandler
+{
+    protected override Task<HttpResponseMessage> SendAsync(
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        if (string.Equals(
+                request.RequestUri?.AbsolutePath,
+                "/hosted-sync.local.json",
+                StringComparison.Ordinal))
+        {
+            var json = JsonSerializer.Serialize(new
+            {
+                supabaseUrl = supabaseUrl.TrimEnd('/') + "/",
+                anonKey,
+                platformLabel = "Disposable clean Android",
+                displayName = "Disposable clean Android"
+            }, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+                RequestMessage = request
+            });
+        }
+
+        return base.SendAsync(request, cancellationToken);
+    }
+}
+
+sealed class HeadlessAndroidJsRuntime : IJSRuntime, IDisposable
+{
+    private readonly Dictionary<string, string> storage = [];
+    private readonly Dictionary<string, byte[]> packageKeys = [];
+    private readonly RSA recoveryKey = RSA.Create(2048);
+
+    public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args) =>
+        InvokeAsync<TValue>(identifier, CancellationToken.None, args);
+
+    public ValueTask<TValue> InvokeAsync<TValue>(
+        string identifier,
+        CancellationToken cancellationToken,
+        object?[]? args)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return identifier switch
+        {
+            "electronicLogbookStore.load" => Result<TValue>(storage.GetValueOrDefault(Arg<string>(args, 0))),
+            "electronicLogbookStore.save" => Save<TValue>(args),
+            "electronicLogbookStore.delete" => Delete<TValue>(args),
+            "electronicLogbookKeys.getRecoveryPublicKey" => RecoveryPublicKey<TValue>(),
+            "electronicLogbookKeys.importRecoveryEnvelope" => ImportRecoveryEnvelope<TValue>(args),
+            "electronicLogbookKeys.hasPackageKey" => Result<TValue>(packageKeys.ContainsKey(Arg<string>(args, 0))),
+            "electronicLogbookKeys.deletePackageKey" => DeletePackageKey<TValue>(args),
+            "electronicLogbookKeys.encrypt" => Encrypt<TValue>(args),
+            "electronicLogbookKeys.decrypt" => Decrypt<TValue>(args),
+            _ => throw new JSException($"Unexpected headless Android bridge call: {identifier}")
+        };
+    }
+
+    public void Dispose()
+    {
+        foreach (var key in packageKeys.Values)
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+        packageKeys.Clear();
+        recoveryKey.Dispose();
+    }
+
+    private ValueTask<TValue> RecoveryPublicKey<TValue>()
+    {
+        var publicKey = recoveryKey.ExportSubjectPublicKeyInfo();
+        return Result<TValue>(new BrowserRecoveryPublicKey(
+            Convert.ToBase64String(publicKey),
+            Convert.ToHexString(SHA256.HashData(publicKey)).ToLowerInvariant(),
+            "RSA-OAEP-256"));
+    }
+
+    private ValueTask<TValue> ImportRecoveryEnvelope<TValue>(object?[]? args)
+    {
+        var keyName = Arg<string>(args, 0);
+        var wrapped = Convert.FromBase64String(Arg<string>(args, 1));
+        var plaintext = recoveryKey.Decrypt(wrapped, RSAEncryptionPadding.OaepSHA256);
+        if (plaintext.Length != PortableLogbookPackage.KeySizeBytes)
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+            return Result<TValue>(false);
+        }
+        if (packageKeys.Remove(keyName, out var previous))
+        {
+            CryptographicOperations.ZeroMemory(previous);
+        }
+        packageKeys[keyName] = plaintext;
+        return Result<TValue>(true);
+    }
+
+    private ValueTask<TValue> Save<TValue>(object?[]? args)
+    {
+        storage[Arg<string>(args, 0)] = Arg<string>(args, 1);
+        return Result<TValue>(default(TValue));
+    }
+
+    private ValueTask<TValue> Delete<TValue>(object?[]? args)
+    {
+        storage.Remove(Arg<string>(args, 0));
+        return Result<TValue>(default(TValue));
+    }
+
+    private ValueTask<TValue> DeletePackageKey<TValue>(object?[]? args)
+    {
+        if (packageKeys.Remove(Arg<string>(args, 0), out var key))
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+        return Result<TValue>(default(TValue));
+    }
+
+    private ValueTask<TValue> Encrypt<TValue>(object?[]? args)
+    {
+        var key = RequiredPackageKey(Arg<string>(args, 0));
+        var nonce = Arg<byte[]>(args, 1);
+        var plaintext = Arg<byte[]>(args, 2);
+        var additionalData = Arg<byte[]>(args, 3);
+        var ciphertext = new byte[plaintext.Length];
+        var tag = new byte[16];
+        using var aes = new AesGcm(key, tag.Length);
+        aes.Encrypt(nonce, plaintext, ciphertext, tag, additionalData);
+        return Result<TValue>(new BrowserPackageCiphertext(ciphertext, tag));
+    }
+
+    private ValueTask<TValue> Decrypt<TValue>(object?[]? args)
+    {
+        var key = RequiredPackageKey(Arg<string>(args, 0));
+        var nonce = Arg<byte[]>(args, 1);
+        var ciphertext = Arg<byte[]>(args, 2);
+        var tag = Arg<byte[]>(args, 3);
+        var additionalData = Arg<byte[]>(args, 4);
+        var plaintext = new byte[ciphertext.Length];
+        using var aes = new AesGcm(key, tag.Length);
+        aes.Decrypt(nonce, ciphertext, tag, plaintext, additionalData);
+        return Result<TValue>(plaintext);
+    }
+
+    private byte[] RequiredPackageKey(string keyName) =>
+        packageKeys.TryGetValue(keyName, out var key)
+            ? key
+            : throw new JSException("The headless Android package key is unavailable.");
+
+    private static T Arg<T>(object?[]? args, int index) =>
+        args is not null && index < args.Length && args[index] is T value
+            ? value
+            : throw new JSException("A headless Android bridge argument was invalid.");
+
+    private static ValueTask<TValue> Result<TValue>(object? value) =>
+        new((TValue)value!);
+}

@@ -933,6 +933,7 @@ public sealed class MobileLogbookSession(
     private async Task ApplyReplacementRecoveryAsync(MobileReplacementRecoveryResult restored)
     {
         DocumentV2 = restored.Document;
+        InvalidateWorkbookProjectionCache();
         HostedSync = restored.HostedSync;
         deviceId = restored.HostedSync.DeviceId;
         ImportReceipts = [];

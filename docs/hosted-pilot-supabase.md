@@ -232,15 +232,16 @@ configuration.
 ### Clean-slate connection recovery
 
 The managed-envelope implementation now discovers an existing membership before device
-or logbook creation, restores the logbook key into Android Keystore, replays hosted
-operations, and activates the replacement device only after verification. A
+or logbook creation, restores the logbook key into Android Keystore, restores the latest
+encrypted custom-field and currency-override configuration before replaying hosted
+operations, and activates the replacement device only after exact verification. A
 `workbook_migration` invitation with no completed hosted membership is separately blocked
 from Android initialization and tells the user to finish the Windows migration.
 
-The remaining pre-cohort blocker is operational proof of that same path after the Windows
-migration has enrolled its managed envelope. Do not clear the retained Pixel app data for
-this proof. Use the disposable clean-install journey required by `TODO.md`; request the
-owner's explicit approval only after that independent evidence passes.
+The disposable `-WorkbookMigrationJourney` rehearsal proves that path after the Windows
+migration has enrolled its managed envelope, including exact configuration and operation
+readback, clean Android durable state, fail-closed envelope cases, and cleanup. It does not
+clear or automate the retained Pixel app data.
 
 Treat the current owner connection failure as an S2 blocked workflow. Preserve the
 retained credential and the single server device. The diagnostic build exposes a
@@ -309,6 +310,22 @@ has email as its only enabled external Auth provider. PostgreSQL 17 is required 
 append-only operation trigger is
 bypassed only inside the narrowly scoped cleanup transaction; normal API deletion
 remains blocked.
+
+After the workbook-migration implementation is locally green, run its separate disposable
+journey against the same development project:
+
+```powershell
+.\tools\Invoke-HostedRecoveryRehearsal.ps1 -WorkbookMigrationJourney
+```
+
+This mode signs a synthetic invited account into the production Windows client, proves a
+pending retry reuses the same hosted resources and Credential Manager material, uploads and
+verifies a two-flight encrypted migration, then runs the production mobile recovery workflow
+against fresh headless Android storage. It removes and corrupts only the disposable managed
+envelope long enough to prove both paths fail without saving an empty logbook, rejects a
+separate wrong account, restores the exact ledger into a new device, verifies the temporary
+Windows credential was deleted after completion, writes redacted evidence, and removes every
+disposable Auth and hosted row. It does not install, clear, or automate the retained Pixel app.
 
 ## References
 

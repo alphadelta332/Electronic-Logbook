@@ -230,8 +230,8 @@ public sealed class MobileLogbookSessionJourneyTests
         var deviceId = new DeviceId("dev_replacement");
         var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
             logbookId,
-            MobileLogbookSession.CustomFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
+            [new CustomFieldDefinition(new CustomFieldId("cf_restored"), "Restored field", 1)],
+            new PortableLogbookCurrencyOverrideDates(new DateOnly(2024, 8, 1), null, null),
             []);
         var hosted = new BrowserHostedSyncState(
             accountId,
@@ -258,6 +258,8 @@ public sealed class MobileLogbookSessionJourneyTests
             replacementRecovery: recovery);
 
         await session.EnsureLoadedWorkbookAsync();
+        var beforeRecovery = session.GetCurrencyRecencySummary(new DateOnly(2026, 7, 27));
+        Assert.Equal(14, beforeRecovery.ExpiredCount);
         await session.SignInWithGoogleAsync();
 
         Assert.Equal(1, google.SignInCount);
@@ -266,6 +268,10 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(deviceId, session.HostedSync?.DeviceId);
         Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync?.LastStatus);
         Assert.Equal(7, session.HostedSync?.LastAcknowledgedHostedRevision);
+        Assert.Equal("Restored field", Assert.Single(session.DocumentV2.CustomFieldDefinitions).Label);
+        var afterRecovery = session.GetCurrencyRecencySummary(new DateOnly(2026, 7, 27));
+        Assert.Equal(1, afterRecovery.CurrentCount);
+        Assert.Equal(13, afterRecovery.ExpiredCount);
         Assert.Equal("Ready", session.PackageKeyStatus);
         Assert.Equal("Existing logbook restored and synced.", session.LastActionMessage);
     }

@@ -4,7 +4,8 @@
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$EvidenceDirectory,
-    [switch]$WorkbookClientInvestigation
+    [switch]$WorkbookClientInvestigation,
+    [switch]$WorkbookMigrationJourney
 )
 
 $ErrorActionPreference = 'Stop'
@@ -110,8 +111,11 @@ try {
     $env:ELB_REHEARSAL_DB_USER = "postgres.$projectRef"
     $env:ELB_REHEARSAL_DB_PASSWORD = [string]$metadata.development.db_password
     $env:ELB_REHEARSAL_WORKBOOK_CLIENT = if ($WorkbookClientInvestigation) { '1' } else { '0' }
+    $env:ELB_REHEARSAL_WORKBOOK_MIGRATION = if ($WorkbookMigrationJourney) { '1' } else { '0' }
 
-    Write-Host $(if ($WorkbookClientInvestigation) {
+    Write-Host $(if ($WorkbookMigrationJourney) {
+        'Running the disposable workbook-migration-to-clean-Android journey.'
+    } elseif ($WorkbookClientInvestigation) {
         'Running a disposable workbook-connection-client investigation.'
     } else {
         'Running a disposable hosted recovery rehearsal.'
@@ -132,6 +136,7 @@ finally {
     Remove-Item Env:ELB_REHEARSAL_DB_USER -ErrorAction SilentlyContinue
     Remove-Item Env:ELB_REHEARSAL_DB_PASSWORD -ErrorAction SilentlyContinue
     Remove-Item Env:ELB_REHEARSAL_WORKBOOK_CLIENT -ErrorAction SilentlyContinue
+    Remove-Item Env:ELB_REHEARSAL_WORKBOOK_MIGRATION -ErrorAction SilentlyContinue
     if ($null -eq $previousSupabaseAccessToken) {
         Remove-Item Env:SUPABASE_ACCESS_TOKEN -ErrorAction SilentlyContinue
     } else {

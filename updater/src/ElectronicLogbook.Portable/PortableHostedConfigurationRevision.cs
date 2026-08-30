@@ -115,26 +115,9 @@ public static class HostedConfigurationRevisionCipher
                     ciphertext,
                     tag,
                     plaintext,
-                    AdditionalData(logbookId, envelope));
+                    CreateAdditionalData(logbookId, envelope));
 
-                var json = Encoding.UTF8.GetString(Decompress(plaintext));
-                var revision = JsonSerializer.Deserialize<PortableHostedConfigurationRevision>(
-                    json,
-                    PortableLogbookJson.SerializerOptions)
-                    ?? throw new HostedConfigurationRevisionCipherException(
-                        "Hosted configuration payload is not a valid revision.");
-                ValidateRevision(revision);
-                if (revision.LogbookId != logbookId ||
-                    revision.RevisionId != envelope.RevisionId ||
-                    revision.DeviceId != envelope.DeviceId ||
-                    revision.SchemaVersion != envelope.SchemaVersion ||
-                    revision.CreatedAt.ToUniversalTime() != envelope.CreatedAt.ToUniversalTime())
-                {
-                    throw new HostedConfigurationRevisionCipherException(
-                        "Hosted configuration metadata does not match its encrypted payload.");
-                }
-
-                return revision;
+                return DeserializeDecryptedPayload(logbookId, envelope, plaintext);
             }
             catch (CryptographicException ex)
             {
@@ -179,6 +162,61 @@ public static class HostedConfigurationRevisionCipher
         return hash.GetHashAndReset()[..NonceSizeBytes];
     }
 
+    public static byte[] CreateAdditionalData(
+        LogbookId logbookId,
+        HostedConfigurationRevisionEnvelope envelope)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logbookId.Value);
+        ArgumentNullException.ThrowIfNull(envelope);
+        return AdditionalData(
+            logbookId,
+            envelope.RevisionId,
+            envelope.DeviceId,
+            envelope.CreatedAt,
+            envelope.SchemaVersion);
+    }
+
+    public static PortableHostedConfigurationRevision DeserializeDecryptedPayload(
+        LogbookId logbookId,
+        HostedConfigurationRevisionEnvelope envelope,
+        ReadOnlySpan<byte> compressedPlaintext)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(logbookId.Value);
+        ArgumentNullException.ThrowIfNull(envelope);
+
+        try
+        {
+            var json = Encoding.UTF8.GetString(Decompress(compressedPlaintext));
+            var revision = JsonSerializer.Deserialize<PortableHostedConfigurationRevision>(
+                json,
+                PortableLogbookJson.SerializerOptions)
+                ?? throw new HostedConfigurationRevisionCipherException(
+                    "Hosted configuration payload is not a valid revision.");
+            ValidateRevision(revision);
+            if (revision.LogbookId != logbookId ||
+                revision.RevisionId != envelope.RevisionId ||
+                revision.DeviceId != envelope.DeviceId ||
+                revision.SchemaVersion != envelope.SchemaVersion ||
+                revision.CreatedAt.ToUniversalTime() != envelope.CreatedAt.ToUniversalTime())
+            {
+                throw new HostedConfigurationRevisionCipherException(
+                    "Hosted configuration metadata does not match its encrypted payload.");
+            }
+
+            return revision;
+        }
+        catch (HostedConfigurationRevisionCipherException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidDataException or JsonException)
+        {
+            throw new HostedConfigurationRevisionCipherException(
+                "Hosted configuration payload is invalid.",
+                ex);
+        }
+    }
+
     private static void ValidateRevision(PortableHostedConfigurationRevision revision)
     {
         if (revision.SchemaVersion != PortableHostedConfigurationRevision.CurrentSchemaVersion)
@@ -200,16 +238,6 @@ public static class HostedConfigurationRevisionCipher
             revision.DeviceId,
             revision.CreatedAt,
             revision.SchemaVersion);
-
-    private static byte[] AdditionalData(
-        LogbookId logbookId,
-        HostedConfigurationRevisionEnvelope envelope) =>
-        AdditionalData(
-            logbookId,
-            envelope.RevisionId,
-            envelope.DeviceId,
-            envelope.CreatedAt,
-            envelope.SchemaVersion);
 
     private static byte[] AdditionalData(
         LogbookId logbookId,
@@ -236,9 +264,9 @@ public static class HostedConfigurationRevisionCipher
         return output.ToArray();
     }
 
-    private static byte[] Decompress(byte[] bytes)
+    private static byte[] Decompress(ReadOnlySpan<byte> bytes)
     {
-        using var input = new MemoryStream(bytes);
+        using var input = new MemoryStream(bytes.ToArray());
         using var gzip = new GZipStream(input, CompressionMode.Decompress);
         using var output = new MemoryStream();
         gzip.CopyTo(output);

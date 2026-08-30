@@ -12,7 +12,8 @@ public sealed class MobileSupabaseHostedSyncClient(
     BrowserHostedCredentialStore credentialStore,
     ISyncClock clock,
     BrowserGoogleCredentialProvider? googleCredentialProvider = null)
-    : IHostedLogbookAuthenticator, IHostedLogbookLedger, IMobileHostedRecoveryClient,
+    : IHostedLogbookAuthenticator, IHostedLogbookLedger, IHostedConfigurationRevisionLedger,
+      IMobileHostedRecoveryClient,
       IMobileGoogleHostedAuthenticator, IMobileRecoveryEnvelopeService,
       IMobileReplacementRecoveryClient
 {
@@ -822,6 +823,28 @@ public sealed class MobileSupabaseHostedSyncClient(
             rows.Any(row => row.HasMore));
     }
 
+    public async ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+        LogbookId logbookId,
+        long afterHostedRevision,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var options = await GetConfigAsync(cancellationToken);
+        await EnsureHostedLogbookAsync(options, logbookId, cancellationToken);
+        var rows = await RpcAsync<ReadConfigurationRevisionsRequest, HostedConfigurationRevisionRow[]>(
+            options,
+            "read_hosted_configuration_revisions",
+            new ReadConfigurationRevisionsRequest(
+                ToHostedUuid(logbookId.Value, "log_"),
+                afterHostedRevision,
+                pageSize),
+            cancellationToken);
+        return new HostedConfigurationRevisionPage(
+            rows.Select(ToConfigurationEnvelope).ToArray(),
+            rows.Length == 0 ? afterHostedRevision : rows.Max(row => row.Revision),
+            rows.Any(row => row.HasMore));
+    }
+
     public async ValueTask RecordAcknowledgementAsync(
         LogbookId logbookId,
         DeviceId deviceId,
@@ -1404,6 +1427,19 @@ public sealed class MobileSupabaseHostedSyncClient(
             row.PayloadHash,
             row.ParentRevisionIds.Select(id => new RevisionId(id)).ToArray());
 
+    private static HostedConfigurationRevisionEnvelope ToConfigurationEnvelope(
+        HostedConfigurationRevisionRow row) =>
+        new(
+            row.Revision,
+            new RevisionId(row.PortableRevisionId),
+            FromHostedUuid(row.AuthorDeviceId, "dev_"),
+            row.ClientCreatedAt,
+            row.ConfigurationFormatVersion + 1,
+            row.PayloadCiphertext,
+            row.PayloadNonce,
+            row.PayloadTag,
+            row.PayloadHash);
+
     private static string ToHostedUuid(string value, string prefix)
     {
         var raw = value.StartsWith(prefix, StringComparison.Ordinal) ? value[prefix.Length..] : value;
@@ -1619,6 +1655,11 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonPropertyName("p_after_revision")] long AfterHostedRevision,
         [property: JsonPropertyName("p_page_size")] int PageSize);
 
+    private sealed record ReadConfigurationRevisionsRequest(
+        [property: JsonPropertyName("p_logbook_id")] string LogbookId,
+        [property: JsonPropertyName("p_after_revision")] long AfterHostedRevision,
+        [property: JsonPropertyName("p_page_size")] int PageSize);
+
     private sealed record RecordAckRequest(
         [property: JsonPropertyName("p_logbook_id")] string LogbookId,
         [property: JsonPropertyName("p_device_id")] string DeviceId,
@@ -1639,6 +1680,19 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonPropertyName("payload_tag")] string PayloadTag,
         [property: JsonPropertyName("payload_hash")] string PayloadHash,
         [property: JsonPropertyName("parent_revision_ids")] IReadOnlyList<string> ParentRevisionIds,
+        [property: JsonPropertyName("highest_revision")] long HighestRevision,
+        [property: JsonPropertyName("has_more")] bool HasMore);
+
+    private sealed record HostedConfigurationRevisionRow(
+        long Revision,
+        [property: JsonPropertyName("portable_revision_id")] string PortableRevisionId,
+        [property: JsonPropertyName("author_device_id")] string AuthorDeviceId,
+        [property: JsonPropertyName("configuration_format_version")] int ConfigurationFormatVersion,
+        [property: JsonPropertyName("payload_ciphertext")] string PayloadCiphertext,
+        [property: JsonPropertyName("payload_nonce")] string PayloadNonce,
+        [property: JsonPropertyName("payload_tag")] string PayloadTag,
+        [property: JsonPropertyName("payload_hash")] string PayloadHash,
+        [property: JsonPropertyName("client_created_at")] DateTimeOffset ClientCreatedAt,
         [property: JsonPropertyName("highest_revision")] long HighestRevision,
         [property: JsonPropertyName("has_more")] bool HasMore);
 }

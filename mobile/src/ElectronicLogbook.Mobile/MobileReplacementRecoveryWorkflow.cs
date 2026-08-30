@@ -8,6 +8,7 @@ public sealed class MobileReplacementRecoveryWorkflow(
     IMobileReplacementRecoveryClient recoveryClient,
     IMobileRecoveryEnvelopeService recoveryEnvelopeService,
     IHostedLogbookLedger ledger,
+    IHostedConfigurationRevisionLedger configurationLedger,
     IHostedLogbookAuthenticator authenticator,
     INetworkStatus networkStatus,
     ISyncClock clock) : IMobileReplacementRecoveryWorkflow
@@ -100,18 +101,50 @@ public sealed class MobileReplacementRecoveryWorkflow(
                 cancellationToken);
         }
 
+        PortableHostedConfigurationRevision? restoredConfiguration;
+        try
+        {
+            restoredConfiguration = await new MobileHostedConfigurationRestore(
+                    packageKeyStore,
+                    configurationLedger)
+                .RestoreLatestAsync(logbookId, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HostedLedgerException
+            or HostedConfigurationRevisionCipherException
+            or InvalidDataException
+            or HttpRequestException)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_CONFIGURATION_RESTORE_FAILED",
+                "The hosted logbook settings could not be restored. The replacement device was not activated.",
+                innerException: ex);
+        }
+        if (context.Membership.WorkbookMigration is not null && restoredConfiguration is null)
+        {
+            throw new MobileHostedDiagnosticException(
+                "RECOVERY_CONFIGURATION_MISSING",
+                "The migrated logbook settings are missing from hosted recovery. The replacement device was not activated.");
+        }
+
         var retained = await logbookStore.LoadStateV2Async();
         var canResume = retained?.HostedSync is not null
             && retained.Document.LogbookId == logbookId
             && retained.HostedSync.AccountId == context.Session.AccountId
             && retained.HostedSync.DeviceId == context.Session.DeviceId;
-        var document = canResume
-            ? retained!.Document
-            : PortableLogbookDocumentV2.CreateAustraliaFirst(
-                logbookId,
-                MobileLogbookSession.CustomFields,
-                PortableLogbookCurrencyOverrideDates.Empty,
-                []);
+        var retainedDocument = canResume ? retained!.Document : null;
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            restoredConfiguration?.CustomFieldDefinitions
+                ?? retainedDocument?.CustomFieldDefinitions
+                ?? MobileLogbookSession.CustomFields,
+            restoredConfiguration?.CurrencyOverrideDates
+                ?? retainedDocument?.CurrencyOverrideDates
+                ?? PortableLogbookCurrencyOverrideDates.Empty,
+            retainedDocument?.Operations ?? []);
         var hosted = canResume
             ? retained!.HostedSync!
             : new BrowserHostedSyncState(
