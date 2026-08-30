@@ -82,4 +82,33 @@ public sealed class WizardPilotMigrationStagingTests
             && replacementIndex > handoffGateIndex,
             "Pilot staging and Google sign-in must complete before hosted migration, pilot handoff, and the non-pilot replacement branch.");
     }
+
+    [Fact]
+    public void PilotUpdateUsesStageAwareFailureCopyAndTreatsOnlyUserCancellationAsCancelled()
+    {
+        var wizard = File.ReadAllText(TestRepo.FindFile(
+            "updater/src/ElectronicLogbook.Updater.Wizard/MainWindow.xaml.cs"));
+        var start = wizard.IndexOf(
+            "private async Task StartUpdateAsync()",
+            StringComparison.Ordinal);
+        var end = wizard.IndexOf(
+            "private HandoffRecoveryResult RecoverPendingHandoffForWizard()",
+            start,
+            StringComparison.Ordinal);
+        Assert.True(start >= 0 && end > start, "StartUpdateAsync could not be isolated.");
+        var updateFlow = wizard[start..end];
+
+        Assert.Contains(
+            "catch (OperationCanceledException ex) when (_updateCts?.IsCancellationRequested == true)",
+            updateFlow,
+            StringComparison.Ordinal);
+        Assert.Contains("PilotWorkbookMigrationStage.PreparingWorkbook", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("PilotWorkbookMigrationStage.SigningIn", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("PilotWorkbookMigrationStage.MovingToFlightLogX", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("PilotWorkbookMigrationStage.InstallingWorkbook", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("PilotWorkbookMigrationFailurePresenter.Create(", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("pilotHostedMigration is not null", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("pilotFailure?.CustomerMessage", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("Migration stopped safely", updateFlow, StringComparison.Ordinal);
+    }
 }

@@ -1492,6 +1492,7 @@ public partial class MainWindow : Window
         string? pilotAccountEmail = null;
         PilotWorkbookHostedMigrationResult? pilotHostedMigration = null;
         PilotWorkbookPostMigrationHandoffResult? pilotHandoff = null;
+        var pilotStage = PilotWorkbookMigrationStage.Preparing;
 
         try
         {
@@ -1536,6 +1537,7 @@ public partial class MainWindow : Window
                 manifest);
             if (_context.Channel == UpdateChannel.Pilot)
             {
+                pilotStage = PilotWorkbookMigrationStage.PreparingWorkbook;
                 AppendLog("validating the source and creating its untouched timestamped backup...");
                 var stager = new WorkbookMigrationStager(progressSink);
                 pilotStaging = await stager.StageAsync(
@@ -1548,6 +1550,7 @@ public partial class MainWindow : Window
                 AppendLog($"Untouched source backup: {_lastBackupPath}");
                 AppendLog("The original workbook remains unchanged until hosted migration is verified.");
 
+                pilotStage = PilotWorkbookMigrationStage.SigningIn;
                 if (!SupabaseHostedSyncConfiguration.TryLoad(out var configuration, out _))
                 {
                     throw new InvalidOperationException(
@@ -1564,6 +1567,7 @@ public partial class MainWindow : Window
                 AppendLog("Google sign-in completed.");
 
                 FooterStatusText.Text = "Securely moving your logbook to FlightLogX...";
+                pilotStage = PilotWorkbookMigrationStage.MovingToFlightLogX;
                 AppendLog("Preparing account recovery before encrypted upload...");
                 var hostedMigration = new PilotWorkbookHostedMigration(
                     connectionClient,
@@ -1578,6 +1582,7 @@ public partial class MainWindow : Window
                 AppendLog("Hosted migration completed and temporary recovery keys were removed.");
 
                 FooterStatusText.Text = "Finalising your updated workbook...";
+                pilotStage = PilotWorkbookMigrationStage.InstallingWorkbook;
                 AppendLog("Stamping the verified workbook and installing it at the original filename...");
                 var postMigrationHandoff = new PilotWorkbookPostMigrationHandoff();
                 pilotHandoff = await postMigrationHandoff.InstallAsync(
@@ -1590,6 +1595,7 @@ public partial class MainWindow : Window
                     $"Workbook stamped '{pilotHandoff.Stamp.Status}' at {pilotHandoff.Stamp.CompletedAt:O}.");
                 AppendLog("The verified 3.0.0 workbook now uses the original workbook filename.");
                 AppendLog($"Untouched timestamped backup retained: {_lastBackupPath}");
+                pilotStage = PilotWorkbookMigrationStage.Completed;
             }
             else
             {
@@ -1712,7 +1718,7 @@ public partial class MainWindow : Window
 
             _stepIndex = 5;
         }
-        catch (OperationCanceledException ex)
+        catch (OperationCanceledException ex) when (_updateCts?.IsCancellationRequested == true)
         {
             if (!string.IsNullOrWhiteSpace(diagnosticReportPath))
             {
@@ -1728,16 +1734,34 @@ public partial class MainWindow : Window
                     CancellationToken.None);
             }
 
-            CompleteTitleText.Text = "Update Cancelled";
-            CompleteSummaryText.Text = "Update was cancelled before completion.";
-            CompleteOutputPathText.Text = "Current workbook: not created";
-            CompleteBackupPathText.Text = string.Empty;
+            CompleteTitleText.Text = _context.Channel == UpdateChannel.Pilot
+                ? "Migration Cancelled"
+                : "Update Cancelled";
+            CompleteSummaryText.Text = _context.Channel == UpdateChannel.Pilot
+                ? "Migration was cancelled before both FlightLogX and the spreadsheet were confirmed complete. Run the migration again when you are ready."
+                : "Update was cancelled before completion.";
+            CompleteOutputPathText.Text = _context.Channel == UpdateChannel.Pilot
+                ? await BuildWorkbookDisplayTextAsync(
+                    "Original workbook",
+                    source,
+                    report?.SourceVersion,
+                    $"Original workbook: {source} (not available)")
+                : "Current workbook: not created";
+            CompleteBackupPathText.Text = _context.Channel == UpdateChannel.Pilot
+                ? await BuildWorkbookDisplayTextAsync(
+                    "Retained backup",
+                    _lastBackupPath,
+                    _lastBackupExpectedVersion,
+                    "Retained backup: not available")
+                : string.Empty;
             RestoreBackupButton.IsEnabled = false;
             OpenDiagnosticReportButton.IsEnabled = !string.IsNullOrWhiteSpace(_lastReportPath) &&
                 File.Exists(_lastReportPath);
             OpenUpdatedCheckBox.IsEnabled = false;
             OpenUpdatedCheckBox.IsChecked = false;
-            FooterStatusText.Text = "Update cancelled.";
+            FooterStatusText.Text = _context.Channel == UpdateChannel.Pilot
+                ? "Migration cancelled. No success was reported."
+                : "Update cancelled.";
             _stepIndex = 5;
         }
         catch (Exception ex)
@@ -1756,11 +1780,25 @@ public partial class MainWindow : Window
                     CancellationToken.None);
             }
 
-            CompleteTitleText.Text = string.IsNullOrWhiteSpace(_lastBackupPath)
+            var pilotFailure = _context.Channel == UpdateChannel.Pilot
+                ? PilotWorkbookMigrationFailurePresenter.Create(
+                    pilotStage,
+                    ex,
+                    !string.IsNullOrWhiteSpace(_lastBackupPath) && File.Exists(_lastBackupPath),
+                    pilotHostedMigration is not null,
+                    progressSink.Events.LastOrDefault()?.PhaseId)
+                : null;
+            CompleteTitleText.Text = pilotFailure?.Title ?? (string.IsNullOrWhiteSpace(_lastBackupPath)
                 ? "Update Failed"
-                : "Update Failed - Backup Available";
-            CompleteSummaryText.Text = ex.Message;
-            CompleteOutputPathText.Text = "Current workbook: not available";
+                : "Update Failed - Backup Available");
+            CompleteSummaryText.Text = pilotFailure?.CustomerMessage ?? ex.Message;
+            CompleteOutputPathText.Text = pilotFailure is null
+                ? "Current workbook: not available"
+                : await BuildWorkbookDisplayTextAsync(
+                    "Original workbook",
+                    source,
+                    report?.SourceVersion,
+                    $"Original workbook: {source} (not available)");
             CompleteBackupPathText.Text = await BuildWorkbookDisplayTextAsync(
                 "Retained backup",
                 _lastBackupPath,
@@ -1773,7 +1811,9 @@ public partial class MainWindow : Window
                 File.Exists(_lastReportPath);
             OpenUpdatedCheckBox.IsEnabled = false;
             OpenUpdatedCheckBox.IsChecked = false;
-            FooterStatusText.Text = "Update failed.";
+            FooterStatusText.Text = pilotFailure is null
+                ? "Update failed."
+                : "Migration stopped safely. Follow the retry instructions above.";
             AppendLog($"ERROR: {ex.Message}");
             _stepIndex = 5;
         }

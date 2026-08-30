@@ -76,6 +76,43 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task RunAsync_NetworkInterruptionDoesNotCompleteAndRetryReusesMigrationAndKeys()
+    {
+        var staging = await CreateStagingAsync();
+        var events = new List<string>();
+        var client = new RecordingHostedClient(events);
+        var interruptedLedger = new RecordingLedger(events) { InterruptNextAppend = true };
+        var firstWorkflow = new PilotWorkbookHostedMigration(
+            client,
+            Session(client.AccountId),
+            _ => interruptedLedger,
+            (_, migration) => CreatePayload(migration));
+
+        await Assert.ThrowsAsync<HttpRequestException>(() =>
+            firstWorkflow.RunAsync(staging, "FlightLogX Logbook"));
+        var firstMigration = client.Migration;
+        var firstKey = client.LastRecoveryMaterial!.LogbookKey;
+
+        Assert.Equal(HostedWorkbookMigrationStatus.Pending, firstMigration.Status);
+        Assert.Equal(0, client.CompleteCallCount);
+        Assert.True(File.Exists(staging.OriginalWorkbookPath));
+        Assert.True(File.Exists(staging.BackupWorkbookPath));
+
+        var retryWorkflow = new PilotWorkbookHostedMigration(
+            client,
+            Session(client.AccountId),
+            _ => new RecordingLedger(events),
+            (_, migration) => CreatePayload(migration));
+        var retry = await retryWorkflow.RunAsync(staging, "FlightLogX Logbook");
+
+        Assert.Equal(firstMigration.MigrationId, retry.Migration.MigrationId);
+        Assert.Equal(firstKey, client.LastRecoveryMaterial!.LogbookKey);
+        Assert.True(client.LastRecoveryMaterial.Resumed);
+        Assert.Equal(HostedWorkbookMigrationStatus.Completed, retry.Migration.Status);
+        Assert.Equal(1, client.CompleteCallCount);
+    }
+
+    [Fact]
     public async Task RunAsync_CompletedRetryVerifiesStoredReceiptWithoutRecoveryOrUpload()
     {
         var staging = await CreateStagingAsync();
@@ -305,6 +342,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         private readonly InMemoryHostedLogbookLedger inner = new();
 
         public bool AddUnexpectedReadbackOperation { get; init; }
+        public bool InterruptNextAppend { get; set; }
 
         public async ValueTask<HostedAppendResult> AppendOperationsAsync(
             LogbookId logbookId,
@@ -313,6 +351,12 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             events.Add("append-operation");
+            if (InterruptNextAppend)
+            {
+                InterruptNextAppend = false;
+                throw new HttpRequestException("Hosted connection interrupted.");
+            }
+
             return await inner.AppendOperationsAsync(
                 logbookId,
                 deviceId,

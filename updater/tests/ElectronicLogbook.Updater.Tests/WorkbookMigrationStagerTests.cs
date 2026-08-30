@@ -201,6 +201,36 @@ public sealed class WorkbookMigrationStagerTests : IDisposable
         Assert.Equal("existing backup", await File.ReadAllTextAsync(existingBackup));
     }
 
+    [Fact]
+    public async Task StageAsync_BackupFailureIsIdentifiableAndLeavesOriginalUnchanged()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(directory, "2.0.3", "Electronic_Logbook.xlsm");
+        var master = TestRepo.CreateMinimalWorkbookPackage(directory, "3.0.0", "Electronic_Logbook_Master.xlsm");
+        var staged = Path.Combine(directory, "Electronic_Logbook_Staged.xlsm");
+        var blockedBackupPath = Path.Combine(
+            directory,
+            "Electronic_Logbook_MigrationBackup_20260828-071523Z.xlsm");
+        Directory.CreateDirectory(blockedBackupPath);
+        var originalBytes = await File.ReadAllBytesAsync(source);
+        var stager = new WorkbookMigrationStager(
+            (request, _) =>
+            {
+                File.Copy(request.MasterPath, request.OutputPath);
+                return CreateReport(request, "2.0.3", "3.0.0");
+            },
+            () => Timestamp);
+
+        var error = await Assert.ThrowsAsync<WorkbookMigrationBackupException>(() =>
+            stager.StageAsync(
+                new MigrationRequest(source, master, staged, Manifest: null),
+                CancellationToken.None));
+
+        Assert.Equal(blockedBackupPath, error.BackupPath);
+        Assert.Equal(originalBytes, await File.ReadAllBytesAsync(source));
+        Assert.False(File.Exists(staged));
+        Assert.Equal("2.0.3", WorkbookPackageValidator.ValidateWorkbookPackage(source));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))

@@ -56,6 +56,41 @@ public sealed class VbaBranchModeTests
         AssertPilotMigrationOffer(updateSource, "RunUpdate remoteVer");
     }
 
+    [Fact]
+    public void CompletedMigrationWarnsOncePerExcelSessionBeforeAddingALocalEntry()
+    {
+        var source = ReadVbaSource("modLogbook.bas");
+        var normalizedSource = source.ReplaceLineEndings("\n");
+
+        Assert.Contains(
+            "Private Const FLIGHTLOGX_MIGRATION_STATUS_NAME As String = \"FlightLogXMigrationStatus\"",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Private Const FLIGHTLOGX_MIGRATION_COMPLETED_STATUS As String = \"Moved to FlightLogX\"",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("Private mFlightLogXLocalEditWarningShown As Boolean", source, StringComparison.Ordinal);
+        Assert.Contains("If mFlightLogXLocalEditWarningShown Then Exit Sub", source, StringComparison.Ordinal);
+        Assert.Contains("mFlightLogXLocalEditWarningShown = True", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "Changes you make here stay only in this spreadsheet and are not sent to FlightLogX.",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("You can continue editing after closing this message.", source, StringComparison.Ordinal);
+
+        var warningIndex = normalizedSource.IndexOf(
+            "    WarnIfPostMigrationWorkbookEditStaysLocal\n",
+            StringComparison.Ordinal);
+        var preAddSaveIndex = normalizedSource.IndexOf(
+            "    If Not TrySaveWorkbookBeforeAdd(ThisWorkbook) Then",
+            StringComparison.Ordinal);
+        Assert.True(warningIndex >= 0, "The Add action should check the completed migration stamp.");
+        Assert.True(
+            preAddSaveIndex > warningIndex,
+            "The local-only warning must appear on the add attempt before the workbook is saved or changed.");
+    }
+
     [Theory]
     [InlineData("pilot", true)]
     [InlineData(" PILOT ", true)]

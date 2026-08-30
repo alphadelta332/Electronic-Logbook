@@ -7,6 +7,15 @@ public sealed record StagedWorkbookMigration(
     string SourceFingerprint,
     MigrationReport MigrationReport);
 
+public sealed class WorkbookMigrationBackupException(
+    string message,
+    string backupPath,
+    Exception innerException)
+    : IOException(message, innerException)
+{
+    public string BackupPath { get; } = backupPath;
+}
+
 public sealed class WorkbookMigrationStager
 {
     private readonly Func<MigrationRequest, CancellationToken, MigrationReport> migrate;
@@ -70,27 +79,42 @@ public sealed class WorkbookMigrationStager
                     "The source workbook changed while the upgraded workbook was being staged.");
             }
 
-            File.Copy(request.SourcePath, backupPath, overwrite: false);
-            WorkbookPackageValidator.ValidateWorkbookPackage(backupPath, sourceVersion);
-            var backupFingerprint = await Integrity.Sha256Async(
-                backupPath,
-                cancellationToken);
-            if (!string.Equals(sourceFingerprint, backupFingerprint, StringComparison.Ordinal))
+            try
             {
-                throw new InvalidDataException(
-                    "The timestamped workbook backup does not exactly match the inspected source workbook.");
+                File.Copy(request.SourcePath, backupPath, overwrite: false);
+                WorkbookPackageValidator.ValidateWorkbookPackage(backupPath, sourceVersion);
+                var backupFingerprint = await Integrity.Sha256Async(
+                    backupPath,
+                    cancellationToken);
+                if (!string.Equals(sourceFingerprint, backupFingerprint, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The timestamped workbook backup does not exactly match the inspected source workbook.");
+                }
+
+                var sourceFingerprintAfterBackup = await Integrity.Sha256Async(
+                    request.SourcePath,
+                    cancellationToken);
+                if (!string.Equals(sourceFingerprint, sourceFingerprintAfterBackup, StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "The source workbook changed while its timestamped backup was being created.");
+                }
+
+                backupVerified = true;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
+            {
+                throw new WorkbookMigrationBackupException(
+                    "The untouched timestamped workbook backup could not be created and verified.",
+                    backupPath,
+                    ex);
             }
 
-            var sourceFingerprintAfterBackup = await Integrity.Sha256Async(
-                request.SourcePath,
-                cancellationToken);
-            if (!string.Equals(sourceFingerprint, sourceFingerprintAfterBackup, StringComparison.Ordinal))
-            {
-                throw new InvalidDataException(
-                    "The source workbook changed while its timestamped backup was being created.");
-            }
-
-            backupVerified = true;
             stagingSucceeded = true;
             return new StagedWorkbookMigration(
                 request.SourcePath,

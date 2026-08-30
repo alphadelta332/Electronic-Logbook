@@ -40,6 +40,8 @@ Private Const HOSTED_SYNC_STATUS_NAME As String = "PortableHostedSyncStatus"
 Private Const HOSTED_SYNC_STATUS_AT_NAME As String = "PortableHostedSyncStatusAt"
 Private Const HOSTED_SYNC_ATTENTION_NAME As String = "PortableHostedSyncAttention"
 Private Const HOSTED_SYNC_CREDENTIAL_TARGET_NAME As String = "PortableHostedCredentialTarget"
+Private Const FLIGHTLOGX_MIGRATION_STATUS_NAME As String = "FlightLogXMigrationStatus"
+Private Const FLIGHTLOGX_MIGRATION_COMPLETED_STATUS As String = "Moved to FlightLogX"
 Private Const HOSTED_SYNC_STATUS_SYNCED As String = "Synced"
 Private Const HOSTED_SYNC_STATUS_WAITING As String = "Waiting"
 Private Const HOSTED_SYNC_STATUS_OFFLINE As String = "Offline"
@@ -50,6 +52,7 @@ Private mLastLogbookExportError As String
 Private mPendingNewEntryNavigationFields As Variant
 Private mHostedWorkbookSyncQueued As Boolean
 Private mSuppressHostedWorkbookSyncOnClose As Boolean
+Private mFlightLogXLocalEditWarningShown As Boolean
 
 Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
 
@@ -63,6 +66,8 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
         Err.Raise vbObjectError + 510, "AddToLogbook", _
                   "Could not activate the New Entry sheet before adding the logbook entry."
     End If
+
+    WarnIfPostMigrationWorkbookEditStaysLocal
 
     '--- Save workbook before making any changes (safeguard against mid-run crashes)
     If Not TrySaveWorkbookBeforeAdd(ThisWorkbook) Then
@@ -901,6 +906,20 @@ Cleanup:
 
         Exit Sub
 
+End Sub
+
+Private Sub WarnIfPostMigrationWorkbookEditStaysLocal()
+    If mFlightLogXLocalEditWarningShown Then Exit Sub
+
+    If StrComp(Trim$(CStr(GetWorkbookNameValue( _
+        ThisWorkbook, FLIGHTLOGX_MIGRATION_STATUS_NAME, vbNullString))), _
+        FLIGHTLOGX_MIGRATION_COMPLETED_STATUS, vbTextCompare) <> 0 Then Exit Sub
+
+    mFlightLogXLocalEditWarningShown = True
+    MsgBox "This spreadsheet has already been moved to FlightLogX." & vbCrLf & vbCrLf & _
+           "Changes you make here stay only in this spreadsheet and are not sent to FlightLogX. " & _
+           "You can continue editing after closing this message.", _
+           vbInformation + vbOKOnly, "Spreadsheet Changes Stay Local"
 End Sub
 
 Private Function TryActivateNewEntrySheet(ByVal wb As Workbook) As Boolean
