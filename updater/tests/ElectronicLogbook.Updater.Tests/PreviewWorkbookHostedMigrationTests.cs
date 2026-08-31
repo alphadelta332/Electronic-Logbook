@@ -2,13 +2,13 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater.Tests;
 
-public sealed class PilotWorkbookHostedMigrationTests : IDisposable
+public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
 {
     private readonly string directory = Path.Combine(
         Path.GetTempPath(),
-        $"PilotWorkbookHostedMigrationTests-{Guid.NewGuid():N}");
+        $"PreviewWorkbookHostedMigrationTests-{Guid.NewGuid():N}");
 
-    public PilotWorkbookHostedMigrationTests()
+    public PreviewWorkbookHostedMigrationTests()
     {
         Directory.CreateDirectory(directory);
     }
@@ -21,7 +21,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         var client = new RecordingHostedClient(events);
         var ledger = new RecordingLedger(events);
         var session = Session(client.AccountId);
-        var workflow = new PilotWorkbookHostedMigration(
+        var workflow = new PreviewWorkbookHostedMigration(
             client,
             session,
             _ => ledger,
@@ -47,7 +47,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         var events = new List<string>();
         var client = new RecordingHostedClient(events);
         var firstLedger = new RecordingLedger(events) { AddUnexpectedReadbackOperation = true };
-        var firstWorkflow = new PilotWorkbookHostedMigration(
+        var firstWorkflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
             _ => firstLedger,
@@ -62,7 +62,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         Assert.Equal(0, client.CompleteCallCount);
 
         var retryLedger = new RecordingLedger(events);
-        var retryWorkflow = new PilotWorkbookHostedMigration(
+        var retryWorkflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
             _ => retryLedger,
@@ -82,7 +82,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         var events = new List<string>();
         var client = new RecordingHostedClient(events);
         var interruptedLedger = new RecordingLedger(events) { InterruptNextAppend = true };
-        var firstWorkflow = new PilotWorkbookHostedMigration(
+        var firstWorkflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
             _ => interruptedLedger,
@@ -98,7 +98,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         Assert.True(File.Exists(staging.OriginalWorkbookPath));
         Assert.True(File.Exists(staging.BackupWorkbookPath));
 
-        var retryWorkflow = new PilotWorkbookHostedMigration(
+        var retryWorkflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
             _ => new RecordingLedger(events),
@@ -119,7 +119,7 @@ public sealed class PilotWorkbookHostedMigrationTests : IDisposable
         var events = new List<string>();
         var client = new RecordingHostedClient(events);
         var ledgerCreateCount = 0;
-        var workflow = new PilotWorkbookHostedMigration(
+        var workflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
             _ =>

@@ -2,13 +2,13 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater;
 
-public sealed record PilotWorkbookHostedMigrationResult(
+public sealed record PreviewWorkbookHostedMigrationResult(
     HostedWorkbookMigration Migration,
     PortableWorkbookMigrationReceipt VerifiedReceipt,
     int VerifiedFlightCount,
     bool ResumedCompletedMigration);
 
-public sealed class PilotWorkbookHostedMigration
+public sealed class PreviewWorkbookHostedMigration
 {
     private readonly IWorkbookMigrationHostedClient client;
     private readonly SupabaseWorkbookSession session;
@@ -16,7 +16,7 @@ public sealed class PilotWorkbookHostedMigration
     private readonly Func<HostedWorkbookMigration, IHostedLogbookLedger> createLedger;
     private readonly Func<string, HostedWorkbookMigration, WorkbookMigrationPayload> convertWorkbook;
 
-    public PilotWorkbookHostedMigration(
+    public PreviewWorkbookHostedMigration(
         SupabaseWorkbookConnectionClient client,
         SupabaseWorkbookSession session,
         SupabaseHostedSyncConfiguration configuration)
@@ -34,7 +34,7 @@ public sealed class PilotWorkbookHostedMigration
         ArgumentNullException.ThrowIfNull(configuration);
     }
 
-    internal PilotWorkbookHostedMigration(
+    internal PreviewWorkbookHostedMigration(
         IWorkbookMigrationHostedClient client,
         SupabaseWorkbookSession session,
         Func<HostedWorkbookMigration, IHostedLogbookLedger> createLedger,
@@ -53,7 +53,7 @@ public sealed class PilotWorkbookHostedMigration
             new WorkbookMigrationRecoveryCoordinator(client));
     }
 
-    public Task<PilotWorkbookHostedMigrationResult> RunAsync(
+    public Task<PreviewWorkbookHostedMigrationResult> RunAsync(
         StagedWorkbookMigration staging,
         string logbookDisplayName,
         CancellationToken cancellationToken = default)
@@ -69,7 +69,7 @@ public sealed class PilotWorkbookHostedMigration
             cancellationToken);
     }
 
-    private async Task<PilotWorkbookHostedMigrationResult> ContinueHostedMigrationAsync(
+    private async Task<PreviewWorkbookHostedMigrationResult> ContinueHostedMigrationAsync(
         string stagedWorkbookPath,
         WorkbookMigrationRecoveryState state,
         CancellationToken cancellationToken)
@@ -85,7 +85,7 @@ public sealed class PilotWorkbookHostedMigration
         if (state.IsAlreadyCompleted)
         {
             EnsureCompletedMigrationMatches(migration, payload);
-            return new PilotWorkbookHostedMigrationResult(
+            return new PreviewWorkbookHostedMigrationResult(
                 migration,
                 payload.Receipt,
                 payload.Receipt.EntryCount,
@@ -111,7 +111,7 @@ public sealed class PilotWorkbookHostedMigration
                 cancellationToken);
             EnsureCompletedMigrationMatches(completed, payload);
 
-            return new PilotWorkbookHostedMigrationResult(
+            return new PreviewWorkbookHostedMigrationResult(
                 completed,
                 verified.VerifiedReceipt,
                 verified.UploadedOperationCount,

@@ -1,21 +1,28 @@
-# Creates a redacted private-pilot preflight report.
+# Creates a redacted FlightLogX Preview preflight report.
 
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Split-Path $PSScriptRoot -Parent),
     [string]$ConnectionString,
-    [string]$AccessToken = $env:ELB_SUPABASE_PILOT_ACCESS_TOKEN,
-    [string]$RefreshToken = $env:ELB_SUPABASE_PILOT_REFRESH_TOKEN,
-    [string]$ServiceRoleKey = $env:ELB_SUPABASE_PILOT_SERVICE_ROLE_KEY,
-    [string]$ExpectedDeviceId = $env:ELB_SUPABASE_PILOT_DEVICE_ID,
+    [string]$AccessToken = $env:ELB_SUPABASE_PREVIEW_ACCESS_TOKEN,
+    [string]$RefreshToken = $env:ELB_SUPABASE_PREVIEW_REFRESH_TOKEN,
+    [string]$ServiceRoleKey = $env:ELB_SUPABASE_PREVIEW_SERVICE_ROLE_KEY,
+    [string]$ExpectedDeviceId = $env:ELB_SUPABASE_PREVIEW_DEVICE_ID,
     [string]$OutputPath,
     [switch]$RunRlsHarness
 )
 
 $ErrorActionPreference = "Stop"
 
+# Legacy environment aliases remain valid while existing owner machines migrate.
+if ([string]::IsNullOrWhiteSpace($AccessToken)) { $AccessToken = $env:ELB_SUPABASE_PILOT_ACCESS_TOKEN }
+if ([string]::IsNullOrWhiteSpace($RefreshToken)) { $RefreshToken = $env:ELB_SUPABASE_PILOT_REFRESH_TOKEN }
+if ([string]::IsNullOrWhiteSpace($ServiceRoleKey)) { $ServiceRoleKey = $env:ELB_SUPABASE_PILOT_SERVICE_ROLE_KEY }
+if ([string]::IsNullOrWhiteSpace($ExpectedDeviceId)) { $ExpectedDeviceId = $env:ELB_SUPABASE_PILOT_DEVICE_ID }
+
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $localSupabaseRoot = Join-Path $env:LOCALAPPDATA "ElectronicLogbook\Supabase"
+# Retained local-state filename alias. Migrate it with the external project names later.
 $localSupabaseConfigPath = Join-Path $localSupabaseRoot "hosted-pilot-projects.local.json"
 $localSupabaseAccessTokenPath = Join-Path $localSupabaseRoot "access-token.txt"
 $localSupabaseConfig = $null
@@ -23,8 +30,21 @@ $supabaseManagementToken = $null
 if (Test-Path -LiteralPath $localSupabaseConfigPath) {
     $localSupabaseConfig = Get-Content -LiteralPath $localSupabaseConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
 }
+$previewProject = if ($null -ne $localSupabaseConfig -and $null -ne $localSupabaseConfig.preview) {
+    $localSupabaseConfig.preview
+} elseif ($null -ne $localSupabaseConfig) {
+    $localSupabaseConfig.privatePilot
+} else {
+    $null
+}
 if (Test-Path -LiteralPath $localSupabaseAccessTokenPath) {
     $supabaseManagementToken = (Get-Content -LiteralPath $localSupabaseAccessTokenPath -Raw -Encoding UTF8).Trim()
+}
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = $env:ELB_SUPABASE_PREVIEW_DB_URL
+}
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = [Environment]::GetEnvironmentVariable("ELB_SUPABASE_PREVIEW_DB_URL", "User")
 }
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     $ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL
@@ -33,18 +53,17 @@ if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     $ConnectionString = [Environment]::GetEnvironmentVariable("ELB_SUPABASE_PILOT_DB_URL", "User")
 }
 if ([string]::IsNullOrWhiteSpace($ConnectionString) -and $null -ne $localSupabaseConfig) {
-    $privatePilot = $localSupabaseConfig.privatePilot
-    if ($null -ne $privatePilot -and
-        -not [string]::IsNullOrWhiteSpace($privatePilot.project_ref) -and
-        -not [string]::IsNullOrWhiteSpace($privatePilot.region) -and
-        -not [string]::IsNullOrWhiteSpace($privatePilot.db_password)) {
-        $encodedPassword = [Uri]::EscapeDataString($privatePilot.db_password)
-        $poolerHost = "aws-0-{0}.pooler.supabase.com" -f $privatePilot.region
-        $ConnectionString = "postgresql://postgres.{0}:{1}@{2}:5432/postgres" -f $privatePilot.project_ref, $encodedPassword, $poolerHost
+    if ($null -ne $previewProject -and
+        -not [string]::IsNullOrWhiteSpace($previewProject.project_ref) -and
+        -not [string]::IsNullOrWhiteSpace($previewProject.region) -and
+        -not [string]::IsNullOrWhiteSpace($previewProject.db_password)) {
+        $encodedPassword = [Uri]::EscapeDataString($previewProject.db_password)
+        $poolerHost = "aws-0-{0}.pooler.supabase.com" -f $previewProject.region
+        $ConnectionString = "postgresql://postgres.{0}:{1}@{2}:5432/postgres" -f $previewProject.project_ref, $encodedPassword, $poolerHost
     }
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = Join-Path $repoRoot "artifacts\private-pilot-20260806\preflight.json"
+    $OutputPath = Join-Path $repoRoot "artifacts\flightlogx-preview\preflight.json"
 }
 if (-not [System.IO.Path]::IsPathRooted($OutputPath)) {
     $OutputPath = Join-Path $repoRoot $OutputPath
@@ -92,7 +111,7 @@ function Invoke-SecretSafeCheck {
     }
 }
 
-function Get-PilotDbHost {
+function Get-PreviewDbHost {
     param([string]$DatabaseConnectionString)
 
     if ([string]::IsNullOrWhiteSpace($DatabaseConnectionString)) {

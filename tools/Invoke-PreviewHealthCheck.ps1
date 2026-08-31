@@ -1,4 +1,4 @@
-# Captures a redacted hosted private-pilot health snapshot.
+# Captures a redacted FlightLogX Preview health snapshot.
 
 [CmdletBinding()]
 param(
@@ -13,6 +13,15 @@ param(
 $ErrorActionPreference = "Stop"
 
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = $env:ELB_SUPABASE_PREVIEW_DB_URL
+}
+
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    $ConnectionString = [Environment]::GetEnvironmentVariable("ELB_SUPABASE_PREVIEW_DB_URL", "User")
+}
+
+# Legacy alias for existing development machines. Remove only after local state has migrated.
+if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     $ConnectionString = $env:ELB_SUPABASE_PILOT_DB_URL
 }
 
@@ -21,7 +30,7 @@ if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
 }
 
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
-    throw "Provide -ConnectionString or set ELB_SUPABASE_PILOT_DB_URL. The value is never printed."
+    throw "Provide -ConnectionString or set ELB_SUPABASE_PREVIEW_DB_URL. The legacy ELB_SUPABASE_PILOT_DB_URL alias is also accepted. The value is never printed."
 }
 
 $psql = Get-Command psql -ErrorAction SilentlyContinue
@@ -36,12 +45,12 @@ from public.get_hosted_pilot_health() as health;
 
 $raw = & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -t -A -c $query
 if ($LASTEXITCODE -ne 0) {
-    throw "Hosted pilot health query failed."
+    throw "Hosted Preview health query failed."
 }
 
 $jsonText = ($raw | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1)
 if ([string]::IsNullOrWhiteSpace($jsonText)) {
-    throw "Hosted pilot health query returned no rows."
+    throw "Hosted Preview health query returned no rows."
 }
 
 $health = $jsonText | ConvertFrom-Json
@@ -52,7 +61,7 @@ if ($null -ne $health.paid_plan_upgrade_triggers) {
 
 $reviewFindings = New-Object System.Collections.Generic.List[string]
 if ([int64]$health.active_account_count -ge $AccountReviewThreshold) {
-    [void]$reviewFindings.Add("active pilot accounts reached the local review threshold")
+    [void]$reviewFindings.Add("active Preview accounts reached the local review threshold")
 }
 if ([int64]$health.estimated_database_bytes -ge $DatabaseBytesReviewThreshold) {
     [void]$reviewFindings.Add("estimated database size reached the local review threshold")
@@ -90,15 +99,15 @@ if (-not [string]::IsNullOrWhiteSpace($OutputPath)) {
     }
 
     $snapshot | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $resolvedOutputPath -Encoding UTF8
-    Write-Host "Hosted pilot health snapshot written to $resolvedOutputPath." -ForegroundColor Green
+    Write-Host "Hosted Preview health snapshot written to $resolvedOutputPath." -ForegroundColor Green
 } else {
     $snapshot | ConvertTo-Json -Depth 6
 }
 
 if ($reviewFindings.Count -gt 0) {
-    Write-Warning ("Pilot review required: " + ($reviewFindings -join "; "))
+    Write-Warning ("Preview review required: " + ($reviewFindings -join "; "))
 } else {
-    Write-Host "Hosted pilot health is within local private-pilot review thresholds." -ForegroundColor Green
+    Write-Host "Hosted Preview health is within local review thresholds." -ForegroundColor Green
 }
 
 if ($PassThru) {

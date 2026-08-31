@@ -1187,11 +1187,12 @@ public sealed class ExcelWorkbookMigrator
         }
 
         var sourceUpdateChannel = ReadName(sourceWorkbook, "GitHubBranch");
-        if (ShouldPreservePilotUpdateChannel(sourceUpdateChannel))
+        var migratedUpdateChannel = CanonicalPreviewUpdateChannel(sourceUpdateChannel);
+        if (migratedUpdateChannel is not null)
         {
             try
             {
-                outputWorkbook.Names.Item("GitHubBranch").RefersToRange.Value2 = "pilot";
+                outputWorkbook.Names.Item("GitHubBranch").RefersToRange.Value2 = migratedUpdateChannel;
             }
             catch
             {
@@ -2120,9 +2121,13 @@ public sealed class ExcelWorkbookMigrator
         }
     }
 
-    internal static bool ShouldPreservePilotUpdateChannel(string? sourceUpdateChannel)
+    internal static string? CanonicalPreviewUpdateChannel(string? sourceUpdateChannel)
     {
-        return string.Equals(sourceUpdateChannel?.Trim(), "pilot", StringComparison.OrdinalIgnoreCase);
+        var normalized = sourceUpdateChannel?.Trim();
+        return string.Equals(normalized, "preview", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(normalized, "pilot", StringComparison.OrdinalIgnoreCase)
+                ? "preview"
+                : null;
     }
 
     private static bool LogbookFingerprintColumnIsPreserved(string name)

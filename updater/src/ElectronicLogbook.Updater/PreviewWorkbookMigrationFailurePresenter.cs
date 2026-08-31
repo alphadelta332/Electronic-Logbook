@@ -2,7 +2,7 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater;
 
-public enum PilotWorkbookMigrationStage
+public enum PreviewWorkbookMigrationStage
 {
     Preparing,
     PreparingWorkbook,
@@ -12,7 +12,7 @@ public enum PilotWorkbookMigrationStage
     Completed
 }
 
-public enum PilotWorkbookMigrationFailureKind
+public enum PreviewWorkbookMigrationFailureKind
 {
     WrongAccount,
     UnsupportedWorkbook,
@@ -27,8 +27,8 @@ public enum PilotWorkbookMigrationFailureKind
     Unexpected
 }
 
-public sealed record PilotWorkbookMigrationFailurePresentation(
-    PilotWorkbookMigrationFailureKind Kind,
+public sealed record PreviewWorkbookMigrationFailurePresentation(
+    PreviewWorkbookMigrationFailureKind Kind,
     string Title,
     string Summary,
     string Detail,
@@ -40,10 +40,10 @@ public sealed record PilotWorkbookMigrationFailurePresentation(
         $"What to do: {RecoveryAction}";
 }
 
-public static class PilotWorkbookMigrationFailurePresenter
+public static class PreviewWorkbookMigrationFailurePresenter
 {
-    public static PilotWorkbookMigrationFailurePresentation Create(
-        PilotWorkbookMigrationStage stage,
+    public static PreviewWorkbookMigrationFailurePresentation Create(
+        PreviewWorkbookMigrationStage stage,
         Exception error,
         bool backupAvailable,
         bool hostedMigrationCompleted,
@@ -54,7 +54,7 @@ public static class PilotWorkbookMigrationFailurePresenter
         if (IsWrongAccount(error))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.WrongAccount,
+                PreviewWorkbookMigrationFailureKind.WrongAccount,
                 "Migration Stopped - Check Google Account",
                 "FlightLogX could not use the Google account you selected.",
                 IncompleteState(
@@ -67,7 +67,7 @@ public static class PilotWorkbookMigrationFailurePresenter
         if (IsNetworkInterruption(error))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.NetworkInterruption,
+                PreviewWorkbookMigrationFailureKind.NetworkInterruption,
                 "Migration Paused - Connection Interrupted",
                 "The connection stopped before FlightLogX could confirm this step.",
                 IncompleteState(
@@ -80,17 +80,17 @@ public static class PilotWorkbookMigrationFailurePresenter
         if (error is WorkbookMigrationBackupException)
         {
             return new(
-                PilotWorkbookMigrationFailureKind.Backup,
+                PreviewWorkbookMigrationFailureKind.Backup,
                 "Migration Stopped - Backup Could Not Be Verified",
                 "FlightLogX could not create and verify the untouched spreadsheet backup.",
                 "No Google sign-in or upload was started. The original spreadsheet was not replaced, and an incomplete backup was removed where possible.",
                 "Close Excel, wait for OneDrive or other file syncing to finish, check that the folder is writable and has free space, then run the migration again.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.InstallingWorkbook)
+        if (stage == PreviewWorkbookMigrationStage.InstallingWorkbook)
         {
             return new(
-                PilotWorkbookMigrationFailureKind.WorkbookInstall,
+                PreviewWorkbookMigrationFailureKind.WorkbookInstall,
                 "Migration Incomplete - Spreadsheet Not Installed",
                 hostedMigrationCompleted
                     ? "Your logbook was verified in FlightLogX, but the updated spreadsheet was not installed."
@@ -102,11 +102,11 @@ public static class PilotWorkbookMigrationFailurePresenter
                 "Close Excel, wait for file syncing to finish, and run the migration again. A verified hosted migration will be checked and reused without uploading a duplicate copy.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.MovingToFlightLogX &&
+        if (stage == PreviewWorkbookMigrationStage.MovingToFlightLogX &&
             IsHostedReadbackMismatch(error))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.HostedReadbackMismatch,
+                PreviewWorkbookMigrationFailureKind.HostedReadbackMismatch,
                 "Migration Stopped - Hosted Copy Did Not Match",
                 "FlightLogX read back data that did not exactly match the spreadsheet.",
                 IncompleteState(
@@ -116,11 +116,11 @@ public static class PilotWorkbookMigrationFailurePresenter
                 "Keep the original spreadsheet and retained backup unchanged, then run the migration again. If the mismatch repeats, contact FlightLogX support and include the diagnostic report.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.MovingToFlightLogX &&
+        if (stage == PreviewWorkbookMigrationStage.MovingToFlightLogX &&
             ContainsInvalidData(error))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.HostedSafetyState,
+                PreviewWorkbookMigrationFailureKind.HostedSafetyState,
                 "Migration Stopped - Secure State Could Not Be Verified",
                 "FlightLogX could not safely verify the migration account or recovery state.",
                 IncompleteState(
@@ -130,44 +130,44 @@ public static class PilotWorkbookMigrationFailurePresenter
                 "Keep the original spreadsheet and retained backup unchanged, then run the migration again. If the same check fails, contact FlightLogX support with the diagnostic report.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.SigningIn)
+        if (stage == PreviewWorkbookMigrationStage.SigningIn)
         {
             return new(
-                PilotWorkbookMigrationFailureKind.SignIn,
+                PreviewWorkbookMigrationFailureKind.SignIn,
                 "Migration Stopped - Google Sign-In Incomplete",
                 "Google sign-in did not finish, so the migration did not continue.",
                 "Nothing was uploaded, and the original spreadsheet was not replaced.",
                 "Run the migration again and complete Google sign-in in the browser. If sign-in keeps failing, contact FlightLogX support.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.PreparingWorkbook &&
+        if (stage == PreviewWorkbookMigrationStage.PreparingWorkbook &&
             IsUnsupportedWorkbook(error))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.UnsupportedWorkbook,
+                PreviewWorkbookMigrationFailureKind.UnsupportedWorkbook,
                 "Migration Stopped - Spreadsheet Version Not Supported",
                 "This spreadsheet version cannot be migrated automatically.",
                 PlainDetail(error, "The spreadsheet was rejected before sign-in or upload. The original file was not changed."),
                 "Keep the original spreadsheet unchanged and contact FlightLogX support for the correct upgrade path.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.PreparingWorkbook &&
+        if (stage == PreviewWorkbookMigrationStage.PreparingWorkbook &&
             ContainsInvalidData(error) &&
             string.IsNullOrWhiteSpace(updaterPhaseId))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.CorruptWorkbook,
+                PreviewWorkbookMigrationFailureKind.CorruptWorkbook,
                 "Migration Stopped - Spreadsheet Could Not Be Read",
                 "FlightLogX could not safely read this spreadsheet.",
                 "The file may be damaged or may be missing required Electronic Logbook parts. It was rejected before sign-in or upload, and the original file was not changed.",
                 "Open the original in Excel, save it as an .xlsm file, close Excel, and run the migration again. If it still fails, contact FlightLogX support with the diagnostic report.");
         }
 
-        if (stage == PilotWorkbookMigrationStage.PreparingWorkbook ||
+        if (stage == PreviewWorkbookMigrationStage.PreparingWorkbook ||
             ContainsInvalidData(error))
         {
             return new(
-                PilotWorkbookMigrationFailureKind.Validation,
+                PreviewWorkbookMigrationFailureKind.Validation,
                 "Migration Stopped - Spreadsheet Check Failed",
                 "The spreadsheet did not pass the migration safety checks.",
                 IncompleteState(
@@ -178,7 +178,7 @@ public static class PilotWorkbookMigrationFailurePresenter
         }
 
         return new(
-            PilotWorkbookMigrationFailureKind.Unexpected,
+            PreviewWorkbookMigrationFailureKind.Unexpected,
             "Migration Stopped Safely",
             "FlightLogX could not finish the migration.",
             IncompleteState(

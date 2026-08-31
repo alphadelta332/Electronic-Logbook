@@ -28,32 +28,36 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void PilotBranchUsesBranchMasterWithoutRepeatingDevelopmentWarning()
+    public void PreviewAndLegacyPilotBranchesUsePreviewRuntimeWithoutRepeatingDevelopmentWarning()
     {
         var bootSource = ReadVbaSource("modBoot.bas");
         var updateSource = ReadVbaSource("modUpdate.bas");
 
-        Assert.Contains("IsPilotUpdateBranch = (LCase$(Trim$(branchName)) = \"pilot\")", bootSource, StringComparison.Ordinal);
+        Assert.Contains("Private Const LEGACY_PREVIEW_GITHUB_BRANCH As String = \"pilot\"", bootSource, StringComparison.Ordinal);
+        Assert.Contains("IsPreviewUpdateBranch = (branchName = \"preview\" Or branchName = LEGACY_PREVIEW_GITHUB_BRANCH)", bootSource, StringComparison.Ordinal);
+        Assert.Contains("GitHubSourceBranch = LEGACY_PREVIEW_GITHUB_BRANCH", bootSource, StringComparison.Ordinal);
         Assert.Contains("RequiresDevelopmentWizardWarning = Not IsStableUpdateBranch(branchName) And", bootSource, StringComparison.Ordinal);
-        Assert.Contains("Not IsPilotUpdateBranch(branchName)", bootSource, StringComparison.Ordinal);
-        Assert.Contains("WorkbookUpdateChannelArgument = \"pilot\"", bootSource, StringComparison.Ordinal);
-        Assert.Contains("ElectronicLogbookUpdaterPilot", bootSource, StringComparison.Ordinal);
+        Assert.Contains("Not IsPreviewUpdateBranch(branchName)", bootSource, StringComparison.Ordinal);
+        Assert.Contains("WorkbookUpdateChannelArgument = \"preview\"", bootSource, StringComparison.Ordinal);
+        Assert.Contains("ElectronicLogbookUpdaterPreview", bootSource, StringComparison.Ordinal);
 
-        Assert.Contains("IsPilotUpdateBranch = (LCase$(Trim$(branchName)) = \"pilot\")", updateSource, StringComparison.Ordinal);
-        Assert.Contains("WorkbookUpdateChannelArgument = \"pilot\"", updateSource, StringComparison.Ordinal);
-        Assert.Contains("ElectronicLogbookUpdaterPilot", updateSource, StringComparison.Ordinal);
+        Assert.Contains("Private Const LEGACY_PREVIEW_GITHUB_BRANCH As String = \"pilot\"", updateSource, StringComparison.Ordinal);
+        Assert.Contains("IsPreviewUpdateBranch = (branchName = \"preview\" Or branchName = LEGACY_PREVIEW_GITHUB_BRANCH)", updateSource, StringComparison.Ordinal);
+        Assert.Contains("GitHubSourceBranch = LEGACY_PREVIEW_GITHUB_BRANCH", updateSource, StringComparison.Ordinal);
+        Assert.Contains("WorkbookUpdateChannelArgument = \"preview\"", updateSource, StringComparison.Ordinal);
+        Assert.Contains("ElectronicLogbookUpdaterPreview", updateSource, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PilotVersion300OffersTheFlightLogXMoveBeforeStartingTheUpdater()
+    public void PreviewVersion300OffersTheFlightLogXMoveBeforeStartingTheUpdater()
     {
         var workbookSource = ReadVbaSource("ThisWorkbook.cls");
         var bootSource = ReadVbaSource("modBoot.bas");
         var updateSource = ReadVbaSource("modUpdate.bas");
 
         Assert.Contains("modBoot.CheckForUpdate", workbookSource, StringComparison.Ordinal);
-        AssertPilotMigrationOffer(bootSource, "RunWizardUpdate remoteVer");
-        AssertPilotMigrationOffer(updateSource, "RunUpdate remoteVer");
+        AssertPreviewMigrationOffer(bootSource, "RunWizardUpdate remoteVer");
+        AssertPreviewMigrationOffer(updateSource, "RunUpdate remoteVer");
     }
 
     [Fact]
@@ -92,19 +96,23 @@ public sealed class VbaBranchModeTests
     }
 
     [Theory]
-    [InlineData("pilot", true)]
-    [InlineData(" PILOT ", true)]
-    [InlineData("main", false)]
-    [InlineData("dev", false)]
-    [InlineData("hotfix", false)]
-    [InlineData("", false)]
-    public void WorkbookMigrationOnlyRetainsTheControlledPilotChannel(string sourceChannel, bool expected)
+    [InlineData("preview", "preview")]
+    [InlineData(" PREVIEW ", "preview")]
+    [InlineData("pilot", "preview")]
+    [InlineData(" PILOT ", "preview")]
+    [InlineData("main", null)]
+    [InlineData("dev", null)]
+    [InlineData("hotfix", null)]
+    [InlineData("", null)]
+    public void WorkbookMigrationCanonicalisesPreviewAndAcceptsLegacyPilot(
+        string sourceChannel,
+        string? expected)
     {
-        Assert.Equal(expected, ExcelWorkbookMigrator.ShouldPreservePilotUpdateChannel(sourceChannel));
+        Assert.Equal(expected, ExcelWorkbookMigrator.CanonicalPreviewUpdateChannel(sourceChannel));
     }
 
     [Fact]
-    public void WizardRecognisesAndDisplaysPilotChannel()
+    public void WizardUsesPreviewChannelAndAcceptsLegacyPilotInput()
     {
         var source = ReadRepoSource(Path.Combine(
             "updater",
@@ -112,14 +120,15 @@ public sealed class VbaBranchModeTests
             "ElectronicLogbook.Updater.Wizard",
             "MainWindow.xaml.cs"));
 
-        Assert.Contains("\"pilot\" => UpdateChannel.Pilot", source, StringComparison.Ordinal);
-        Assert.Contains("UpdateChannel.Pilot => \"Preview\"", source, StringComparison.Ordinal);
-        Assert.Contains("UpdateChannel.Pilot => \"pilot\"", source, StringComparison.Ordinal);
+        Assert.Contains("\"preview\" => UpdateChannel.Preview", source, StringComparison.Ordinal);
+        Assert.Contains("\"pilot\" => UpdateChannel.Preview", source, StringComparison.Ordinal);
+        Assert.Contains("UpdateChannel.Preview => \"Preview\"", source, StringComparison.Ordinal);
+        Assert.Contains("UpdateChannel.Preview => LegacyPreviewGitHubBranch", source, StringComparison.Ordinal);
         Assert.Contains("Preview version:", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PilotWizardPublicationIsProtectedAndKeepsThe203BridgeAsset()
+    public void LegacyPilotWizardPublicationIsProtectedAndKeepsThe203BridgeAsset()
     {
         var pilotWorkflow = ReadRepoSource(Path.Combine(
             ".github",
@@ -144,13 +153,13 @@ public sealed class VbaBranchModeTests
         return ReadRepoSource(fileName);
     }
 
-    private static void AssertPilotMigrationOffer(string source, string acceptedAction)
+    private static void AssertPreviewMigrationOffer(string source, string acceptedAction)
     {
         var normalizedSource = source.ReplaceLineEndings("\n");
 
-        Assert.Contains("Private Const PILOT_MIGRATION_VERSION As String = \"3.0.0\"", source, StringComparison.Ordinal);
-        Assert.Contains("IsPilotMigrationOffer = IsPilotUpdateBranch(GetGitHubBranch()) And", source, StringComparison.Ordinal);
-        Assert.Contains("NormalizeVersionText(remoteVer) = PILOT_MIGRATION_VERSION", source, StringComparison.Ordinal);
+        Assert.Contains("Private Const PREVIEW_MIGRATION_VERSION As String = \"3.0.0\"", source, StringComparison.Ordinal);
+        Assert.Contains("IsPreviewMigrationOffer = IsPreviewUpdateBranch(GetGitHubBranch()) And", source, StringComparison.Ordinal);
+        Assert.Contains("NormalizeVersionText(remoteVer) = PREVIEW_MIGRATION_VERSION", source, StringComparison.Ordinal);
         Assert.Contains("Your logbook is ready to move to FlightLogX.", source, StringComparison.Ordinal);
         Assert.Contains("in this workbook to the FlightLogX app.", source, StringComparison.Ordinal);
         Assert.Contains("Nothing will change if you choose No.", source, StringComparison.Ordinal);

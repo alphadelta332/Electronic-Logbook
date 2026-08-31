@@ -1,4 +1,4 @@
-# Stores the private-pilot database URL in the Windows user environment.
+# Stores the FlightLogX Preview database URL in the Windows user environment.
 # The value is intentionally not printed.
 
 [CmdletBinding()]
@@ -22,17 +22,17 @@ if ($ConnectionString -notmatch "^postgres(ql)?://") {
 }
 
 [Environment]::SetEnvironmentVariable(
-    "ELB_SUPABASE_PILOT_DB_URL",
+    "ELB_SUPABASE_PREVIEW_DB_URL",
     $ConnectionString,
     [EnvironmentVariableTarget]::User)
 
 $saved = [Environment]::GetEnvironmentVariable(
-    "ELB_SUPABASE_PILOT_DB_URL",
+    "ELB_SUPABASE_PREVIEW_DB_URL",
     [EnvironmentVariableTarget]::User)
 
 if ([string]::IsNullOrWhiteSpace($saved)) {
-    throw "ELB_SUPABASE_PILOT_DB_URL was not saved."
+    throw "ELB_SUPABASE_PREVIEW_DB_URL was not saved."
 }
 
-Write-Host "ELB_SUPABASE_PILOT_DB_URL saved to the Windows user environment." -ForegroundColor Green
+Write-Host "ELB_SUPABASE_PREVIEW_DB_URL saved to the Windows user environment." -ForegroundColor Green
 Write-Host "The connection string was not printed." -ForegroundColor Yellow

@@ -2,13 +2,13 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater;
 
-public sealed record PilotWorkbookPostMigrationHandoffResult(
+public sealed record PreviewWorkbookPostMigrationHandoffResult(
     string FinalWorkbookPath,
     string UntouchedBackupWorkbookPath,
     string InstallationRollbackBackupPath,
     WorkbookMigrationStamp Stamp);
 
-public sealed class PilotWorkbookPostMigrationHandoff
+public sealed class PreviewWorkbookPostMigrationHandoff
 {
     public const string CompletedStatus = "Moved to FlightLogX";
 
@@ -22,7 +22,7 @@ public sealed class PilotWorkbookPostMigrationHandoff
         IWorkbookPackageValidation,
         HandoffResult> replaceWorkbook;
 
-    public PilotWorkbookPostMigrationHandoff()
+    public PreviewWorkbookPostMigrationHandoff()
         : this(
             PortableLogbookWorkbookPackageStorage.EnsureWorkbookMigrationStamp,
             PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp,
@@ -37,7 +37,7 @@ public sealed class PilotWorkbookPostMigrationHandoff
     {
     }
 
-    internal PilotWorkbookPostMigrationHandoff(
+    internal PreviewWorkbookPostMigrationHandoff(
         Func<string, WorkbookMigrationStamp, WorkbookMigrationStampPackageResult> stampWorkbook,
         Func<string, WorkbookMigrationStamp?> readStamp,
         Func<
@@ -57,9 +57,9 @@ public sealed class PilotWorkbookPostMigrationHandoff
         this.replaceWorkbook = replaceWorkbook;
     }
 
-    public async Task<PilotWorkbookPostMigrationHandoffResult> InstallAsync(
+    public async Task<PreviewWorkbookPostMigrationHandoffResult> InstallAsync(
         StagedWorkbookMigration staging,
-        PilotWorkbookHostedMigrationResult hostedResult,
+        PreviewWorkbookHostedMigrationResult hostedResult,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(staging);
@@ -91,7 +91,7 @@ public sealed class PilotWorkbookPostMigrationHandoff
             validation);
 
         await ValidateUntouchedBackupAsync(staging, cancellationToken);
-        return new PilotWorkbookPostMigrationHandoffResult(
+        return new PreviewWorkbookPostMigrationHandoffResult(
             handoff.FinalWorkbookPath,
             staging.BackupWorkbookPath,
             handoff.BackupWorkbookPath,
@@ -99,7 +99,7 @@ public sealed class PilotWorkbookPostMigrationHandoff
     }
 
     private static WorkbookMigrationStamp CreateVerifiedStamp(
-        PilotWorkbookHostedMigrationResult hostedResult)
+        PreviewWorkbookHostedMigrationResult hostedResult)
     {
         var migration = hostedResult.Migration;
         var receipt = hostedResult.VerifiedReceipt;

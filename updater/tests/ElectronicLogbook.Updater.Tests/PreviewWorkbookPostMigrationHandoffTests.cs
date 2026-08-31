@@ -4,16 +4,16 @@ using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater.Tests;
 
-public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
+public sealed class PreviewWorkbookPostMigrationHandoffTests : IDisposable
 {
     private static readonly DateTimeOffset CompletedAt =
         DateTimeOffset.Parse("2026-08-29T08:15:30+10:00");
 
     private readonly string directory = Path.Combine(
         Path.GetTempPath(),
-        $"PilotWorkbookPostMigrationHandoffTests-{Guid.NewGuid():N}");
+        $"PreviewWorkbookPostMigrationHandoffTests-{Guid.NewGuid():N}");
 
-    public PilotWorkbookPostMigrationHandoffTests()
+    public PreviewWorkbookPostMigrationHandoffTests()
     {
         Directory.CreateDirectory(directory);
     }
@@ -27,7 +27,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
             staging.BackupWorkbookPath,
             CancellationToken.None);
 
-        var result = await new PilotWorkbookPostMigrationHandoff().InstallAsync(
+        var result = await new PreviewWorkbookPostMigrationHandoff().InstallAsync(
             staging,
             hostedResult);
 
@@ -46,7 +46,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
                 CancellationToken.None));
         Assert.Equal(
             new WorkbookMigrationStamp(
-                PilotWorkbookPostMigrationHandoff.CompletedStatus,
+                PreviewWorkbookPostMigrationHandoff.CompletedStatus,
                 CompletedAt,
                 hostedResult.Migration.MigrationId),
             PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp(
@@ -64,7 +64,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
             staging.BackupWorkbookPath,
             CancellationToken.None);
         var replaceCalled = false;
-        var handoff = new PilotWorkbookPostMigrationHandoff(
+        var handoff = new PreviewWorkbookPostMigrationHandoff(
             (_, _) => throw new IOException("stamp write failed"),
             PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp,
             (_, _, _, _, _) =>
@@ -102,7 +102,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
         var backupFingerprint = await Integrity.Sha256Async(
             staging.BackupWorkbookPath,
             CancellationToken.None);
-        var failingHandoff = new PilotWorkbookPostMigrationHandoff(
+        var failingHandoff = new PreviewWorkbookPostMigrationHandoff(
             PortableLogbookWorkbookPackageStorage.EnsureWorkbookMigrationStamp,
             PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp,
             (_, _, _, _, _) => throw new IOException("installation failed"));
@@ -121,7 +121,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
             PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp(
                 staging.StagedWorkbookPath));
 
-        var retry = await new PilotWorkbookPostMigrationHandoff().InstallAsync(
+        var retry = await new PreviewWorkbookPostMigrationHandoff().InstallAsync(
             staging,
             hostedResult);
 
@@ -147,7 +147,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
                 StringComparison.OrdinalIgnoreCase)
                 ? null
                 : PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp(path);
-        var handoff = new PilotWorkbookPostMigrationHandoff(
+        var handoff = new PreviewWorkbookPostMigrationHandoff(
             PortableLogbookWorkbookPackageStorage.EnsureWorkbookMigrationStamp,
             ReadStampExceptFromInstalledSource,
             static (source, staged, finalVersion, backupVersion, validation) =>
@@ -181,7 +181,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
             StagedWorkbookPath = retryStaged,
             MigrationReport = staging.MigrationReport with { OutputPath = retryStaged }
         };
-        var retry = await new PilotWorkbookPostMigrationHandoff().InstallAsync(
+        var retry = await new PreviewWorkbookPostMigrationHandoff().InstallAsync(
             retryStaging,
             hostedResult with { ResumedCompletedMigration = true });
 
@@ -204,7 +204,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
         }
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
-            new PilotWorkbookPostMigrationHandoff().InstallAsync(staging, hostedResult));
+            new PreviewWorkbookPostMigrationHandoff().InstallAsync(staging, hostedResult));
 
         Assert.Contains("changed after hosted migration", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Null(
@@ -230,7 +230,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
         };
 
         var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
-            new PilotWorkbookPostMigrationHandoff().InstallAsync(staging, hostedResult));
+            new PreviewWorkbookPostMigrationHandoff().InstallAsync(staging, hostedResult));
 
         Assert.Contains("completion has not been exactly verified", error.Message, StringComparison.OrdinalIgnoreCase);
         Assert.Null(
@@ -249,7 +249,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
             TestRepo.Version,
             "stamp-metadata.xlsm");
         var stamp = new WorkbookMigrationStamp(
-            PilotWorkbookPostMigrationHandoff.CompletedStatus,
+            PreviewWorkbookPostMigrationHandoff.CompletedStatus,
             CompletedAt,
             new WorkbookMigrationId("mig_stamp"));
 
@@ -318,7 +318,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
                 "validated"));
     }
 
-    private static PilotWorkbookHostedMigrationResult CompletedHostedResult(
+    private static PreviewWorkbookHostedMigrationResult CompletedHostedResult(
         string sourceFingerprint)
     {
         var migrationId = new WorkbookMigrationId("mig_complete");
@@ -351,7 +351,7 @@ public sealed class PilotWorkbookPostMigrationHandoffTests : IDisposable
             CompletedAt,
             CompletedAt,
             null);
-        return new PilotWorkbookHostedMigrationResult(
+        return new PreviewWorkbookHostedMigrationResult(
             migration,
             receipt,
             1,

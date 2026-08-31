@@ -20,7 +20,8 @@ Private Const WIZARD_EXE_NAME As String = "ElectronicLogbook.Updater.Wizard.exe"
 Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-x64.zip"
 Private Const DEV_WIZARD_TAG_PREFIX As String = "dev-wizard-"
 Private Const DEV_WIZARD_COMMIT_NAME As String = "dev-wizard-commit.txt"
-Private Const PILOT_MIGRATION_VERSION As String = "3.0.0"
+Private Const PREVIEW_MIGRATION_VERSION As String = "3.0.0"
+Private Const LEGACY_PREVIEW_GITHUB_BRANCH As String = "pilot"
 ' -------------------------------------------------------------
 
 ' ==============================================================
@@ -79,10 +80,10 @@ End Sub
 
 Private Function BuildUpdateOfferMessage(ByVal localVer As String, _
                                          ByVal remoteVer As String) As String
-    If IsPilotMigrationOffer(remoteVer) Then
+    If IsPreviewMigrationOffer(remoteVer) Then
         BuildUpdateOfferMessage = _
             "Your logbook is ready to move to FlightLogX." & vbCrLf & vbCrLf & _
-            "Version " & PILOT_MIGRATION_VERSION & " will guide you through moving the flights " & _
+            "Version " & PREVIEW_MIGRATION_VERSION & " will guide you through moving the flights " & _
             "in this workbook to the FlightLogX app." & vbCrLf & vbCrLf & _
             "Nothing will change if you choose No." & vbCrLf & vbCrLf & _
             "Start the move now?"
@@ -96,16 +97,16 @@ Private Function BuildUpdateOfferMessage(ByVal localVer As String, _
 End Function
 
 Private Function UpdateOfferTitle(ByVal remoteVer As String) As String
-    If IsPilotMigrationOffer(remoteVer) Then
+    If IsPreviewMigrationOffer(remoteVer) Then
         UpdateOfferTitle = "Move to FlightLogX"
     Else
         UpdateOfferTitle = "Logbook Update Available"
     End If
 End Function
 
-Private Function IsPilotMigrationOffer(ByVal remoteVer As String) As Boolean
-    IsPilotMigrationOffer = IsPilotUpdateBranch(GetGitHubBranch()) And _
-                            NormalizeVersionText(remoteVer) = PILOT_MIGRATION_VERSION
+Private Function IsPreviewMigrationOffer(ByVal remoteVer As String) As Boolean
+    IsPreviewMigrationOffer = IsPreviewUpdateBranch(GetGitHubBranch()) And _
+                              NormalizeVersionText(remoteVer) = PREVIEW_MIGRATION_VERSION
 End Function
 
 ' ==============================================================
@@ -2027,7 +2028,7 @@ Private Function ResolveGitHubRef() As String
     Dim branchName As String
     Dim sha        As String
 
-    branchName = GetGitHubBranch()
+    branchName = GitHubSourceBranch(GetGitHubBranch())
     sha = GetBranchCommitSha(branchName)
     If sha <> "" Then
         ResolveGitHubRef = sha
@@ -2054,8 +2055,18 @@ Private Function IsStableUpdateBranch(ByVal branchName As String) As Boolean
     IsStableUpdateBranch = (LCase$(Trim$(branchName)) = "main")
 End Function
 
-Private Function IsPilotUpdateBranch(ByVal branchName As String) As Boolean
-    IsPilotUpdateBranch = (LCase$(Trim$(branchName)) = "pilot")
+Private Function IsPreviewUpdateBranch(ByVal branchName As String) As Boolean
+    branchName = LCase$(Trim$(branchName))
+    IsPreviewUpdateBranch = (branchName = "preview" Or branchName = LEGACY_PREVIEW_GITHUB_BRANCH)
+End Function
+
+Private Function GitHubSourceBranch(ByVal workbookChannel As String) As String
+    workbookChannel = LCase$(Trim$(workbookChannel))
+    If workbookChannel = "preview" Then
+        GitHubSourceBranch = LEGACY_PREVIEW_GITHUB_BRANCH
+    Else
+        GitHubSourceBranch = workbookChannel
+    End If
 End Function
 
 Private Function WorkbookUpdateChannelArgument() As String
@@ -2064,8 +2075,8 @@ Private Function WorkbookUpdateChannelArgument() As String
     branchName = LCase$(Trim$(GetGitHubBranch()))
     If branchName = "hotfix" Then
         WorkbookUpdateChannelArgument = "hotfix"
-    ElseIf branchName = "pilot" Then
-        WorkbookUpdateChannelArgument = "pilot"
+    ElseIf IsPreviewUpdateBranch(branchName) Then
+        WorkbookUpdateChannelArgument = "preview"
     ElseIf branchName = "main" Then
         WorkbookUpdateChannelArgument = "stable"
     Else
@@ -2195,8 +2206,8 @@ Private Function ResolveWizardExecutablePath(ByVal repository As String, _
     If Not IsStableUpdateBranch(GetGitHubBranch()) Then
         If LCase$(Trim$(GetGitHubBranch())) = "hotfix" Then
             tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterHotfix"
-        ElseIf IsPilotUpdateBranch(GetGitHubBranch()) Then
-            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterPilot"
+        ElseIf IsPreviewUpdateBranch(GetGitHubBranch()) Then
+            tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterPreview"
         Else
             tempFolder = Environ("TEMP") & "\ElectronicLogbookUpdaterDev"
         End If

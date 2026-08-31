@@ -1,4 +1,4 @@
-# Builds and stores the private-pilot Supabase Session Pooler URL from the DB password.
+# Builds and stores the FlightLogX Preview Supabase Session Pooler URL from the DB password.
 # This avoids direct-connection IPv6 issues and URL-encodes special password characters.
 
 [CmdletBinding()]
@@ -43,9 +43,9 @@ $encodedPassword = [Uri]::EscapeDataString($DatabasePassword)
 $connectionString = "postgresql://postgres.${ProjectRef}:$encodedPassword@${PoolerHost}:$Port/postgres"
 
 [Environment]::SetEnvironmentVariable(
-    "ELB_SUPABASE_PILOT_DB_URL",
+    "ELB_SUPABASE_PREVIEW_DB_URL",
     $connectionString,
     [EnvironmentVariableTarget]::User)
 
-Write-Host "ELB_SUPABASE_PILOT_DB_URL saved using the Supabase Session Pooler." -ForegroundColor Green
+Write-Host "ELB_SUPABASE_PREVIEW_DB_URL saved using the Supabase Session Pooler." -ForegroundColor Green
 Write-Host "The password and connection string were not printed." -ForegroundColor Yellow
