@@ -65,27 +65,27 @@ else
             </div>
         </section>
 
-        @if (IsPilotUpdateAvailable)
+        @if (IsPreviewUpdateAvailable)
         {
             <section class="form-section">
                 <div class="section-title-row">
                     <div>
-                        <span class="eyebrow">Private pilot</span>
+                        <span class="eyebrow">FlightLogX Preview</span>
                         <h2>FlightLogX updates</h2>
                     </div>
-                    <span class="draft-pill">Pilot only</span>
+                    <span class="draft-pill">Preview only</span>
                 </div>
-                <MudText Typo="Typo.body2">Check for the latest invited pilot build. If one is available, FlightLogX downloads it and Android asks you to approve the installation.</MudText>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPilotUpdateAsync" Disabled="@IsPilotUpdateBusy">
-                    @(IsPilotUpdateBusy ? "Checking for update…" : "Check for pilot update")
+                <MudText Typo="Typo.body2">Check for the latest invitation-only Preview build. If one is available, FlightLogX downloads it and Android asks you to approve the installation.</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPreviewUpdateAsync" Disabled="@IsPreviewUpdateBusy">
+                    @(IsPreviewUpdateBusy ? "Checking for update…" : "Check for Preview update")
                 </MudButton>
-                @if (!string.IsNullOrWhiteSpace(PilotUpdateMessage))
+                @if (!string.IsNullOrWhiteSpace(PreviewUpdateMessage))
                 {
-                    <span class="settings-status-line" role="status">@PilotUpdateMessage</span>
+                    <span class="settings-status-line" role="status">@PreviewUpdateMessage</span>
                 }
-                @if (!string.IsNullOrWhiteSpace(PilotUpdateError))
+                @if (!string.IsNullOrWhiteSpace(PreviewUpdateError))
                 {
-                    <span class="settings-status-line settings-status-error" role="alert">@PilotUpdateError</span>
+                    <span class="settings-status-line settings-status-error" role="alert">@PreviewUpdateError</span>
                 }
             </section>
         }
@@ -437,8 +437,8 @@ else
     private bool IsSyncBusy { get; set; }
     private bool IsAccountBusy { get; set; }
     private bool IsConnectionDiagnosticBusy { get; set; }
-    private bool IsPilotUpdateAvailable { get; set; }
-    private bool IsPilotUpdateBusy { get; set; }
+    private bool IsPreviewUpdateAvailable { get; set; }
+    private bool IsPreviewUpdateBusy { get; set; }
     private string HostedEmail { get; set; } = string.Empty;
     private string HostedVerificationCode { get; set; } = string.Empty;
     private string AccountRecoveryCode { get; set; } = string.Empty;
@@ -454,8 +454,8 @@ else
     private string? FallbackAccountMessage { get; set; }
     private string? FallbackAccountError { get; set; }
     private string? ConnectionDiagnosticMessage { get; set; }
-    private string? PilotUpdateMessage { get; set; }
-    private string? PilotUpdateError { get; set; }
+    private string? PreviewUpdateMessage { get; set; }
+    private string? PreviewUpdateError { get; set; }
 
     private bool CanRecoverConnection =>
         !IsConnectionDiagnosticBusy
@@ -468,12 +468,12 @@ else
         await UiPreferences.EnsureLoadedAsync();
         try
         {
-            IsPilotUpdateAvailable = await JsRuntime.InvokeAsync<bool>(
-                "electronicLogbookPilotUpdates.isAvailable");
+            IsPreviewUpdateAvailable = await JsRuntime.InvokeAsync<bool>(
+                "electronicLogbookPreviewUpdates.isAvailable");
         }
         catch (JSException)
         {
-            IsPilotUpdateAvailable = false;
+            IsPreviewUpdateAvailable = false;
         }
     }
 
@@ -857,32 +857,32 @@ else
         }
     }
 
-    private async Task CheckForPilotUpdateAsync()
+    private async Task CheckForPreviewUpdateAsync()
     {
-        if (!IsPilotUpdateAvailable || IsPilotUpdateBusy)
+        if (!IsPreviewUpdateAvailable || IsPreviewUpdateBusy)
         {
             return;
         }
 
-        IsPilotUpdateBusy = true;
-        PilotUpdateMessage = "Checking Firebase App Distribution for a newer pilot build…";
-        PilotUpdateError = null;
+        IsPreviewUpdateBusy = true;
+        PreviewUpdateMessage = "Checking Firebase App Distribution for a newer Preview build…";
+        PreviewUpdateError = null;
         try
         {
             var outcome = await JsRuntime.InvokeAsync<string>(
-                "electronicLogbookPilotUpdates.checkAndInstall");
-            PilotUpdateMessage = outcome == "updateStarted"
-                ? "The pilot update was downloaded. Follow Android's installation prompt to finish."
-                : "This device already has the latest invited pilot build.";
+                "electronicLogbookPreviewUpdates.checkAndInstall");
+            PreviewUpdateMessage = outcome == "updateStarted"
+                ? "The Preview update was downloaded. Follow Android's installation prompt to finish."
+                : "This device already has the latest invitation-only Preview build.";
         }
         catch (JSException)
         {
-            PilotUpdateMessage = null;
-            PilotUpdateError = "The pilot update check could not start. Confirm this Google account accepted the Firebase invitation, then try again.";
+            PreviewUpdateMessage = null;
+            PreviewUpdateError = "The Preview update check could not start. Confirm this Google account accepted the Firebase invitation, then try again.";
         }
         finally
         {
-            IsPilotUpdateBusy = false;
+            IsPreviewUpdateBusy = false;
         }
     }
 

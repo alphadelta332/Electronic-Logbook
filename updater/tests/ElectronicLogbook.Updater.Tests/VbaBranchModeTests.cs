@@ -113,9 +113,9 @@ public sealed class VbaBranchModeTests
             "MainWindow.xaml.cs"));
 
         Assert.Contains("\"pilot\" => UpdateChannel.Pilot", source, StringComparison.Ordinal);
-        Assert.Contains("UpdateChannel.Pilot => \"Pilot\"", source, StringComparison.Ordinal);
+        Assert.Contains("UpdateChannel.Pilot => \"Preview\"", source, StringComparison.Ordinal);
         Assert.Contains("UpdateChannel.Pilot => \"pilot\"", source, StringComparison.Ordinal);
-        Assert.Contains("Pilot version:", source, StringComparison.Ordinal);
+        Assert.Contains("Preview version:", source, StringComparison.Ordinal);
     }
 
     [Fact]

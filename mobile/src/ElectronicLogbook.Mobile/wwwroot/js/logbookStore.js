@@ -81,8 +81,8 @@
         return globalThis.Capacitor?.isNativePlatform?.() && plugin?.getStatus ? plugin : null;
     }
 
-    function nativePilotUpdatesPlugin() {
-        const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookPilotUpdates;
+    function nativePreviewUpdatesPlugin() {
+        const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookPreviewUpdates;
         return globalThis.Capacitor?.isNativePlatform?.() && plugin?.checkAndInstall ? plugin : null;
     }
 
@@ -232,15 +232,15 @@
         }
     };
 
-    window.electronicLogbookPilotUpdates = {
+    window.electronicLogbookPreviewUpdates = {
         isAvailable: async () => {
-            const plugin = nativePilotUpdatesPlugin();
+            const plugin = nativePreviewUpdatesPlugin();
             return plugin ? Boolean((await plugin.isAvailable()).enabled) : false;
         },
         checkAndInstall: async () => {
-            const plugin = nativePilotUpdatesPlugin();
+            const plugin = nativePreviewUpdatesPlugin();
             if (!plugin) {
-                throw new Error("Pilot updates are only available in the private Android pilot app.");
+                throw new Error("Preview updates are only available in the invitation-only Android Preview app.");
             }
 
             const result = await plugin.checkAndInstall();

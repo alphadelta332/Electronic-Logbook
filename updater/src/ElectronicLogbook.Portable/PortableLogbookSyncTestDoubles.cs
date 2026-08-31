@@ -201,7 +201,7 @@ public sealed class InMemoryHostedLogbookLedger : IHostedLogbookLedger
         {
             throw new HostedLedgerException(
                 HostedLedgerFailureReason.PayloadTooLarge,
-                "Hosted operation encrypted payload is too large for the private pilot boundary.");
+                "Hosted operation encrypted payload is too large for the Preview boundary.");
         }
 
         if (LooksLikePlaintextPayload(upload.PayloadCiphertext))
@@ -361,7 +361,7 @@ public sealed class InMemoryHostedLogbookAuthenticator(
         {
             throw new HostedSignInException(
                 HostedSignInFailureReason.PublicRegistrationBlocked,
-                "Public account registration is disabled for the private pilot.");
+                "Public account registration is disabled during the invitation-only Preview.");
         }
 
         ThrowIfAccountOrDeviceBlocked();
@@ -370,7 +370,7 @@ public sealed class InMemoryHostedLogbookAuthenticator(
         {
             throw new HostedSignInException(
                 HostedSignInFailureReason.InvitationRequired,
-                "Sign-in is available only for invited pilot accounts.");
+                "Sign-in is available only for invited Preview accounts.");
         }
 
         pendingSignIn = new HostedSignInStart(accountId, MaskEmail(email), clock.UtcNow.AddMinutes(10));

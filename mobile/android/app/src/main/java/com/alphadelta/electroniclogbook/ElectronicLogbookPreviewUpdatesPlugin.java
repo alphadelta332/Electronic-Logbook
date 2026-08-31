@@ -7,21 +7,21 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.google.firebase.appdistribution.FirebaseAppDistribution;
 
-@CapacitorPlugin(name = "ElectronicLogbookPilotUpdates")
-public class ElectronicLogbookPilotUpdatesPlugin extends Plugin {
+@CapacitorPlugin(name = "ElectronicLogbookPreviewUpdates")
+public class ElectronicLogbookPreviewUpdatesPlugin extends Plugin {
     @PluginMethod
     public void isAvailable(PluginCall call) {
         JSObject result = new JSObject();
-        result.put("enabled", BuildConfig.PILOT_UPDATES_ENABLED);
+        result.put("enabled", BuildConfig.PREVIEW_UPDATES_ENABLED);
         call.resolve(result);
     }
 
     @PluginMethod
     public void checkAndInstall(PluginCall call) {
-        if (!BuildConfig.PILOT_UPDATES_ENABLED) {
+        if (!BuildConfig.PREVIEW_UPDATES_ENABLED) {
             call.reject(
-                "Pilot updates are not included in this FlightLogX build.",
-                "PILOT_UPDATES_UNAVAILABLE");
+                "Preview updates are not included in this FlightLogX build.",
+                "PREVIEW_UPDATES_UNAVAILABLE");
             return;
         }
 
@@ -33,8 +33,8 @@ public class ElectronicLogbookPilotUpdatesPlugin extends Plugin {
                 call.resolve(result);
             })
             .addOnFailureListener(exception -> call.reject(
-                "FlightLogX could not check Firebase App Distribution for a pilot update.",
-                "PILOT_UPDATE_FAILED",
+                "FlightLogX could not check Firebase App Distribution for a Preview update.",
+                "PREVIEW_UPDATE_FAILED",
                 exception)));
     }
 }

@@ -127,8 +127,24 @@ Out of scope:
    that the temporary **Allow from this source** permission is normally turned off after
    installation. The owner reference device may keep it enabled only for the duration of
    an explicitly active update rehearsal.
-3. Provision the invited Google-account email through the owner-only enrolment path once
-   that path passes its acceptance gate. Public self-registration must remain disabled.
+3. From the repository root, first run the owner-only enrolment as a read-only preflight:
+
+   ```powershell
+   .\tools\Add-FlightLogXParticipant.ps1 `
+     -Email "participant-google-account@example.com" `
+     -DisplayName "Participant name" `
+     -FirebaseGroupAlias "the-approved-release-group" `
+     -WhatIf
+   ```
+
+   Check that every precondition passes, then run the same command again without
+   `-WhatIf`. The command creates or reuses the matching hosted invitation in
+   `workbook_migration` mode, adds that same Google email to the existing
+   release-bearing Firebase group, verifies the membership, and writes a private copy of
+   this installation guide under
+   `%LOCALAPPDATA%\ElectronicLogbook\ParticipantHandoffs`. Send that generated file only
+   through the owner's trusted contact path. Public self-registration remains disabled;
+   neither the owner nor participant uses database tools.
 4. Complete the repository and `2.0.3` coached channel checks above.
 5. Start the migration from the existing workbook, accept `3.0.0`, and use Google sign-in
    in the Windows updater.
@@ -157,7 +173,7 @@ release remains newer than every `3.0.0` pilot revision.
 2. Build a higher disposable APK from `mobile/`:
 
    ```powershell
-   npm.cmd run build:android:pilot -- -PilotBuildRevision 1
+   npm.cmd run build:android:preview -- -PreviewBuildRevision 1
    ```
 
 3. Verify the script reports the permanent package, signing certificate, displayed

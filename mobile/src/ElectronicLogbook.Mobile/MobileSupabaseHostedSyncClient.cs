@@ -196,7 +196,7 @@ public sealed class MobileSupabaseHostedSyncClient(
         {
             throw new HostedSignInException(
                 HostedSignInFailureReason.PublicRegistrationBlocked,
-                "Public account registration is disabled for the private pilot.");
+                "Public account registration is disabled during the invitation-only Preview.");
         }
 
         var options = await GetConfigAsync(cancellationToken);
@@ -1315,7 +1315,7 @@ public sealed class MobileSupabaseHostedSyncClient(
     private static HostedSignInException InvalidSignInLink() =>
         new(
             HostedSignInFailureReason.InvalidVerificationCode,
-            "The pasted sign-in link is not an unused Supabase sign-in link for this pilot project.");
+            "The pasted sign-in link is not an unused FlightLogX Preview sign-in link.");
 
     private static HostedSignInException ToSignInException(HttpStatusCode statusCode, string body)
     {

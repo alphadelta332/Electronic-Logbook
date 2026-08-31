@@ -1,20 +1,20 @@
-# Install The FlightLogX Android Private Pilot
+# Install The FlightLogX Android Preview
 
-Status: tester-facing private-pilot instructions
+Status: participant-facing Preview instructions
 
 Last checked: 2026-08-31
 
-FlightLogX private-pilot builds are distributed by Firebase App Distribution rather
+FlightLogX invitation-only Preview builds are distributed by Firebase App Distribution rather
 than Google Play. Android therefore treats the APK as an app from outside the Play
 Store and may show strong security warnings. These warnings are expected only when all
-of the checks below match. If anything differs, stop and contact the FlightLogX pilot
+of the checks below match. If anything differs, stop and contact the FlightLogX Preview
 owner.
 
 ## Before You Start
 
 Confirm all of these details:
 
-- You received a Firebase App Distribution invitation from the FlightLogX pilot owner.
+- You received a Firebase App Distribution invitation from the FlightLogX Preview owner.
 - The tester page address begins with `https://distribution.firebase.google.com/`.
 - The page shows **FlightLogX** and package
   `com.alphadelta.electroniclogbook`.
@@ -39,7 +39,7 @@ cloud-storage link, or unrelated website download.
 7. If Android says Chrome or Firebase App Tester cannot install unknown apps, select
    **Settings**, turn on **Allow from this source** for the app that downloaded the APK,
    return to the installer, and select **Install**.
-8. Open FlightLogX. Do not enter real logbook data until the pilot owner confirms that
+8. Open FlightLogX. Do not enter real logbook data until the Preview owner confirms that
    the build and account are ready.
 9. For an ordinary tester, turn the temporary installation permission back off:
    **Settings > Apps > Special app access > Install unknown apps**, select Chrome or
@@ -47,12 +47,12 @@ cloud-storage link, or unrelated website download.
    slightly between Android manufacturers. The owner may leave it enabled only during an
    explicitly active update-rehearsal session, then must turn it off when that session ends.
 
-Firebase App Tester is optional. It can collect private-pilot releases in one place,
+Firebase App Tester is optional. It can collect Preview releases in one place,
 but installing it does not remove Android's unknown-app permission requirement.
 
 ## Stop Instead Of Continuing When
 
-Contact the FlightLogX pilot owner and do not uninstall or clear any existing FlightLogX
+Contact the FlightLogX Preview owner and do not uninstall or clear any existing FlightLogX
 app if:
 
 - the download comes from any domain other than `distribution.firebase.google.com`;
@@ -62,12 +62,12 @@ app if:
   or a 24-hour security delay; or
 - the installed app opens an unexpected empty logbook where existing data was expected.
 
-Do not work around these failures by removing an existing app. The pilot owner must
+Do not work around these failures by removing an existing app. The Preview owner must
 first check the package, signing certificate, account, and recoverability.
 
-## Later Pilot Updates
+## Later Preview Updates
 
-Use **Settings > Check for pilot update** inside FlightLogX. Android will still require
+Use **Settings > Check for Preview update** inside FlightLogX. Android will still require
 you to approve installation of the downloaded update. If **Allow from this source** was
 turned off after the previous install, Android may ask you to enable it again; turn it
 back off after the update completes. Android grants this permission separately to each

@@ -411,10 +411,10 @@ function Update-AndroidSigningMetadata {
             Credentials = $null
         },
         @{
-            Name = 'permanent pilot'
-            Metadata = $script:TransferConfig.Expected.PilotSigningMetadataFile
-            Keystore = $script:TransferConfig.Expected.PilotSigningKeystoreFile
-            Credentials = $script:TransferConfig.Expected.PilotSigningCredentialsFile
+            Name = 'permanent Preview'
+            Metadata = $script:TransferConfig.Expected.PreviewSigningMetadataFile
+            Keystore = $script:TransferConfig.Expected.PreviewSigningKeystoreFile
+            Credentials = $script:TransferConfig.Expected.PreviewSigningCredentialsFile
         }
     )
 
@@ -800,7 +800,7 @@ function Invoke-VerifyAction {
     catch { $excelDetail = $_.Exception.Message }
     Add-CheckResult $results 'Excel COM' $excelPassed $true $excelDetail
 
-    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md')) {
+    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, 'docs/private-pilot-android-install.md')) {
         Add-CheckResult $results $path (Test-Path -LiteralPath (Join-Path $script:RepoRoot $path) -PathType Leaf) $true 'required repository context'
     }
     $hostedConfig = Join-Path $script:RepoRoot 'mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json'
@@ -825,7 +825,7 @@ function Invoke-VerifyAction {
             $firebaseConfigPassed = $false
         }
     }
-    Add-CheckResult $results 'Firebase Android pilot config' $firebaseConfigPassed $true 'private transfer asset; project, package, app ID, and key presence checked without printing values'
+    Add-CheckResult $results 'Firebase Android Preview config' $firebaseConfigPassed $true 'private transfer asset; project, package, app ID, and key presence checked without printing values'
     $resendRoot = Join-Path $electronicLogbookLocalRoot 'Resend'
     foreach ($fileName in $script:TransferConfig.Expected.ResendApiKeyFiles) {
         $keyPath = Join-Path $resendRoot $fileName
@@ -856,47 +856,47 @@ function Invoke-VerifyAction {
         }
     }
 
-    $pilotKeystore = Join-Path $signingRoot $script:TransferConfig.Expected.PilotSigningKeystoreFile
-    $pilotCredentialsPath = Join-Path $signingRoot $script:TransferConfig.Expected.PilotSigningCredentialsFile
-    $pilotMetadataPath = Join-Path $signingRoot $script:TransferConfig.Expected.PilotSigningMetadataFile
-    $pilotSigningPaths = @($pilotKeystore, $pilotCredentialsPath, $pilotMetadataPath)
-    $pilotSigningPassed = @($pilotSigningPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count -eq $pilotSigningPaths.Count
-    Add-CheckResult $results 'Permanent pilot Android signing identity' $pilotSigningPassed $true 'protected private transfer assets; credential values are never printed'
-    if ($pilotSigningPassed) {
+    $previewKeystore = Join-Path $signingRoot $script:TransferConfig.Expected.PreviewSigningKeystoreFile
+    $previewCredentialsPath = Join-Path $signingRoot $script:TransferConfig.Expected.PreviewSigningCredentialsFile
+    $previewMetadataPath = Join-Path $signingRoot $script:TransferConfig.Expected.PreviewSigningMetadataFile
+    $previewSigningPaths = @($previewKeystore, $previewCredentialsPath, $previewMetadataPath)
+    $previewSigningPassed = @($previewSigningPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count -eq $previewSigningPaths.Count
+    Add-CheckResult $results 'Permanent Preview Android signing identity' $previewSigningPassed $true 'protected private transfer assets; credential values are never printed'
+    if ($previewSigningPassed) {
         try {
-            $pilotCredentials = Get-Content -LiteralPath $pilotCredentialsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $pilotMetadata = Get-Content -LiteralPath $pilotMetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $pilotStructurePassed = $pilotCredentials.schemaVersion -eq 1 `
-                -and -not [string]::IsNullOrWhiteSpace($pilotCredentials.storePassword) `
-                -and -not [string]::IsNullOrWhiteSpace($pilotCredentials.keyPassword) `
-                -and -not [string]::IsNullOrWhiteSpace($pilotCredentials.keyAlias) `
-                -and $pilotMetadata.packageName -eq $script:TransferConfig.Expected.FirebaseAndroidPackageName `
-                -and $pilotMetadata.keystorePath -eq $pilotKeystore `
-                -and $pilotMetadata.keyAlias -eq $pilotCredentials.keyAlias `
-                -and -not [string]::IsNullOrWhiteSpace($pilotMetadata.certificateSha256)
-            Add-CheckResult $results 'Permanent pilot signing metadata' $pilotStructurePassed $true 'package, alias, path, and secret presence checked without printing credential values'
+            $previewCredentials = Get-Content -LiteralPath $previewCredentialsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $previewMetadata = Get-Content -LiteralPath $previewMetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $previewStructurePassed = $previewCredentials.schemaVersion -eq 1 `
+                -and -not [string]::IsNullOrWhiteSpace($previewCredentials.storePassword) `
+                -and -not [string]::IsNullOrWhiteSpace($previewCredentials.keyPassword) `
+                -and -not [string]::IsNullOrWhiteSpace($previewCredentials.keyAlias) `
+                -and $previewMetadata.packageName -eq $script:TransferConfig.Expected.FirebaseAndroidPackageName `
+                -and $previewMetadata.keystorePath -eq $previewKeystore `
+                -and $previewMetadata.keyAlias -eq $previewCredentials.keyAlias `
+                -and -not [string]::IsNullOrWhiteSpace($previewMetadata.certificateSha256)
+            Add-CheckResult $results 'Permanent Preview signing metadata' $previewStructurePassed $true 'package, alias, path, and secret presence checked without printing credential values'
 
             $keytool = Get-Command 'keytool.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($keytool -and $pilotStructurePassed) {
-                $previousStorePassword = $env:ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD
+            if ($keytool -and $previewStructurePassed) {
+                $previousStorePassword = $env:ELECTRONIC_LOGBOOK_PREVIEW_VERIFY_STORE_PASSWORD
                 try {
-                    $env:ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD = $pilotCredentials.storePassword
-                    $output = & $keytool.Source -list -v -keystore $pilotKeystore -storetype PKCS12 `
-                        '-storepass:env' ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD `
-                        -alias $pilotCredentials.keyAlias 2>&1 | Out-String
+                    $env:ELECTRONIC_LOGBOOK_PREVIEW_VERIFY_STORE_PASSWORD = $previewCredentials.storePassword
+                    $output = & $keytool.Source -list -v -keystore $previewKeystore -storetype PKCS12 `
+                        '-storepass:env' ELECTRONIC_LOGBOOK_PREVIEW_VERIFY_STORE_PASSWORD `
+                        -alias $previewCredentials.keyAlias 2>&1 | Out-String
                     $fingerprint = if ($LASTEXITCODE -eq 0 -and $output -match 'SHA256:\s*([0-9A-F:]+)') {
                         $Matches[1].Replace(':', '').ToLowerInvariant()
                     }
                     else { '' }
-                    Add-CheckResult $results 'Permanent pilot signing certificate fingerprint' ($fingerprint -eq $pilotMetadata.certificateSha256) $true $(if ($fingerprint) { $fingerprint } else { 'keystore validation failed' })
+                    Add-CheckResult $results 'Permanent Preview signing certificate fingerprint' ($fingerprint -eq $previewMetadata.certificateSha256) $true $(if ($fingerprint) { $fingerprint } else { 'keystore validation failed' })
                 }
                 finally {
-                    $env:ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD = $previousStorePassword
+                    $env:ELECTRONIC_LOGBOOK_PREVIEW_VERIFY_STORE_PASSWORD = $previousStorePassword
                 }
             }
         }
         catch {
-            Add-CheckResult $results 'Permanent pilot signing metadata' $false $true 'protected signing files could not be parsed or validated'
+            Add-CheckResult $results 'Permanent Preview signing metadata' $false $true 'protected signing files could not be parsed or validated'
         }
     }
 

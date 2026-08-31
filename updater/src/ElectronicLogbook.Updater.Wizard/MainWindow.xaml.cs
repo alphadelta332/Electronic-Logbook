@@ -247,7 +247,7 @@ public partial class MainWindow : Window
             {
                 UpdateChannel.Development => "Development",
                 UpdateChannel.Hotfix => "Hotfix",
-                UpdateChannel.Pilot => "Pilot",
+                UpdateChannel.Pilot => "Preview",
                 UpdateChannel.LocalMaster => "Local Master",
                 _ => "Local Master"
             };
@@ -264,8 +264,8 @@ public partial class MainWindow : Window
                     ? "Using hotfix build"
                     : $"Hotfix version: {masterVersion}",
                 UpdateChannel.Pilot => string.IsNullOrWhiteSpace(masterVersion)
-                    ? "Using private pilot build"
-                    : $"Pilot version: {masterVersion}",
+                    ? "Using FlightLogX Preview build"
+                    : $"Preview version: {masterVersion}",
                 _ => string.IsNullOrWhiteSpace(masterVersion)
                     ? "Using local master build"
                     : $"Local master version: {masterVersion}"
@@ -1554,12 +1554,12 @@ public partial class MainWindow : Window
                 if (!SupabaseHostedSyncConfiguration.TryLoad(out var configuration, out _))
                 {
                     throw new InvalidOperationException(
-                        "Google sign-in is not configured in this pilot updater. Ask FlightLogX support for the correct pilot installer.");
+                        "Google sign-in is not configured in this Preview updater. Ask FlightLogX support for the correct Preview installer.");
                 }
 
                 using var connectionClient = new SupabaseWorkbookConnectionClient(
                     configuration ?? throw new InvalidOperationException(
-                        "Google sign-in is not configured in this pilot updater."));
+                        "Google sign-in is not configured in this Preview updater."));
                 FooterStatusText.Text = "Opening Google sign-in in your browser...";
                 AppendLog("Opening secure Google sign-in in the system browser...");
                 var pilotSession = await connectionClient.SignInWithGoogleAsync(_updateCts.Token);
@@ -1636,7 +1636,7 @@ public partial class MainWindow : Window
 
             if (pilotStaging is not null)
             {
-                AppendLog("Pilot hosted migration and workbook installation are complete.");
+                AppendLog("FlightLogX Preview hosted migration and workbook installation are complete.");
             }
             else if (_context.UseInPlaceSwap)
             {
@@ -2688,7 +2688,7 @@ public partial class MainWindow : Window
             UpdateChannel.Stable => "Stable",
             UpdateChannel.Development => "Development",
             UpdateChannel.Hotfix => "Hotfix",
-            UpdateChannel.Pilot => "Pilot",
+            UpdateChannel.Pilot => "Preview",
             UpdateChannel.LocalMaster => "Local Master",
             _ => "Stable"
         };

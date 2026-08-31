@@ -17,7 +17,7 @@ public sealed class PilotWorkbookMigrationFailurePresenterTests
 
         Assert.Equal(PilotWorkbookMigrationFailureKind.WrongAccount, result.Kind);
         Assert.Contains("Google account", result.Summary, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("pilot invitation", result.RecoveryAction, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("FlightLogX Preview invitation", result.RecoveryAction, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("not confirmed complete", result.Detail, StringComparison.OrdinalIgnoreCase);
     }
 

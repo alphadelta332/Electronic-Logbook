@@ -61,7 +61,7 @@ public static class PilotWorkbookMigrationFailurePresenter
                     backupAvailable,
                     hostedMigrationCompleted,
                     "The original spreadsheet was not replaced."),
-                "Start the migration again and choose the Google account that received the pilot invitation. If that account is already selected, contact FlightLogX support.");
+                "Start the migration again and choose the Google account that received the FlightLogX Preview invitation. If that account is already selected, contact FlightLogX support.");
         }
 
         if (IsNetworkInterruption(error))

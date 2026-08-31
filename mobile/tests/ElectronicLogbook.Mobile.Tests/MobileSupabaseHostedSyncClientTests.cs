@@ -1244,7 +1244,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
             await client.CompleteEmailSignInAsync(signInLink));
 
         Assert.Equal(HostedSignInFailureReason.InvalidVerificationCode, error.Reason);
-        Assert.Contains("this pilot project", error.Message, StringComparison.Ordinal);
+        Assert.Contains("FlightLogX Preview sign-in link", error.Message, StringComparison.Ordinal);
         Assert.DoesNotContain(handler.Requests, request => request.Path == "/auth/v1/verify");
     }
 

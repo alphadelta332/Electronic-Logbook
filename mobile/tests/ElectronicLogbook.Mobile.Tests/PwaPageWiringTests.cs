@@ -1447,7 +1447,7 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void PilotAndroidUpdaterIsRestrictedToThePermanentIdPilotVariant()
+    public void PreviewAndroidUpdaterIsRestrictedToThePermanentIdPreviewVariantWithLegacyInputs()
     {
         var gradle = ReadProjectFile("mobile", "android", "app", "build.gradle");
         var activity = ReadProjectFile(
@@ -1455,38 +1455,46 @@ public sealed class PwaPageWiringTests
             "electroniclogbook", "MainActivity.java");
         var plugin = ReadProjectFile(
             "mobile", "android", "app", "src", "main", "java", "com", "alphadelta",
-            "electroniclogbook", "ElectronicLogbookPilotUpdatesPlugin.java");
+            "electroniclogbook", "ElectronicLogbookPreviewUpdatesPlugin.java");
         var javascript = ReadMobileWebAsset(Path.Combine("js", "logbookStore.js"));
         var settings = ReadMobilePage("Settings.razor");
         var package = ReadProjectFile("mobile", "package.json");
         var appGitIgnore = ReadProjectFile("mobile", "android", "app", ".gitignore");
-        var signing = ReadProjectFile("mobile", "scripts", "AndroidPilotSigning.ps1");
-        var build = ReadProjectFile("mobile", "scripts", "Build-AndroidPilot.ps1");
+        var signing = ReadProjectFile("mobile", "scripts", "AndroidPreviewSigning.ps1");
+        var build = ReadProjectFile("mobile", "scripts", "Build-AndroidPreview.ps1");
 
         Assert.Contains("applicationId = \"com.alphadelta.electroniclogbook\"", gradle, StringComparison.Ordinal);
-        Assert.Contains("pilot {", gradle, StringComparison.Ordinal);
+        Assert.Contains("preview {", gradle, StringComparison.Ordinal);
         Assert.Contains("initWith release", gradle, StringComparison.Ordinal);
-        Assert.Contains("buildConfigField \"boolean\", \"PILOT_UPDATES_ENABLED\", \"false\"", gradle, StringComparison.Ordinal);
-        Assert.Contains("buildConfigField \"boolean\", \"PILOT_UPDATES_ENABLED\", \"true\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("buildConfigField \"boolean\", \"PREVIEW_UPDATES_ENABLED\", \"false\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("buildConfigField \"boolean\", \"PREVIEW_UPDATES_ENABLED\", \"true\"", gradle, StringComparison.Ordinal);
         Assert.Contains("implementation \"com.google.firebase:firebase-appdistribution-api:16.0.0-beta20\"", gradle, StringComparison.Ordinal);
-        Assert.Contains("pilotImplementation \"com.google.firebase:firebase-appdistribution:16.0.0-beta20\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("previewImplementation \"com.google.firebase:firebase-appdistribution:16.0.0-beta20\"", gradle, StringComparison.Ordinal);
         Assert.DoesNotContain("releaseImplementation \"com.google.firebase:firebase-appdistribution:", gradle, StringComparison.Ordinal);
         Assert.DoesNotContain("debugImplementation \"com.google.firebase:firebase-appdistribution:", gradle, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_PREVIEW_KEYSTORE", gradle, StringComparison.Ordinal);
         Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_KEYSTORE", gradle, StringComparison.Ordinal);
-        Assert.Contains("signingConfig signingConfigs.flightLogXPilot", gradle, StringComparison.Ordinal);
-        Assert.Contains("Pilot artifacts must use the permanent FlightLogX signing identity", gradle, StringComparison.Ordinal);
+        Assert.Contains("signingConfig signingConfigs.flightLogXPreview", gradle, StringComparison.Ordinal);
+        Assert.Contains("Preview artifacts must use the permanent FlightLogX signing identity", gradle, StringComparison.Ordinal);
         Assert.Contains("productVersionParts.major * 100000000", gradle, StringComparison.Ordinal);
-        Assert.Contains("flightLogXPilotBuildRevision", gradle, StringComparison.Ordinal);
-        Assert.Contains("flightLogXPilotBuildRevision may only be used for a signed pilot artifact task", gradle, StringComparison.Ordinal);
-        Assert.DoesNotContain("signingConfig signingConfigs.electronicLogbookDevelopment", GetGradleBuildType(gradle, "pilot"), StringComparison.Ordinal);
+        Assert.Contains("flightLogXPreviewBuildRevision", gradle, StringComparison.Ordinal);
+        Assert.Contains("legacyPilotBuildRevisionText", gradle, StringComparison.Ordinal);
+        Assert.Contains("flightLogXPreviewBuildRevision may only be used for a signed Preview artifact task", gradle, StringComparison.Ordinal);
+        Assert.DoesNotContain("signingConfig signingConfigs.electronicLogbookDevelopment", GetGradleBuildType(gradle, "preview"), StringComparison.Ordinal);
 
-        Assert.Contains("registerPlugin(ElectronicLogbookPilotUpdatesPlugin.class);", activity, StringComparison.Ordinal);
-        Assert.Contains("BuildConfig.PILOT_UPDATES_ENABLED", plugin, StringComparison.Ordinal);
+        Assert.Contains("registerPlugin(ElectronicLogbookPreviewUpdatesPlugin.class);", activity, StringComparison.Ordinal);
+        Assert.Contains("BuildConfig.PREVIEW_UPDATES_ENABLED", plugin, StringComparison.Ordinal);
         Assert.Contains("updateIfNewReleaseAvailable()", plugin, StringComparison.Ordinal);
-        Assert.Contains("window.electronicLogbookPilotUpdates", javascript, StringComparison.Ordinal);
-        Assert.Contains("electronicLogbookPilotUpdates.isAvailable", settings, StringComparison.Ordinal);
-        Assert.Contains("Check for pilot update", settings, StringComparison.Ordinal);
-        Assert.Contains("scripts/Build-AndroidPilot.ps1", package, StringComparison.Ordinal);
+        Assert.Contains("window.electronicLogbookPreviewUpdates", javascript, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookPreviewUpdates.isAvailable", settings, StringComparison.Ordinal);
+        Assert.Contains("FlightLogX Preview", settings, StringComparison.Ordinal);
+        Assert.Contains("Check for Preview update", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Private pilot", settings, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Preview updates are not included", plugin, StringComparison.Ordinal);
+        Assert.Contains("invitation-only Android Preview app", javascript, StringComparison.Ordinal);
+        Assert.Contains("build:android:preview", package, StringComparison.Ordinal);
+        Assert.Contains("build:android:pilot", package, StringComparison.Ordinal);
+        Assert.Contains("scripts/Build-AndroidPreview.ps1", package, StringComparison.Ordinal);
         Assert.Contains("flightlogx-pilot.keystore", signing, StringComparison.Ordinal);
         Assert.Contains("flightlogx-pilot-credentials.json", signing, StringComparison.Ordinal);
         Assert.Contains("RandomNumberGenerator", signing, StringComparison.Ordinal);
@@ -1495,8 +1503,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("aapt.exe", build, StringComparison.Ordinal);
         Assert.Contains("com.alphadelta.electroniclogbook", build, StringComparison.Ordinal);
         Assert.Contains("[ValidateRange(0, 9999)]", build, StringComparison.Ordinal);
-        Assert.Contains("-PflightLogXPilotBuildRevision=$PilotBuildRevision", build, StringComparison.Ordinal);
-        Assert.Contains("The built APK version metadata does not match the requested pilot build revision", build, StringComparison.Ordinal);
+        Assert.Contains("[Alias(\"PilotBuildRevision\")]", build, StringComparison.Ordinal);
+        Assert.Contains("-PflightLogXPreviewBuildRevision=$PreviewBuildRevision", build, StringComparison.Ordinal);
+        Assert.Contains("The built APK version metadata does not match the requested Preview build revision", build, StringComparison.Ordinal);
         Assert.Contains("/google-services.json", appGitIgnore, StringComparison.Ordinal);
     }
 

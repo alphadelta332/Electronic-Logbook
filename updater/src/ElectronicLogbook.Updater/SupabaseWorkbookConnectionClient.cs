@@ -785,7 +785,7 @@ public sealed class SupabaseWorkbookConnectionClient :
     private static HostedSignInException InvalidSignInLink() =>
         new(
             HostedSignInFailureReason.InvalidVerificationCode,
-            "The pasted sign-in link is not an unused Supabase sign-in link for this pilot project.");
+            "The pasted sign-in link is not an unused FlightLogX Preview sign-in link.");
 
     private static HostedSignInException ToSignInException(HttpStatusCode statusCode) =>
         new(

@@ -2,7 +2,8 @@
 param(
     [switch] $SkipSync,
     [ValidateRange(0, 9999)]
-    [int] $PilotBuildRevision = 0
+    [Alias("PilotBuildRevision")]
+    [int] $PreviewBuildRevision = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,14 +12,14 @@ Set-StrictMode -Version Latest
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $mobileRoot = Split-Path -Parent $scriptRoot
 $androidRoot = Join-Path $mobileRoot "android"
-$apkPath = Join-Path $androidRoot "app\build\outputs\apk\pilot\app-pilot.apk"
-$outputMetadataPath = Join-Path $androidRoot "app\build\outputs\apk\pilot\output-metadata.json"
+$apkPath = Join-Path $androidRoot "app\build\outputs\apk\preview\app-preview.apk"
+$outputMetadataPath = Join-Path $androidRoot "app\build\outputs\apk\preview\output-metadata.json"
 $packageName = "com.alphadelta.electroniclogbook"
 $versionPath = Join-Path (Split-Path -Parent $mobileRoot) "version.txt"
 
-. (Join-Path $scriptRoot "AndroidPilotSigning.ps1")
+. (Join-Path $scriptRoot "AndroidPreviewSigning.ps1")
 
-function Find-PilotAndroidSdk {
+function Find-PreviewAndroidSdk {
     $candidates = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)
     if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
         $candidates += Join-Path $env:LOCALAPPDATA "Android\Sdk"
@@ -30,10 +31,10 @@ function Find-PilotAndroidSdk {
         }
     }
 
-    throw "Android SDK Build-Tools were not found. Set ANDROID_HOME before building the pilot APK."
+    throw "Android SDK Build-Tools were not found. Set ANDROID_HOME before building the Preview APK."
 }
 
-function Find-PilotBuildTool {
+function Find-PreviewBuildTool {
     param(
         [Parameter(Mandatory = $true)] [string] $SdkRoot,
         [Parameter(Mandatory = $true)] [string] $FileName
@@ -51,7 +52,7 @@ function Find-PilotBuildTool {
     return $tool
 }
 
-function Get-PilotFileSha256 {
+function Get-PreviewFileSha256 {
     param([Parameter(Mandatory = $true)] [string] $Path)
 
     $stream = [IO.File]::OpenRead($Path)
@@ -65,11 +66,11 @@ function Get-PilotFileSha256 {
     }
 }
 
-$sdkRoot = Find-PilotAndroidSdk
+$sdkRoot = Find-PreviewAndroidSdk
 $env:ANDROID_HOME = $sdkRoot
 $env:ANDROID_SDK_ROOT = $sdkRoot
-$signingIdentity = Initialize-AndroidPilotSigning
-Write-Host "Using permanent FlightLogX pilot certificate $($signingIdentity.CertificateSha256)."
+$signingIdentity = Initialize-AndroidPreviewSigning
+Write-Host "Using permanent FlightLogX Preview certificate $($signingIdentity.CertificateSha256)."
 
 $productVersion = (Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8).Trim()
 if ($productVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
@@ -81,7 +82,7 @@ $patch = [int] $Matches[3]
 if ($major -gt 20 -or $minor -gt 99 -or $patch -gt 99) {
     throw "Android versions require major <= 20, minor <= 99, and patch <= 99."
 }
-$expectedVersionCode = ($major * 100000000) + ($minor * 1000000) + ($patch * 10000) + $PilotBuildRevision
+$expectedVersionCode = ($major * 100000000) + ($minor * 1000000) + ($patch * 10000) + $PreviewBuildRevision
 
 if (-not $SkipSync) {
     Push-Location $mobileRoot
@@ -94,36 +95,36 @@ if (-not $SkipSync) {
 
 Push-Location $androidRoot
 try {
-    $gradleArguments = @("assemblePilot")
-    if ($PilotBuildRevision -gt 0) {
-        $gradleArguments += "-PflightLogXPilotBuildRevision=$PilotBuildRevision"
+    $gradleArguments = @("assemblePreview")
+    if ($PreviewBuildRevision -gt 0) {
+        $gradleArguments += "-PflightLogXPreviewBuildRevision=$PreviewBuildRevision"
     }
     & .\gradlew.bat @gradleArguments
-    if ($LASTEXITCODE -ne 0) { throw "Signed pilot APK build failed." }
+    if ($LASTEXITCODE -ne 0) { throw "Signed Preview APK build failed." }
 }
 finally { Pop-Location }
 
 if (-not (Test-Path -LiteralPath $apkPath -PathType Leaf)) {
-    throw "The pilot APK was not produced at the expected path."
+    throw "The Preview APK was not produced at the expected path."
 }
 if (-not (Test-Path -LiteralPath $outputMetadataPath -PathType Leaf)) {
-    throw "The pilot APK output metadata was not produced."
+    throw "The Preview APK output metadata was not produced."
 }
 
 $outputMetadata = Get-Content -LiteralPath $outputMetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($outputMetadata.applicationId -ne $packageName -or $outputMetadata.variantName -ne "pilot") {
-    throw "The built APK metadata does not identify the permanent FlightLogX pilot package."
+if ($outputMetadata.applicationId -ne $packageName -or $outputMetadata.variantName -ne "preview") {
+    throw "The built APK metadata does not identify the permanent FlightLogX Preview package."
 }
 $builtVersionCode = [int64] $outputMetadata.elements[0].versionCode
 $builtVersionName = [string] $outputMetadata.elements[0].versionName
 if ($builtVersionCode -ne $expectedVersionCode -or $builtVersionName -ne $productVersion) {
-    throw "The built APK version metadata does not match the requested pilot build revision."
+    throw "The built APK version metadata does not match the requested Preview build revision."
 }
 
-$apkSigner = Find-PilotBuildTool -SdkRoot $sdkRoot -FileName "apksigner.bat"
+$apkSigner = Find-PreviewBuildTool -SdkRoot $sdkRoot -FileName "apksigner.bat"
 $signerOutput = & $apkSigner verify --verbose --print-certs $apkPath 2>&1
 if ($LASTEXITCODE -ne 0) {
-    throw "Android apksigner rejected the pilot APK."
+    throw "Android apksigner rejected the Preview APK."
 }
 $signerFingerprintLine = $signerOutput | Where-Object { $_ -match "certificate SHA-256 digest:\s*([0-9a-fA-F]+)" } | Select-Object -First 1
 if ($null -eq $signerFingerprintLine -or $signerFingerprintLine -notmatch "certificate SHA-256 digest:\s*([0-9a-fA-F]+)") {
@@ -131,23 +132,23 @@ if ($null -eq $signerFingerprintLine -or $signerFingerprintLine -notmatch "certi
 }
 $apkFingerprint = $Matches[1].ToLowerInvariant()
 if ($apkFingerprint -ne $signingIdentity.CertificateSha256) {
-    throw "The pilot APK was signed by an unexpected certificate. Do not distribute it."
+    throw "The Preview APK was signed by an unexpected certificate. Do not distribute it."
 }
 
-$aapt = Find-PilotBuildTool -SdkRoot $sdkRoot -FileName "aapt.exe"
+$aapt = Find-PreviewBuildTool -SdkRoot $sdkRoot -FileName "aapt.exe"
 $badgingOutput = & $aapt dump badging $apkPath 2>&1
 if ($LASTEXITCODE -ne 0) {
-    throw "Android aapt could not inspect the pilot APK package."
+    throw "Android aapt could not inspect the Preview APK package."
 }
 $packageLine = $badgingOutput | Where-Object { $_ -match "^package:\s+name='([^']+)'" } | Select-Object -First 1
 if ($null -eq $packageLine -or $packageLine -notmatch "^package:\s+name='([^']+)'" -or $Matches[1] -ne $packageName) {
     throw "The APK manifest does not contain the permanent FlightLogX package name."
 }
 
-$apkHash = Get-PilotFileSha256 -Path $apkPath
-Write-Host "Signed pilot APK verified: $apkPath"
+$apkHash = Get-PreviewFileSha256 -Path $apkPath
+Write-Host "Signed Preview APK verified: $apkPath"
 Write-Host "Package: $packageName"
-Write-Host "Version: $builtVersionName ($builtVersionCode; pilot revision $PilotBuildRevision)"
+Write-Host "Version: $builtVersionName ($builtVersionCode; Preview revision $PreviewBuildRevision)"
 Write-Host "Certificate SHA-256: $apkFingerprint"
 Write-Host "APK SHA-256: $apkHash"
 
@@ -156,7 +157,7 @@ return [pscustomobject]@{
     PackageName = $packageName
     VersionName = $builtVersionName
     VersionCode = $builtVersionCode
-    PilotBuildRevision = $PilotBuildRevision
+    PreviewBuildRevision = $PreviewBuildRevision
     CertificateSha256 = $apkFingerprint
     ApkSha256 = $apkHash
 }

@@ -14,36 +14,42 @@ def productVersionParts = [
 if (productVersionParts.major > 20 || productVersionParts.minor > 99 || productVersionParts.patch > 99) {
     throw new GradleException("Android versions require major <= 20, minor <= 99, and patch <= 99.")
 }
-// Reserve four low-order digits for signed pilot build revisions. Android versionCode
+// Reserve four low-order digits for signed Preview build revisions. Android versionCode
 // is monotonic and intentionally independent from the user-visible versionName.
 def productVersionCode =
     productVersionParts.major * 100000000 +
     productVersionParts.minor * 1000000 +
     productVersionParts.patch * 10000
-def pilotBuildRevisionText = providers.gradleProperty('flightLogXPilotBuildRevision').orNull
-def pilotBuildRevision = 0
-if (pilotBuildRevisionText != null) {
-    if (!(pilotBuildRevisionText ==~ /^\d+$/)) {
-        throw new GradleException("flightLogXPilotBuildRevision must be a whole number from 1 to 9999.")
+def previewBuildRevisionText = providers.gradleProperty('flightLogXPreviewBuildRevision').orNull
+def legacyPilotBuildRevisionText = providers.gradleProperty('flightLogXPilotBuildRevision').orNull
+if (previewBuildRevisionText != null && legacyPilotBuildRevisionText != null &&
+        previewBuildRevisionText != legacyPilotBuildRevisionText) {
+    throw new GradleException("Preview and legacy pilot build revisions must match when both are supplied.")
+}
+previewBuildRevisionText = previewBuildRevisionText ?: legacyPilotBuildRevisionText
+def previewBuildRevision = 0
+if (previewBuildRevisionText != null) {
+    if (!(previewBuildRevisionText ==~ /^\d+$/)) {
+        throw new GradleException("flightLogXPreviewBuildRevision must be a whole number from 1 to 9999.")
     }
-    pilotBuildRevision = pilotBuildRevisionText.toInteger()
-    if (pilotBuildRevision < 1 || pilotBuildRevision > 9999) {
-        throw new GradleException("flightLogXPilotBuildRevision must be a whole number from 1 to 9999.")
+    previewBuildRevision = previewBuildRevisionText.toInteger()
+    if (previewBuildRevision < 1 || previewBuildRevision > 9999) {
+        throw new GradleException("flightLogXPreviewBuildRevision must be a whole number from 1 to 9999.")
     }
 }
-def androidVersionCode = productVersionCode + pilotBuildRevision
+def androidVersionCode = productVersionCode + previewBuildRevision
 def developmentKeystorePath = System.getenv('ELECTRONIC_LOGBOOK_DEV_KEYSTORE')
-def pilotSigningEnvironment = [
-    keystore: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEYSTORE'),
-    storePassword: System.getenv('ELECTRONIC_LOGBOOK_PILOT_STORE_PASSWORD'),
-    keyAlias: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEY_ALIAS'),
-    keyPassword: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEY_PASSWORD')
+def previewSigningEnvironment = [
+    keystore: System.getenv('ELECTRONIC_LOGBOOK_PREVIEW_KEYSTORE') ?: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEYSTORE'),
+    storePassword: System.getenv('ELECTRONIC_LOGBOOK_PREVIEW_STORE_PASSWORD') ?: System.getenv('ELECTRONIC_LOGBOOK_PILOT_STORE_PASSWORD'),
+    keyAlias: System.getenv('ELECTRONIC_LOGBOOK_PREVIEW_KEY_ALIAS') ?: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEY_ALIAS'),
+    keyPassword: System.getenv('ELECTRONIC_LOGBOOK_PREVIEW_KEY_PASSWORD') ?: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEY_PASSWORD')
 ]
-def configuredPilotSigningValues = pilotSigningEnvironment.values().count { it }
-if (configuredPilotSigningValues > 0 && configuredPilotSigningValues < pilotSigningEnvironment.size()) {
-    throw new GradleException("The FlightLogX pilot signing environment is incomplete.")
+def configuredPreviewSigningValues = previewSigningEnvironment.values().count { it }
+if (configuredPreviewSigningValues > 0 && configuredPreviewSigningValues < previewSigningEnvironment.size()) {
+    throw new GradleException("The FlightLogX Preview signing environment is incomplete.")
 }
-def pilotSigningConfigured = configuredPilotSigningValues == pilotSigningEnvironment.size()
+def previewSigningConfigured = configuredPreviewSigningValues == previewSigningEnvironment.size()
 
 android {
     namespace = "com.alphadelta.electroniclogbook"
@@ -57,7 +63,7 @@ android {
         targetSdkVersion = rootProject.ext.targetSdkVersion
         versionCode = androidVersionCode
         versionName = productVersion
-        buildConfigField "boolean", "PILOT_UPDATES_ENABLED", "false"
+        buildConfigField "boolean", "PREVIEW_UPDATES_ENABLED", "false"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -74,12 +80,12 @@ android {
                 keyPassword System.getenv('ELECTRONIC_LOGBOOK_DEV_KEY_PASSWORD') ?: 'android'
             }
         }
-        if (pilotSigningConfigured) {
-            flightLogXPilot {
-                storeFile file(pilotSigningEnvironment.keystore)
-                storePassword pilotSigningEnvironment.storePassword
-                keyAlias pilotSigningEnvironment.keyAlias
-                keyPassword pilotSigningEnvironment.keyPassword
+        if (previewSigningConfigured) {
+            flightLogXPreview {
+                storeFile file(previewSigningEnvironment.keystore)
+                storePassword previewSigningEnvironment.storePassword
+                keyAlias previewSigningEnvironment.keyAlias
+                keyPassword previewSigningEnvironment.keyPassword
             }
         }
     }
@@ -98,12 +104,12 @@ android {
                 signingConfig signingConfigs.electronicLogbookDevelopment
             }
         }
-        pilot {
+        preview {
             initWith release
-            buildConfigField "boolean", "PILOT_UPDATES_ENABLED", "true"
+            buildConfigField "boolean", "PREVIEW_UPDATES_ENABLED", "true"
             matchingFallbacks = ['release']
-            if (pilotSigningConfigured) {
-                signingConfig signingConfigs.flightLogXPilot
+            if (previewSigningConfigured) {
+                signingConfig signingConfigs.flightLogXPreview
             }
         }
         release {
@@ -114,15 +120,15 @@ android {
 }
 
 gradle.taskGraph.whenReady { graph ->
-    def pilotArtifactTasks = ['assemblePilot', 'bundlePilot', 'packagePilot']
-    def pilotArtifactRequested = graph.allTasks.any { pilotArtifactTasks.contains(it.name) }
-    if (pilotBuildRevision > 0 && !pilotArtifactRequested) {
+    def previewArtifactTasks = ['assemblePreview', 'bundlePreview', 'packagePreview']
+    def previewArtifactRequested = graph.allTasks.any { previewArtifactTasks.contains(it.name) }
+    if (previewBuildRevision > 0 && !previewArtifactRequested) {
         throw new GradleException(
-            "flightLogXPilotBuildRevision may only be used for a signed pilot artifact task.")
+            "flightLogXPreviewBuildRevision may only be used for a signed Preview artifact task.")
     }
-    if (pilotArtifactRequested && !pilotSigningConfigured) {
+    if (previewArtifactRequested && !previewSigningConfigured) {
         throw new GradleException(
-            "Pilot artifacts must use the permanent FlightLogX signing identity. Run npm.cmd run build:android:pilot.")
+            "Preview artifacts must use the permanent FlightLogX signing identity. Run npm.cmd run build:android:preview.")
     }
 }
 
@@ -141,7 +147,7 @@ dependencies {
     implementation "androidx.credentials:credentials-play-services-auth:$androidxCredentialsVersion"
     implementation "com.google.android.libraries.identity.googleid:googleid:$googleIdVersion"
     implementation "com.google.firebase:firebase-appdistribution-api:16.0.0-beta20"
-    pilotImplementation "com.google.firebase:firebase-appdistribution:16.0.0-beta20"
+    previewImplementation "com.google.firebase:firebase-appdistribution:16.0.0-beta20"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"

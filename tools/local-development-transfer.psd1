@@ -113,9 +113,12 @@
         FirebaseCliVersion = '15.28.2'
         FirebaseProjectId = 'flightlogx-private-pilot'
         FirebaseAndroidPackageName = 'com.alphadelta.electroniclogbook'
-        PilotSigningKeystoreFile = 'flightlogx-pilot.keystore'
-        PilotSigningCredentialsFile = 'flightlogx-pilot-credentials.json'
-        PilotSigningMetadataFile = 'flightlogx-pilot-signing.json'
+        # The filenames are permanent legacy identifiers for the already-distributed signing identity.
+        PreviewSigningKeystoreFile = 'flightlogx-pilot.keystore'
+        PreviewSigningCredentialsFile = 'flightlogx-pilot-credentials.json'
+        PreviewSigningMetadataFile = 'flightlogx-pilot-signing.json'
+        OwnerEnrollmentScript = 'tools/Add-FlightLogXParticipant.ps1'
+        ParticipantHandoffDirectory = 'ElectronicLogbook\ParticipantHandoffs'
         PostgreSqlMajor = 17
         ResendApiKeyFiles = @('privatepilotauthdevapi.txt', 'privatepilotauthapi.txt')
         RecoveryEnvelopeSecretFiles = @('development.env', 'private-pilot.env')
