@@ -215,15 +215,30 @@ public sealed class MobileSupabaseHostedSyncClient(
             clock.UtcNow.AddMinutes(10));
     }
 
-    public async ValueTask<HostedSyncSession> CompleteEmailSignInAsync(
+    public ValueTask<HostedSyncSession> CompleteEmailSignInAsync(
+        string verificationCode,
+        CancellationToken cancellationToken = default) =>
+        CompleteEmailSignInCoreAsync(pendingEmail, verificationCode, cancellationToken);
+
+    public ValueTask<HostedSyncSession> CompleteEmailSignInAsync(
+        string email,
         string verificationCode,
         CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(email);
+        return CompleteEmailSignInCoreAsync(email.Trim(), verificationCode, cancellationToken);
+    }
+
+    private async ValueTask<HostedSyncSession> CompleteEmailSignInCoreAsync(
+        string? email,
+        string verificationCode,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(verificationCode);
         var retainedCredential = credential ?? await credentialStore.LoadAsync();
         var options = await GetConfigAsync(cancellationToken);
         using var verify = NewRequest(options, HttpMethod.Post, "/auth/v1/verify", includeAuthorization: false);
-        verify.Content = CreateVerifyContent(options, pendingEmail, verificationCode);
+        verify.Content = CreateVerifyContent(options, email, verificationCode);
         using var response = await http.SendAsync(verify, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)

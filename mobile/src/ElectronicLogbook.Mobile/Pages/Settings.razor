@@ -65,6 +65,31 @@ else
             </div>
         </section>
 
+        @if (IsPilotUpdateAvailable)
+        {
+            <section class="form-section">
+                <div class="section-title-row">
+                    <div>
+                        <span class="eyebrow">Private pilot</span>
+                        <h2>FlightLogX updates</h2>
+                    </div>
+                    <span class="draft-pill">Pilot only</span>
+                </div>
+                <MudText Typo="Typo.body2">Check for the latest invited pilot build. If one is available, FlightLogX downloads it and Android asks you to approve the installation.</MudText>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPilotUpdateAsync" Disabled="@IsPilotUpdateBusy">
+                    @(IsPilotUpdateBusy ? "Checking for update…" : "Check for pilot update")
+                </MudButton>
+                @if (!string.IsNullOrWhiteSpace(PilotUpdateMessage))
+                {
+                    <span class="settings-status-line" role="status">@PilotUpdateMessage</span>
+                }
+                @if (!string.IsNullOrWhiteSpace(PilotUpdateError))
+                {
+                    <span class="settings-status-line settings-status-error" role="alert">@PilotUpdateError</span>
+                }
+            </section>
+        }
+
         <section class="form-section">
             <div class="section-title-row">
                 <div>
@@ -311,7 +336,7 @@ else
                 <summary>Account sign-in and recovery fallback</summary>
                 <MudText Typo="Typo.caption">Open these controls only when FlightLogX support asks you to use the email-code or recovery-code fallback.</MudText>
                 <div class="field-grid">
-                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited email" Immediate="true" Disabled="@IsAccountBusy" />
+                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited account email" HelperText="Enter the email address that received the FlightLogX code." Immediate="true" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
                         Send sign-in code
                     </MudButton>
@@ -321,9 +346,17 @@ else
                                   HelperText="Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive."
                                   Immediate="true"
                                   Disabled="@IsAccountBusy" />
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Password" OnClick="CompleteHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail) || string.IsNullOrWhiteSpace(HostedVerificationCode))">
                         @(Session.HasHostedSync ? "Reauthenticate account" : "Connect account")
                     </MudButton>
+                    @if (!string.IsNullOrWhiteSpace(FallbackAccountMessage))
+                    {
+                        <span class="settings-status-line" role="status">@FallbackAccountMessage</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(FallbackAccountError))
+                    {
+                        <span class="settings-status-line settings-status-error" role="alert">@FallbackAccountError</span>
+                    }
                     @if (Session.ShouldOfferHostedAuthentication)
                     {
                         <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Restore" OnClick="ResumeHostedSignInAsync" Disabled="@IsAccountBusy">
@@ -404,6 +437,8 @@ else
     private bool IsSyncBusy { get; set; }
     private bool IsAccountBusy { get; set; }
     private bool IsConnectionDiagnosticBusy { get; set; }
+    private bool IsPilotUpdateAvailable { get; set; }
+    private bool IsPilotUpdateBusy { get; set; }
     private string HostedEmail { get; set; } = string.Empty;
     private string HostedVerificationCode { get; set; } = string.Empty;
     private string AccountRecoveryCode { get; set; } = string.Empty;
@@ -416,7 +451,11 @@ else
     private string? SyncError { get; set; }
     private string? AccountMessage { get; set; }
     private string? AccountError { get; set; }
+    private string? FallbackAccountMessage { get; set; }
+    private string? FallbackAccountError { get; set; }
     private string? ConnectionDiagnosticMessage { get; set; }
+    private string? PilotUpdateMessage { get; set; }
+    private string? PilotUpdateError { get; set; }
 
     private bool CanRecoverConnection =>
         !IsConnectionDiagnosticBusy
@@ -427,6 +466,15 @@ else
         Session.HostedSyncChanged += OnHostedSyncChanged;
         await Session.EnsureLoadedWorkbookAsync();
         await UiPreferences.EnsureLoadedAsync();
+        try
+        {
+            IsPilotUpdateAvailable = await JsRuntime.InvokeAsync<bool>(
+                "electronicLogbookPilotUpdates.isAvailable");
+        }
+        catch (JSException)
+        {
+            IsPilotUpdateAvailable = false;
+        }
     }
 
     public void Dispose() => Session.HostedSyncChanged -= OnHostedSyncChanged;
@@ -507,14 +555,18 @@ else
         IsAccountBusy = true;
         AccountMessage = null;
         AccountError = null;
+        FallbackAccountMessage = null;
+        FallbackAccountError = null;
         try
         {
             var signIn = await Session.StartHostedInviteAcceptanceAsync(HostedEmail);
             AccountMessage = $"Sign-in code sent to {signIn.DeliveryHint}. It expires after 10 minutes. Check your junk or spam folder if it does not arrive.";
+            FallbackAccountMessage = AccountMessage;
         }
         catch (Exception ex)
         {
             AccountError = AccountFailureMessage(ex);
+            FallbackAccountError = AccountError;
         }
         finally
         {
@@ -524,7 +576,7 @@ else
 
     private async Task CompleteHostedSignInAsync()
     {
-        if (IsAccountBusy || string.IsNullOrWhiteSpace(HostedVerificationCode))
+        if (IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail) || string.IsNullOrWhiteSpace(HostedVerificationCode))
         {
             return;
         }
@@ -532,15 +584,19 @@ else
         IsAccountBusy = true;
         AccountMessage = null;
         AccountError = null;
+        FallbackAccountMessage = null;
+        FallbackAccountError = null;
         try
         {
-            await Session.CompleteHostedInviteAcceptanceAsync(HostedVerificationCode);
+            await Session.CompleteHostedInviteAcceptanceAsync(HostedEmail, HostedVerificationCode);
             HostedVerificationCode = string.Empty;
             AccountMessage = Session.LastActionMessage ?? "Account connected.";
+            FallbackAccountMessage = AccountMessage;
         }
         catch (Exception ex)
         {
             AccountError = AccountFailureMessage(ex);
+            FallbackAccountError = AccountError;
         }
         finally
         {
@@ -798,6 +854,35 @@ else
         finally
         {
             IsSyncBusy = false;
+        }
+    }
+
+    private async Task CheckForPilotUpdateAsync()
+    {
+        if (!IsPilotUpdateAvailable || IsPilotUpdateBusy)
+        {
+            return;
+        }
+
+        IsPilotUpdateBusy = true;
+        PilotUpdateMessage = "Checking Firebase App Distribution for a newer pilot build…";
+        PilotUpdateError = null;
+        try
+        {
+            var outcome = await JsRuntime.InvokeAsync<string>(
+                "electronicLogbookPilotUpdates.checkAndInstall");
+            PilotUpdateMessage = outcome == "updateStarted"
+                ? "The pilot update was downloaded. Follow Android's installation prompt to finish."
+                : "This device already has the latest invited pilot build.";
+        }
+        catch (JSException)
+        {
+            PilotUpdateMessage = null;
+            PilotUpdateError = "The pilot update check could not start. Confirm this Google account accepted the Firebase invitation, then try again.";
+        }
+        finally
+        {
+            IsPilotUpdateBusy = false;
         }
     }
 

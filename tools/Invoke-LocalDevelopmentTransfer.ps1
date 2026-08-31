@@ -403,16 +403,41 @@ function Update-AndroidSigningMetadata {
     param([string]$LocalRoot)
 
     $signingRoot = Join-Path $LocalRoot 'ElectronicLogbook\AndroidSigning'
-    $metadataPath = Join-Path $signingRoot 'electronic-logbook-development.json'
-    $keystorePath = Join-Path $signingRoot 'electronic-logbook-development.keystore'
-    if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { return }
-    if (-not (Test-Path -LiteralPath $keystorePath -PathType Leaf)) { throw 'Android signing metadata was restored without its keystore.' }
+    $identities = @(
+        @{
+            Name = 'development'
+            Metadata = 'electronic-logbook-development.json'
+            Keystore = 'electronic-logbook-development.keystore'
+            Credentials = $null
+        },
+        @{
+            Name = 'permanent pilot'
+            Metadata = $script:TransferConfig.Expected.PilotSigningMetadataFile
+            Keystore = $script:TransferConfig.Expected.PilotSigningKeystoreFile
+            Credentials = $script:TransferConfig.Expected.PilotSigningCredentialsFile
+        }
+    )
 
-    $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $metadata.keystorePath = $keystorePath
-    $metadata.updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
-    if ($PSCmdlet.ShouldProcess($metadataPath, 'Rewrite restored keystore path')) {
-        $metadata | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
+    foreach ($identity in $identities) {
+        $metadataPath = Join-Path $signingRoot $identity.Metadata
+        $keystorePath = Join-Path $signingRoot $identity.Keystore
+        $requiredPaths = @($metadataPath, $keystorePath)
+        if ($identity.Credentials) {
+            $requiredPaths += Join-Path $signingRoot $identity.Credentials
+        }
+
+        $existingCount = @($requiredPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count
+        if ($existingCount -eq 0) { continue }
+        if ($existingCount -ne $requiredPaths.Count) {
+            throw "The $($identity.Name) Android signing identity was restored incompletely."
+        }
+
+        $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $metadata.keystorePath = $keystorePath
+        $metadata.updatedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        if ($PSCmdlet.ShouldProcess($metadataPath, 'Rewrite restored keystore path')) {
+            $metadata | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $metadataPath -Encoding UTF8
+        }
     }
 }
 
@@ -719,7 +744,7 @@ function Invoke-VerifyAction {
     Write-Step 'Verifying development environment'
     $results = [Collections.Generic.List[object]]::new()
 
-    foreach ($name in @('git', 'dotnet', 'node', 'npm.cmd', 'java', 'adb', 'supabase', 'psql', 'code')) {
+    foreach ($name in @('git', 'dotnet', 'node', 'npm.cmd', 'java', 'adb', 'supabase', 'firebase', 'psql', 'code')) {
         $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
         Add-CheckResult $results $name ($null -ne $command) $true $(if ($command) { $command.Source } else { 'not found on PATH' })
     }
@@ -749,6 +774,9 @@ function Invoke-VerifyAction {
 
     $supabaseVersion = Get-NativeCommandOutput -Name 'supabase' -Arguments @('--version')
     Add-CheckResult $results 'Supabase CLI version' ($supabaseVersion -eq $script:TransferConfig.Expected.SupabaseVersion) $true $supabaseVersion
+    $firebaseVersionOutput = Get-NativeCommandOutput -Name 'firebase' -Arguments @('--version')
+    $firebaseVersion = @($firebaseVersionOutput -split "`r?`n" | Where-Object { $_ -match '^\d+\.\d+\.\d+$' }) | Select-Object -Last 1
+    Add-CheckResult $results 'Firebase CLI version' ($firebaseVersion -eq $script:TransferConfig.Expected.FirebaseCliVersion) $true $firebaseVersion
     $psqlVersion = Get-NativeCommandOutput -Name 'psql' -Arguments @('--version')
     Add-CheckResult $results 'PostgreSQL client 17' ($psqlVersion -match ' 17\.') $true $(if ($psqlVersion) { $psqlVersion } else { 'not found' })
 
@@ -780,6 +808,31 @@ function Invoke-VerifyAction {
     $electronicLogbookLocalRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook'
     Add-CheckResult $results 'Supabase management token' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\access-token.txt') -PathType Leaf) $true 'private transfer asset; value is never printed'
     Add-CheckResult $results 'Hosted project metadata' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\hosted-pilot-projects.local.json') -PathType Leaf) $true 'private transfer asset; values are never printed'
+    $firebaseConfigPath = Join-Path $script:RepoRoot 'mobile\android\app\google-services.json'
+    $firebaseConfigPassed = $false
+    if (Test-Path -LiteralPath $firebaseConfigPath -PathType Leaf) {
+        try {
+            $firebaseConfig = Get-Content -LiteralPath $firebaseConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $firebaseClient = @($firebaseConfig.client | Where-Object {
+                $_.client_info.android_client_info.package_name -eq $script:TransferConfig.Expected.FirebaseAndroidPackageName
+            }) | Select-Object -First 1
+            $firebaseConfigPassed = $firebaseConfig.project_info.project_id -eq $script:TransferConfig.Expected.FirebaseProjectId `
+                -and $null -ne $firebaseClient `
+                -and -not [string]::IsNullOrWhiteSpace($firebaseClient.client_info.mobilesdk_app_id) `
+                -and @($firebaseClient.api_key).Count -gt 0
+        }
+        catch {
+            $firebaseConfigPassed = $false
+        }
+    }
+    Add-CheckResult $results 'Firebase Android pilot config' $firebaseConfigPassed $true 'private transfer asset; project, package, app ID, and key presence checked without printing values'
+    $resendRoot = Join-Path $electronicLogbookLocalRoot 'Resend'
+    foreach ($fileName in $script:TransferConfig.Expected.ResendApiKeyFiles) {
+        $keyPath = Join-Path $resendRoot $fileName
+        $keyConfigured = (Test-Path -LiteralPath $keyPath -PathType Leaf) `
+            -and -not [string]::IsNullOrWhiteSpace((Get-Content -LiteralPath $keyPath -Raw -Encoding UTF8).Trim())
+        Add-CheckResult $results "Resend sending key: $fileName" $keyConfigured $true 'private transfer asset; value is never printed'
+    }
     $recoveryRoot = Join-Path $electronicLogbookLocalRoot 'Supabase\recovery-envelope'
     foreach ($fileName in $script:TransferConfig.Expected.RecoveryEnvelopeSecretFiles) {
         $secretCheck = Test-RecoveryEnvelopeSecretFile -Path (Join-Path $recoveryRoot $fileName)
@@ -800,6 +853,50 @@ function Invoke-VerifyAction {
             $output = & $keytool.Source -list -v -keystore $keystore -storepass android -alias androiddebugkey 2>&1 | Out-String
             $fingerprint = if ($output -match 'SHA256:\s*([0-9A-F:]+)') { $Matches[1].Replace(':', '').ToLowerInvariant() } else { '' }
             Add-CheckResult $results 'Signing certificate fingerprint' ($fingerprint -eq $metadata.certificateSha256) $true $fingerprint
+        }
+    }
+
+    $pilotKeystore = Join-Path $signingRoot $script:TransferConfig.Expected.PilotSigningKeystoreFile
+    $pilotCredentialsPath = Join-Path $signingRoot $script:TransferConfig.Expected.PilotSigningCredentialsFile
+    $pilotMetadataPath = Join-Path $signingRoot $script:TransferConfig.Expected.PilotSigningMetadataFile
+    $pilotSigningPaths = @($pilotKeystore, $pilotCredentialsPath, $pilotMetadataPath)
+    $pilotSigningPassed = @($pilotSigningPaths | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf }).Count -eq $pilotSigningPaths.Count
+    Add-CheckResult $results 'Permanent pilot Android signing identity' $pilotSigningPassed $true 'protected private transfer assets; credential values are never printed'
+    if ($pilotSigningPassed) {
+        try {
+            $pilotCredentials = Get-Content -LiteralPath $pilotCredentialsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $pilotMetadata = Get-Content -LiteralPath $pilotMetadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $pilotStructurePassed = $pilotCredentials.schemaVersion -eq 1 `
+                -and -not [string]::IsNullOrWhiteSpace($pilotCredentials.storePassword) `
+                -and -not [string]::IsNullOrWhiteSpace($pilotCredentials.keyPassword) `
+                -and -not [string]::IsNullOrWhiteSpace($pilotCredentials.keyAlias) `
+                -and $pilotMetadata.packageName -eq $script:TransferConfig.Expected.FirebaseAndroidPackageName `
+                -and $pilotMetadata.keystorePath -eq $pilotKeystore `
+                -and $pilotMetadata.keyAlias -eq $pilotCredentials.keyAlias `
+                -and -not [string]::IsNullOrWhiteSpace($pilotMetadata.certificateSha256)
+            Add-CheckResult $results 'Permanent pilot signing metadata' $pilotStructurePassed $true 'package, alias, path, and secret presence checked without printing credential values'
+
+            $keytool = Get-Command 'keytool.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($keytool -and $pilotStructurePassed) {
+                $previousStorePassword = $env:ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD
+                try {
+                    $env:ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD = $pilotCredentials.storePassword
+                    $output = & $keytool.Source -list -v -keystore $pilotKeystore -storetype PKCS12 `
+                        '-storepass:env' ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD `
+                        -alias $pilotCredentials.keyAlias 2>&1 | Out-String
+                    $fingerprint = if ($LASTEXITCODE -eq 0 -and $output -match 'SHA256:\s*([0-9A-F:]+)') {
+                        $Matches[1].Replace(':', '').ToLowerInvariant()
+                    }
+                    else { '' }
+                    Add-CheckResult $results 'Permanent pilot signing certificate fingerprint' ($fingerprint -eq $pilotMetadata.certificateSha256) $true $(if ($fingerprint) { $fingerprint } else { 'keystore validation failed' })
+                }
+                finally {
+                    $env:ELECTRONIC_LOGBOOK_PILOT_VERIFY_STORE_PASSWORD = $previousStorePassword
+                }
+            }
+        }
+        catch {
+            Add-CheckResult $results 'Permanent pilot signing metadata' $false $true 'protected signing files could not be parsed or validated'
         }
     }
 

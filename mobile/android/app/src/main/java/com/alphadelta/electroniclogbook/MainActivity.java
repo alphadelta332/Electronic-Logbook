@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(ElectronicLogbookNativeFilesPlugin.class);
         registerPlugin(ElectronicLogbookCredentialsPlugin.class);
+        registerPlugin(ElectronicLogbookPilotUpdatesPlugin.class);
         super.onCreate(savedInstanceState);
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         configureBackNavigation();

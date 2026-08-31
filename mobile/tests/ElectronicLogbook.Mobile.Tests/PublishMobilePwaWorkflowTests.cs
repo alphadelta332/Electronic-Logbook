@@ -108,7 +108,10 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("applicationId = \"com.alphadelta.electroniclogbook\"", gradle, StringComparison.Ordinal);
         Assert.Contains("applicationIdSuffix \".dev\"", gradle, StringComparison.Ordinal);
         Assert.Contains("applicationIdSuffix \".acceptance\"", gradle, StringComparison.Ordinal);
-        Assert.Contains("versionCode = productVersionCode", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionCode = androidVersionCode", gradle, StringComparison.Ordinal);
+        Assert.Contains("productVersionParts.major * 100000000", gradle, StringComparison.Ordinal);
+        Assert.Contains("productVersionParts.minor * 1000000", gradle, StringComparison.Ordinal);
+        Assert.Contains("productVersionParts.patch * 10000", gradle, StringComparison.Ordinal);
         Assert.Contains("versionName = productVersion", gradle, StringComparison.Ordinal);
         Assert.Contains("Assert-Equal -Actual $metadata.applicationId -Expected \"com.alphadelta.electroniclogbook.dev\"", acceptancePrepScript, StringComparison.Ordinal);
         Assert.Contains("/Android/data/com.alphadelta.electroniclogbook/files/exports/logbook.elogbook", browserFileStoreTests, StringComparison.Ordinal);

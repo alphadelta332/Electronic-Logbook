@@ -812,6 +812,13 @@ public sealed class MobileLogbookSession(
             () => hostedAuthenticator!.CompleteEmailSignInAsync(verificationCode));
     }
 
+    public async Task CompleteHostedInviteAcceptanceAsync(string email, string verificationCode)
+    {
+        EnsureHostedInviteAcceptanceAvailable();
+        await CompleteEmailSignInOrRecoverAsync(
+            () => hostedAuthenticator!.CompleteEmailSignInAsync(email, verificationCode));
+    }
+
     public async Task ResumeHostedInviteAcceptanceAsync()
     {
         EnsureHostedInviteAcceptanceAvailable();

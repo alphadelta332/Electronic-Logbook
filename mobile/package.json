@@ -9,6 +9,7 @@
     "sync:android": "npm run generate:icons && npm run publish:pwa && npm run prepare:android-assets && capacitor sync android",
     "build:android": "npm run sync:android && cd android && gradlew.bat assembleDebug",
     "build:android:acceptance": "npm run sync:android && cd android && gradlew.bat assembleAcceptance",
+    "build:android:pilot": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Build-AndroidPilot.ps1",
     "install:visual-browser": "playwright install chromium",
     "capture:visual": "npm run publish:pwa && node scripts/capture-pwa-visual-audit.mjs",
     "install:android:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Install-AndroidDebugBuild.ps1",

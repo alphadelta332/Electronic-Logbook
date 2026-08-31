@@ -448,6 +448,29 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
+    public async Task EmailCodeReauthenticationUsesProvidedEmailWithoutAnInMemorySignInStart()
+    {
+        var handler = new RecordingHandler();
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-08-31T00:00:00Z")));
+
+        var session = await client.CompleteEmailSignInAsync("owner@example.com", "123456");
+
+        var verify = Assert.Single(handler.Requests, request => request.Path == "/auth/v1/verify");
+        Assert.Equal("owner@example.com", verify.Body.GetProperty("email").GetString());
+        Assert.Equal("123456", verify.Body.GetProperty("token").GetString());
+        Assert.Equal("email", verify.Body.GetProperty("type").GetString());
+        Assert.DoesNotContain(handler.Requests, request => request.Path == "/auth/v1/otp");
+        Assert.Equal(ValidCredential().AccountId, session.AccountId);
+        Assert.Equal(ValidCredential().DeviceId, session.DeviceId);
+    }
+
+    [Fact]
     public async Task EmailCodeReauthenticationRejectsAnotherAccountAndKeepsTheRetainedCredential()
     {
         var handler = new RecordingHandler();

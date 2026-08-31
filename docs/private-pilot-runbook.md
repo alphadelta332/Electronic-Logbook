@@ -122,20 +122,53 @@ Out of scope:
 
 1. Confirm the participant has the supported Android and, if relevant, Windows/Excel
    environment.
-2. Provision the invited Google-account email through the owner-only enrolment path once
+2. Send `docs/private-pilot-android-install.md` before the invitation. Explain that this
+   is a Firebase-distributed APK, that Android will show outside-Play-Store warnings, and
+   that the temporary **Allow from this source** permission is normally turned off after
+   installation. The owner reference device may keep it enabled only for the duration of
+   an explicitly active update rehearsal.
+3. Provision the invited Google-account email through the owner-only enrolment path once
    that path passes its acceptance gate. Public self-registration must remain disabled.
-3. Complete the repository and `2.0.3` coached channel checks above.
-4. Start the migration from the existing workbook, accept `3.0.0`, and use Google sign-in
+4. Complete the repository and `2.0.3` coached channel checks above.
+5. Start the migration from the existing workbook, accept `3.0.0`, and use Google sign-in
    in the Windows updater.
-5. Continue only after the updater reports exact hosted readback and completes the
+6. Continue only after the updater reports exact hosted readback and completes the
    workbook migration lifecycle.
-6. Ask the participant to install the approved Android pilot build and sign in with the
-   same Google account. The app must discover the completed migrated logbook without a
-   workbook picker or manual import.
-7. Keep the displayed six-digit email-code sign-in and package exchange in
+7. Coach the first installation using the tester-facing guide. Treat Firebase's grey
+   **Download started...** state as a direction to use Android notifications or Chrome
+   Downloads, not as live download progress. Stop rather than coaching an ordinary tester
+   through an unverified-developer advanced flow or security delay.
+8. Ask the participant to open the approved Android pilot build and sign in with the same
+   Google account. The app must discover the completed migrated logbook without a workbook
+   picker or manual import.
+9. Keep the displayed six-digit email-code sign-in and package exchange in
    Advanced/support only.
-8. Record the start date, environment, migration result, and expected weekly check-in
-   cadence in the private cohort tracker.
+10. Record the start date, environment, migration result, warnings encountered, and
+    expected weekly check-in cadence in the private cohort tracker.
+
+### Pilot Update Rehearsal
+
+Android `versionCode` is monotonic and separate from the displayed `version.txt` value.
+FlightLogX reserves four low-order version-code digits for pilot build revisions, so a
+`3.0.0` revision `1` build is newer than the initial pilot APK while a future `3.0.1`
+release remains newer than every `3.0.0` pilot revision.
+
+1. Confirm the owner-only Firebase group contains exactly the owner and no canary.
+2. Build a higher disposable APK from `mobile/`:
+
+   ```powershell
+   npm.cmd run build:android:pilot -- -PilotBuildRevision 1
+   ```
+
+3. Verify the script reports the permanent package, signing certificate, displayed
+   version, higher Android version code, and APK SHA-256 before uploading it.
+4. Distribute only to the owner-only Firebase group. Do not put an invited email or a
+   Firebase App ID in tracked scripts or evidence.
+5. On the retained Pixel, use **Settings > Check for pilot update**. Record the installed
+   version before the check, Firebase release identifier in redacted form, download
+   outcome, and the Android installation-approval screen. Do not approve the final install
+   until retained state and certificate continuity are confirmed.
+6. Turn off **Allow from this source** after the rehearsal ends.
 
 ## Weekly Check-In
 
@@ -273,5 +306,8 @@ cannot be explained, or the support burden is not sustainable for a private pilo
 - [ ] `tools\Invoke-PrivatePilotPreflight.ps1 -RunRlsHarness` writes a redacted
   pre-invite readiness report.
 - [ ] Android install path is verified on the reference Pixel device.
+- [ ] Tester receives `docs/private-pilot-android-install.md` before the Firebase invitation
+  and understands when to continue, when to stop, and how to remove the temporary
+  unknown-app installation permission.
 - [ ] Workbook pairing is verified on the Excel-capable release machine.
 - [ ] Rollback contact path and diagnostic collection path are tested.

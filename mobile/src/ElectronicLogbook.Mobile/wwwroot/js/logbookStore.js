@@ -81,6 +81,11 @@
         return globalThis.Capacitor?.isNativePlatform?.() && plugin?.getStatus ? plugin : null;
     }
 
+    function nativePilotUpdatesPlugin() {
+        const plugin = globalThis.Capacitor?.Plugins?.ElectronicLogbookPilotUpdates;
+        return globalThis.Capacitor?.isNativePlatform?.() && plugin?.checkAndInstall ? plugin : null;
+    }
+
     async function notifyNetworkRestored(dotNetReference) {
         try {
             await dotNetReference.invokeMethodAsync("HandleNetworkRestoredAsync");
@@ -224,6 +229,22 @@
             }
 
             return true;
+        }
+    };
+
+    window.electronicLogbookPilotUpdates = {
+        isAvailable: async () => {
+            const plugin = nativePilotUpdatesPlugin();
+            return plugin ? Boolean((await plugin.isAvailable()).enabled) : false;
+        },
+        checkAndInstall: async () => {
+            const plugin = nativePilotUpdatesPlugin();
+            if (!plugin) {
+                throw new Error("Pilot updates are only available in the private Android pilot app.");
+            }
+
+            const result = await plugin.checkAndInstall();
+            return result?.outcome ?? "current";
         }
     };
 

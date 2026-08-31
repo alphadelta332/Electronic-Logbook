@@ -12,12 +12,25 @@ public sealed class PrivatePilotRunbookTests
         var recoveryRehearsalScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-HostedRecoveryRehearsal.ps1"));
         var emailOtpConfigScript = File.ReadAllText(TestRepo.FindFile("tools", "Test-HostedEmailOtpConfiguration.ps1"));
         var hostedSetup = File.ReadAllText(TestRepo.FindFile("docs", "hosted-pilot-supabase.md"));
+        var androidInstall = File.ReadAllText(TestRepo.FindFile("docs", "private-pilot-android-install.md"));
 
         Assert.Contains("artifacts/private-pilot-20260806/cohort.md", runbook, StringComparison.Ordinal);
         Assert.Contains("Invoke-PrivatePilotHealthCheck.ps1", runbook, StringComparison.Ordinal);
         Assert.Contains("Invoke-PrivatePilotPreflight.ps1", runbook, StringComparison.Ordinal);
         Assert.Contains("ELB_SUPABASE_PILOT_DB_URL", runbook, StringComparison.Ordinal);
         Assert.Contains("get_hosted_pilot_health", runbook, StringComparison.Ordinal);
+        Assert.Contains("docs/private-pilot-android-install.md", runbook, StringComparison.Ordinal);
+        Assert.Contains("Download started...", runbook, StringComparison.Ordinal);
+        Assert.Contains("unverified-developer advanced flow", runbook, StringComparison.Ordinal);
+
+        Assert.Contains("distribution.firebase.google.com", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("com.alphadelta.electroniclogbook", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("Download started...", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("Allow from this source", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("turn off **Allow from this source**", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("unverified developer", androidInstall, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("24-hour security delay", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("Do not work around these failures by removing an existing app", androidInstall, StringComparison.Ordinal);
 
         Assert.Contains("ELB_SUPABASE_PILOT_DB_URL", healthScript, StringComparison.Ordinal);
         Assert.Contains("public.get_hosted_pilot_health", healthScript, StringComparison.Ordinal);

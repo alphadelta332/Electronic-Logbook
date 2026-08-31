@@ -339,7 +339,8 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("Connection status", settings, StringComparison.Ordinal);
         Assert.Contains("Hosted sync", settings, StringComparison.Ordinal);
-        Assert.Contains("Invited email", settings, StringComparison.Ordinal);
+        Assert.Contains("Invited account email", settings, StringComparison.Ordinal);
+        Assert.Contains("Enter the email address that received the FlightLogX code.", settings, StringComparison.Ordinal);
         Assert.Contains("Six-digit sign-in code", settings, StringComparison.Ordinal);
         Assert.Contains("Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive.", settings, StringComparison.Ordinal);
         Assert.Contains("Send sign-in code", settings, StringComparison.Ordinal);
@@ -361,6 +362,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Session.ShouldOfferHostedAuthentication", settings, StringComparison.Ordinal);
         Assert.Contains("Reauthenticate with Google", settings, StringComparison.Ordinal);
         Assert.Contains("Reauthenticate account", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.CompleteHostedInviteAcceptanceAsync(HostedEmail, HostedVerificationCode)", settings, StringComparison.Ordinal);
+        Assert.Contains("FallbackAccountError", settings, StringComparison.Ordinal);
         Assert.Contains("without deleting the local logbook", settings, StringComparison.Ordinal);
         Assert.Contains("Copy redacted diagnostics", settings, StringComparison.Ordinal);
         Assert.Contains("Technical details", settings, StringComparison.Ordinal);
@@ -1441,6 +1444,69 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("{ name: \"wide-768\", width: 768, height: 1024, fontScale: 1 }", audit, StringComparison.Ordinal);
         Assert.Contains("{ name: \"ipad-landscape-1024x768\", width: 1024, height: 768, fontScale: 1 }", audit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PilotAndroidUpdaterIsRestrictedToThePermanentIdPilotVariant()
+    {
+        var gradle = ReadProjectFile("mobile", "android", "app", "build.gradle");
+        var activity = ReadProjectFile(
+            "mobile", "android", "app", "src", "main", "java", "com", "alphadelta",
+            "electroniclogbook", "MainActivity.java");
+        var plugin = ReadProjectFile(
+            "mobile", "android", "app", "src", "main", "java", "com", "alphadelta",
+            "electroniclogbook", "ElectronicLogbookPilotUpdatesPlugin.java");
+        var javascript = ReadMobileWebAsset(Path.Combine("js", "logbookStore.js"));
+        var settings = ReadMobilePage("Settings.razor");
+        var package = ReadProjectFile("mobile", "package.json");
+        var appGitIgnore = ReadProjectFile("mobile", "android", "app", ".gitignore");
+        var signing = ReadProjectFile("mobile", "scripts", "AndroidPilotSigning.ps1");
+        var build = ReadProjectFile("mobile", "scripts", "Build-AndroidPilot.ps1");
+
+        Assert.Contains("applicationId = \"com.alphadelta.electroniclogbook\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("pilot {", gradle, StringComparison.Ordinal);
+        Assert.Contains("initWith release", gradle, StringComparison.Ordinal);
+        Assert.Contains("buildConfigField \"boolean\", \"PILOT_UPDATES_ENABLED\", \"false\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("buildConfigField \"boolean\", \"PILOT_UPDATES_ENABLED\", \"true\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("implementation \"com.google.firebase:firebase-appdistribution-api:16.0.0-beta20\"", gradle, StringComparison.Ordinal);
+        Assert.Contains("pilotImplementation \"com.google.firebase:firebase-appdistribution:16.0.0-beta20\"", gradle, StringComparison.Ordinal);
+        Assert.DoesNotContain("releaseImplementation \"com.google.firebase:firebase-appdistribution:", gradle, StringComparison.Ordinal);
+        Assert.DoesNotContain("debugImplementation \"com.google.firebase:firebase-appdistribution:", gradle, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_KEYSTORE", gradle, StringComparison.Ordinal);
+        Assert.Contains("signingConfig signingConfigs.flightLogXPilot", gradle, StringComparison.Ordinal);
+        Assert.Contains("Pilot artifacts must use the permanent FlightLogX signing identity", gradle, StringComparison.Ordinal);
+        Assert.Contains("productVersionParts.major * 100000000", gradle, StringComparison.Ordinal);
+        Assert.Contains("flightLogXPilotBuildRevision", gradle, StringComparison.Ordinal);
+        Assert.Contains("flightLogXPilotBuildRevision may only be used for a signed pilot artifact task", gradle, StringComparison.Ordinal);
+        Assert.DoesNotContain("signingConfig signingConfigs.electronicLogbookDevelopment", GetGradleBuildType(gradle, "pilot"), StringComparison.Ordinal);
+
+        Assert.Contains("registerPlugin(ElectronicLogbookPilotUpdatesPlugin.class);", activity, StringComparison.Ordinal);
+        Assert.Contains("BuildConfig.PILOT_UPDATES_ENABLED", plugin, StringComparison.Ordinal);
+        Assert.Contains("updateIfNewReleaseAvailable()", plugin, StringComparison.Ordinal);
+        Assert.Contains("window.electronicLogbookPilotUpdates", javascript, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookPilotUpdates.isAvailable", settings, StringComparison.Ordinal);
+        Assert.Contains("Check for pilot update", settings, StringComparison.Ordinal);
+        Assert.Contains("scripts/Build-AndroidPilot.ps1", package, StringComparison.Ordinal);
+        Assert.Contains("flightlogx-pilot.keystore", signing, StringComparison.Ordinal);
+        Assert.Contains("flightlogx-pilot-credentials.json", signing, StringComparison.Ordinal);
+        Assert.Contains("RandomNumberGenerator", signing, StringComparison.Ordinal);
+        Assert.Contains("Do not regenerate it", signing, StringComparison.Ordinal);
+        Assert.Contains("apksigner.bat", build, StringComparison.Ordinal);
+        Assert.Contains("aapt.exe", build, StringComparison.Ordinal);
+        Assert.Contains("com.alphadelta.electroniclogbook", build, StringComparison.Ordinal);
+        Assert.Contains("[ValidateRange(0, 9999)]", build, StringComparison.Ordinal);
+        Assert.Contains("-PflightLogXPilotBuildRevision=$PilotBuildRevision", build, StringComparison.Ordinal);
+        Assert.Contains("The built APK version metadata does not match the requested pilot build revision", build, StringComparison.Ordinal);
+        Assert.Contains("/google-services.json", appGitIgnore, StringComparison.Ordinal);
+    }
+
+    private static string GetGradleBuildType(string gradle, string buildType)
+    {
+        var match = Regex.Match(
+            gradle,
+            $@"(?ms)^\s{{8}}{Regex.Escape(buildType)}\s*\{{(?<body>.*?)^\s{{8}}\}}$");
+        Assert.True(match.Success, $"Could not find Android build type '{buildType}'.");
+        return match.Groups["body"].Value;
     }
 
     private static string ReadMobilePage(string relativePath) =>

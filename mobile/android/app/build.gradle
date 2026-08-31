@@ -6,21 +6,58 @@ if (!productVersionMatch.matches()) {
     throw new GradleException("version.txt must contain a numeric major.minor.patch version.")
 }
 
+def productVersionParts = [
+    major: productVersionMatch[0][1].toInteger(),
+    minor: productVersionMatch[0][2].toInteger(),
+    patch: productVersionMatch[0][3].toInteger()
+]
+if (productVersionParts.major > 20 || productVersionParts.minor > 99 || productVersionParts.patch > 99) {
+    throw new GradleException("Android versions require major <= 20, minor <= 99, and patch <= 99.")
+}
+// Reserve four low-order digits for signed pilot build revisions. Android versionCode
+// is monotonic and intentionally independent from the user-visible versionName.
 def productVersionCode =
-    productVersionMatch[0][1].toInteger() * 1000000 +
-    productVersionMatch[0][2].toInteger() * 1000 +
-    productVersionMatch[0][3].toInteger()
+    productVersionParts.major * 100000000 +
+    productVersionParts.minor * 1000000 +
+    productVersionParts.patch * 10000
+def pilotBuildRevisionText = providers.gradleProperty('flightLogXPilotBuildRevision').orNull
+def pilotBuildRevision = 0
+if (pilotBuildRevisionText != null) {
+    if (!(pilotBuildRevisionText ==~ /^\d+$/)) {
+        throw new GradleException("flightLogXPilotBuildRevision must be a whole number from 1 to 9999.")
+    }
+    pilotBuildRevision = pilotBuildRevisionText.toInteger()
+    if (pilotBuildRevision < 1 || pilotBuildRevision > 9999) {
+        throw new GradleException("flightLogXPilotBuildRevision must be a whole number from 1 to 9999.")
+    }
+}
+def androidVersionCode = productVersionCode + pilotBuildRevision
 def developmentKeystorePath = System.getenv('ELECTRONIC_LOGBOOK_DEV_KEYSTORE')
+def pilotSigningEnvironment = [
+    keystore: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEYSTORE'),
+    storePassword: System.getenv('ELECTRONIC_LOGBOOK_PILOT_STORE_PASSWORD'),
+    keyAlias: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEY_ALIAS'),
+    keyPassword: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEY_PASSWORD')
+]
+def configuredPilotSigningValues = pilotSigningEnvironment.values().count { it }
+if (configuredPilotSigningValues > 0 && configuredPilotSigningValues < pilotSigningEnvironment.size()) {
+    throw new GradleException("The FlightLogX pilot signing environment is incomplete.")
+}
+def pilotSigningConfigured = configuredPilotSigningValues == pilotSigningEnvironment.size()
 
 android {
     namespace = "com.alphadelta.electroniclogbook"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures {
+        buildConfig = true
+    }
     defaultConfig {
         applicationId = "com.alphadelta.electroniclogbook"
         minSdkVersion = rootProject.ext.minSdkVersion
         targetSdkVersion = rootProject.ext.targetSdkVersion
-        versionCode = productVersionCode
+        versionCode = androidVersionCode
         versionName = productVersion
+        buildConfigField "boolean", "PILOT_UPDATES_ENABLED", "false"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -35,6 +72,14 @@ android {
                 storePassword System.getenv('ELECTRONIC_LOGBOOK_DEV_STORE_PASSWORD') ?: 'android'
                 keyAlias System.getenv('ELECTRONIC_LOGBOOK_DEV_KEY_ALIAS') ?: 'androiddebugkey'
                 keyPassword System.getenv('ELECTRONIC_LOGBOOK_DEV_KEY_PASSWORD') ?: 'android'
+            }
+        }
+        if (pilotSigningConfigured) {
+            flightLogXPilot {
+                storeFile file(pilotSigningEnvironment.keystore)
+                storePassword pilotSigningEnvironment.storePassword
+                keyAlias pilotSigningEnvironment.keyAlias
+                keyPassword pilotSigningEnvironment.keyPassword
             }
         }
     }
@@ -53,10 +98,31 @@ android {
                 signingConfig signingConfigs.electronicLogbookDevelopment
             }
         }
+        pilot {
+            initWith release
+            buildConfigField "boolean", "PILOT_UPDATES_ENABLED", "true"
+            matchingFallbacks = ['release']
+            if (pilotSigningConfigured) {
+                signingConfig signingConfigs.flightLogXPilot
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def pilotArtifactTasks = ['assemblePilot', 'bundlePilot', 'packagePilot']
+    def pilotArtifactRequested = graph.allTasks.any { pilotArtifactTasks.contains(it.name) }
+    if (pilotBuildRevision > 0 && !pilotArtifactRequested) {
+        throw new GradleException(
+            "flightLogXPilotBuildRevision may only be used for a signed pilot artifact task.")
+    }
+    if (pilotArtifactRequested && !pilotSigningConfigured) {
+        throw new GradleException(
+            "Pilot artifacts must use the permanent FlightLogX signing identity. Run npm.cmd run build:android:pilot.")
     }
 }
 
@@ -74,6 +140,8 @@ dependencies {
     implementation "androidx.credentials:credentials:$androidxCredentialsVersion"
     implementation "androidx.credentials:credentials-play-services-auth:$androidxCredentialsVersion"
     implementation "com.google.android.libraries.identity.googleid:googleid:$googleIdVersion"
+    implementation "com.google.firebase:firebase-appdistribution-api:16.0.0-beta20"
+    pilotImplementation "com.google.firebase:firebase-appdistribution:16.0.0-beta20"
     implementation project(':capacitor-android')
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
