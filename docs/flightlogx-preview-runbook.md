@@ -17,9 +17,10 @@ Excel is used only for fresh exports. Continuing workbook/app synchronization is
 part of this Preview.
 
 The controlled `preview` workbook channel tests `3.0.0` while ordinary `main` workbooks
-stay on `2.0.3`. Its GitHub branch, environment, secret names, and bridge asset still use
-the legacy external name `pilot` until the owner-controlled migration is complete. Preview
-prerelease files are publicly downloadable because the repository and
+stay on `2.0.3`. Its GitHub branch, protected environment, variable, secret, and normal
+bridge marker use the canonical `preview` name. A pinned `pilot` branch and matching bridge
+marker remain only for the coached first hop from `2.0.3`. Preview prerelease files are
+publicly downloadable because the repository and
 the `2.0.3` bootstrap use unauthenticated GitHub Release URLs. They are not advertised,
 linked from the public update channel, or offered to a workbook unless a coach explicitly
 changes that workbook to `GitHubBranch = pilot`.
@@ -30,17 +31,21 @@ changes that workbook to `GitHubBranch = pilot`.
 
 Before coaching any workbook, the owner must confirm all of the following:
 
-1. The remote `pilot` branch points to the exact approved `3.x` commit.
-2. The GitHub `pilot` environment requires owner approval.
+1. The remote `preview` branch points to the exact approved `3.x` commit.
+2. The GitHub `preview` environment requires owner approval.
 3. That environment contains repository variable
-   `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL` and secret
-   `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY` for the Preview Sydney project.
+   `ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_URL` and secret
+   `ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_ANON_KEY` for the Preview Sydney project.
 4. The `Publish FlightLogX Preview wizard` workflow passed for that exact commit after its environment
    approval.
 5. The resulting prerelease tag is `dev-wizard-<first 12 characters of the commit>` and
-   contains `pilot-wizard-channel.txt`. The old `dev-wizard-` name is intentional: the
-   `2.0.3` launcher requires it for the first hop.
-6. `origin/main:version.txt` is still `2.0.3` and the public latest release is still
+   contains both `preview-wizard-channel.txt` and the compatibility alias
+   `pilot-wizard-channel.txt`. The old `dev-wizard-` name is intentional: the `2.0.3`
+   launcher requires it for the first hop.
+6. The compatibility branch `pilot` points to the exact same commit as `preview`. Do not
+   develop or publish from `pilot`; it exists only because the `2.0.3` launcher reads its
+   workbook channel as a GitHub branch name.
+7. `origin/main:version.txt` is still `2.0.3` and the public latest release is still
    `v2.0.3`.
 
 Do not coach the workbook change if any one of these checks fails. Do not substitute a

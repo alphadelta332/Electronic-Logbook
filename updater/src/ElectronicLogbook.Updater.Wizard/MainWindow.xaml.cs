@@ -21,7 +21,7 @@ namespace ElectronicLogbook.Updater.Wizard;
 public partial class MainWindow : Window
 {
     private const int TotalSteps = 6;
-    private const string LegacyPreviewGitHubBranch = "pilot";
+    private const string PreviewGitHubBranch = "preview";
 
     private readonly string[] _stepTitles =
     [
@@ -274,7 +274,7 @@ public partial class MainWindow : Window
             var branchName = _context.Channel switch
             {
                 UpdateChannel.Hotfix => "hotfix",
-                UpdateChannel.Preview => LegacyPreviewGitHubBranch,
+                UpdateChannel.Preview => PreviewGitHubBranch,
                 _ => "dev"
             };
             SetReleaseSummaryMarkdown(await GetBranchReadmeSummaryAsync(

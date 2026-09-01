@@ -3,7 +3,7 @@ name: Publish FlightLogX Preview wizard
 on:
   push:
     branches:
-      - pilot
+      - preview
 
 permissions:
   contents: write
@@ -17,11 +17,9 @@ jobs:
     name: Publish protected Preview wizard asset
     runs-on: windows-latest
     timeout-minutes: 25
-    environment: pilot
+    environment: preview
 
     steps:
-      # The branch and environment retain their legacy external names until the
-      # owner-controlled GitHub migration is completed.
       - name: Check out exact Preview commit
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
@@ -30,8 +28,8 @@ jobs:
       - name: Validate Preview source
         shell: pwsh
         run: |
-          if ($env:GITHUB_REF_NAME -ne "pilot") {
-            throw "Preview wizard publication must run from the legacy pilot branch."
+          if ($env:GITHUB_REF_NAME -ne "preview") {
+            throw "Preview wizard publication must run from the preview branch."
           }
 
           $version = (Get-Content -LiteralPath version.txt -Raw).Trim()
@@ -42,8 +40,8 @@ jobs:
       - name: Build Preview wizard asset
         shell: pwsh
         env:
-          HOSTED_SUPABASE_URL: ${{ vars.ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL }}
-          HOSTED_SUPABASE_ANON_KEY: ${{ secrets.ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY }}
+          HOSTED_SUPABASE_URL: ${{ vars.ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_URL }}
+          HOSTED_SUPABASE_ANON_KEY: ${{ secrets.ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_ANON_KEY }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:HOSTED_SUPABASE_URL) -or
               [string]::IsNullOrWhiteSpace($env:HOSTED_SUPABASE_ANON_KEY)) {
@@ -69,6 +67,7 @@ jobs:
           $tag = "dev-wizard-$shortSha"
           $title = "FlightLogX Preview workbook updater $version ($shortSha)"
           Set-Content -Path dev-wizard-commit.txt -Value $env:GITHUB_SHA -Encoding ascii
+          Set-Content -Path preview-wizard-channel.txt -Value "preview`n$env:GITHUB_SHA" -Encoding ascii
           Set-Content -Path pilot-wizard-channel.txt -Value "pilot`n$env:GITHUB_SHA" -Encoding ascii
           $notes = @"
           Publicly downloadable prerelease used only by the coached, invitation-only
@@ -76,10 +75,11 @@ jobs:
 
           Version: $version
           Commit: $env:GITHUB_SHA
-          Branch: pilot (legacy external name; canonical channel is preview)
+          Branch: preview
 
           The dev-wizard tag name is retained because the 2.0.3 bootstrap requires it
-          for the first controlled update to 3.x.
+          for the first controlled update to 3.x. The pilot channel marker is retained
+          only for the matching 2.0.3 compatibility branch.
           "@
 
           $existing = gh release view $tag `
@@ -91,6 +91,11 @@ jobs:
               throw "Release $tag exists for a different commit."
             }
 
+            if ($existing.assets.name -notcontains "preview-wizard-channel.txt") {
+              gh release upload $tag `
+                preview-wizard-channel.txt `
+                --repo $env:GITHUB_REPOSITORY
+            }
             if ($existing.assets.name -notcontains "pilot-wizard-channel.txt") {
               gh release upload $tag `
                 pilot-wizard-channel.txt `
@@ -103,6 +108,7 @@ jobs:
               updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
               updater/dist/wizard-signature-report.json `
               dev-wizard-commit.txt `
+              preview-wizard-channel.txt `
               pilot-wizard-channel.txt `
               --repo $env:GITHUB_REPOSITORY `
               --title $title `

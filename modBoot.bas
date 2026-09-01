@@ -360,11 +360,8 @@ End Function
 
 Private Function GitHubSourceBranch(ByVal workbookChannel As String) As String
     workbookChannel = LCase$(Trim$(workbookChannel))
-    If workbookChannel = "preview" Then
-        GitHubSourceBranch = LEGACY_PREVIEW_GITHUB_BRANCH
-    Else
-        GitHubSourceBranch = workbookChannel
-    End If
+    If workbookChannel = LEGACY_PREVIEW_GITHUB_BRANCH Then workbookChannel = "preview"
+    GitHubSourceBranch = workbookChannel
 End Function
 
 Private Function RequiresDevelopmentWizardWarning(ByVal branchName As String) As Boolean

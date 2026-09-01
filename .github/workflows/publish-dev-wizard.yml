@@ -95,8 +95,9 @@ jobs:
               --repo $env:GITHUB_REPOSITORY `
               --json assets `
               | ConvertFrom-Json
-            if ($oldRelease.assets.name -contains "pilot-wizard-channel.txt") {
-              Write-Host "Preserving legacy Preview-channel bridge release $oldTag."
+            if ($oldRelease.assets.name -contains "preview-wizard-channel.txt" -or
+                $oldRelease.assets.name -contains "pilot-wizard-channel.txt") {
+              Write-Host "Preserving Preview-channel bridge release $oldTag."
               continue
             }
 
