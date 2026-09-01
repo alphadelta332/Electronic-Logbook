@@ -19,7 +19,7 @@ public sealed class PreviewWorkbookPostMigrationHandoffTests : IDisposable
     }
 
     [Fact]
-    public async Task InstallAsync_StampsVerifiedCompletionThenAtomicallyInstallsAndRetainsUntouchedBackup()
+    public async Task InstallAsync_StampsAndInstallsThenRetainsOnlyFinalAndUntouchedBackupWorkbooks()
     {
         var staging = await CreateStagingAsync();
         var hostedResult = CompletedHostedResult(staging.SourceFingerprint);
@@ -34,8 +34,11 @@ public sealed class PreviewWorkbookPostMigrationHandoffTests : IDisposable
         Assert.Equal(Path.GetFullPath(staging.OriginalWorkbookPath), result.FinalWorkbookPath);
         Assert.Equal(staging.BackupWorkbookPath, result.UntouchedBackupWorkbookPath);
         Assert.True(File.Exists(result.UntouchedBackupWorkbookPath));
-        Assert.True(File.Exists(result.InstallationRollbackBackupPath));
         Assert.False(File.Exists(staging.StagedWorkbookPath));
+        Assert.Equal(2, Directory.EnumerateFiles(directory, "*.xlsm").Count());
+        Assert.Empty(Directory.EnumerateFiles(directory, "*_Old_*.xlsm"));
+        Assert.Empty(Directory.EnumerateFiles(directory, ".*_handoff.json"));
+        Assert.Empty(Directory.EnumerateFiles(directory, ".*_handoff.json.*.tmp"));
         Assert.Equal(
             TestRepo.Version,
             WorkbookPackageValidator.ValidateWorkbookPackage(result.FinalWorkbookPath));

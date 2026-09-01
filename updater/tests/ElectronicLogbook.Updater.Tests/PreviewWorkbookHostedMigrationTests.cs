@@ -1,9 +1,22 @@
+using System.Security.Cryptography;
 using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater.Tests;
 
 public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
 {
+    public enum HostedInterruptionPoint
+    {
+        Begin,
+        Status,
+        PrepareRecovery,
+        AppendOperations,
+        AppendConfiguration,
+        ReadOperations,
+        ReadConfiguration,
+        Complete
+    }
+
     private readonly string directory = Path.Combine(
         Path.GetTempPath(),
         $"PreviewWorkbookHostedMigrationTests-{Guid.NewGuid():N}");
@@ -18,7 +31,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
     {
         var staging = await CreateStagingAsync();
         var events = new List<string>();
-        var client = new RecordingHostedClient(events);
+        using var client = new RecordingHostedClient(events);
         var ledger = new RecordingLedger(events);
         var session = Session(client.AccountId);
         var workflow = new PreviewWorkbookHostedMigration(
@@ -45,7 +58,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
     {
         var staging = await CreateStagingAsync();
         var events = new List<string>();
-        var client = new RecordingHostedClient(events);
+        using var client = new RecordingHostedClient(events);
         var firstLedger = new RecordingLedger(events) { AddUnexpectedReadbackOperation = true };
         var firstWorkflow = new PreviewWorkbookHostedMigration(
             client,
@@ -75,41 +88,60 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
         Assert.Equal(1, client.CompleteCallCount);
     }
 
-    [Fact]
-    public async Task RunAsync_NetworkInterruptionDoesNotCompleteAndRetryReusesMigrationAndKeys()
+    [Theory]
+    [InlineData(HostedInterruptionPoint.Begin)]
+    [InlineData(HostedInterruptionPoint.Status)]
+    [InlineData(HostedInterruptionPoint.PrepareRecovery)]
+    [InlineData(HostedInterruptionPoint.AppendOperations)]
+    [InlineData(HostedInterruptionPoint.AppendConfiguration)]
+    [InlineData(HostedInterruptionPoint.ReadOperations)]
+    [InlineData(HostedInterruptionPoint.ReadConfiguration)]
+    [InlineData(HostedInterruptionPoint.Complete)]
+    public async Task RunAsync_LostNetworkResponseAtEveryHostedBoundary_RetryReusesMigrationKeysAndData(
+        HostedInterruptionPoint interruptionPoint)
     {
         var staging = await CreateStagingAsync();
         var events = new List<string>();
-        var client = new RecordingHostedClient(events);
-        var interruptedLedger = new RecordingLedger(events) { InterruptNextAppend = true };
+        var interruption = new OneShotNetworkInterruption(interruptionPoint);
+        using var client = new RecordingHostedClient(events, interruption);
+        var ledger = new RecordingLedger(events, interruption);
         var firstWorkflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
-            _ => interruptedLedger,
+            _ => ledger,
             (_, migration) => CreatePayload(migration));
 
         await Assert.ThrowsAsync<HttpRequestException>(() =>
             firstWorkflow.RunAsync(staging, "FlightLogX Logbook"));
         var firstMigration = client.Migration;
-        var firstKey = client.LastRecoveryMaterial!.LogbookKey;
 
-        Assert.Equal(HostedWorkbookMigrationStatus.Pending, firstMigration.Status);
-        Assert.Equal(0, client.CompleteCallCount);
+        Assert.True(interruption.HasInterrupted);
         Assert.True(File.Exists(staging.OriginalWorkbookPath));
         Assert.True(File.Exists(staging.BackupWorkbookPath));
 
         var retryWorkflow = new PreviewWorkbookHostedMigration(
             client,
             Session(client.AccountId),
-            _ => new RecordingLedger(events),
+            _ => ledger,
             (_, migration) => CreatePayload(migration));
         var retry = await retryWorkflow.RunAsync(staging, "FlightLogX Logbook");
 
         Assert.Equal(firstMigration.MigrationId, retry.Migration.MigrationId);
-        Assert.Equal(firstKey, client.LastRecoveryMaterial!.LogbookKey);
-        Assert.True(client.LastRecoveryMaterial.Resumed);
         Assert.Equal(HostedWorkbookMigrationStatus.Completed, retry.Migration.Status);
         Assert.Equal(1, client.CompleteCallCount);
+        Assert.Equal(1, ledger.StoredOperationCount);
+        Assert.Equal(1, client.StoredConfigurationCount);
+        var expectedRecoveryPreparations = interruptionPoint is
+            HostedInterruptionPoint.Begin or
+            HostedInterruptionPoint.Status or
+            HostedInterruptionPoint.Complete
+                ? 1
+                : 2;
+        Assert.Equal(expectedRecoveryPreparations, client.PrepareCallCount);
+        Assert.Equal(expectedRecoveryPreparations, client.ObservedLogbookKeys.Count);
+        Assert.Equal(expectedRecoveryPreparations, client.ObservedRecoveryFingerprints.Count);
+        Assert.Single(client.ObservedLogbookKeys.Distinct());
+        Assert.Single(client.ObservedRecoveryFingerprints.Distinct(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -117,7 +149,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
     {
         var staging = await CreateStagingAsync();
         var events = new List<string>();
-        var client = new RecordingHostedClient(events);
+        using var client = new RecordingHostedClient(events);
         var ledgerCreateCount = 0;
         var workflow = new PreviewWorkbookHostedMigration(
             client,
@@ -213,15 +245,22 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             new Dictionary<string, int>());
 
-    private sealed class RecordingHostedClient : IWorkbookMigrationHostedClient
+    private sealed class RecordingHostedClient : IWorkbookMigrationHostedClient, IDisposable
     {
         private readonly List<string> events;
+        private readonly OneShotNetworkInterruption? interruption;
         private readonly PortableLogbookKey retainedKey = PortableLogbookKey.Generate();
+        private readonly byte[] retainedRecoveryPrivateKey;
         private HostedConfigurationRevisionEnvelope? configuration;
 
-        public RecordingHostedClient(List<string> events)
+        public RecordingHostedClient(
+            List<string> events,
+            OneShotNetworkInterruption? interruption = null)
         {
             this.events = events;
+            this.interruption = interruption;
+            using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
+            retainedRecoveryPrivateKey = recoveryKeyPair.ExportPrivateKey();
         }
 
         public HostedAccountId AccountId { get; } = new("acct_test");
@@ -229,6 +268,9 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
         public PortableWorkbookMigrationRecoveryMaterial? LastRecoveryMaterial { get; private set; }
         public int PrepareCallCount { get; private set; }
         public int CompleteCallCount { get; private set; }
+        public int StoredConfigurationCount => configuration is null ? 0 : 1;
+        public List<PortableLogbookKey> ObservedLogbookKeys { get; } = [];
+        public List<string> ObservedRecoveryFingerprints { get; } = [];
 
         public Task<HostedWorkbookMigration> BeginWorkbookMigrationAsync(
             string sourceFingerprint,
@@ -253,6 +295,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                 DateTimeOffset.Parse("2026-08-29T01:02:03Z"),
                 null,
                 null);
+            interruption?.ThrowAfter(HostedInterruptionPoint.Begin);
             return Task.FromResult(Migration);
         }
 
@@ -261,6 +304,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             events.Add("status");
+            interruption?.ThrowAfter(HostedInterruptionPoint.Status);
             return Task.FromResult(Migration);
         }
 
@@ -276,8 +320,19 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                     migration.LogbookId,
                     migration.DeviceId),
                 retainedKey,
-                PortableWorkbookRecoveryKeyPair.Create(),
+                PortableWorkbookRecoveryKeyPair.Import(retainedRecoveryPrivateKey),
                 resumed: PrepareCallCount > 1);
+            ObservedLogbookKeys.Add(LastRecoveryMaterial.LogbookKey);
+            ObservedRecoveryFingerprints.Add(LastRecoveryMaterial.RecoveryKeyPair.Fingerprint);
+            try
+            {
+                interruption?.ThrowAfter(HostedInterruptionPoint.PrepareRecovery);
+            }
+            catch
+            {
+                LastRecoveryMaterial.Dispose();
+                throw;
+            }
             return Task.FromResult(LastRecoveryMaterial);
         }
 
@@ -299,6 +354,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                 CompletedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
+            interruption?.ThrowAfter(HostedInterruptionPoint.Complete);
             return Task.FromResult(Migration);
         }
 
@@ -319,6 +375,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                 revision.PayloadNonce,
                 revision.PayloadTag,
                 revision.PayloadHash);
+            interruption?.ThrowAfter(HostedInterruptionPoint.AppendConfiguration);
             return Task.FromResult(configuration);
         }
 
@@ -330,19 +387,34 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
         {
             cancellationToken.ThrowIfCancellationRequested();
             events.Add("read-configuration");
-            return Task.FromResult(new HostedConfigurationRevisionPage(
+            var page = new HostedConfigurationRevisionPage(
                 configuration is null ? [] : [configuration],
                 configuration?.HostedRevision ?? afterHostedRevision,
-                false));
+                false);
+            interruption?.ThrowAfter(HostedInterruptionPoint.ReadConfiguration);
+            return Task.FromResult(page);
         }
+
+        public void Dispose() => CryptographicOperations.ZeroMemory(retainedRecoveryPrivateKey);
     }
 
-    private sealed class RecordingLedger(List<string> events) : IHostedLogbookLedger
+    private sealed class RecordingLedger : IHostedLogbookLedger
     {
         private readonly InMemoryHostedLogbookLedger inner = new();
+        private readonly List<string> events;
+        private readonly OneShotNetworkInterruption? interruption;
+        private readonly HashSet<RevisionId> storedOperationIds = [];
+
+        public RecordingLedger(
+            List<string> events,
+            OneShotNetworkInterruption? interruption = null)
+        {
+            this.events = events;
+            this.interruption = interruption;
+        }
 
         public bool AddUnexpectedReadbackOperation { get; init; }
-        public bool InterruptNextAppend { get; set; }
+        public int StoredOperationCount => storedOperationIds.Count;
 
         public async ValueTask<HostedAppendResult> AppendOperationsAsync(
             LogbookId logbookId,
@@ -351,17 +423,14 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
             CancellationToken cancellationToken = default)
         {
             events.Add("append-operation");
-            if (InterruptNextAppend)
-            {
-                InterruptNextAppend = false;
-                throw new HttpRequestException("Hosted connection interrupted.");
-            }
-
-            return await inner.AppendOperationsAsync(
+            var result = await inner.AppendOperationsAsync(
                 logbookId,
                 deviceId,
                 operations,
                 cancellationToken);
+            storedOperationIds.UnionWith(operations.Select(operation => operation.RevisionId));
+            interruption?.ThrowAfter(HostedInterruptionPoint.AppendOperations);
+            return result;
         }
 
         public async ValueTask<HostedOperationPage> ReadMissingOperationsAsync(
@@ -376,6 +445,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                 afterHostedRevision,
                 pageSize,
                 cancellationToken);
+            interruption?.ThrowAfter(HostedInterruptionPoint.ReadOperations);
             if (!AddUnexpectedReadbackOperation || page.Operations.Count == 0)
             {
                 return page;
@@ -398,5 +468,22 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
             long throughHostedRevision,
             CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
+    }
+
+    private sealed class OneShotNetworkInterruption(HostedInterruptionPoint point)
+    {
+        public bool HasInterrupted { get; private set; }
+
+        public void ThrowAfter(HostedInterruptionPoint currentPoint)
+        {
+            if (HasInterrupted || currentPoint != point)
+            {
+                return;
+            }
+
+            HasInterrupted = true;
+            throw new HttpRequestException(
+                $"Hosted connection interrupted after {currentPoint} completed remotely.");
+        }
     }
 }

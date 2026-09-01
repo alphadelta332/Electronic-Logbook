@@ -18,7 +18,34 @@
     )
 
     LocalAppDataAssets = @(
-        @{ Path = 'ElectronicLogbook'; Required = $true; Classification = 'secret-machine-state' }
+        @{ Path = 'ElectronicLogbook/AndroidSigning/electronic-logbook-development.json'; Required = $true; Classification = 'signing-metadata'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/AndroidSigning/electronic-logbook-development.keystore'; Required = $true; Classification = 'secret-signing-identity'; Lifecycle = 'local-transfer' }
+        # These permanent Preview filenames are retained legacy cryptographic identifiers.
+        @{ Path = 'ElectronicLogbook/AndroidSigning/flightlogx-pilot.keystore'; Required = $true; Classification = 'secret-signing-identity'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/AndroidSigning/flightlogx-pilot-credentials.json'; Required = $true; Classification = 'secret-signing-credentials'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/AndroidSigning/flightlogx-pilot-signing.json'; Required = $true; Classification = 'signing-metadata'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Google Auth/webclientid.txt'; Required = $false; Classification = 'public-oauth-identifier'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Resend/privatepilotauthdevapi.txt'; Required = $true; Classification = 'secret-api-credential'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Resend/privatepilotauthapi.txt'; Required = $true; Classification = 'secret-api-credential'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Supabase/access-token.txt'; Required = $true; Classification = 'secret-api-credential'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Supabase/hosted-preview-projects.local.json'; Required = $false; RequirementGroup = 'hosted-project-metadata'; Classification = 'private-project-metadata'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Supabase/hosted-pilot-projects.local.json'; Required = $false; RequirementGroup = 'hosted-project-metadata'; Classification = 'private-project-metadata-compatibility'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Supabase/recovery-envelope/development.env'; Required = $true; Classification = 'secret-recovery-configuration'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Supabase/recovery-envelope/private-pilot.env'; Required = $true; Classification = 'secret-recovery-configuration'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/ParticipantHandoffs'; Required = $false; Classification = 'private-participant-handoff'; Lifecycle = 'local-transfer' }
+    )
+
+    # Known local trees that must stay outside the operational transfer archive. This is
+    # policy documentation consumed by transfer validation, not a deletion list.
+    LocalAppDataExclusions = @(
+        @{ Path = 'ElectronicLogbook/AnalysisTools'; Lifecycle = 'regenerated-dependency'; Reason = 'Installed analysis packages and source caches are reproducible and machine-specific.' }
+        @{ Path = 'ElectronicLogbook/AndroidDeviceBridge'; Lifecycle = 'deliberate-exclusion'; Reason = 'Device-specific IndexedDB backups remain on the source machine.' }
+        @{ Path = 'ElectronicLogbook/Evidence'; Lifecycle = 'regenerated-output'; Reason = 'Generated local evidence is not an operational prerequisite.' }
+        @{ Path = 'ElectronicLogbook/Gate1RetainedState'; Lifecycle = 'deliberate-exclusion'; Reason = 'Retained-device recovery snapshots must not be copied as configuration.' }
+        @{ Path = 'ElectronicLogbook/Google Auth/androidclientid.txt'; Lifecycle = 'deliberate-exclusion'; Reason = 'No active local consumer reads this public identifier.' }
+        @{ Path = 'ElectronicLogbook/Google Auth/client_secret_*.json'; Lifecycle = 'deliberate-exclusion'; Reason = 'Google client-secret downloads are not consumed by the updater or Android build.' }
+        @{ Path = 'ElectronicLogbook/Google Auth/webclientsecret.txt'; Lifecycle = 'deliberate-exclusion'; Reason = 'The updater uses browser sign-in without a local Google client secret.' }
+        @{ Path = 'ElectronicLogbook/Recovery Codes'; Lifecycle = 'deliberate-exclusion'; Reason = 'User recovery artifacts are not development credentials and require separate protected handling.' }
     )
 
     CodexAssets = @(

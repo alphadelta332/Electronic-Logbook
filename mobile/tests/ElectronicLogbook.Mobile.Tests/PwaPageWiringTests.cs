@@ -1509,11 +1509,33 @@ public sealed class PwaPageWiringTests
         Assert.Contains("/google-services.json", appGitIgnore, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    public void GradleBuildTypeExtractionAcceptsLfAndCrLf(string lineEnding)
+    {
+        var gradle = string.Join(
+            lineEnding,
+            [
+                "android {",
+                "    buildTypes {",
+                "        preview {",
+                "            initWith release",
+                "        }",
+                "    }",
+                "}"
+            ]);
+
+        var preview = GetGradleBuildType(gradle, "preview");
+
+        Assert.Contains("initWith release", preview, StringComparison.Ordinal);
+    }
+
     private static string GetGradleBuildType(string gradle, string buildType)
     {
         var match = Regex.Match(
             gradle,
-            $@"(?ms)^\s{{8}}{Regex.Escape(buildType)}\s*\{{(?<body>.*?)^\s{{8}}\}}$");
+            $@"(?ms)^[ ]{{8}}{Regex.Escape(buildType)}[ \t]*\{{(?<body>.*?)^[ ]{{8}}\}}[ \t]*\r?$");
         Assert.True(match.Success, $"Could not find Android build type '{buildType}'.");
         return match.Groups["body"].Value;
     }

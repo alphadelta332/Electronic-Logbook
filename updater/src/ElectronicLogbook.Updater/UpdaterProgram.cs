@@ -107,7 +107,7 @@ public static class UpdaterProgram
         }
         catch (UpdaterUsageException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            Console.Error.WriteLine(DiagnosticBundleFactory.RedactSensitiveText(ex.Message));
             Console.Error.WriteLine();
             Console.Error.WriteLine(UpdaterOptions.HelpText);
             return 2;
@@ -128,7 +128,8 @@ public static class UpdaterProgram
                     finalWorkbookPath ?? options.OutputPath);
             }
 
-            Console.Error.WriteLine($"Update failed: {ex.Message}");
+            Console.Error.WriteLine(
+                $"Update failed: {DiagnosticBundleFactory.RedactSensitiveText(ex.Message)}");
             return 1;
         }
         finally

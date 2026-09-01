@@ -5,7 +5,6 @@ namespace ElectronicLogbook.Updater;
 public sealed record PreviewWorkbookPostMigrationHandoffResult(
     string FinalWorkbookPath,
     string UntouchedBackupWorkbookPath,
-    string InstallationRollbackBackupPath,
     WorkbookMigrationStamp Stamp);
 
 public sealed class PreviewWorkbookPostMigrationHandoff
@@ -91,11 +90,35 @@ public sealed class PreviewWorkbookPostMigrationHandoff
             validation);
 
         await ValidateUntouchedBackupAsync(staging, cancellationToken);
+        DeleteRedundantInstallationBackup(
+            handoff.BackupWorkbookPath,
+            handoff.FinalWorkbookPath,
+            staging.BackupWorkbookPath);
         return new PreviewWorkbookPostMigrationHandoffResult(
             handoff.FinalWorkbookPath,
             staging.BackupWorkbookPath,
-            handoff.BackupWorkbookPath,
             stamp);
+    }
+
+    private static void DeleteRedundantInstallationBackup(
+        string installationBackupPath,
+        string finalWorkbookPath,
+        string untouchedBackupPath)
+    {
+        var backup = Path.GetFullPath(installationBackupPath);
+        if (string.Equals(backup, Path.GetFullPath(finalWorkbookPath), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(backup, Path.GetFullPath(untouchedBackupPath), StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                "The installation rollback backup overlaps a retained workbook and cannot be cleaned safely.");
+        }
+
+        File.Delete(backup);
+        if (File.Exists(backup))
+        {
+            throw new IOException(
+                "The redundant installation rollback backup could not be removed after the untouched backup was verified.");
+        }
     }
 
     private static WorkbookMigrationStamp CreateVerifiedStamp(

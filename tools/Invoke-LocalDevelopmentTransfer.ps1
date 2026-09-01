@@ -283,6 +283,74 @@ function Add-AssetToStage {
     return [pscustomobject]@{ Missing = $false; Required = [bool]$Asset.Required; Path = $Asset.Path }
 }
 
+function Assert-TransferConfiguration {
+    $allowedLifecycles = @('local-transfer', 'regenerated-dependency', 'regenerated-output', 'fresh-authentication', 'deliberate-exclusion')
+    $transferPaths = @{}
+
+    foreach ($asset in $script:TransferConfig.LocalAppDataAssets) {
+        $normalizedPath = (ConvertTo-PortablePath $asset.Path).TrimEnd('/')
+        if ($normalizedPath -eq 'ElectronicLogbook') {
+            throw 'LocalAppDataAssets must explicitly allowlist operational files; the whole ElectronicLogbook directory is forbidden.'
+        }
+        if ($asset.Lifecycle -ne 'local-transfer') {
+            throw "Local transfer asset has an invalid lifecycle: $($asset.Path)"
+        }
+        if ([string]::IsNullOrWhiteSpace($asset.Classification)) {
+            throw "Local transfer asset has no classification: $($asset.Path)"
+        }
+        if ($transferPaths.ContainsKey($normalizedPath)) {
+            throw "Local transfer asset is declared more than once: $($asset.Path)"
+        }
+        $transferPaths[$normalizedPath] = $true
+    }
+
+    foreach ($exclusion in $script:TransferConfig.LocalAppDataExclusions) {
+        $normalizedPath = (ConvertTo-PortablePath $exclusion.Path).TrimEnd('/')
+        if ($exclusion.Lifecycle -notin $allowedLifecycles -or $exclusion.Lifecycle -eq 'local-transfer') {
+            throw "Local exclusion has an invalid lifecycle: $($exclusion.Path)"
+        }
+        if ([string]::IsNullOrWhiteSpace($exclusion.Reason)) {
+            throw "Local exclusion has no reason: $($exclusion.Path)"
+        }
+        foreach ($transferPath in $transferPaths.Keys) {
+            if ($transferPath -eq $normalizedPath -or
+                $transferPath.StartsWith($normalizedPath + '/', [StringComparison]::OrdinalIgnoreCase)) {
+                throw "Local path is both transferred and excluded: $($exclusion.Path)"
+            }
+        }
+    }
+}
+
+function Test-LocalPathPolicyMatch {
+    param(
+        [string]$RelativePath,
+        [string]$PolicyPath
+    )
+
+    $relative = (ConvertTo-PortablePath $RelativePath).TrimEnd('/')
+    $policy = (ConvertTo-PortablePath $PolicyPath).TrimEnd('/')
+    return $relative -like $policy -or
+        $relative.StartsWith($policy + '/', [StringComparison]::OrdinalIgnoreCase)
+}
+
+function Assert-LocalAppDataInventoryClassified {
+    $localRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook'
+    if (-not (Test-Path -LiteralPath $localRoot -PathType Container)) { return }
+
+    $policies = @($script:TransferConfig.LocalAppDataAssets) + @($script:TransferConfig.LocalAppDataExclusions)
+    $unclassified = [Collections.Generic.List[string]]::new()
+    foreach ($file in Get-ChildItem -LiteralPath $localRoot -Recurse -Force -File -ErrorAction Stop) {
+        $relative = ConvertTo-PortablePath ([IO.Path]::GetRelativePath($LocalAppDataRoot, $file.FullName))
+        $matched = @($policies | Where-Object { Test-LocalPathPolicyMatch -RelativePath $relative -PolicyPath $_.Path }).Count -gt 0
+        if (-not $matched) { $unclassified.Add($relative) }
+    }
+
+    if ($unclassified.Count -gt 0) {
+        $examples = @($unclassified | Select-Object -First 5) -join ', '
+        throw "$($unclassified.Count) local ElectronicLogbook file(s) are unclassified. Update local-development-transfer.psd1 before export. First paths: $examples"
+    }
+}
+
 function Invoke-ExportAction {
     $records = [Collections.Generic.List[object]]::new()
     $missing = @()
@@ -291,6 +359,7 @@ function Invoke-ExportAction {
 
     try {
         Write-Step 'Classifying operational files'
+        Assert-LocalAppDataInventoryClassified
         if (-not $inventoryOnly) { New-Item -ItemType Directory -Path $stageRoot -Force | Out-Null }
 
         foreach ($asset in $script:TransferConfig.RepoAssets) {
@@ -300,6 +369,15 @@ function Invoke-ExportAction {
         foreach ($asset in $script:TransferConfig.LocalAppDataAssets) {
             $result = Add-AssetToStage -SourceRoot $LocalAppDataRoot -TargetRootName 'LocalAppData' -Asset $asset -StageRoot $stageRoot -Records $records -InventoryOnly:$inventoryOnly
             if ($result.Missing) { $missing += $result }
+        }
+        $requirementGroups = @($script:TransferConfig.LocalAppDataAssets |
+            Where-Object { $_.ContainsKey('RequirementGroup') -and -not [string]::IsNullOrWhiteSpace($_.RequirementGroup) } |
+            Group-Object { $_.RequirementGroup })
+        foreach ($group in $requirementGroups) {
+            $found = @($group.Group | Where-Object { @(Get-AssetMatches -Root $LocalAppDataRoot -Asset $_).Count -gt 0 }).Count -gt 0
+            if (-not $found) {
+                throw "Required local transfer asset group is missing: $($group.Name)"
+            }
         }
         foreach ($asset in $script:TransferConfig.CodexAssets) {
             $result = Add-AssetToStage -SourceRoot $CodexHome -TargetRootName 'Codex' -Asset $asset -StageRoot $stageRoot -Records $records -InventoryOnly:$inventoryOnly
@@ -318,6 +396,11 @@ function Invoke-ExportAction {
 
         $totalBytes = ($records | ForEach-Object { [long]$_['length'] } | Measure-Object -Sum).Sum
         Write-Host "Inventory: $($records.Count) files, $([math]::Round(($totalBytes / 1MB), 2)) MiB"
+        $classificationSummary = @($records |
+            Group-Object { $_['classification'] } |
+            Sort-Object Name |
+            ForEach-Object { "$($_.Name)=$($_.Count)" }) -join '; '
+        Write-Host "Inventory by classification: $classificationSummary"
         if ($inventoryOnly) {
             Write-Host 'Export dry run completed. No staging directory or archive was created.' -ForegroundColor Green
             return
@@ -922,6 +1005,8 @@ function Invoke-VerifyAction {
     if ($failures.Count -gt 0) { throw "$($failures.Count) required environment check(s) failed." }
     Write-Host 'Required environment checks passed.' -ForegroundColor Green
 }
+
+Assert-TransferConfiguration
 
 switch ($Action) {
     'Export' { Invoke-ExportAction }

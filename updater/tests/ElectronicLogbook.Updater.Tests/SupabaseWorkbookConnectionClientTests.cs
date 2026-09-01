@@ -259,29 +259,43 @@ public sealed class SupabaseWorkbookConnectionClientTests
         await client.CompleteEmailSignInAsync("123456");
         var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
         using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
+        var packageKeyBytes = packageKey.ToBytes();
+        var recoveryPrivateKeyBytes = recoveryKeyPair.ExportPrivateKey();
+        var packageKeyBase64 = Convert.ToBase64String(packageKeyBytes);
+        var recoveryPrivateKeyBase64 = Convert.ToBase64String(recoveryPrivateKeyBytes);
 
-        await client.EnrollWorkbookRecoveryAsync(
-            migration.LogbookId,
-            migration.DeviceId,
-            packageKey,
-            recoveryKeyPair);
+        try
+        {
+            await client.EnrollWorkbookRecoveryAsync(
+                migration.LogbookId,
+                migration.DeviceId,
+                packageKey,
+                recoveryKeyPair);
 
-        Assert.True(handler.EnrollmentMatchedPackageKey);
-        var configurationRequest = handler.Requests.Single(request =>
-            request.Path == "/functions/v1/recovery-envelope" &&
-            JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "configuration");
-        var enrollmentRequest = handler.Requests.Single(request =>
-            request.Path == "/functions/v1/recovery-envelope" &&
-            JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "enroll");
-        using var enrollmentJson = JsonDocument.Parse(enrollmentRequest.Body);
-        Assert.Equal(logbookId.ToString("D"), enrollmentJson.RootElement.GetProperty("logbookId").GetString());
-        Assert.Equal(
-            recoveryKeyPair.PublicKey,
-            enrollmentJson.RootElement.GetProperty("devicePublicKey").GetString());
-        Assert.Equal("test-v1", enrollmentJson.RootElement.GetProperty("ingressKeyVersionId").GetString());
-        Assert.DoesNotContain(packageKey.ToRecoveryCode(), enrollmentRequest.Body, StringComparison.Ordinal);
-        Assert.Equal("Bearer", configurationRequest.AuthorizationScheme);
-        Assert.Equal("Bearer", enrollmentRequest.AuthorizationScheme);
+            Assert.True(handler.EnrollmentMatchedPackageKey);
+            var configurationRequest = handler.Requests.Single(request =>
+                request.Path == "/functions/v1/recovery-envelope" &&
+                JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "configuration");
+            var enrollmentRequest = handler.Requests.Single(request =>
+                request.Path == "/functions/v1/recovery-envelope" &&
+                JsonDocument.Parse(request.Body).RootElement.GetProperty("action").GetString() == "enroll");
+            using var enrollmentJson = JsonDocument.Parse(enrollmentRequest.Body);
+            Assert.Equal(logbookId.ToString("D"), enrollmentJson.RootElement.GetProperty("logbookId").GetString());
+            Assert.Equal(
+                recoveryKeyPair.PublicKey,
+                enrollmentJson.RootElement.GetProperty("devicePublicKey").GetString());
+            Assert.Equal("test-v1", enrollmentJson.RootElement.GetProperty("ingressKeyVersionId").GetString());
+            Assert.DoesNotContain(packageKey.ToRecoveryCode(), enrollmentRequest.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain(packageKeyBase64, enrollmentRequest.Body, StringComparison.Ordinal);
+            Assert.DoesNotContain(recoveryPrivateKeyBase64, enrollmentRequest.Body, StringComparison.Ordinal);
+            Assert.Equal("Bearer", configurationRequest.AuthorizationScheme);
+            Assert.Equal("Bearer", enrollmentRequest.AuthorizationScheme);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(packageKeyBytes);
+            CryptographicOperations.ZeroMemory(recoveryPrivateKeyBytes);
+        }
     }
 
     [Fact]

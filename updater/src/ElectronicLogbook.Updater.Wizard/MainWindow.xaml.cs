@@ -1877,7 +1877,8 @@ public partial class MainWindow : Window
 
     private void AppendLog(string message)
     {
-        UpdateLogTextBox.AppendText($"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}");
+        var redacted = DiagnosticBundleFactory.RedactSensitiveText(message);
+        UpdateLogTextBox.AppendText($"{DateTime.Now:HH:mm:ss} {redacted}{Environment.NewLine}");
         UpdateLogTextBox.ScrollToEnd();
     }
 

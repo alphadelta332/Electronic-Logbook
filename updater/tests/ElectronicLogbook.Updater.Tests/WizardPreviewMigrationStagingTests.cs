@@ -111,4 +111,40 @@ public sealed class WizardPreviewMigrationStagingTests
         Assert.Contains("previewFailure?.CustomerMessage", updateFlow, StringComparison.Ordinal);
         Assert.Contains("Migration stopped safely", updateFlow, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void PreviewUpdateLogsUseCentralRedactionAndDoNotReferenceFlightOrKeyPayloadObjects()
+    {
+        var wizard = File.ReadAllText(TestRepo.FindFile(
+            "updater/src/ElectronicLogbook.Updater.Wizard/MainWindow.xaml.cs"));
+        var flowStart = wizard.IndexOf(
+            "private async Task StartUpdateAsync()",
+            StringComparison.Ordinal);
+        var flowEnd = wizard.IndexOf(
+            "private HandoffRecoveryResult RecoverPendingHandoffForWizard()",
+            flowStart,
+            StringComparison.Ordinal);
+        var logStart = wizard.IndexOf(
+            "private void AppendLog(string message)",
+            StringComparison.Ordinal);
+        var logEnd = wizard.IndexOf(
+            "private async Task TryWriteDiagnosticBundleAsync(",
+            logStart,
+            StringComparison.Ordinal);
+        Assert.True(flowStart >= 0 && flowEnd > flowStart, "StartUpdateAsync could not be isolated.");
+        Assert.True(logStart >= 0 && logEnd > logStart, "AppendLog could not be isolated.");
+        var updateFlow = wizard[flowStart..flowEnd];
+        var appendLog = wizard[logStart..logEnd];
+
+        Assert.Contains(
+            "DiagnosticBundleFactory.RedactSensitiveText(message)",
+            appendLog,
+            StringComparison.Ordinal);
+        Assert.Contains("UpdateLogTextBox.AppendText", appendLog, StringComparison.Ordinal);
+        Assert.DoesNotContain("previewHostedMigration.VerifiedReceipt", updateFlow, StringComparison.Ordinal);
+        Assert.DoesNotContain(".LogbookKey", updateFlow, StringComparison.Ordinal);
+        Assert.DoesNotContain(".RecoveryKeyPair", updateFlow, StringComparison.Ordinal);
+        Assert.DoesNotContain("PayloadCiphertext", updateFlow, StringComparison.Ordinal);
+        Assert.DoesNotContain("PortableLogbookJson", updateFlow, StringComparison.Ordinal);
+    }
 }

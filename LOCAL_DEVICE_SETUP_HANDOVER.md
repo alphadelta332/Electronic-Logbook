@@ -5,8 +5,8 @@ another trusted personal computer. It deliberately contains no passwords, tokens
 private keys, user names, drive letters, or machine-specific paths.
 
 The public repository supplies the installer and transfer commands. Private project
-context, signing keys, OAuth files, hosted Preview credentials, and local recovery state
-travel inside a local 7-Zip archive.
+context, signing keys, the required public OAuth identifier, hosted Preview credentials,
+and narrowly selected local operational state travel inside a local 7-Zip archive.
 
 The archive is intentionally unencrypted for direct transfer between trusted personal
 devices. It contains credentials and signing material: never upload it to GitHub, place
@@ -56,11 +56,12 @@ It includes:
 - the mobile hosted-sync local JSON when configured;
 - private `.github/*.pem` material when present;
 - the reusable project-local `.codex` scripts, prompt, schema, and hooks;
-- `%LOCALAPPDATA%\ElectronicLogbook`, including durable Android signing, Google OAuth,
-  Supabase management/project configuration, separate domain-scoped Resend sending keys
-  under `Resend\privatepilotauthdevapi.txt` and `Resend\privatepilotauthapi.txt`, separate
-  `development.env` and `private-pilot.env` recovery configurations, and the small
-  Android device-bridge records;
+- an explicit allowlist under `%LOCALAPPDATA%\ElectronicLogbook`: the durable Android
+  signing files, public Google Web client ID, Supabase management/project configuration,
+  separate domain-scoped Resend sending keys under
+  `Resend\privatepilotauthdevapi.txt` and `Resend\privatepilotauthapi.txt`, separate
+  `development.env` and `private-pilot.env` recovery configurations, and generated
+  participant handoffs when present;
 - the custom Graphify skill when installed; and
 - a sanitized reference snapshot of stable Codex preferences.
 
@@ -79,6 +80,36 @@ Every payload file is recorded with a SHA-256 hash, length, target root, relativ
 and non-secret classification. The internal manifest also records the Git branch,
 commit, whether tracked/untracked repository state was clean, and redacted software
 versions.
+
+### Why there is no single `.env` file
+
+A single `.env` file would make this setup more fragile, not less. The local inputs do
+not share a lifecycle or parser: Android keystores are binary identities, signing and
+project metadata are structured JSON, recovery-envelope functions already consume
+project-specific `.env` files, and the Supabase/Resend tools consume narrowly scoped
+credentials. Combining them would create one high-impact secret, require extra parsing
+and copying in every consumer, and make rotation or recovery easier to get wrong.
+
+The central control point is therefore the transfer manifest and its verifier, not a
+universal secret file. `tools/local-development-transfer.psd1` explicitly classifies
+each transferred file. `Export -WhatIf` reports counts by classification, and `Verify`
+checks the required values without printing them. Export stops if it discovers a local
+file that is neither allowlisted nor explicitly excluded, so new state cannot silently
+leak into the archive or disappear from the handover.
+
+Known local state is handled as follows:
+
+| Local state | Lifecycle | Handling |
+| --- | --- | --- |
+| Android signing files | Local transfer | Transfer as an inseparable identity; never regenerate the Preview key. |
+| Supabase, Resend, and recovery-envelope credentials | Local transfer | Keep in their existing scoped files and validate without displaying values. |
+| Google Web client ID | Local transfer | Transfer the public identifier only; Google client-secret files are not consumed or transferred. |
+| Participant handoffs | Local transfer | Transfer only when present; keep private and outside git. |
+| Analysis tools | Regenerated dependency | Reinstall or regenerate; do not transfer caches or embedded source repositories. |
+| Evidence | Regenerated output | Recreate when needed; it is not configuration. |
+| Android device-bridge and Gate 1 retained-state backups | Deliberate exclusion | Keep on the source machine; they are device-specific recovery evidence. |
+| User recovery-code files | Deliberate exclusion | Protect separately; they are not development credentials. |
+| GitHub, Firebase, Supabase CLI, and Codex login sessions | Fresh authentication | Sign in again on the destination machine. |
 
 The Windows updater's Google sign-in uses the system's default HTTPS browser and returns
 through a short-lived listener bound only to `127.0.0.1`. The updater does not consume or
@@ -108,7 +139,9 @@ It explicitly excludes:
 - `artifacts`, `mobile/artifacts`, and `graphify-out`;
 - Codex authentication, sessions, databases, plugin caches, logs, attachments,
   generated images, and bounded-roadmap run history;
-- Android `local.properties` and other paths that belong to one machine; and
+- Android `local.properties` and other paths that belong to one machine;
+- local analysis-tool installations, generated evidence, device-bridge backups, retained
+  Gate 1 device state, user recovery-code files, and unused Google client-secret files;
 - GitHub and Codex authentication, which must be established again.
 
 Do not broaden the archive by copying a whole user profile or a whole `.codex`

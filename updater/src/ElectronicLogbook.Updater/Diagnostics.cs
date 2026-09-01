@@ -180,12 +180,12 @@ public static partial class DiagnosticBundleFactory
         };
     }
 
-    private static string RedactSensitiveText(
+    public static string RedactSensitiveText(
         string message,
-        IEnumerable<string?> sensitivePaths)
+        IEnumerable<string?>? sensitivePaths = null)
     {
         var redacted = message;
-        foreach (var path in sensitivePaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+        foreach (var path in (sensitivePaths ?? []).Where(path => !string.IsNullOrWhiteSpace(path)))
         {
             redacted = redacted.Replace(path!, "[redacted-path]", StringComparison.OrdinalIgnoreCase);
             var fileName = Path.GetFileName(path);
@@ -195,7 +195,14 @@ public static partial class DiagnosticBundleFactory
             }
         }
 
+        redacted = PrivateKeyPemRegex().Replace(redacted, "[redacted-private-key]");
+        redacted = PrivateKeyBase64Regex().Replace(redacted, "[redacted-private-key]");
         redacted = RecoveryCodeLineRegex().Replace(redacted, "Recovery code: [redacted-recovery-code]");
+        redacted = RawLogbookKeyBase64Regex().Replace(redacted, "[redacted-logbook-key]");
+        redacted = RawLogbookRecoveryCodeRegex().Replace(redacted, "[redacted-recovery-code]");
+        redacted = LabeledSessionTokenRegex().Replace(redacted, "[redacted-token]");
+        redacted = BearerTokenRegex().Replace(redacted, "Bearer [redacted-token]");
+        redacted = JwtRegex().Replace(redacted, "[redacted-token]");
 
         return SensitiveTokenRegex().Replace(redacted, "[redacted-token]");
     }
@@ -214,4 +221,25 @@ public static partial class DiagnosticBundleFactory
 
     [GeneratedRegex(@"(?i)\bRecovery code:\s*[A-Za-z0-9_-](?:[A-Za-z0-9_-]|\s){42,}")]
     private static partial Regex RecoveryCodeLineRegex();
+
+    [GeneratedRegex(@"(?is)-----BEGIN (?:RSA )?PRIVATE KEY-----.*?-----END (?:RSA )?PRIVATE KEY-----")]
+    private static partial Regex PrivateKeyPemRegex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9+/=])MII[A-Za-z0-9+/=]{100,}(?![A-Za-z0-9+/=])")]
+    private static partial Regex PrivateKeyBase64Regex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9+/=])[A-Za-z0-9+/]{43}=(?![A-Za-z0-9+/=])")]
+    private static partial Regex RawLogbookKeyBase64Regex();
+
+    [GeneratedRegex(@"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")]
+    private static partial Regex RawLogbookRecoveryCodeRegex();
+
+    [GeneratedRegex(@"(?i)\b(?:access|refresh|id|session)[ _-]?token\s*[:=]\s*(?:Bearer\s+)?[""']?[A-Za-z0-9._~+/=-]{12,}[""']?")]
+    private static partial Regex LabeledSessionTokenRegex();
+
+    [GeneratedRegex(@"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{20,}")]
+    private static partial Regex BearerTokenRegex();
+
+    [GeneratedRegex(@"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b")]
+    private static partial Regex JwtRegex();
 }

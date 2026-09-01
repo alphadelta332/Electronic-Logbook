@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text.Json;
 using ElectronicLogbook.Portable;
 
@@ -92,6 +93,73 @@ public sealed class DiagnosticBundleFactoryTests : IDisposable
         Assert.Contains("[redacted-path]", bundle.Phases[0].RecoveryHint, StringComparison.Ordinal);
         Assert.DoesNotContain(sourcePath, bundle.Phases[0].RecoveryHint, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Save and close", bundle.Error?.RecoveryHint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CreateRedactsRawLogbookKeysRecoveryPrivateKeysAndSessionTokensFromAllText()
+    {
+        var logbookKey = PortableLogbookKey.Generate();
+        var logbookKeyBytes = logbookKey.ToBytes();
+        using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
+        var recoveryPrivateKeyBytes = recoveryKeyPair.ExportPrivateKey();
+        var rawLogbookKey = Convert.ToBase64String(logbookKeyBytes);
+        var recoveryCode = logbookKey.ToRecoveryCode();
+        var rawPrivateKey = Convert.ToBase64String(recoveryPrivateKeyBytes);
+        var privateKeyPem = PemEncoding.WriteString("PRIVATE KEY", recoveryPrivateKeyBytes);
+        const string accessToken =
+            "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwcmV2aWV3LXVzZXIifQ.signaturesegment12345";
+        const string refreshToken = "refresh-token-value-that-must-not-survive";
+        var sensitiveMessage = string.Join(
+            " | ",
+            $"raw key {rawLogbookKey}",
+            $"raw recovery {recoveryCode}",
+            $"private key {rawPrivateKey}",
+            privateKeyPem,
+            $"access token: {accessToken}",
+            $"refresh_token={refreshToken}",
+            $"Authorization: Bearer {accessToken}");
+
+        try
+        {
+            var bundle = DiagnosticBundleFactory.Create(
+                TestRepo.Version,
+                report: null,
+                [new UpdaterProgressEvent(
+                    UpdaterProgressEventTypes.PhaseFailed,
+                    UpdaterPhaseIds.CopyLogbookData,
+                    sensitiveMessage,
+                    null,
+                    DateTimeOffset.Parse("2026-09-01T00:00:00Z"),
+                    sensitiveMessage)],
+                new InvalidOperationException(sensitiveMessage),
+                sourceWorkbookPath: null,
+                masterWorkbookPath: null,
+                outputWorkbookPath: null);
+            var json = JsonSerializer.Serialize(bundle, JsonDefaults.Web);
+
+            foreach (var secret in new[]
+            {
+                rawLogbookKey,
+                recoveryCode,
+                rawPrivateKey,
+                privateKeyPem,
+                accessToken,
+                refreshToken
+            })
+            {
+                Assert.DoesNotContain(secret, json, StringComparison.Ordinal);
+            }
+
+            Assert.Contains("[redacted-logbook-key]", json, StringComparison.Ordinal);
+            Assert.Contains("[redacted-recovery-code]", json, StringComparison.Ordinal);
+            Assert.Contains("[redacted-private-key]", json, StringComparison.Ordinal);
+            Assert.Contains("[redacted-token]", json, StringComparison.Ordinal);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(logbookKeyBytes);
+            CryptographicOperations.ZeroMemory(recoveryPrivateKeyBytes);
+        }
     }
 
     [Fact]

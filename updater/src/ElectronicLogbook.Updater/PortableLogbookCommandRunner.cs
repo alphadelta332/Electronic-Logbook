@@ -87,14 +87,15 @@ public static class PortableLogbookCommandRunner
         }
         catch (UpdaterUsageException ex)
         {
-            Console.Error.WriteLine(ex.Message);
+            Console.Error.WriteLine(DiagnosticBundleFactory.RedactSensitiveText(ex.Message));
             Console.Error.WriteLine();
             Console.Error.WriteLine(PortableLogbookCommandOptions.HelpText);
             return Task.FromResult(2);
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Portable logbook command failed: {ex.Message}");
+            Console.Error.WriteLine(
+                $"Portable logbook command failed: {DiagnosticBundleFactory.RedactSensitiveText(ex.Message)}");
             return Task.FromResult(1);
         }
     }

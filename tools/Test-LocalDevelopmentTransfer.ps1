@@ -125,6 +125,17 @@ try {
     Assert-True ($config.Expected.ParticipantHandoffDirectory -eq 'ElectronicLogbook\ParticipantHandoffs') 'private participant handoffs must stay under transferred local state'
     Assert-True (@($config.Expected.ResendApiKeyFiles).Count -eq 2) 'separate development and Preview Resend sending keys must be verified'
     Assert-True (@($config.Expected.RecoveryEnvelopeSecretFiles).Count -eq 2) 'development and Preview recovery secret files must be verified'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook' }).Count -eq 0) 'the whole ElectronicLogbook tree must never be a transfer asset'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Lifecycle -ne 'local-transfer' }).Count -eq 0) 'every transferred local asset must use the local-transfer lifecycle'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/Google Auth/webclientid.txt' -and -not $_.Required }).Count -eq 1) 'only the public Google Web client ID may be transferred from the local Google Auth directory'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -like 'ElectronicLogbook/Google Auth/*' }).Count -eq 1) 'Google client IDs or secrets without an active consumer must stay outside the transfer allowlist'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Classification -eq 'secret-signing-identity' }).Count -eq 2) 'development and permanent Preview keystores must be explicitly allowlisted'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Classification -eq 'secret-api-credential' }).Count -eq 3) 'Supabase and both Resend API credentials must be explicitly allowlisted'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.ContainsKey('RequirementGroup') -and $_['RequirementGroup'] -eq 'hosted-project-metadata' }).Count -eq 2) 'canonical and legacy hosted metadata must form one required alternative group'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/AndroidDeviceBridge' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'device bridge backups must be deliberately excluded'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/AnalysisTools' -and $_.Lifecycle -eq 'regenerated-dependency' }).Count -eq 1) 'analysis tools must be classified as regenerated dependencies'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/Recovery Codes' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'user recovery artifacts must be deliberately excluded'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/Google Auth/client_secret_*.json' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'unused Google client-secret downloads must be deliberately excluded'
 
     $entrypointText = Get-Content -LiteralPath $entrypoint -Raw -Encoding UTF8
     Assert-True ($entrypointText -match "@\('a'.*'-t7z'.*'-mx=9'.*'-bb0'") 'real export must create a 7-Zip archive'
@@ -138,6 +149,9 @@ try {
     Assert-True ($entrypointText -match 'Permanent Preview Android signing identity') 'verifier must require the permanent Preview keystore and protected credentials'
     Assert-True ($entrypointText -match "'-storepass:env'.*ELECTRONIC_LOGBOOK_PREVIEW_VERIFY_STORE_PASSWORD") 'verifier must keep the Preview keystore password out of the keytool command line'
     Assert-True ($entrypointText -match 'Android signing identity was restored incompletely') 'import must reject incomplete permanent Preview signing state'
+    Assert-True ($entrypointText -match 'Assert-TransferConfiguration') 'every transfer action must validate the local allowlist and exclusion policy'
+    Assert-True ($entrypointText -match 'Inventory by classification') 'export must summarize classifications without printing secret values'
+    Assert-True ($entrypointText -match 'Assert-LocalAppDataInventoryClassified') 'export must reject newly discovered unclassified local files'
     Assert-True ($entrypointText -match 'winget\.exe list' -and $entrypointText -match "wingetAction = if.*'upgrade'") 'installer must distinguish installed Winget packages from missing packages'
     Assert-True ($entrypointText -match 'stillInstalled') 'installer must re-verify a package after a nonzero Winget upgrade result'
 
@@ -155,12 +169,36 @@ try {
         New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
         Set-Content -LiteralPath $path -Value "synthetic $($asset.Path)" -Encoding UTF8
     }
-    $localState = Join-Path $syntheticLocal 'ElectronicLogbook\synthetic.json'
-    New-Item -ItemType Directory -Path (Split-Path $localState -Parent) -Force | Out-Null
-    Set-Content -LiteralPath $localState -Value '{}' -Encoding UTF8
+    foreach ($asset in $config.LocalAppDataAssets | Where-Object Required) {
+        $path = Join-Path $syntheticLocal $asset.Path
+        New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $path -Value "synthetic $($asset.Classification)" -Encoding UTF8
+    }
+    foreach ($group in @($config.LocalAppDataAssets | Where-Object { $_.ContainsKey('RequirementGroup') } | Group-Object { $_['RequirementGroup'] })) {
+        $asset = $group.Group | Select-Object -First 1
+        $path = Join-Path $syntheticLocal $asset.Path
+        New-Item -ItemType Directory -Path (Split-Path $path -Parent) -Force | Out-Null
+        Set-Content -LiteralPath $path -Value "synthetic $($asset.Classification)" -Encoding UTF8
+    }
+    $excludedLocalState = Join-Path $syntheticLocal 'ElectronicLogbook\Gate1RetainedState\must-not-transfer.json'
+    New-Item -ItemType Directory -Path (Split-Path $excludedLocalState -Parent) -Force | Out-Null
+    Set-Content -LiteralPath $excludedLocalState -Value '{"generated":true}' -Encoding UTF8
+    $unclassifiedLocalState = Join-Path $syntheticLocal 'ElectronicLogbook\unclassified.tmp'
+    Set-Content -LiteralPath $unclassifiedLocalState -Value 'must be classified' -Encoding UTF8
+    $unclassifiedRun = Invoke-TransferProcess -Arguments @('-Action', 'Export', '-RepoRoot', $syntheticRepo, '-LocalAppDataRoot', $syntheticLocal, '-CodexHome', $syntheticCodex, '-WhatIf')
+    Assert-True ($unclassifiedRun.ExitCode -ne 0) 'export must reject an unclassified local file'
+    Assert-True (($unclassifiedRun.Error + $unclassifiedRun.Output) -match 'local ElectronicLogbook file\(s\) are unclassified') 'unclassified-file rejection must explain how to update the manifest'
+    Remove-Item -LiteralPath $unclassifiedLocalState -Force
+    $hostedMetadataPath = Join-Path $syntheticLocal 'ElectronicLogbook\Supabase\hosted-preview-projects.local.json'
+    Remove-Item -LiteralPath $hostedMetadataPath -Force
+    $missingGroupRun = Invoke-TransferProcess -Arguments @('-Action', 'Export', '-RepoRoot', $syntheticRepo, '-LocalAppDataRoot', $syntheticLocal, '-CodexHome', $syntheticCodex, '-WhatIf')
+    Assert-True ($missingGroupRun.ExitCode -ne 0) 'export must require canonical or compatibility hosted-project metadata'
+    Assert-True (($missingGroupRun.Error + $missingGroupRun.Output) -match 'Required local transfer asset group is missing: hosted-project-metadata') 'missing hosted metadata must identify its requirement group'
+    Set-Content -LiteralPath $hostedMetadataPath -Value 'synthetic private-project-metadata' -Encoding UTF8
     $dryRun = Invoke-TransferProcess -Arguments @('-Action', 'Export', '-RepoRoot', $syntheticRepo, '-LocalAppDataRoot', $syntheticLocal, '-CodexHome', $syntheticCodex, '-WhatIf')
     Assert-True ($dryRun.ExitCode -eq 0) "synthetic export dry run failed: $($dryRun.Error)"
     Assert-True ($dryRun.Output -match 'Export dry run completed') 'dry run must confirm that no archive was created'
+    Assert-True ($dryRun.Output -match 'Inventory by classification:.*secret-api-credential=3') 'dry run must expose named classification counts without secret values'
 
     $mainExportArchive = Join-Path $temporaryRoot 'main-export.7z'
     $mainExport = Invoke-TransferProcess -Arguments @(
@@ -171,6 +209,9 @@ try {
     Assert-True (Test-Path -LiteralPath $mainExportArchive -PathType Leaf) 'main exporter must create the requested archive'
     & $script:sevenZip t $mainExportArchive -bb0 -bd | Out-Null
     Assert-True ($LASTEXITCODE -eq 0) 'main exporter archive must pass 7-Zip integrity testing'
+    $mainListing = (& $script:sevenZip l $mainExportArchive -bb0 -bd | Out-String)
+    Assert-True ($mainListing -notmatch 'must-not-transfer\.json') 'unlisted retained-device state must stay outside the transfer archive'
+    Assert-True ($mainListing -match 'electronic-logbook-development\.keystore') 'explicitly allowlisted signing identity must be present in the transfer archive'
 
     $bundleSource = Join-Path $temporaryRoot 'valid-source'
     $validArchive = Join-Path $temporaryRoot 'valid.7z'

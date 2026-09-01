@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Updater.Tests;
@@ -71,6 +73,92 @@ public sealed class WorkbookMigrationHostedTransferTests
         Assert.Equal(
             EnvelopeSignature(hosted.ConfigurationUploadAttempts[0]),
             EnvelopeSignature(hosted.ConfigurationUploadAttempts[1]));
+    }
+
+    [Fact]
+    public async Task UploadAndVerifyAsync_HostedRowsAndReceiptExcludePlaintextFlightAndRawKeyMaterial()
+    {
+        const string typeSentinel = "TYPE-PLAINTEXT-SENTINEL";
+        const string registrationSentinel = "REG-PLAINTEXT-SENTINEL";
+        const string fromSentinel = "FROM-PLAINTEXT-SENTINEL";
+        const string toSentinel = "TO-PLAINTEXT-SENTINEL";
+        const string detailsSentinel = "DETAILS-PLAINTEXT-SENTINEL";
+        const string customLabelSentinel = "LABEL-PLAINTEXT-SENTINEL";
+        const string customValueSentinel = "VALUE-PLAINTEXT-SENTINEL";
+        var migration = Migration();
+        var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            [customLabelSentinel, "Second", "Third", "Fourth"]);
+        var payload = WorkbookMigrationPayloadConverter.ConvertRows(
+            [new PortableLogbookWorkbookRowV2(
+                null,
+                null,
+                PortableLogbookWorkbookEntry.Empty with
+                {
+                    Year = 2026,
+                    Month = 9,
+                    Day = 1,
+                    Type = typeSentinel,
+                    Reg = registrationSentinel,
+                    From = fromSentinel,
+                    To = toSentinel,
+                    Remarks = detailsSentinel,
+                    SeCommandDay = 1.4m,
+                    LandingsDay = 1,
+                    CustomFields = new Dictionary<CustomFieldId, string?>
+                    {
+                        [customFields[0].Id] = customValueSentinel
+                    }
+                })],
+            customFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            migration);
+        var key = PortableLogbookKey.Generate();
+        var rawKeyBytes = key.ToBytes();
+        var rawKeyBase64 = Convert.ToBase64String(rawKeyBytes);
+        var recoveryCode = key.ToRecoveryCode();
+        var hosted = new RecordingHostedMigrationStore();
+        var transfer = new WorkbookMigrationHostedTransfer(hosted, hosted);
+
+        try
+        {
+            var result = await transfer.UploadAndVerifyAsync(migration, payload, key);
+            var hostedRowsJson = JsonSerializer.Serialize(
+                new
+                {
+                    Operations = hosted.OperationUploadAttempts.Single(),
+                    Configuration = hosted.ConfigurationUploadAttempts.Single()
+                },
+                PortableLogbookJson.SerializerOptions);
+            var receiptJson = JsonSerializer.Serialize(
+                result.VerifiedReceipt,
+                PortableLogbookJson.SerializerOptions);
+
+            foreach (var sentinel in new[]
+            {
+                typeSentinel,
+                registrationSentinel,
+                fromSentinel,
+                toSentinel,
+                detailsSentinel,
+                customLabelSentinel,
+                customValueSentinel,
+                rawKeyBase64,
+                recoveryCode
+            })
+            {
+                Assert.DoesNotContain(sentinel, hostedRowsJson, StringComparison.Ordinal);
+                Assert.DoesNotContain(sentinel, receiptJson, StringComparison.Ordinal);
+            }
+
+            Assert.Contains("payloadCiphertext", hostedRowsJson, StringComparison.Ordinal);
+            Assert.Contains("payloadHash", hostedRowsJson, StringComparison.Ordinal);
+            Assert.DoesNotContain("payloadCiphertext", receiptJson, StringComparison.Ordinal);
+            Assert.Equal(payload.Receipt, result.VerifiedReceipt);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(rawKeyBytes);
+        }
     }
 
     [Fact]
