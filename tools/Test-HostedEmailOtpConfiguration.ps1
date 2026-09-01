@@ -2,14 +2,20 @@
 
 [CmdletBinding()]
 param(
-    [ValidateSet("development", "privatePilot")]
+    [ValidateSet("development", "preview", "privatePilot")]
     [string]$Environment = "development",
     [string]$LocalSupabaseRoot = (Join-Path $env:LOCALAPPDATA "ElectronicLogbook\Supabase")
 )
 
 $ErrorActionPreference = "Stop"
 
-$metadataPath = Join-Path $LocalSupabaseRoot "hosted-pilot-projects.local.json"
+$canonicalMetadataPath = Join-Path $LocalSupabaseRoot "hosted-preview-projects.local.json"
+$legacyMetadataPath = Join-Path $LocalSupabaseRoot "hosted-pilot-projects.local.json"
+$metadataPath = if (Test-Path -LiteralPath $canonicalMetadataPath -PathType Leaf) {
+    $canonicalMetadataPath
+} else {
+    $legacyMetadataPath
+}
 $tokenPath = Join-Path $LocalSupabaseRoot "access-token.txt"
 if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) {
     throw "Hosted project metadata is not configured."
@@ -19,7 +25,13 @@ if (-not (Test-Path -LiteralPath $tokenPath -PathType Leaf)) {
 }
 
 $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
-$project = $metadata.$Environment
+$project = if ($Environment -eq "development") {
+    $metadata.development
+} elseif ($null -ne $metadata.preview) {
+    $metadata.preview
+} else {
+    $metadata.privatePilot
+}
 if ($null -eq $project -or [string]::IsNullOrWhiteSpace($project.project_ref)) {
     throw "The selected hosted project is not configured."
 }

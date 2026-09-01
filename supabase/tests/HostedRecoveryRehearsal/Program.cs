@@ -175,7 +175,7 @@ try
             Reg = "VH-DSP",
             From = "YSBK",
             To = "YSCN",
-            Pic = "Disposable pilot",
+            Pic = "Disposable Preview user",
             SeCommandDay = 1.2m
         });
     var upload = HostedOperationCipher.Encrypt(operation, PortableLogbookKey.FromBytes(packageKey.Bytes));

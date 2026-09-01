@@ -1,6 +1,6 @@
 # Hosted Sync Architecture Decision
 
-Status: accepted for private-pilot architecture planning
+Status: accepted for Preview architecture planning
 
 Date: 2026-08-06
 
@@ -9,9 +9,9 @@ External facts checked: 2026-08-06
 ## Decision
 
 Electronic Logbook will replace routine manual package transport with a
-Supabase-hosted operation ledger for the private pilot.
+Supabase-hosted operation ledger for the FlightLogX Preview.
 
-The pilot architecture is:
+The Preview architecture is:
 
 - Supabase Auth provides invited-user authentication.
 - Supabase-hosted PostgreSQL stores the canonical append-only operation ledger and the
@@ -41,15 +41,15 @@ The current mobile and workbook exchange path already proves several important p
 - updater-side workbook validation, backup, and handoff safeguards.
 
 Manual package exchange is too visible and too file-centric for normal daily use. The
-next release direction is a small invitation-only Android-first pilot where routine sync
+next release direction is a small invitation-only Android-first Preview where routine sync
 is automatic, encrypted, and independent of user-owned cloud storage. Excel remains
 valuable, but it should behave as a paired client rather than the canonical container.
 
 ## Consequences
 
-The first hosted milestone should optimize for a narrow, auditable pilot:
+The first hosted milestone should optimize for a narrow, auditable Preview:
 
-- use Supabase Free in the Sydney region for development and the private pilot;
+- use Supabase Free in the Sydney region for development and the FlightLogX Preview;
 - keep public registration, billing, team administration, and public uptime promises out
   of scope;
 - design Row Level Security, unique revision insertion, device membership, and audit
@@ -58,7 +58,7 @@ The first hosted milestone should optimize for a narrow, auditable pilot:
 - keep the current Package Exchange workflow as Advanced recovery and portability, not
   normal onboarding or daily sync;
 - defer realtime subscriptions, premium hosted recovery, custom domains, and managed
-  monitoring until pilot evidence shows they materially improve reliability or support.
+  monitoring until Preview evidence shows they materially improve reliability or support.
 
 This decision deliberately does not finalize the physical database schema, RLS policy
 text, sync API contract, authentication UX, key-envelope format, or conflict-resolution
@@ -73,12 +73,12 @@ and acceptance evidence.
   other user-owned cloud file provider.
 - No hosted plaintext flight records or hosted recovery keys.
 - No mutable hosted "current entry" table as the source of truth.
-- No public-product infrastructure or paid-plan dependency for the private pilot unless
+- No public-product infrastructure or paid-plan dependency for the FlightLogX Preview unless
   a documented trigger is reached.
 
-## Supabase Pilot Baseline
+## Supabase Preview Baseline
 
-Create separate Supabase projects for development and the private pilot. Select the
+Create separate Supabase projects for development and the FlightLogX Preview. Select the
 specific `ap-southeast-2` Oceania (Sydney) region for both projects; Supabase documents
 that project data is stored in the chosen primary region, and lists Sydney as
 `ap-southeast-2`.
@@ -88,9 +88,9 @@ the Supabase pricing page lists the Free plan as $0/month with 50,000 monthly ac
 users, 500 MB database size, 5 GB egress, 5 GB cached egress, 1 GB file storage,
 community support, two active projects, and pausing after one week of inactivity. Treat
 those numbers as operational assumptions to recheck before project creation and before
-pilot launch.
+Preview launch.
 
-For the invite-only pilot, disable public sign-up and use email sign-in only for existing
+For the invite-only Preview, disable public sign-up and use email sign-in only for existing
 invited users. Supabase Auth supports disabling new sign-ups, and passwordless email OTP
 or magic-link calls should set `shouldCreateUser` to `false` so an unknown address cannot
 self-register from the client.
@@ -127,7 +127,7 @@ operation payloads and key envelopes remain ciphertext.
 
 - grants account access to a logbook with role `owner`, `writer`, or `viewer`;
 - records who granted access, when it was accepted, and whether the grant is revoked;
-- starts with owner-only membership for the private pilot.
+- starts with owner-only membership for the FlightLogX Preview.
 
 `devices`:
 
@@ -224,9 +224,9 @@ Deletion and retention:
 
 ## Authentication Contract
 
-Pilot authentication is invited email sign-in. Public self-registration stays disabled.
+Preview authentication is invited email sign-in. Public self-registration stays disabled.
 Unknown email addresses receive a generic failure path that does not disclose whether a
-pilot account exists.
+Preview account exists.
 
 Android uses Supabase Auth sessions with refresh tokens stored behind platform secure
 storage. Sign-out removes hosted refresh credentials from the device but leaves encrypted
@@ -329,7 +329,7 @@ Trigger sync:
 - from a manual status refresh in Account or Sync status.
 
 Start with bounded polling and lifecycle-triggered pulls. Add realtime notification only
-if pilot evidence shows polling/resume sync creates material latency, battery, or support
+if Preview evidence shows polling/resume sync creates material latency, battery, or support
 problems.
 
 ## Conflict Policy
@@ -360,7 +360,7 @@ Unresolved conflicts keep both versions visible in history and put the affected 
 Primary risks and controls:
 
 - RLS mistakes: enforce owner/member/device predicates on every hosted table; include
-  adversarial cross-account tests before pilot use.
+  adversarial cross-account tests before Preview use.
 - Token theft: store refresh tokens only in Android secure storage or Windows Credential
   Manager; support sign-out, device revocation, and account disablement.
 - Key theft: never upload plaintext logbook keys or recovery codes; scope envelopes to
@@ -385,23 +385,23 @@ Primary risks and controls:
 - Hosted-provider compromise: retained encrypted client history and logical exports must
   allow migration to a new project or provider without plaintext exposure.
 
-## Pilot Cost And Continuity Rules
+## Preview Cost And Continuity Rules
 
-Stay on Supabase Free while the pilot is small, invited, recoverable from client history,
+Stay on Supabase Free while the Preview is small, invited, recoverable from client history,
 and comfortably below the published Free-plan limits. Recheck published limits before
-each pilot gate because hosted-provider limits can change.
+each Preview gate because hosted-provider limits can change.
 
 Upgrade to a paid plan only when one of these triggers occurs:
 
 - public availability starts;
-- free-project pausing disrupts normal pilot use;
+- free-project pausing disrupts normal Preview use;
 - monitored usage approaches half of an important quota such as database size, egress,
   storage, or monthly active users;
-- pilot users begin treating the hosted copy as their only practical recovery source;
+- Preview users begin treating the hosted copy as their only practical recovery source;
 - managed daily backups, longer log retention, email support, or other paid reliability
   features become necessary for support.
 
-Continuity requirements before pilot use:
+Continuity requirements before Preview use:
 
 - logical export of hosted metadata and ciphertext operation history;
 - restore rehearsal into a separate project;

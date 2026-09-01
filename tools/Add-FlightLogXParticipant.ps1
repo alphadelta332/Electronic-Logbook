@@ -184,9 +184,15 @@ function Invoke-FlightLogXParticipantEnrollment {
     }
     $resolvedRepoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
     $transferManifestPath = Join-Path $resolvedRepoRoot 'tools\local-development-transfer.psd1'
-    $sourceGuidePath = Join-Path $resolvedRepoRoot 'docs\private-pilot-android-install.md'
+    $sourceGuidePath = Join-Path $resolvedRepoRoot 'docs\flightlogx-preview-android-install.md'
     $supabaseRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook\Supabase'
-    $metadataPath = Join-Path $supabaseRoot 'hosted-pilot-projects.local.json'
+    $canonicalMetadataPath = Join-Path $supabaseRoot 'hosted-preview-projects.local.json'
+    $legacyMetadataPath = Join-Path $supabaseRoot 'hosted-pilot-projects.local.json'
+    $metadataPath = if (Test-Path -LiteralPath $canonicalMetadataPath -PathType Leaf) {
+        $canonicalMetadataPath
+    } else {
+        $legacyMetadataPath
+    }
     $managementTokenPath = Join-Path $supabaseRoot 'access-token.txt'
 
     foreach ($path in @($transferManifestPath, $sourceGuidePath, $metadataPath, $managementTokenPath)) {
@@ -198,8 +204,9 @@ function Invoke-FlightLogXParticipantEnrollment {
     $transferConfig = Import-PowerShellDataFile -LiteralPath $transferManifestPath
     $firebaseProjectId = [string]$transferConfig.Expected.FirebaseProjectId
     $metadata = Get-Content -LiteralPath $metadataPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    $projectRef = [string]$metadata.privatePilot.project_ref
-    $projectRegion = [string]$metadata.privatePilot.region
+    $previewProject = if ($null -ne $metadata.preview) { $metadata.preview } else { $metadata.privatePilot }
+    $projectRef = [string]$previewProject.project_ref
+    $projectRegion = [string]$previewProject.region
     $managementToken = (Get-Content -LiteralPath $managementTokenPath -Raw -Encoding UTF8).Trim()
     if ([string]::IsNullOrWhiteSpace($firebaseProjectId) -or
         [string]::IsNullOrWhiteSpace($projectRef) -or

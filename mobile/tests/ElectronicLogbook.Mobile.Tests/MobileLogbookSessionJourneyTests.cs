@@ -164,7 +164,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var session = CreateSession(jsRuntime, authenticator, clock);
 
         await session.EnsureLoadedWorkbookAsync();
-        var signIn = await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        var signIn = await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
 
         Assert.Equal("p***@example.com", signIn.DeliveryHint);
@@ -201,14 +201,14 @@ public sealed class MobileLogbookSessionJourneyTests
             clock);
         var session = CreateSession(jsRuntime, authenticator, clock);
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(session.WorkbookDraft);
         await session.SaveWorkbookEntryAsync();
         var retainedLogbookId = session.DocumentV2.LogbookId;
         var retainedDeviceId = Assert.IsType<BrowserHostedSyncState>(session.HostedSync).DeviceId;
 
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
 
         Assert.Equal(retainedLogbookId, session.DocumentV2.LogbookId);
@@ -230,7 +230,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var session = CreateSession(jsRuntime, authenticator, clock);
 
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await Assert.ThrowsAsync<JSException>(async () =>
             await session.CompleteHostedInviteAcceptanceAsync("123456"));
 
@@ -338,7 +338,7 @@ public sealed class MobileLogbookSessionJourneyTests
             replacementRecovery: recovery);
 
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
 
         Assert.Equal(1, authenticator.CompleteCount);
@@ -359,7 +359,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var initialAuthenticator = new InMemoryHostedLogbookAuthenticator(accountId, revokedDeviceId, clock);
         var initial = CreateSession(jsRuntime, initialAuthenticator, clock);
         await initial.EnsureLoadedWorkbookAsync();
-        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.StartHostedInviteAcceptanceAsync("preview@example.com");
         await initial.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(initial.WorkbookDraft);
         await initial.SaveWorkbookEntryAsync();
@@ -408,7 +408,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.True(session.ShouldOfferHostedAuthentication);
         Assert.Single(session.DocumentV2.Operations);
 
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
 
         Assert.Equal(1, authenticator.CompleteCount);
@@ -524,7 +524,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
         var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
         await initial.EnsureLoadedWorkbookAsync();
-        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.StartHostedInviteAcceptanceAsync("preview@example.com");
         await initial.CompleteHostedInviteAcceptanceAsync("123456");
         var retainedLogbookId = initial.DocumentV2.LogbookId;
         var retainedDeviceId = initial.HostedSync!.DeviceId;
@@ -575,7 +575,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
         var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
         await initial.EnsureLoadedWorkbookAsync();
-        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.StartHostedInviteAcceptanceAsync("preview@example.com");
         await initial.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(initial.WorkbookDraft);
         await initial.SaveWorkbookEntryAsync();
@@ -601,7 +601,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(retainedHostedState.LogbookId, reloaded.HostedSync.LogbookId);
         Assert.Equal(retainedHostedState.DeviceId, reloaded.HostedSync.DeviceId);
         Assert.Equal("Account recovery setup needs attention (RECOVERY_SERVICE_REJECTED). Retry Sync now.", reloaded.HostedSync.AttentionRequiredReason);
-        Assert.DoesNotContain("pilot@example.com", reloaded.HostedSync.AttentionRequiredReason, StringComparison.Ordinal);
+        Assert.DoesNotContain("preview@example.com", reloaded.HostedSync.AttentionRequiredReason, StringComparison.Ordinal);
         Assert.DoesNotContain("secret", reloaded.HostedSync.AttentionRequiredReason, StringComparison.OrdinalIgnoreCase);
         var persisted = await new BrowserLogbookStore(jsRuntime).LoadStateV2Async();
         Assert.NotNull(persisted);
@@ -634,7 +634,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
         var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
         await initial.EnsureLoadedWorkbookAsync();
-        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.StartHostedInviteAcceptanceAsync("preview@example.com");
         await initial.CompleteHostedInviteAcceptanceAsync("123456");
         var retainedLogbookId = initial.DocumentV2.LogbookId;
         var retainedHostedState = initial.HostedSync!;
@@ -679,7 +679,7 @@ public sealed class MobileLogbookSessionJourneyTests
             recoveryEnvelopeService: recoveryService);
 
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
 
         Assert.True(session.IsRecoveryCodeConfirmationPending);
@@ -722,7 +722,7 @@ public sealed class MobileLogbookSessionJourneyTests
         await session.EnsureLoadedWorkbookAsync();
         FillWorkbookDraft(session.WorkbookDraft);
         await session.SaveWorkbookEntryAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await session.CompleteHostedInviteAcceptanceAsync("123456"));
@@ -746,7 +746,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var session = CreateSession(jsRuntime, authenticator, clock, ledger, network);
 
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(session.WorkbookDraft);
 
@@ -809,7 +809,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var ledger = new InMemoryHostedLogbookLedger();
         var network = new StaticNetworkStatus(new NetworkAvailability(IsOnline: true));
         var sourceAuthenticator = new InMemoryHostedLogbookAuthenticator(accountId, sourceDeviceId, clock);
-        await sourceAuthenticator.StartEmailSignInAsync("pilot@example.com");
+        await sourceAuthenticator.StartEmailSignInAsync("preview@example.com");
         await sourceAuthenticator.CompleteEmailSignInAsync("123456");
         var seeded = await new MobileHostedSyncWorkflow(
                 packageKeyStore,
@@ -847,7 +847,7 @@ public sealed class MobileLogbookSessionJourneyTests
             accountId,
             replacementDeviceId,
             clock);
-        await replacementAuthenticator.StartEmailSignInAsync("pilot@example.com");
+        await replacementAuthenticator.StartEmailSignInAsync("preview@example.com");
         await replacementAuthenticator.CompleteEmailSignInAsync("123456");
         var repaired = await new MobileHostedSyncWorkflow(
                 packageKeyStore,
@@ -883,7 +883,7 @@ public sealed class MobileLogbookSessionJourneyTests
             clock);
         var initial = CreateSession(jsRuntime, authenticator, clock, ledger, network);
         await initial.EnsureLoadedWorkbookAsync();
-        await initial.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await initial.StartHostedInviteAcceptanceAsync("preview@example.com");
         await initial.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(initial.WorkbookDraft);
         await initial.SaveWorkbookEntryAsync();
@@ -927,7 +927,7 @@ public sealed class MobileLogbookSessionJourneyTests
             clock);
         var session = CreateSession(jsRuntime, authenticator, clock, ledger, network);
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(session.WorkbookDraft);
 
@@ -1078,7 +1078,7 @@ public sealed class MobileLogbookSessionJourneyTests
         var session = CreateSession(jsRuntime, authenticator, clock, ledger, network);
 
         await session.EnsureLoadedWorkbookAsync();
-        await session.StartHostedInviteAcceptanceAsync("pilot@example.com");
+        await session.StartHostedInviteAcceptanceAsync("preview@example.com");
         await session.CompleteHostedInviteAcceptanceAsync("123456");
         FillWorkbookDraft(session.WorkbookDraft);
         await session.SaveWorkbookEntryAsync();
@@ -2172,7 +2172,7 @@ public sealed class MobileLogbookSessionJourneyTests
             {
                 throw new MobileHostedDiagnosticException(
                     "RECOVERY_SERVICE_REJECTED",
-                    "pilot@example.com secret-token package_key=secret-value");
+                    "preview@example.com secret-token package_key=secret-value");
             }
 
             return ValueTask.FromResult(new MobileRecoveryEnvelopeEnrollmentResult(true, "managed-key-v1"));

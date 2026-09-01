@@ -11,7 +11,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $localRoot = Join-Path $env:LOCALAPPDATA 'ElectronicLogbook\Supabase'
-$metadataPath = Join-Path $localRoot 'hosted-pilot-projects.local.json'
+$canonicalMetadataPath = Join-Path $localRoot 'hosted-preview-projects.local.json'
+$legacyMetadataPath = Join-Path $localRoot 'hosted-pilot-projects.local.json'
+$metadataPath = if (Test-Path -LiteralPath $canonicalMetadataPath -PathType Leaf) {
+    $canonicalMetadataPath
+} else {
+    $legacyMetadataPath
+}
 $tokenPath = Join-Path $localRoot 'access-token.txt'
 $projectPath = Join-Path $repoRoot 'supabase\tests\HostedRecoveryRehearsal\HostedRecoveryRehearsal.csproj'
 
@@ -83,7 +89,7 @@ if (@($enabledExternalProviders).Count -ne 1 -or $enabledExternalProviders[0] -n
 }
 
 if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
-    $EvidenceDirectory = Join-Path $repoRoot ('artifacts\private-pilot-hosted-recovery-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    $EvidenceDirectory = Join-Path $repoRoot ('artifacts\flightlogx-preview-hosted-recovery-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 }
 $EvidenceDirectory = [IO.Path]::GetFullPath($EvidenceDirectory)
 New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
@@ -98,7 +104,7 @@ if ($LASTEXITCODE -ne 0) {
 $anonKey = [string](($keys | Where-Object name -eq 'anon' | Select-Object -First 1).api_key)
 $serviceRoleKey = [string](($keys | Where-Object name -eq 'service_role' | Select-Object -First 1).api_key)
 if ([string]::IsNullOrWhiteSpace($anonKey) -or [string]::IsNullOrWhiteSpace($serviceRoleKey)) {
-    throw 'The development project did not expose legacy anon and service_role keys required by the mobile pilot client.'
+    throw 'The development project did not expose legacy anon and service_role keys required by the mobile Preview client.'
 }
 
 try {

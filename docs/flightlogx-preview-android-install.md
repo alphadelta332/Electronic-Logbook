@@ -35,7 +35,7 @@ cloud-storage link, or unrelated website download.
 5. Chrome may warn that the APK or file might be harmful or dangerous. Recheck the
    Firebase address, FlightLogX name, and package above. Only then select **Download
    anyway**, **Keep**, or the equivalent confirmation shown by that Android version.
-6. Open the downloaded `app-pilot.apk` file.
+6. Open the downloaded `app-preview.apk` file.
 7. If Android says Chrome or Firebase App Tester cannot install unknown apps, select
    **Settings**, turn on **Allow from this source** for the app that downloaded the APK,
    return to the installer, and select **Install**.

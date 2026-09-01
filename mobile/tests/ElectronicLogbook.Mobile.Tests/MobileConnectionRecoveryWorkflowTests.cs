@@ -117,14 +117,14 @@ public sealed class MobileConnectionRecoveryWorkflowTests
     [Fact]
     public void RedactorRemovesSecretsEmailsUrlsPayloadsAndFullIdentifiers()
     {
-        const string raw = "owner@example.com https://pilot.supabase.co access_token=eyJabcdefghijk.abcdefghijklmnop.abcdefghijklmnop " +
+        const string raw = "owner@example.com https://preview.supabase.co access_token=eyJabcdefghijk.abcdefghijklmnop.abcdefghijklmnop " +
             "payload_ciphertext=QWxhZGRpbjpvcGVuIHNlc2FtZVF1aXRlTG9uZ1NlY3JldFZhbHVlMTIzNDU2 " +
             "acct_10000000000000000000000000000001 10000000-0000-0000-0000-000000000001";
 
         var redacted = MobileDiagnosticRedactor.Redact(raw);
 
         Assert.DoesNotContain("owner@example.com", redacted, StringComparison.Ordinal);
-        Assert.DoesNotContain("pilot.supabase.co", redacted, StringComparison.Ordinal);
+        Assert.DoesNotContain("preview.supabase.co", redacted, StringComparison.Ordinal);
         Assert.DoesNotContain("eyJabcdefghijk", redacted, StringComparison.Ordinal);
         Assert.DoesNotContain("QWxhZGRpb", redacted, StringComparison.Ordinal);
         Assert.DoesNotContain("10000000000000000000000000000001", redacted, StringComparison.Ordinal);
@@ -141,7 +141,7 @@ public sealed class MobileConnectionRecoveryWorkflowTests
             new BrowserPackageKeyStore(js),
             new ManualSyncClock(Now),
             faultInjector: stage => stage == MobileConnectionStage.CONFIG_LOAD
-                ? new InvalidDataException("owner@example.com https://pilot.supabase.co")
+                ? new InvalidDataException("owner@example.com https://preview.supabase.co")
                 : null);
 
         var report = await workflow.RunPreflightAsync();
@@ -150,7 +150,7 @@ public sealed class MobileConnectionRecoveryWorkflowTests
         Assert.Equal("UNEXPECTED_InvalidDataException", report.ErrorCode);
         Assert.Contains(nameof(InvalidDataException), json, StringComparison.Ordinal);
         Assert.DoesNotContain("owner@example.com", json, StringComparison.Ordinal);
-        Assert.DoesNotContain("pilot.supabase.co", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("preview.supabase.co", json, StringComparison.Ordinal);
     }
 
     private static MobileConnectionRecoveryWorkflow CreateWorkflow(

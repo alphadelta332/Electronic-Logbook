@@ -206,7 +206,7 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                 "access-token",
                 "refresh-token",
                 DateTimeOffset.UtcNow.AddHours(1)),
-            "pilot@example.com");
+            "preview@example.com");
 
     private static AirportVisitStatsDiagnostics EmptyAirportStats() =>
         new(

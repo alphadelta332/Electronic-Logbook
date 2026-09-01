@@ -800,14 +800,19 @@ function Invoke-VerifyAction {
     catch { $excelDetail = $_.Exception.Message }
     Add-CheckResult $results 'Excel COM' $excelPassed $true $excelDetail
 
-    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, 'docs/private-pilot-android-install.md')) {
+    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, 'docs/flightlogx-preview-android-install.md')) {
         Add-CheckResult $results $path (Test-Path -LiteralPath (Join-Path $script:RepoRoot $path) -PathType Leaf) $true 'required repository context'
     }
     $hostedConfig = Join-Path $script:RepoRoot 'mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json'
-    Add-CheckResult $results 'Hosted sync local config' (Test-Path -LiteralPath $hostedConfig -PathType Leaf) $false 'required only for hosted private-pilot work'
+    Add-CheckResult $results 'Hosted sync local config' (Test-Path -LiteralPath $hostedConfig -PathType Leaf) $false 'required only for hosted Preview work'
     $electronicLogbookLocalRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook'
     Add-CheckResult $results 'Supabase management token' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\access-token.txt') -PathType Leaf) $true 'private transfer asset; value is never printed'
-    Add-CheckResult $results 'Hosted project metadata' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Supabase\hosted-pilot-projects.local.json') -PathType Leaf) $true 'private transfer asset; values are never printed'
+    $hostedMetadataRoot = Join-Path $electronicLogbookLocalRoot 'Supabase'
+    $canonicalHostedMetadata = Join-Path $hostedMetadataRoot $script:TransferConfig.Expected.HostedProjectMetadataFile
+    $legacyHostedMetadata = Join-Path $hostedMetadataRoot $script:TransferConfig.Expected.LegacyHostedProjectMetadataFile
+    $hostedMetadataFound = (Test-Path -LiteralPath $canonicalHostedMetadata -PathType Leaf) -or
+        (Test-Path -LiteralPath $legacyHostedMetadata -PathType Leaf)
+    Add-CheckResult $results 'Hosted project metadata' $hostedMetadataFound $true 'canonical Preview metadata or its narrow legacy filename alias; values are never printed'
     $firebaseConfigPath = Join-Path $script:RepoRoot 'mobile\android\app\google-services.json'
     $firebaseConfigPassed = $false
     if (Test-Path -LiteralPath $firebaseConfigPath -PathType Leaf) {

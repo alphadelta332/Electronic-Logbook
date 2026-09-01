@@ -1,4 +1,4 @@
--- Adversarial hosted-pilot RLS checks.
+-- Adversarial FlightLogX Preview RLS checks.
 -- Run against a disposable local Supabase database after migrations are applied.
 
 begin;
@@ -737,7 +737,7 @@ select elb_rls_test.expect_error(
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000005', true);
 
 select public.accept_hosted_invitation(
-    'Accepted Pilot',
+    'Accepted Preview User',
     'android',
     'Pixel 8 Pro',
     'public-signing-key',
@@ -747,7 +747,7 @@ select public.accept_hosted_invitation(
 select elb_rls_test.assert_true(
     'invited user can accept invitation and becomes active',
     (
-        select status = 'active' and display_name = 'Accepted Pilot'
+        select status = 'active' and display_name = 'Accepted Preview User'
         from public.accounts
         where account_id = '10000000-0000-0000-0000-000000000005'
     )
@@ -771,7 +771,7 @@ select elb_rls_test.expect_error(
     'disabled account cannot accept invitation or register a device',
     $sql$
         select public.accept_hosted_invitation(
-            'Disabled Pilot',
+            'Disabled Preview User',
             'android',
             'Disabled Android',
             null,
@@ -1186,7 +1186,7 @@ select elb_rls_test.assert_true(
 );
 
 select elb_rls_test.assert_true(
-    'pilot health reports counts and upgrade triggers without service secrets',
+    'Preview health reports counts and upgrade triggers without service secrets',
     (
         select health.active_account_count = baseline.active_account_count + 4
           and health.active_device_count = baseline.active_device_count + 4
@@ -1253,7 +1253,7 @@ select public.elb_upsert_managed_recovery_envelope(
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000001',
     'AES-256-GCM',
-    'pilot-kek-v1',
+    'preview-kek-v1',
     repeat('B', 64),
     repeat('C', 16)
 );
@@ -1263,7 +1263,7 @@ select public.elb_upsert_managed_recovery_envelope(
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000001',
     'AES-256-GCM',
-    'pilot-kek-v1',
+    'preview-kek-v1',
     repeat('X', 64),
     repeat('Y', 16)
 );
@@ -1428,7 +1428,7 @@ select public.elb_upsert_device_recovery_envelope(
     '10000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000001',
-    'pilot-kek-v1',
+    'preview-kek-v1',
     repeat('D', 344)
 );
 
@@ -1436,7 +1436,7 @@ select public.elb_upsert_device_recovery_envelope(
     '10000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000001',
-    'pilot-kek-v1',
+    'preview-kek-v1',
     repeat('E', 344)
 );
 
@@ -1510,7 +1510,7 @@ select public.elb_upsert_device_recovery_envelope(
     '10000000-0000-0000-0000-000000000001',
     '20000000-0000-0000-0000-000000000001',
     '40000000-0000-0000-0000-000000000006',
-    'pilot-kek-v1',
+    'preview-kek-v1',
     repeat('G', 344)
 );
 

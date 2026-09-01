@@ -9,7 +9,7 @@ public sealed class SupabaseHostedSyncClientTests
     public async Task ReadMissingOperationsUsesTheLastReturnedRevisionAsItsPageCursor()
     {
         using var client = new SupabaseHostedSyncClient(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "anon-key",
             new HostedAccountId("acct_10000000000000000000000000000001"),
             new DeviceId("dev_40000000000000000000000000000001"),

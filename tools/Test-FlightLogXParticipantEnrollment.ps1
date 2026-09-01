@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path $PSScriptRoot -Parent
 $scriptPath = Join-Path $PSScriptRoot 'Add-FlightLogXParticipant.ps1'
 $manifestPath = Join-Path $PSScriptRoot 'local-development-transfer.psd1'
-$runbookPath = Join-Path $repoRoot 'docs\private-pilot-runbook.md'
+$runbookPath = Join-Path $repoRoot 'docs\flightlogx-preview-runbook.md'
 $handoverPath = Join-Path $repoRoot 'LOCAL_DEVICE_SETUP_HANDOVER.md'
 $passed = 0
 
@@ -80,6 +80,8 @@ finally {
 
 $source = Get-Content -LiteralPath $scriptPath -Raw -Encoding UTF8
 Assert-True ($source -match 'SupportsShouldProcess\s*=\s*\$true') 'owner command must support a non-mutating WhatIf preflight'
+Assert-True ($source -match 'hosted-preview-projects\.local\.json' -and $source -match 'hosted-pilot-projects\.local\.json') 'owner command must prefer canonical Preview metadata while accepting the legacy filename'
+Assert-True ($source -match '\$metadata\.preview' -and $source -match '\$metadata\.privatePilot') 'owner command must prefer the canonical Preview project key while accepting the legacy key'
 Assert-True ($source -match 'auth/v1/admin/users') 'owner command must provision or reuse the Supabase Auth identity'
 Assert-True ($source -match 'rest/v1/accounts') 'owner command must provision or verify the hosted invitation row'
 Assert-True ($source -match 'appdistribution:testers:add') 'owner command must add the tester through Firebase App Distribution'

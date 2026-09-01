@@ -86,6 +86,12 @@ bundle a Google client secret; its hosted provider credentials stay in Google/Su
 while the hosted redirect allow list permits
 `http://127.0.0.1:*/flightlogx-auth/**`.
 
+The canonical ignored Supabase project metadata file is
+`%LOCALAPPDATA%\ElectronicLogbook\Supabase\hosted-preview-projects.local.json`, with the
+Preview project under the `preview` key. Current tools still read the legacy
+`hosted-pilot-projects.local.json` filename and `privatePilot` key so an older trusted
+transfer bundle can be verified and migrated without exposing or re-entering secrets.
+
 The owner-only participant command is
 `tools\Add-FlightLogXParticipant.ps1`. It depends on the transferred Supabase management
 token and private-project metadata, the pinned `supabase` and `firebase` CLIs, and a fresh

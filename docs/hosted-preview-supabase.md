@@ -1,15 +1,15 @@
-# Hosted Pilot Supabase Setup
+# FlightLogX Preview Hosted Supabase Setup
 
-This document is the repeatable project setup note for the private hosted pilot. It is
+This document is the repeatable project setup note for the invitation-only Preview. It is
 safe to commit because it contains no Supabase URLs, anon keys, service-role keys, JWT
-secrets, SMTP credentials, or pilot emails.
+secrets, SMTP credentials, or Preview emails.
 
 ## Project Creation
 
 Create two separate Supabase projects:
 
 - Development: used for local and CI-adjacent integration work.
-- Private pilot: used only for invited pilot users.
+- FlightLogX Preview: used only for invited Preview users.
 
 Use the Sydney region, `ap-southeast-2`, for both projects. Service-role keys, database
 passwords, and management access tokens are secrets and must remain in protected local or
@@ -17,14 +17,14 @@ CI secret storage. The project URL and anon key are public client configuration,
 them out of source files, logs, diagnostics, screenshots, and workbook metadata. They may
 be embedded in a built client artifact for the intended environment.
 
-The first private pilot remains on Supabase Free until a documented upgrade trigger is
+The first FlightLogX Preview remains on Supabase Free until a documented upgrade trigger is
 reached. Recheck current Supabase Free limits, region availability, and Auth behavior
-before creating the pilot project and again before inviting real users.
+before creating the Preview project and again before inviting real users.
 
 ## Apply Migrations
 
 Install and authenticate the Supabase CLI locally, then link each project separately.
-Apply the same checked-in migrations to development first, then to the private-pilot
+Apply the same checked-in migrations to development first, then to the Preview
 project after review.
 
 ```powershell
@@ -33,10 +33,10 @@ supabase link --project-ref <development-project-ref>
 supabase db push
 ```
 
-For the pilot project, relink intentionally before pushing:
+For the Preview project, relink intentionally before pushing:
 
 ```powershell
-supabase link --project-ref <private-pilot-project-ref>
+supabase link --project-ref <preview-project-ref>
 supabase db push
 ```
 
@@ -64,7 +64,7 @@ Configure Auth in the Supabase dashboard for each project:
 - Disable public self-registration.
 - Enable email sign-in only for invited users.
 - Send Auth email through Resend using `auth-dev.flightlogx.app` for development and
-  `auth.flightlogx.app` for private pilot, with a separate sending-only Resend credential
+  `auth.flightlogx.app` for FlightLogX Preview, with a separate sending-only Resend credential
   for each Supabase project. Use `FlightLogX <signin@...>` as the sender.
 - Change the shared **Magic Link or OTP** template to display `{{ .Token }}` and no
   clickable confirmation link. Set Email OTP length to 6, expiration to 600 seconds, email sends
@@ -88,11 +88,11 @@ Configure Auth in the Supabase dashboard for each project:
   the REST field `create_user: false`, so an unknown email address cannot create a new
   account from the app.
 - Unknown email, disabled account, and revoked-device paths must use generic user-facing
-  language that does not reveal whether an address belongs to the pilot.
+  language that does not reveal whether an address belongs to the Preview.
 
 Invitations are created administratively. The app and workbook must not contain a shared
 service credential capable of creating users. Set `accounts.onboarding_mode` to
-`workbook_migration` for the workbook-led pilot. The invitation RPC verifies the signed-in
+`workbook_migration` for the workbook-led Preview. The invitation RPC verifies the signed-in
 identity against `accounts.invited_email`, and rejects Android registration for that mode
 so the app must enter managed recovery after the Windows migration creates the hosted
 membership. Existing invitations default to `app_only` for backward compatibility; do
@@ -110,18 +110,18 @@ completion, the invitation RPC does not directly activate Android: the app must 
 managed recovery path before a replacement device becomes active.
 
 Verify the redacted remote configuration after setup and before each canary. The private
-pilot preflight also fails if Google or the Windows loopback callback is missing:
+Preview preflight also fails if Google or the Windows loopback callback is missing:
 
 ```powershell
 .\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment development
-.\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment privatePilot
+.\tools\Test-HostedEmailOtpConfiguration.ps1 -Environment preview
 ```
 
 The development wizard publishing workflow reads the project URL from the repository
 variable `ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_URL` and the anon key from the repository
 secret `ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_ANON_KEY`. It embeds those public client
 settings in the wizard executable and validates the finished executable before publishing.
-Do not reuse the development values for a private-pilot or release build.
+Do not reuse the development values for a Preview or release build.
 
 After a Supabase Auth invitation is accepted, the client should call
 `public.accept_hosted_invitation(...)` with the local device type and platform label. The
@@ -168,7 +168,8 @@ acknowledgements are monotonic.
 
 ## Health, Diagnostics, And Restore
 
-Use `public.get_hosted_pilot_health()` for pre-pilot and weekly private-pilot checks. It
+Use the legacy remote function `public.get_hosted_pilot_health()` for pre-Preview and
+weekly Preview checks. Its rename is deferred until the external Supabase migration. It
 returns active account, device, operation, and estimated database-size counts plus
 conservative upgrade-trigger labels. Treat those triggers as a review point, not as
 current Supabase plan documentation; confirm the live plan limits in the Supabase
@@ -182,8 +183,8 @@ to diagnostics.
 Use `public.create_hosted_logical_export_manifest(...)` as the owner-only restore
 rehearsal entrypoint. The manifest records counts and the highest hosted revision for a
 logbook; the actual restore rehearsal should export the matching logical rows from a
-development or pilot project and import them into a separate Sydney project or disposable
-local database before inviting pilot users.
+development or Preview project and import them into a separate Sydney project or disposable
+local database before inviting Preview users.
 
 ## Local Secrets
 
@@ -193,8 +194,8 @@ Suggested local names:
 ```text
 ELB_SUPABASE_DEV_URL
 ELB_SUPABASE_DEV_ANON_KEY
-ELB_SUPABASE_PILOT_URL
-ELB_SUPABASE_PILOT_ANON_KEY
+ELB_SUPABASE_PREVIEW_URL
+ELB_SUPABASE_PREVIEW_ANON_KEY
 ```
 
 Service-role keys are for administrative scripts only and must never be bundled into the
@@ -207,6 +208,9 @@ Managed recovery uses a different local secret file for each hosted project:
 %LOCALAPPDATA%\ElectronicLogbook\Supabase\recovery-envelope\private-pilot.env
 ```
 
+The Preview recovery filename above is a retained local secret alias. Do not rename it
+independently; migrate it with the external project names and transfer manifest.
+
 Never reuse one project's ingress key pair or KEK in the other project. Create a missing
 file with `tools\RecoveryEnvelopeSecretGenerator`, deploy it with `supabase secrets set
 --env-file <path> --project-ref <ref>`, and retain it only through the trusted local
@@ -217,16 +221,16 @@ For the Android owner-rehearsal build, create a local gitignored mobile runtime 
 
 ```powershell
 .\tools\New-MobileHostedSyncLocalConfig.ps1 `
-  -SupabaseUrl "https://<private-pilot-project-ref>.supabase.co" `
-  -AnonKey "<private-pilot-anon-key>" `
+  -SupabaseUrl "https://<preview-project-ref>.supabase.co" `
+  -AnonKey "<preview-anon-key>" `
   -PlatformLabel "Pixel 8 Pro" `
   -DisplayName "Project owner"
 ```
 
 This writes `mobile/src/ElectronicLogbook.Mobile/wwwroot/hosted-sync.local.json`, which
-is gitignored. Use the private-pilot project URL and anon key only. Re-run
+is gitignored. Use the Preview project URL and anon key only. Re-run
 `npm.cmd run sync:android` or `npm.cmd run install:android:debug` from `mobile/` after
-creating or changing that file so the Capacitor assets include the pilot transport
+creating or changing that file so the Capacitor assets include the Preview transport
 configuration.
 
 ### Clean-slate connection recovery
@@ -254,12 +258,15 @@ Before installing the acceptance build, configure desktop-only values without pr
 them:
 
 ```text
-ELB_SUPABASE_PILOT_DB_URL
-ELB_SUPABASE_PILOT_ACCESS_TOKEN
-ELB_SUPABASE_PILOT_REFRESH_TOKEN       # only used when the access token is expired
-ELB_SUPABASE_PILOT_SERVICE_ROLE_KEY    # desktop administrative validation only
-ELB_SUPABASE_PILOT_DEVICE_ID
+ELB_SUPABASE_PREVIEW_DB_URL
+ELB_SUPABASE_PREVIEW_ACCESS_TOKEN
+ELB_SUPABASE_PREVIEW_REFRESH_TOKEN       # only used when the access token is expired
+ELB_SUPABASE_PREVIEW_SERVICE_ROLE_KEY    # desktop administrative validation only
+ELB_SUPABASE_PREVIEW_DEVICE_ID
 ```
+
+The Preview tools also accept the corresponding legacy `ELB_SUPABASE_PILOT_*` names so
+existing owner machines continue to work during this compatibility window.
 
 Then build/sync the isolated app so packaged config copies exist and run the preflight
 once. It verifies packaged-config parity, JWT project/role/expiry, the Auth endpoint,
@@ -272,9 +279,9 @@ rerun preflight. Recovery never sends email or calls device registration; it imp
 new app-only logbook key, saves IndexedDB state, reloads it, and compares account,
 device, and logbook identifiers before displaying Connected.
 
-## Verification Before Pilot Use
+## Verification Before Preview Use
 
-Before inviting pilot users:
+Before inviting Preview users:
 
 - run the migration against a disposable development project;
 - inspect Supabase Security Advisor and Performance Advisor output;
@@ -289,10 +296,10 @@ project:
 
 ```powershell
 supabase db reset
-psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/hosted_pilot_rls.sql
+psql "postgresql://postgres:postgres@127.0.0.1:54322/postgres" -v ON_ERROR_STOP=1 -f supabase/tests/hosted_preview_rls.sql
 ```
 
-The harness is `supabase/tests/hosted_pilot_rls.sql`. It seeds synthetic
+The harness is `supabase/tests/hosted_preview_rls.sql`. It seeds synthetic
 `example.invalid` users and rolls its transaction back.
 
 Run the hosted managed/recovery-code rehearsal only against the development project:

@@ -17,7 +17,7 @@ public sealed class PortableLogbookSyncContractsTests
             new HostedAccountId("acct_private"),
             androidDeviceId,
             clock);
-        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.StartEmailSignInAsync("preview@example.com");
         await authenticator.CompleteEmailSignInAsync("123456");
 
         var remoteOperation = CreateWorkbookOperation(logbookId, "ent_remote", "rev_remote", workbookDeviceId);
@@ -131,7 +131,7 @@ public sealed class PortableLogbookSyncContractsTests
             new HostedAccountId("acct_private"),
             workbookDeviceId,
             clock);
-        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.StartEmailSignInAsync("preview@example.com");
         await authenticator.CompleteEmailSignInAsync("123456");
         var sync = new PortableHostedLogbookSync(
             ledger,
@@ -228,7 +228,7 @@ public sealed class PortableLogbookSyncContractsTests
             new HostedAccountId("acct_private"),
             deviceId,
             clock);
-        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.StartEmailSignInAsync("preview@example.com");
         await authenticator.CompleteEmailSignInAsync("123456");
         authenticator.DeviceStatus = HostedDeviceStatus.Revoked;
         clock.Advance(TimeSpan.FromHours(1));
@@ -402,7 +402,7 @@ public sealed class PortableLogbookSyncContractsTests
             IsEditable: true));
 
         await storage.SaveAsync(new SyncSecretName("refresh-token"), new byte[] { 1, 2, 3 });
-        var signInStart = await authenticator.StartEmailSignInAsync("pilot@example.com");
+        var signInStart = await authenticator.StartEmailSignInAsync("preview@example.com");
         var session = await authenticator.CompleteEmailSignInAsync("123456");
         await scheduler.ScheduleAsync(new BackgroundSyncRequest(
             new LogbookId("log_sync"),
@@ -452,14 +452,14 @@ public sealed class PortableLogbookSyncContractsTests
             new DeviceId("dev_android"),
             clock);
 
-        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.StartEmailSignInAsync("preview@example.com");
         var session = await authenticator.CompleteEmailSignInAsync("123456");
         clock.Advance(TimeSpan.FromMinutes(30));
         var refreshed = await authenticator.RefreshAsync();
         authenticator.RevokeRefreshToken();
         var revokedError = await Assert.ThrowsAsync<HostedSignInException>(async () =>
             await authenticator.RefreshAsync());
-        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.StartEmailSignInAsync("preview@example.com");
         await authenticator.CompleteEmailSignInAsync("123456");
         await authenticator.SignOutAsync();
         var signedOutError = await Assert.ThrowsAsync<HostedSignInException>(async () =>
@@ -480,19 +480,19 @@ public sealed class PortableLogbookSyncContractsTests
             new DeviceId("dev_android"),
             clock);
 
-        await authenticator.StartEmailSignInAsync("pilot@example.com");
+        await authenticator.StartEmailSignInAsync("preview@example.com");
         clock.Advance(TimeSpan.FromMinutes(11));
         var expiredError = await Assert.ThrowsAsync<HostedSignInException>(async () =>
             await authenticator.CompleteEmailSignInAsync("123456"));
 
         authenticator.AccountStatus = HostedAccountStatus.Disabled;
         var disabledError = await Assert.ThrowsAsync<HostedSignInException>(async () =>
-            await authenticator.StartEmailSignInAsync("pilot@example.com"));
+            await authenticator.StartEmailSignInAsync("preview@example.com"));
 
         authenticator.AccountStatus = HostedAccountStatus.Invited;
         authenticator.DeviceStatus = HostedDeviceStatus.Revoked;
         var revokedDeviceError = await Assert.ThrowsAsync<HostedSignInException>(async () =>
-            await authenticator.StartEmailSignInAsync("pilot@example.com"));
+            await authenticator.StartEmailSignInAsync("preview@example.com"));
 
         Assert.Equal(HostedSignInFailureReason.VerificationExpired, expiredError.Reason);
         Assert.Equal(HostedSignInFailureReason.AccountDisabled, disabledError.Reason);

@@ -28,7 +28,7 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void PreviewAndLegacyPilotBranchesUsePreviewRuntimeWithoutRepeatingDevelopmentWarning()
+    public void PreviewAndLegacyPreviewAliasBranchesUsePreviewRuntimeWithoutRepeatingDevelopmentWarning()
     {
         var bootSource = ReadVbaSource("modBoot.bas");
         var updateSource = ReadVbaSource("modUpdate.bas");
@@ -104,7 +104,7 @@ public sealed class VbaBranchModeTests
     [InlineData("dev", null)]
     [InlineData("hotfix", null)]
     [InlineData("", null)]
-    public void WorkbookMigrationCanonicalisesPreviewAndAcceptsLegacyPilot(
+    public void WorkbookMigrationCanonicalisesPreviewAndAcceptsLegacyPreviewAlias(
         string sourceChannel,
         string? expected)
     {
@@ -112,7 +112,7 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void WizardUsesPreviewChannelAndAcceptsLegacyPilotInput()
+    public void WizardUsesPreviewChannelAndAcceptsLegacyPreviewAliasInput()
     {
         var source = ReadRepoSource(Path.Combine(
             "updater",
@@ -128,24 +128,24 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void LegacyPilotWizardPublicationIsProtectedAndKeepsThe203BridgeAsset()
+    public void LegacyPreviewWizardPublicationIsProtectedAndKeepsThe203BridgeAsset()
     {
-        var pilotWorkflow = ReadRepoSource(Path.Combine(
+        var legacyPreviewWorkflow = ReadRepoSource(Path.Combine(
             ".github",
             "workflows",
-            "publish-pilot-wizard.yml"));
+            "publish-preview-wizard.yml"));
         var developmentWorkflow = ReadRepoSource(Path.Combine(
             ".github",
             "workflows",
             "publish-dev-wizard.yml"));
 
-        Assert.Contains("- pilot", pilotWorkflow, StringComparison.Ordinal);
-        Assert.Contains("environment: pilot", pilotWorkflow, StringComparison.Ordinal);
-        Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL", pilotWorkflow, StringComparison.Ordinal);
-        Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY", pilotWorkflow, StringComparison.Ordinal);
-        Assert.Contains("$tag = \"dev-wizard-$shortSha\"", pilotWorkflow, StringComparison.Ordinal);
-        Assert.Contains("pilot-wizard-channel.txt", pilotWorkflow, StringComparison.Ordinal);
-        Assert.Contains("Preserving pilot channel bridge release", developmentWorkflow, StringComparison.Ordinal);
+        Assert.Contains("- pilot", legacyPreviewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("environment: pilot", legacyPreviewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL", legacyPreviewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY", legacyPreviewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("$tag = \"dev-wizard-$shortSha\"", legacyPreviewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("pilot-wizard-channel.txt", legacyPreviewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Preserving legacy Preview-channel bridge release", developmentWorkflow, StringComparison.Ordinal);
     }
 
     private static string ReadVbaSource(string fileName)

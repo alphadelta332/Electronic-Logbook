@@ -1,25 +1,25 @@
 namespace ElectronicLogbook.Updater.Tests;
 
-public sealed class PrivatePilotRunbookTests
+public sealed class PreviewRunbookTests
 {
     [Fact]
-    public void PrivatePilotRunbookWiresHealthCheckAndLocalEvidence()
+    public void PreviewRunbookWiresHealthCheckAndLocalEvidence()
     {
-        var runbook = File.ReadAllText(TestRepo.FindFile("docs", "private-pilot-runbook.md"));
-        var healthScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PrivatePilotHealthCheck.ps1"));
-        var preflightScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PrivatePilotPreflight.ps1"));
-        var rlsHarness = File.ReadAllText(TestRepo.FindFile("supabase", "tests", "hosted_pilot_rls.sql"));
+        var runbook = File.ReadAllText(TestRepo.FindFile("docs", "flightlogx-preview-runbook.md"));
+        var healthScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PreviewHealthCheck.ps1"));
+        var preflightScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-PreviewPreflight.ps1"));
+        var rlsHarness = File.ReadAllText(TestRepo.FindFile("supabase", "tests", "hosted_preview_rls.sql"));
         var recoveryRehearsalScript = File.ReadAllText(TestRepo.FindFile("tools", "Invoke-HostedRecoveryRehearsal.ps1"));
         var emailOtpConfigScript = File.ReadAllText(TestRepo.FindFile("tools", "Test-HostedEmailOtpConfiguration.ps1"));
-        var hostedSetup = File.ReadAllText(TestRepo.FindFile("docs", "hosted-pilot-supabase.md"));
-        var androidInstall = File.ReadAllText(TestRepo.FindFile("docs", "private-pilot-android-install.md"));
+        var hostedSetup = File.ReadAllText(TestRepo.FindFile("docs", "hosted-preview-supabase.md"));
+        var androidInstall = File.ReadAllText(TestRepo.FindFile("docs", "flightlogx-preview-android-install.md"));
 
         Assert.Contains("artifacts/private-pilot-20260806/cohort.md", runbook, StringComparison.Ordinal);
-        Assert.Contains("Invoke-PrivatePilotHealthCheck.ps1", runbook, StringComparison.Ordinal);
-        Assert.Contains("Invoke-PrivatePilotPreflight.ps1", runbook, StringComparison.Ordinal);
-        Assert.Contains("ELB_SUPABASE_PILOT_DB_URL", runbook, StringComparison.Ordinal);
+        Assert.Contains("Invoke-PreviewHealthCheck.ps1", runbook, StringComparison.Ordinal);
+        Assert.Contains("Invoke-PreviewPreflight.ps1", runbook, StringComparison.Ordinal);
+        Assert.Contains("ELB_SUPABASE_PREVIEW_DB_URL", runbook, StringComparison.Ordinal);
         Assert.Contains("get_hosted_pilot_health", runbook, StringComparison.Ordinal);
-        Assert.Contains("docs/private-pilot-android-install.md", runbook, StringComparison.Ordinal);
+        Assert.Contains("docs/flightlogx-preview-android-install.md", runbook, StringComparison.Ordinal);
         Assert.Contains("Download started...", runbook, StringComparison.Ordinal);
         Assert.Contains("unverified-developer advanced flow", runbook, StringComparison.Ordinal);
 
@@ -32,6 +32,7 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("24-hour security delay", androidInstall, StringComparison.Ordinal);
         Assert.Contains("Do not work around these failures by removing an existing app", androidInstall, StringComparison.Ordinal);
 
+        Assert.Contains("ELB_SUPABASE_PREVIEW_DB_URL", healthScript, StringComparison.Ordinal);
         Assert.Contains("ELB_SUPABASE_PILOT_DB_URL", healthScript, StringComparison.Ordinal);
         Assert.Contains("public.get_hosted_pilot_health", healthScript, StringComparison.Ordinal);
         Assert.Contains("paidPlanUpgradeTriggers", healthScript, StringComparison.Ordinal);
@@ -40,15 +41,18 @@ public sealed class PrivatePilotRunbookTests
         Assert.DoesNotContain("Write-Host $ConnectionString", healthScript, StringComparison.Ordinal);
         Assert.DoesNotContain("Write-Output $ConnectionString", healthScript, StringComparison.Ordinal);
 
-        Assert.Contains("docs\\private-pilot-runbook.md", preflightScript, StringComparison.Ordinal);
-        Assert.Contains("supabase\\tests\\hosted_pilot_rls.sql", preflightScript, StringComparison.Ordinal);
-        Assert.Contains("Invoke-PrivatePilotHealthCheck.ps1", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("docs\\flightlogx-preview-runbook.md", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("supabase\\tests\\hosted_preview_rls.sql", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Invoke-PreviewHealthCheck.ps1", preflightScript, StringComparison.Ordinal);
         Assert.Contains("ElectronicLogbook\\Supabase", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("hosted-preview-projects.local.json", preflightScript, StringComparison.Ordinal);
         Assert.Contains("hosted-pilot-projects.local.json", preflightScript, StringComparison.Ordinal);
         Assert.Contains("access-token.txt", preflightScript, StringComparison.Ordinal);
-        Assert.Contains("private-pilot database region is ap-southeast-2", preflightScript, StringComparison.Ordinal);
-        Assert.Contains("Supabase management token sees active private-pilot project in ap-southeast-2", preflightScript, StringComparison.Ordinal);
-        Assert.Contains("private-pilot project is not active and healthy", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Preview database region is ap-southeast-2", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Supabase management token sees active Preview project in ap-southeast-2", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("Preview project is not active and healthy", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("ELB_SUPABASE_PREVIEW_ACCESS_TOKEN", preflightScript, StringComparison.Ordinal);
+        Assert.Contains("ELB_SUPABASE_PILOT_ACCESS_TOKEN", preflightScript, StringComparison.Ordinal);
         Assert.Contains("Google sign-in allows the Windows updater loopback callback", preflightScript, StringComparison.Ordinal);
         Assert.Contains("http://127.0.0.1:*/flightlogx-auth/**", preflightScript, StringComparison.Ordinal);
         Assert.Contains("Auth signup disabled with invited-user email and Google only", preflightScript, StringComparison.Ordinal);
@@ -77,6 +81,10 @@ public sealed class PrivatePilotRunbookTests
         Assert.Contains("PKCE with SHA-256", hostedSetup, StringComparison.Ordinal);
         Assert.Contains("http://127.0.0.1:*/flightlogx-auth/**", hostedSetup, StringComparison.Ordinal);
         Assert.Contains("mailer_otp_exp", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("hosted-preview-projects.local.json", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("hosted-pilot-projects.local.json", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("\"preview\"", emailOtpConfigScript, StringComparison.Ordinal);
+        Assert.Contains("\"privatePilot\"", emailOtpConfigScript, StringComparison.Ordinal);
         Assert.Contains("rate_limit_email_sent", emailOtpConfigScript, StringComparison.Ordinal);
         Assert.Contains("rate_limit_otp", emailOtpConfigScript, StringComparison.Ordinal);
         Assert.Contains("ConfirmationURL|TokenHash", emailOtpConfigScript, StringComparison.Ordinal);
@@ -84,6 +92,8 @@ public sealed class PrivatePilotRunbookTests
         Assert.DoesNotContain("Write-Output $managementToken", emailOtpConfigScript, StringComparison.Ordinal);
 
         Assert.Contains("ACTIVE_HEALTHY", recoveryRehearsalScript, StringComparison.Ordinal);
+        Assert.Contains("hosted-preview-projects.local.json", recoveryRehearsalScript, StringComparison.Ordinal);
+        Assert.Contains("hosted-pilot-projects.local.json", recoveryRehearsalScript, StringComparison.Ordinal);
         Assert.Contains("Sydney development project", recoveryRehearsalScript, StringComparison.Ordinal);
         Assert.Contains("public Auth signup to be disabled", recoveryRehearsalScript, StringComparison.Ordinal);
         Assert.Contains("email to be the only enabled external Auth provider", recoveryRehearsalScript, StringComparison.Ordinal);
@@ -99,7 +109,7 @@ public sealed class PrivatePilotRunbookTests
         var gate = File.ReadAllText(TestRepo.FindFile("docs", "public-release-hardening-gate.md"));
 
         Assert.Contains("Status: intentionally not started", gate, StringComparison.Ordinal);
-        Assert.Contains("private pilot exit decision is `pass` or `pass with issues`", gate, StringComparison.Ordinal);
+        Assert.Contains("FlightLogX Preview exit decision is `pass` or `pass with issues`", gate, StringComparison.Ordinal);
         Assert.Contains("project owner explicitly decides to pursue public release", gate, StringComparison.Ordinal);
         Assert.Contains("Do not start these until the entry criteria pass", gate, StringComparison.Ordinal);
         Assert.Contains("public signup or waitlist", gate, StringComparison.Ordinal);

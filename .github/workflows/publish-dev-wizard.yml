@@ -96,7 +96,7 @@ jobs:
               --json assets `
               | ConvertFrom-Json
             if ($oldRelease.assets.name -contains "pilot-wizard-channel.txt") {
-              Write-Host "Preserving pilot channel bridge release $oldTag."
+              Write-Host "Preserving legacy Preview-channel bridge release $oldTag."
               continue
             }
 

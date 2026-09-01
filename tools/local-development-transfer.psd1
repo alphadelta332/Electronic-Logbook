@@ -113,6 +113,8 @@
         FirebaseCliVersion = '15.28.2'
         FirebaseProjectId = 'flightlogx-private-pilot'
         FirebaseAndroidPackageName = 'com.alphadelta.electroniclogbook'
+        HostedProjectMetadataFile = 'hosted-preview-projects.local.json'
+        LegacyHostedProjectMetadataFile = 'hosted-pilot-projects.local.json'
         # The filenames are permanent legacy identifiers for the already-distributed signing identity.
         PreviewSigningKeystoreFile = 'flightlogx-pilot.keystore'
         PreviewSigningCredentialsFile = 'flightlogx-pilot-credentials.json'

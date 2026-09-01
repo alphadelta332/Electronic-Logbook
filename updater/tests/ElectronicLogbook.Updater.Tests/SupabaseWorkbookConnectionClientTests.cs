@@ -38,7 +38,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
             "Excel Test Device");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        var started = await client.StartEmailSignInAsync("pilot@example.com");
+        var started = await client.StartEmailSignInAsync("preview@example.com");
         var session = await client.CompleteEmailSignInAsync("123456");
         var logbooks = await client.DiscoverActiveLogbooksAsync();
         using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
@@ -59,7 +59,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
         Assert.False(JsonDocument.Parse(otp.Body).RootElement.GetProperty("create_user").GetBoolean());
         var verify = handler.Requests.Single(request => request.Path == "/auth/v1/verify");
         using var verifyJson = JsonDocument.Parse(verify.Body);
-        Assert.Equal("pilot@example.com", verifyJson.RootElement.GetProperty("email").GetString());
+        Assert.Equal("preview@example.com", verifyJson.RootElement.GetProperty("email").GetString());
         Assert.Equal("123456", verifyJson.RootElement.GetProperty("token").GetString());
         Assert.False(verifyJson.RootElement.TryGetProperty("token_hash", out _));
         var restore = handler.Requests.Single(request =>
@@ -84,7 +84,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
             PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
@@ -93,7 +93,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var session = await client.SignInWithGoogleAsync(browser);
 
         Assert.Equal("acct_" + accountId.ToString("N"), session.AccountId.Value);
-        Assert.Equal("pilot@example.com", session.AccountDisplay);
+        Assert.Equal("preview@example.com", session.AccountDisplay);
         Assert.NotNull(browser.AuthorizationUri);
         var authorization = QueryValues(browser.AuthorizationUri!.Query);
         Assert.Equal("google", authorization["provider"]);
@@ -124,7 +124,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
             PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
@@ -149,14 +149,14 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var handler = new WorkbookConnectionHandler(accountId, logbookId, PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
         var sourceFingerprint = new string('a', 64);
         var receiptHash = new string('e', 64);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var started = await client.BeginWorkbookMigrationAsync(sourceFingerprint, "Migrated Logbook");
         var status = await client.GetWorkbookMigrationStatusAsync();
@@ -191,12 +191,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var handler = new WorkbookConnectionHandler(accountId, logbookId, PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
         var revision = new HostedConfigurationRevisionUpload(
@@ -250,12 +250,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var handler = new WorkbookConnectionHandler(accountId, logbookId, packageKey);
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
         using var recoveryKeyPair = PortableWorkbookRecoveryKeyPair.Create();
@@ -293,12 +293,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
             PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
         var targetName = PortableWorkbookMigrationRecoveryStore.CreateTargetName(
@@ -345,14 +345,14 @@ public sealed class SupabaseWorkbookConnectionClientTests
             PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
         var coordinator = new WorkbookMigrationRecoveryCoordinator(client);
         var sourceFingerprint = new string('a', 64);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var migration = await client.BeginWorkbookMigrationAsync(
             sourceFingerprint,
@@ -399,14 +399,14 @@ public sealed class SupabaseWorkbookConnectionClientTests
             PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
         var coordinator = new WorkbookMigrationRecoveryCoordinator(client);
         var sourceFingerprint = new string('a', 64);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         using var first = await coordinator.PrepareAsync(sourceFingerprint, "Migrated Logbook");
         var targetName = first.RecoveryMaterial.CredentialTargetName;
@@ -449,12 +449,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
             invalidIngressFingerprint: true);
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Windows Migration");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var migration = await client.BeginWorkbookMigrationAsync(new string('a', 64), "Migrated Logbook");
         var targetName = PortableWorkbookMigrationRecoveryStore.CreateTargetName(
@@ -498,8 +498,8 @@ public sealed class SupabaseWorkbookConnectionClientTests
     }
 
     [Theory]
-    [InlineData("https://pilot.supabase.co/auth/v1/verify?token=hashed-magic-link-token&type=magiclink&redirect_to=http%3A%2F%2Flocalhost%3A3000", "hashed-magic-link-token", "magiclink")]
-    [InlineData("https://pilot.supabase.co/auth/v1/verify?token_hash=hashed-email-token&type=email", "hashed-email-token", "email")]
+    [InlineData("https://preview.supabase.co/auth/v1/verify?token=hashed-magic-link-token&type=magiclink&redirect_to=http%3A%2F%2Flocalhost%3A3000", "hashed-magic-link-token", "magiclink")]
+    [InlineData("https://preview.supabase.co/auth/v1/verify?token_hash=hashed-email-token&type=email", "hashed-email-token", "email")]
     public async Task ClientAcceptsUnusedSupabaseSignInLinkAsTokenHash(
         string signInLink,
         string expectedTokenHash,
@@ -508,12 +508,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var handler = new WorkbookConnectionHandler(Guid.NewGuid(), Guid.NewGuid(), PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Excel Test Device");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync(signInLink);
 
         var verify = handler.Requests.Single(request => request.Path == "/auth/v1/verify");
@@ -530,14 +530,14 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var handler = new WorkbookConnectionHandler(Guid.NewGuid(), Guid.NewGuid(), PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Excel Test Device");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
         const string safeLink =
-            "https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fpilot.supabase.co%2Fauth%2Fv1%2Fverify%3Ftoken%3Dsafe-link-token%26type%3Dmagiclink%26redirect_to%3Dhttp%3A%2F%2Flocalhost%3A3000&data=redacted&reserved=0";
+            "https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fpreview.supabase.co%2Fauth%2Fv1%2Fverify%3Ftoken%3Dsafe-link-token%26type%3Dmagiclink%26redirect_to%3Dhttp%3A%2F%2Flocalhost%3A3000&data=redacted&reserved=0";
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync(safeLink);
 
         var verify = handler.Requests.Single(request => request.Path == "/auth/v1/verify");
@@ -552,12 +552,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
         var handler = new WorkbookConnectionHandler(Guid.NewGuid(), Guid.NewGuid(), PortableLogbookKey.Generate());
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Excel Test Device");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         var error = await Assert.ThrowsAsync<HostedSignInException>(() =>
             client.CompleteEmailSignInAsync(
                 "https://attacker.supabase.co/auth/v1/verify?token=wrong-project&type=magiclink"));
@@ -576,12 +576,12 @@ public sealed class SupabaseWorkbookConnectionClientTests
             rejectActivation: true);
         using var http = new HttpClient(handler);
         var configuration = new SupabaseHostedSyncConfiguration(
-            new Uri("https://pilot.supabase.co"),
+            new Uri("https://preview.supabase.co"),
             "public-anon-key",
             "Excel Test Device");
         using var client = new SupabaseWorkbookConnectionClient(configuration, http);
 
-        await client.StartEmailSignInAsync("pilot@example.com");
+        await client.StartEmailSignInAsync("preview@example.com");
         await client.CompleteEmailSignInAsync("123456");
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             client.ActivateWorkbookDeviceAsync(LogbookId.New(), DeviceId.New()));
@@ -652,7 +652,7 @@ public sealed class SupabaseWorkbookConnectionClientTests
                       "expires_in": 3600,
                       "user": {
                         "id": "{{accountId:D}}",
-                        "email": "pilot@example.com"
+                        "email": "preview@example.com"
                       }
                     }
                     """);

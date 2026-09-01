@@ -1,4 +1,4 @@
-# Creates the gitignored Android hosted-sync runtime config for private-pilot rehearsal.
+# Creates the gitignored Android hosted-sync runtime config for Preview rehearsal.
 
 [CmdletBinding()]
 param(

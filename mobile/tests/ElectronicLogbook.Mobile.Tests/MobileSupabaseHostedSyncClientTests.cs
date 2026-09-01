@@ -14,13 +14,13 @@ public sealed class MobileSupabaseHostedSyncClientTests
     {
         var handler = new RecordingHandler
         {
-            ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "pilot", exp = 4_102_444_800L }))
+            ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "preview", exp = 4_102_444_800L }))
         };
         var jsRuntime = new MemoryJsRuntime();
         await new BrowserHostedCredentialStore(jsRuntime).SaveAsync(new BrowserHostedCredential(
             new HostedAccountId("acct_10000000000000000000000000000001"),
             new DeviceId("dev_40000000000000000000000000000001"),
-            CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L }),
+            CreateJwt(new { iss = "https://preview.supabase.co/auth/v1", exp = 4_102_444_800L }),
             "retained-refresh-token",
             DateTimeOffset.Parse("2099-01-01T00:00:00Z")));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
@@ -44,7 +44,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
 
     [Theory]
     [InlineData("other", 4102444800L, "ANON_KEY_PROJECT_MISMATCH")]
-    [InlineData("pilot", 1L, "ANON_KEY_EXPIRED")]
+    [InlineData("preview", 1L, "ANON_KEY_EXPIRED")]
     public async Task RecoveryConfigRejectsWrongProjectAndExpiredAnonCredentials(string projectRef, long expiry, string expectedCode)
     {
         var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = projectRef, exp = expiry })) };
@@ -59,12 +59,12 @@ public sealed class MobileSupabaseHostedSyncClientTests
     [Fact]
     public async Task RecoveryPreflightUsesRetainedRefreshCredentialOnlyWhenAccessIsExpired()
     {
-        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "pilot", exp = 4_102_444_800L })) };
+        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "preview", exp = 4_102_444_800L })) };
         var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
         await store.SaveAsync(new BrowserHostedCredential(
             new HostedAccountId("acct_10000000000000000000000000000001"),
             new DeviceId("dev_40000000000000000000000000000001"),
-            CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 1L }),
+            CreateJwt(new { iss = "https://preview.supabase.co/auth/v1", exp = 1L }),
             "retained-refresh-token",
             DateTimeOffset.Parse("2020-01-01T00:00:00Z")));
         using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
@@ -79,7 +79,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
     [Fact]
     public async Task RecoveryPreflightRejectsAccessTokenFromAnotherProject()
     {
-        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "pilot", exp = 4_102_444_800L })) };
+        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "preview", exp = 4_102_444_800L })) };
         var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
         await store.SaveAsync(ValidCredential() with
         {
@@ -96,7 +96,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
     [Fact]
     public async Task RecoveryPreflightReportsRejectedAccessAndSanitizedSupabaseError()
     {
-        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "pilot", exp = 4_102_444_800L })) };
+        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "preview", exp = 4_102_444_800L })) };
         handler.ResponseOverrides["/auth/v1/user"] = (HttpStatusCode.Unauthorized, """{"error_code":"bad_jwt","msg":"token owner@example.com rejected"}""");
         var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
         await store.SaveAsync(ValidCredential());
@@ -114,7 +114,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
     [Fact]
     public async Task RejectedRefreshCredentialIsRetainedForDiagnostics()
     {
-        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "pilot", exp = 4_102_444_800L })) };
+        var handler = new RecordingHandler { ConfigJson = Config(CreateJwt(new { role = "anon", @ref = "preview", exp = 4_102_444_800L })) };
         handler.ResponseOverrides["/auth/v1/token"] = (HttpStatusCode.BadRequest, """{"error_code":"refresh_token_not_found","msg":"invalid refresh"}""");
         var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
         await store.SaveAsync(ValidCredential());
@@ -223,7 +223,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
 
         var refresh = Assert.Single(handler.Requests, request => request.Path == "/auth/v1/token");
         var envelope = Assert.Single(handler.Requests, request => request.Path == "/functions/v1/recovery-envelope");
-        var refreshedAccessToken = CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L });
+        var refreshedAccessToken = CreateJwt(new { iss = "https://preview.supabase.co/auth/v1", exp = 4_102_444_800L });
         Assert.Null(refresh.Authorization);
         Assert.Equal("Bearer " + refreshedAccessToken, envelope.Authorization);
         Assert.NotEqual("Bearer " + expiring.AccessToken, envelope.Authorization);
@@ -327,7 +327,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
         handler.ResponseOverrides["/functions/v1/recovery-envelope"] = (HttpStatusCode.Forbidden, """
             {
               "error_code": "permission_denied",
-              "message": "owner@example.com https://pilot.supabase.co bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEifQ.signaturesig package_key=super-secret-value log_20000000000000000000000000000001"
+              "message": "owner@example.com https://preview.supabase.co bearer eyJhbGciOiJub25lIn0.eyJzdWIiOiIxMDAwMDAwMC0wMDAwLTAwMDAtMDAwMC0wMDAwMDAwMDAwMDEifQ.signaturesig package_key=super-secret-value log_20000000000000000000000000000001"
             }
             """);
         var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
@@ -345,7 +345,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
         Assert.Equal(HttpStatusCode.Forbidden, error.HttpStatus);
         Assert.Equal("permission_denied", error.SupabaseCode);
         Assert.DoesNotContain("owner@example.com", error.SupabaseMessage, StringComparison.Ordinal);
-        Assert.DoesNotContain("pilot.supabase.co", error.SupabaseMessage, StringComparison.Ordinal);
+        Assert.DoesNotContain("preview.supabase.co", error.SupabaseMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("eyJ", error.SupabaseMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("super-secret-value", error.SupabaseMessage, StringComparison.Ordinal);
         Assert.DoesNotContain("log_20000000000000000000000000000001", error.SupabaseMessage, StringComparison.Ordinal);
@@ -354,7 +354,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
     private static BrowserHostedCredential ValidCredential() => new(
         new HostedAccountId("acct_10000000000000000000000000000001"),
         new DeviceId("dev_40000000000000000000000000000001"),
-        CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L }),
+        CreateJwt(new { iss = "https://preview.supabase.co/auth/v1", exp = 4_102_444_800L }),
         "retained-refresh-token",
         DateTimeOffset.Parse("2099-01-01T00:00:00Z"));
 
@@ -532,7 +532,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
 
     private static string Config(string anonKey) => $$"""
         {
-          "supabaseUrl": "https://pilot.supabase.co",
+          "supabaseUrl": "https://preview.supabase.co",
           "anonKey": "{{anonKey}}",
           "platformLabel": "Pixel 8 Pro",
           "displayName": "Project owner",
@@ -1113,8 +1113,8 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Theory]
-    [InlineData("https://pilot.supabase.co/auth/v1/verify?token=hashed-magic-link-token&type=magiclink&redirect_to=http%3A%2F%2Flocalhost%3A3000", "hashed-magic-link-token", "magiclink")]
-    [InlineData("https://pilot.supabase.co/auth/v1/verify?token_hash=hashed-email-token&type=email", "hashed-email-token", "email")]
+    [InlineData("https://preview.supabase.co/auth/v1/verify?token=hashed-magic-link-token&type=magiclink&redirect_to=http%3A%2F%2Flocalhost%3A3000", "hashed-magic-link-token", "magiclink")]
+    [InlineData("https://preview.supabase.co/auth/v1/verify?token_hash=hashed-email-token&type=email", "hashed-email-token", "email")]
     public async Task ClientAcceptsUnusedSupabaseSignInLinkAsTokenHash(
         string signInLink,
         string expectedTokenHash,
@@ -1150,7 +1150,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
             new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
 
         await client.CompleteEmailSignInAsync(
-            "https://pilot.supabase.co/auth/v1/verify?token=existing-token-hash&type=magiclink");
+            "https://preview.supabase.co/auth/v1/verify?token=existing-token-hash&type=magiclink");
 
         Assert.DoesNotContain(handler.Requests, request => request.Path == "/auth/v1/otp");
         Assert.Contains(handler.Requests, request =>
@@ -1168,7 +1168,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
             new BrowserHostedCredentialStore(new MemoryJsRuntime()),
             new ManualSyncClock(DateTimeOffset.Parse("2026-08-07T00:00:00Z")));
         const string safeLink =
-            "https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fpilot.supabase.co%2Fauth%2Fv1%2Fverify%3Ftoken%3Dsafe-link-token%26type%3Dmagiclink%26redirect_to%3Dhttp%3A%2F%2Flocalhost%3A3000&data=redacted&reserved=0";
+            "https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fpreview.supabase.co%2Fauth%2Fv1%2Fverify%3Ftoken%3Dsafe-link-token%26type%3Dmagiclink%26redirect_to%3Dhttp%3A%2F%2Flocalhost%3A3000&data=redacted&reserved=0";
 
         await client.CompleteEmailSignInAsync(safeLink);
 
@@ -1216,7 +1216,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
 
         var error = await Assert.ThrowsAsync<HostedSignInException>(async () =>
             await client.CompleteEmailSignInAsync(
-                "https://pilot.supabase.co/auth/v1/verify?token=expired-token-hash&type=magiclink"));
+                "https://preview.supabase.co/auth/v1/verify?token=expired-token-hash&type=magiclink"));
 
         Assert.Equal(HostedSignInFailureReason.VerificationExpired, error.Reason);
         Assert.Contains("expired", error.Message, StringComparison.OrdinalIgnoreCase);
@@ -1224,12 +1224,12 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Theory]
-    [InlineData("http://pilot.supabase.co/auth/v1/verify?token=hash&type=magiclink")]
+    [InlineData("http://preview.supabase.co/auth/v1/verify?token=hash&type=magiclink")]
     [InlineData("https://other.supabase.co/auth/v1/verify?token=hash&type=magiclink")]
-    [InlineData("https://pilot.supabase.co/not-auth?token=hash&type=magiclink")]
-    [InlineData("https://pilot.supabase.co/auth/v1/verify?token=hash&type=invite")]
+    [InlineData("https://preview.supabase.co/not-auth?token=hash&type=magiclink")]
+    [InlineData("https://preview.supabase.co/auth/v1/verify?token=hash&type=invite")]
     [InlineData("https://nam01.safelinks.protection.outlook.com/?url=https%3A%2F%2Fevil.example%2Fauth%2Fv1%2Fverify%3Ftoken%3Dhash%26type%3Dmagiclink")]
-    [InlineData("https://links.example/?url=https%3A%2F%2Fpilot.supabase.co%2Fauth%2Fv1%2Fverify%3Ftoken%3Dhash%26type%3Dmagiclink")]
+    [InlineData("https://links.example/?url=https%3A%2F%2Fpreview.supabase.co%2Fauth%2Fv1%2Fverify%3Ftoken%3Dhash%26type%3Dmagiclink")]
     public async Task ClientRejectsLinksOutsideCurrentPilotPasswordlessFlow(string signInLink)
     {
         var handler = new RecordingHandler();
@@ -1291,7 +1291,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
             {
                 "/hosted-sync.local.json" => ConfigJson ?? """
                     {
-                      "supabaseUrl": "https://pilot.supabase.co",
+                      "supabaseUrl": "https://preview.supabase.co",
                       "anonKey": "anon-key",
                       "platformLabel": "Pixel 8 Pro",
                       "displayName": "Project owner",
@@ -1309,7 +1309,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
                     """,
                 "/auth/v1/token" => $$"""
                     {
-                      "access_token": "{{CreateJwt(new { iss = "https://pilot.supabase.co/auth/v1", exp = 4_102_444_800L })}}",
+                      "access_token": "{{CreateJwt(new { iss = "https://preview.supabase.co/auth/v1", exp = 4_102_444_800L })}}",
                       "refresh_token": "retained-refresh-token",
                       "expires_in": 3600
                     }
@@ -1426,7 +1426,7 @@ public sealed class MobileSupabaseHostedSyncClientTests
             Assert.NotNull(args);
             LastGoogleOptions = JsonSerializer.SerializeToElement(args[0]);
             var result = JsonSerializer.Deserialize<TValue>(
-                JsonSerializer.Serialize(new { idToken = GoogleIdToken, email = "pilot@example.com" }),
+                JsonSerializer.Serialize(new { idToken = GoogleIdToken, email = "preview@example.com" }),
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
             return new ValueTask<TValue>(Assert.IsType<TValue>(result));
         }

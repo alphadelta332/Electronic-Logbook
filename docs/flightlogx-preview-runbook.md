@@ -1,28 +1,30 @@
-# Private Pilot Runbook
+# FlightLogX Preview Runbook
 
-Status: pre-pilot operating plan
+Status: pre-Preview operating plan
 
 Last checked: 2026-08-28
 
-This runbook defines the private, invitation-only Android-first pilot for hosted sync.
+This runbook defines the private, invitation-only Android-first Preview for hosted sync.
 It intentionally excludes public signup, billing, public uptime promises, and public
 release hardening.
 
-## Pilot Goal
+## Preview Goal
 
-Run a small eight-week pilot that proves the workbook-led move to FlightLogX without
+Run a small eight-week Preview that proves the workbook-led move to FlightLogX without
 manual packages. An existing `2.0.3` workbook is the one-time migration source. After
 the hosted migration is verified, the Android app is the normal editable logbook and
 Excel is used only for fresh exports. Continuing workbook/app synchronization is not
-part of this pilot.
+part of this Preview.
 
-The controlled `pilot` update channel tests `3.0.0` while ordinary `main` workbooks stay
-on `2.0.3`. Pilot prerelease files are publicly downloadable because the repository and
+The controlled `preview` workbook channel tests `3.0.0` while ordinary `main` workbooks
+stay on `2.0.3`. Its GitHub branch, environment, secret names, and bridge asset still use
+the legacy external name `pilot` until the owner-controlled migration is complete. Preview
+prerelease files are publicly downloadable because the repository and
 the `2.0.3` bootstrap use unauthenticated GitHub Release URLs. They are not advertised,
 linked from the public update channel, or offered to a workbook unless a coach explicitly
 changes that workbook to `GitHubBranch = pilot`.
 
-## Pilot Update Channel Bootstrap
+## Preview Update Channel Bootstrap
 
 ### Repository setup
 
@@ -32,8 +34,8 @@ Before coaching any workbook, the owner must confirm all of the following:
 2. The GitHub `pilot` environment requires owner approval.
 3. That environment contains repository variable
    `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL` and secret
-   `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY` for the private-pilot Sydney project.
-4. The `Publish pilot wizard` workflow passed for that exact commit after its environment
+   `ELECTRONIC_LOGBOOK_PILOT_SUPABASE_ANON_KEY` for the Preview Sydney project.
+4. The `Publish FlightLogX Preview wizard` workflow passed for that exact commit after its environment
    approval.
 5. The resulting prerelease tag is `dev-wizard-<first 12 characters of the commit>` and
    contains `pilot-wizard-channel.txt`. The old `dev-wizard-` name is intentional: the
@@ -62,22 +64,22 @@ public instructions.
 6. Use the workbook's normal update check and accept the `3.0.0` update.
 7. `2.0.3` will show one warning labelled `Development Updater Warning`. This is expected
    because `2.0.3` does not yet know the word `pilot`. Confirm it only after the coach has
-   matched the approved pilot commit and prerelease tag from the repository setup above.
+   matched the approved Preview commit and prerelease tag from the repository setup above.
 8. Do not accept a second development warning after the workbook has reached `3.0.0`.
-   The `3.0.0` launcher understands `pilot` as its own channel.
+   The `3.0.0` launcher accepts that legacy value and canonicalises it to `preview`.
 
-The updater copies only the exact `pilot` value into the upgraded workbook. It does not
-carry `dev`, `hotfix`, `main`, blank, or an arbitrary branch value across migration. This
-keeps the canary on the pilot channel without turning an accidental or hostile branch
-name into a durable update source.
+The updater writes `preview` into the upgraded workbook when the source contains either
+`preview` or the legacy `pilot` value. It does not carry `dev`, `hotfix`, `main`, blank,
+or an arbitrary branch value across migration. This keeps the canary on the Preview
+channel without turning an accidental or hostile branch name into a durable update source.
 
-This channel bootstrap only selects and retains the pilot build. Do not treat it as proof
+This channel bootstrap only selects and retains the Preview build. Do not treat it as proof
 that hosted migration, exact readback, Google recovery, workbook stamping, or Android
 arrival is complete; those have separate acceptance gates in `TODO.md`.
 
 ## Named Cohort
 
-Keep the participant list out of git. The pilot cohort source of truth is the local,
+Keep the participant list out of git. The Preview cohort source of truth is the local,
 gitignored `artifacts/private-pilot-20260806/cohort.md` file or the project owner's
 private tracker.
 
@@ -98,13 +100,13 @@ participant. Target maximum for the first run: 5 total participants.
 
 ## Supported Environments
 
-Supported for this pilot:
+Supported for this Preview:
 
-- Android first, distributed through the approved private-pilot installation path once
+- Android first, distributed through the approved Preview installation path once
   that path passes its acceptance gate;
 - Pixel 8 Pro reference device and comparable Android phones that can run the current
   WebView/PWA build;
-- Australia/Sydney Supabase development or private-pilot project;
+- Australia/Sydney Supabase development or Preview project;
 - Windows Excel `2.0.3` as the one-time migration source through the controlled `pilot`
   update channel and checked-in updater flow;
 - local encrypted app cache and hosted encrypted operation ledger.
@@ -122,7 +124,7 @@ Out of scope:
 
 1. Confirm the participant has the supported Android and, if relevant, Windows/Excel
    environment.
-2. Send `docs/private-pilot-android-install.md` before the invitation. Explain that this
+2. Send `docs/flightlogx-preview-android-install.md` before the invitation. Explain that this
    is a Firebase-distributed APK, that Android will show outside-Play-Store warnings, and
    that the temporary **Allow from this source** permission is normally turned off after
    installation. The owner reference device may keep it enabled only for the duration of
@@ -154,7 +156,7 @@ Out of scope:
    **Download started...** state as a direction to use Android notifications or Chrome
    Downloads, not as live download progress. Stop rather than coaching an ordinary tester
    through an unverified-developer advanced flow or security delay.
-8. Ask the participant to open the approved Android pilot build and sign in with the same
+8. Ask the participant to open the approved Android Preview build and sign in with the same
    Google account. The app must discover the completed migrated logbook without a workbook
    picker or manual import.
 9. Keep the displayed six-digit email-code sign-in and package exchange in
@@ -162,12 +164,12 @@ Out of scope:
 10. Record the start date, environment, migration result, warnings encountered, and
     expected weekly check-in cadence in the private cohort tracker.
 
-### Pilot Update Rehearsal
+### Preview Update Rehearsal
 
 Android `versionCode` is monotonic and separate from the displayed `version.txt` value.
-FlightLogX reserves four low-order version-code digits for pilot build revisions, so a
-`3.0.0` revision `1` build is newer than the initial pilot APK while a future `3.0.1`
-release remains newer than every `3.0.0` pilot revision.
+FlightLogX reserves four low-order version-code digits for Preview build revisions, so a
+`3.0.0` revision `1` build is newer than the initial Preview APK while a future `3.0.1`
+release remains newer than every `3.0.0` Preview revision.
 
 1. Confirm the owner-only Firebase group contains exactly the owner and no canary.
 2. Build a higher disposable APK from `mobile/`:
@@ -180,7 +182,7 @@ release remains newer than every `3.0.0` pilot revision.
    version, higher Android version code, and APK SHA-256 before uploading it.
 4. Distribute only to the owner-only Firebase group. Do not put an invited email or a
    Firebase App ID in tracked scripts or evidence.
-5. On the retained Pixel, use **Settings > Check for pilot update**. Record the installed
+5. On the retained Pixel, use **Settings > Check for Preview update**. Record the installed
    version before the check, Firebase release identifier in redacted form, download
    outcome, and the Android installation-approval screen. Do not approve the final install
    until retained state and certificate continuity are confirmed.
@@ -206,10 +208,10 @@ Severity levels:
 
 | Severity | Definition | Response |
 | --- | --- | --- |
-| S0 data loss | User cannot recover expected logbook data from app, workbook, backup, or hosted ledger | Pause pilot, preserve devices/workbooks, export diagnostics, start rollback |
+| S0 data loss | User cannot recover expected logbook data from app, workbook, backup, or hosted ledger | Pause Preview, preserve devices/workbooks, export diagnostics, start rollback |
 | S1 sync/security | Cross-account access, plaintext hosted payload, revoked device syncs, or unrecoverable sync divergence | Disable affected account/device, stop new invites, preserve evidence |
 | S2 blocked workflow | User cannot sign in, pair, sync, restore, or continue normal entry work | Provide workaround or patched build before next check-in |
-| S3 usability | Confusing status, copy, timing, or recovery path without data risk | Track for pilot exit decision |
+| S3 usability | Confusing status, copy, timing, or recovery path without data risk | Track for Preview exit decision |
 
 Incident record minimum:
 
@@ -229,7 +231,7 @@ Official Supabase pages checked on 2026-08-06:
 - https://supabase.com/pricing
 - https://supabase.com/docs/guides/platform/billing-on-supabase
 
-Current free-plan assumptions for pilot monitoring:
+Current free-plan assumptions for Preview monitoring:
 
 - 50,000 monthly active users;
 - 500 MB database size per project;
@@ -239,35 +241,35 @@ Current free-plan assumptions for pilot monitoring:
 - 2 active projects;
 - free projects may pause after inactivity.
 
-Pilot review triggers:
+Preview review triggers:
 
 - database reaches 250 MB or health reports `NearLimit`;
 - egress or cached egress reaches 2.5 GB in a month;
 - file storage reaches 500 MB;
-- active pilot accounts exceed 25;
+- active Preview accounts exceed 25;
 - free-project pausing disrupts a participant;
 - users begin treating hosted storage as their only practical recovery source;
 - support needs require managed backups, longer log retention, or email support.
 
-Weekly commands use `tools\Invoke-PrivatePilotHealthCheck.ps1`, which queries
+Weekly commands use `tools\Invoke-PreviewHealthCheck.ps1`, which queries the legacy
 `public.get_hosted_pilot_health()` without printing the database connection string:
 
 ```powershell
-$env:ELB_SUPABASE_PILOT_DB_URL = "<pilot-db-url>"
-.\tools\Invoke-PrivatePilotHealthCheck.ps1 `
-  -OutputPath artifacts\private-pilot-20260806\health\week-01.json
+$env:ELB_SUPABASE_PREVIEW_DB_URL = "<preview-db-url>"
+.\tools\Invoke-PreviewHealthCheck.ps1 `
+  -OutputPath artifacts\flightlogx-preview\health\week-01.json
 ```
 
 Also inspect Supabase Security Advisor, Performance Advisor, Auth configuration, project
 status, and usage dashboards before each new invite batch. The preflight must report the
-private-pilot project as `ACTIVE_HEALTHY`; a paused or restoring project is not invite-ready.
+Preview project as `ACTIVE_HEALTHY`; a paused or restoring project is not invite-ready.
 
-For a single redacted pre-invite report that checks the local pilot files, captures
+For a single redacted pre-invite report that checks the local Preview files, captures
 health, and can run the adversarial RLS harness:
 
 ```powershell
-$env:ELB_SUPABASE_PILOT_DB_URL = "<pilot-db-url>"
-.\tools\Invoke-PrivatePilotPreflight.ps1 -RunRlsHarness
+$env:ELB_SUPABASE_PREVIEW_DB_URL = "<preview-db-url>"
+.\tools\Invoke-PreviewPreflight.ps1 -RunRlsHarness
 ```
 
 ## Rollback
@@ -297,7 +299,7 @@ Pass requires:
 - app-only and workbook-linked participants each complete at least one offline recovery
   and later convergence path;
 - hosted diagnostics remain redacted;
-- RLS harness passes against the final pilot schema;
+- RLS harness passes against the final Preview schema;
 - free-tier usage stays below review triggers or a paid-upgrade decision is documented;
 - package exchange remains Advanced recovery/support, not normal daily use.
 
@@ -305,24 +307,24 @@ Pass with issues requires the same data-safety guarantees but allows S2/S3 fixes
 queued before public-release planning.
 
 Fail if data recovery is uncertain, security boundaries are violated, sync convergence
-cannot be explained, or the support burden is not sustainable for a private pilot.
+cannot be explained, or the support burden is not sustainable for a FlightLogX Preview.
 
 ## Pre-Invite Checklist
 
 - [ ] Private cohort tracker exists outside git.
 - [ ] Development project migration and RLS harness pass.
-- [ ] Private-pilot project is created in `ap-southeast-2`.
+- [ ] Preview project is created in `ap-southeast-2`.
 - [ ] Public signup is disabled and email sign-in is configured for invited users only.
-- [ ] Private-pilot project status is `ACTIVE_HEALTHY` immediately before invitations.
+- [ ] Preview project status is `ACTIVE_HEALTHY` immediately before invitations.
 - [ ] Security Advisor and Performance Advisor are reviewed.
 - [ ] Logical export and restore are rehearsed into a separate project or disposable
   local database.
-- [ ] `tools\Invoke-PrivatePilotHealthCheck.ps1` writes a redacted weekly health
+- [ ] `tools\Invoke-PreviewHealthCheck.ps1` writes a redacted weekly health
   snapshot.
-- [ ] `tools\Invoke-PrivatePilotPreflight.ps1 -RunRlsHarness` writes a redacted
+- [ ] `tools\Invoke-PreviewPreflight.ps1 -RunRlsHarness` writes a redacted
   pre-invite readiness report.
 - [ ] Android install path is verified on the reference Pixel device.
-- [ ] Tester receives `docs/private-pilot-android-install.md` before the Firebase invitation
+- [ ] Tester receives `docs/flightlogx-preview-android-install.md` before the Firebase invitation
   and understands when to continue, when to stop, and how to remove the temporary
   unknown-app installation permission.
 - [ ] Workbook pairing is verified on the Excel-capable release machine.

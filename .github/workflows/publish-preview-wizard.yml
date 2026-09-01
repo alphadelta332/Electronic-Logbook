@@ -1,4 +1,4 @@
-name: Publish pilot wizard
+name: Publish FlightLogX Preview wizard
 
 on:
   push:
@@ -9,35 +9,37 @@ permissions:
   contents: write
 
 concurrency:
-  group: publish-pilot-wizard
+  group: publish-preview-wizard
   cancel-in-progress: false
 
 jobs:
   publish:
-    name: Publish protected pilot wizard asset
+    name: Publish protected Preview wizard asset
     runs-on: windows-latest
     timeout-minutes: 25
     environment: pilot
 
     steps:
-      - name: Check out exact pilot commit
+      # The branch and environment retain their legacy external names until the
+      # owner-controlled GitHub migration is completed.
+      - name: Check out exact Preview commit
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
-      - name: Validate pilot source
+      - name: Validate Preview source
         shell: pwsh
         run: |
           if ($env:GITHUB_REF_NAME -ne "pilot") {
-            throw "Pilot wizard publication must run from the pilot branch."
+            throw "Preview wizard publication must run from the legacy pilot branch."
           }
 
           $version = (Get-Content -LiteralPath version.txt -Raw).Trim()
           if ($version -notmatch '^3\.\d+\.\d+$') {
-            throw "Pilot workbook version must be 3.x.x. Found: $version"
+            throw "Preview workbook version must be 3.x.x. Found: $version"
           }
 
-      - name: Build pilot wizard asset
+      - name: Build Preview wizard asset
         shell: pwsh
         env:
           HOSTED_SUPABASE_URL: ${{ vars.ELECTRONIC_LOGBOOK_PILOT_SUPABASE_URL }}
@@ -45,7 +47,7 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:HOSTED_SUPABASE_URL) -or
               [string]::IsNullOrWhiteSpace($env:HOSTED_SUPABASE_ANON_KEY)) {
-            throw "Protected pilot hosted-sync configuration is missing."
+            throw "Protected Preview hosted-sync configuration is missing."
           }
 
           $configPath = Join-Path $env:RUNNER_TEMP "wizard-hosted-sync.json"
@@ -57,7 +59,7 @@ jobs:
 
           ./updater/Publish-WizardAsset.ps1 -HostedSyncConfigPath $configPath
 
-      - name: Publish pilot bridge release
+      - name: Publish Preview bridge release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,16 +67,16 @@ jobs:
           $version = (Get-Content -LiteralPath version.txt -Raw).Trim()
           $shortSha = $env:GITHUB_SHA.Substring(0, 12)
           $tag = "dev-wizard-$shortSha"
-          $title = "Private pilot workbook updater $version ($shortSha)"
+          $title = "FlightLogX Preview workbook updater $version ($shortSha)"
           Set-Content -Path dev-wizard-commit.txt -Value $env:GITHUB_SHA -Encoding ascii
           Set-Content -Path pilot-wizard-channel.txt -Value "pilot`n$env:GITHUB_SHA" -Encoding ascii
           $notes = @"
           Publicly downloadable prerelease used only by the coached, invitation-only
-          workbook pilot channel. It is not offered to main-channel workbooks.
+          FlightLogX Preview channel. It is not offered to main-channel workbooks.
 
           Version: $version
           Commit: $env:GITHUB_SHA
-          Branch: pilot
+          Branch: pilot (legacy external name; canonical channel is preview)
 
           The dev-wizard tag name is retained because the 2.0.3 bootstrap requires it
           for the first controlled update to 3.x.

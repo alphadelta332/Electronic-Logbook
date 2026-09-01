@@ -336,7 +336,7 @@ public sealed class InMemoryHostedLogbookAuthenticator(
     HostedAccountId accountId,
     DeviceId deviceId,
     ISyncClock clock,
-    string invitedEmail = "pilot@example.com")
+    string invitedEmail = "preview@example.com")
     : IHostedLogbookAuthenticator
 {
     private HostedSyncSession? currentSession;

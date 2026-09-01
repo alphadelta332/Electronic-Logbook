@@ -22,8 +22,13 @@ if ([string]::IsNullOrWhiteSpace($ExpectedDeviceId)) { $ExpectedDeviceId = $env:
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
 $localSupabaseRoot = Join-Path $env:LOCALAPPDATA "ElectronicLogbook\Supabase"
-# Retained local-state filename alias. Migrate it with the external project names later.
-$localSupabaseConfigPath = Join-Path $localSupabaseRoot "hosted-pilot-projects.local.json"
+$canonicalSupabaseConfigPath = Join-Path $localSupabaseRoot "hosted-preview-projects.local.json"
+$legacySupabaseConfigPath = Join-Path $localSupabaseRoot "hosted-pilot-projects.local.json"
+$localSupabaseConfigPath = if (Test-Path -LiteralPath $canonicalSupabaseConfigPath -PathType Leaf) {
+    $canonicalSupabaseConfigPath
+} else {
+    $legacySupabaseConfigPath
+}
 $localSupabaseAccessTokenPath = Join-Path $localSupabaseRoot "access-token.txt"
 $localSupabaseConfig = $null
 $supabaseManagementToken = $null
@@ -171,26 +176,24 @@ $runtimeConfig = $null
     if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) { throw "Auth endpoint rejected the packaged anon key" }
 }))
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "private-pilot database region is ap-southeast-2" -Action {
-    $databaseHost = Get-PilotDbHost -DatabaseConnectionString $ConnectionString
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Preview database region is ap-southeast-2" -Action {
+    $databaseHost = Get-PreviewDbHost -DatabaseConnectionString $ConnectionString
     if ([string]::IsNullOrWhiteSpace($databaseHost)) {
-        throw "pilot database host could not be read from the configured connection string"
+        throw "Preview database host could not be read from the configured connection string"
     }
     if ($databaseHost -notmatch "(^|[.-])ap-southeast-2([.-]|$)") {
-        throw "pilot database host does not identify ap-southeast-2"
+        throw "Preview database host does not identify ap-southeast-2"
     }
 }))
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "Supabase management token sees active private-pilot project in ap-southeast-2" -Action {
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "Supabase management token sees active Preview project in ap-southeast-2" -Action {
     if ([string]::IsNullOrWhiteSpace($supabaseManagementToken)) {
         throw "Supabase management access token is not configured"
     }
-    if ($null -eq $localSupabaseConfig -or $null -eq $localSupabaseConfig.privatePilot) {
-        throw "local private-pilot project metadata is not configured"
-    }
-    $projectRef = $localSupabaseConfig.privatePilot.project_ref
+    if ($null -eq $previewProject) { throw "local Preview project metadata is not configured" }
+    $projectRef = $previewProject.project_ref
     if ([string]::IsNullOrWhiteSpace($projectRef)) {
-        throw "local private-pilot project ref is not configured"
+        throw "local Preview project ref is not configured"
     }
 
     $previousToken = $env:SUPABASE_ACCESS_TOKEN
@@ -203,15 +206,15 @@ $runtimeConfig = $null
             throw "Supabase projects list failed"
         }
         $projects = $projectsJson | ConvertFrom-Json
-        $pilot = @($projects | Where-Object { $_.id -eq $projectRef -or $_.ref -eq $projectRef })[0]
-        if ($null -eq $pilot) {
-            throw "private-pilot project was not returned by Supabase projects list"
+        $preview = @($projects | Where-Object { $_.id -eq $projectRef -or $_.ref -eq $projectRef })[0]
+        if ($null -eq $preview) {
+            throw "Preview project was not returned by Supabase projects list"
         }
-        if ($pilot.region -ne "ap-southeast-2") {
-            throw "private-pilot project is not in ap-southeast-2"
+        if ($preview.region -ne "ap-southeast-2") {
+            throw "Preview project is not in ap-southeast-2"
         }
-        if ($pilot.status -ne "ACTIVE_HEALTHY") {
-            throw "private-pilot project is not active and healthy"
+        if ($preview.status -ne "ACTIVE_HEALTHY") {
+            throw "Preview project is not active and healthy"
         }
     }
     finally {
@@ -224,12 +227,10 @@ $runtimeConfig = $null
     if ([string]::IsNullOrWhiteSpace($supabaseManagementToken)) {
         throw "Supabase management access token is not configured"
     }
-    if ($null -eq $localSupabaseConfig -or $null -eq $localSupabaseConfig.privatePilot) {
-        throw "local private-pilot project metadata is not configured"
-    }
-    $projectRef = $localSupabaseConfig.privatePilot.project_ref
+    if ($null -eq $previewProject) { throw "local Preview project metadata is not configured" }
+    $projectRef = $previewProject.project_ref
     if ([string]::IsNullOrWhiteSpace($projectRef)) {
-        throw "local private-pilot project ref is not configured"
+        throw "local Preview project ref is not configured"
     }
 
     $authConfig = Invoke-RestMethod `
@@ -308,12 +309,12 @@ $authUserId = $null
 }))
 
 $requiredFiles = @(
-    "docs\private-pilot-runbook.md",
+    "docs\flightlogx-preview-runbook.md",
     "docs\public-release-hardening-gate.md",
-    "docs\hosted-pilot-supabase.md",
+    "docs\hosted-preview-supabase.md",
     "supabase\migrations\20260806000000_hosted_pilot_foundation.sql",
-    "supabase\tests\hosted_pilot_rls.sql",
-    "tools\Invoke-PrivatePilotHealthCheck.ps1"
+    "supabase\tests\hosted_preview_rls.sql",
+    "tools\Invoke-PreviewHealthCheck.ps1"
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -324,7 +325,7 @@ foreach ($relativePath in $requiredFiles) {
         -Detail "presence only; no participant data read"))
 }
 
-$runbook = Get-Content -LiteralPath (Join-Path $repoRoot "docs\private-pilot-runbook.md") -Raw -Encoding UTF8
+$runbook = Get-Content -LiteralPath (Join-Path $repoRoot "docs\flightlogx-preview-runbook.md") -Raw -Encoding UTF8
 [void]$checks.Add((New-Check `
     -Name "runbook defines invitation process" `
     -Passed ($runbook -match "## Invitation Process" -and $runbook -match "Public\s+self-registration must remain disabled") `
@@ -347,18 +348,18 @@ $publicGate = Get-Content -LiteralPath (Join-Path $repoRoot "docs\public-release
 $healthSnapshot = $null
 if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
     [void]$checks.Add((New-Check `
-        -Name "hosted pilot health snapshot" `
+        -Name "hosted Preview health snapshot" `
         -Passed $false `
-        -Detail "skipped; provide -ConnectionString or ELB_SUPABASE_PILOT_DB_URL"))
+        -Detail "skipped; provide -ConnectionString or ELB_SUPABASE_PREVIEW_DB_URL"))
 } else {
     $healthFileName = "{0}.health.json" -f [System.IO.Path]::GetFileNameWithoutExtension($OutputPath)
     $healthPath = Join-Path (Split-Path $OutputPath -Parent) $healthFileName
-    & (Join-Path $repoRoot "tools\Invoke-PrivatePilotHealthCheck.ps1") `
+    & (Join-Path $repoRoot "tools\Invoke-PreviewHealthCheck.ps1") `
         -ConnectionString $ConnectionString `
         -OutputPath $healthPath | Out-Host
     $healthSnapshot = Get-Content -LiteralPath $healthPath -Raw -Encoding UTF8 | ConvertFrom-Json
     [void]$checks.Add((New-Check `
-        -Name "hosted pilot health snapshot" `
+        -Name "hosted Preview health snapshot" `
         -Passed ($healthSnapshot.databaseSizeStatus -eq "ok" -and @($healthSnapshot.localReviewFindings).Count -eq 0) `
         -Detail "redacted health snapshot captured"))
 }
@@ -392,7 +393,7 @@ if ($RunRlsHarness) {
         [void]$checks.Add((New-Check `
             -Name "hosted RLS harness" `
             -Passed $false `
-            -Detail "skipped; provide -ConnectionString or ELB_SUPABASE_PILOT_DB_URL"))
+            -Detail "skipped; provide -ConnectionString or ELB_SUPABASE_PREVIEW_DB_URL"))
     } else {
         $psql = Get-Command psql -ErrorAction SilentlyContinue
         if ($null -eq $psql) {
@@ -401,7 +402,7 @@ if ($RunRlsHarness) {
                 -Passed $false `
                 -Detail "psql was not found on PATH"))
         } else {
-            & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -f (Join-Path $repoRoot "supabase\tests\hosted_pilot_rls.sql") | Out-Host
+            & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -f (Join-Path $repoRoot "supabase\tests\hosted_preview_rls.sql") | Out-Host
             [void]$checks.Add((New-Check `
                 -Name "hosted RLS harness" `
                 -Passed ($LASTEXITCODE -eq 0) `
@@ -432,8 +433,8 @@ if (-not [string]::IsNullOrWhiteSpace($outputDirectory)) {
 }
 
 $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
-Write-Host "Private pilot preflight report written to $OutputPath." -ForegroundColor Green
+Write-Host "FlightLogX Preview preflight report written to $OutputPath." -ForegroundColor Green
 
 if (-not $allPassed) {
-    throw "Private pilot preflight is not ready. See $OutputPath for redacted details."
+    throw "FlightLogX Preview preflight is not ready. See $OutputPath for redacted details."
 }
