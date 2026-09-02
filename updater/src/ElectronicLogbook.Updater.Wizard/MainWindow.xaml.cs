@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -11,7 +10,6 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Documents;
 using System.Windows.Media;
-using System.Xml.Linq;
 using ElectronicLogbook.Updater;
 using ElectronicLogbook.Portable;
 using Microsoft.Win32;
@@ -2181,6 +2179,13 @@ public partial class MainWindow : Window
 
     private static string? TryReadWorkbookVersionFromPackage(string workbookPath)
     {
+        return TryReadWorkbookDefinedNameFromPackage(workbookPath, "LogbookVersion");
+    }
+
+    private static string? TryReadWorkbookDefinedNameFromPackage(
+        string workbookPath,
+        string definedName)
+    {
         if (!File.Exists(workbookPath))
         {
             return null;
@@ -2188,94 +2193,9 @@ public partial class MainWindow : Window
 
         try
         {
-            using var stream = new FileStream(
+            return WorkbookPackageValidator.ReadWorkbookDefinedNameValue(
                 workbookPath,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
-            using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
-
-            var spreadsheet = (XNamespace)"http://schemas.openxmlformats.org/spreadsheetml/2006/main";
-            var documentRelationships =
-                (XNamespace)"http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-            var packageRelationships =
-                (XNamespace)"http://schemas.openxmlformats.org/package/2006/relationships";
-            var workbook = ReadXmlEntry(archive, "xl/workbook.xml");
-            var workbookRelationships = ReadXmlEntry(archive, "xl/_rels/workbook.xml.rels");
-            if (workbook is null || workbookRelationships is null)
-            {
-                return null;
-            }
-
-            var definedName = workbook
-                .Descendants(spreadsheet + "definedName")
-                .FirstOrDefault(name => string.Equals(
-                    (string?)name.Attribute("name"),
-                    "LogbookVersion",
-                    StringComparison.OrdinalIgnoreCase));
-            if (definedName is null ||
-                !TryParseSingleCellReference(definedName.Value, out var sheetName, out var cellReference))
-            {
-                return null;
-            }
-
-            var sheet = workbook
-                .Descendants(spreadsheet + "sheet")
-                .FirstOrDefault(candidate => string.Equals(
-                    (string?)candidate.Attribute("name"),
-                    sheetName,
-                    StringComparison.OrdinalIgnoreCase));
-            var relationshipId = (string?)sheet?.Attribute(documentRelationships + "id");
-            if (string.IsNullOrWhiteSpace(relationshipId))
-            {
-                return null;
-            }
-
-            var relationship = workbookRelationships
-                .Descendants(packageRelationships + "Relationship")
-                .FirstOrDefault(candidate => string.Equals(
-                    (string?)candidate.Attribute("Id"),
-                    relationshipId,
-                    StringComparison.Ordinal));
-            var target = (string?)relationship?.Attribute("Target");
-            if (string.IsNullOrWhiteSpace(target))
-            {
-                return null;
-            }
-
-            var worksheet = ReadXmlEntry(archive, ResolveWorkbookRelationshipTarget(target));
-            var cell = worksheet?
-                .Descendants(spreadsheet + "c")
-                .FirstOrDefault(candidate => string.Equals(
-                    (string?)candidate.Attribute("r"),
-                    cellReference,
-                    StringComparison.OrdinalIgnoreCase));
-            if (cell is null)
-            {
-                return null;
-            }
-
-            var cellType = (string?)cell.Attribute("t");
-            if (string.Equals(cellType, "s", StringComparison.Ordinal))
-            {
-                var sharedStringIndex = (int?)cell.Element(spreadsheet + "v");
-                var sharedStrings = ReadXmlEntry(archive, "xl/sharedStrings.xml");
-                return sharedStringIndex.HasValue
-                    ? sharedStrings?
-                        .Descendants(spreadsheet + "si")
-                        .ElementAtOrDefault(sharedStringIndex.Value)?
-                        .Descendants(spreadsheet + "t")
-                        .Select(text => text.Value)
-                        .Aggregate(string.Empty, static (value, text) => value + text)
-                    : null;
-            }
-
-            if (string.Equals(cellType, "inlineStr", StringComparison.Ordinal))
-            {
-                return string.Concat(cell.Descendants(spreadsheet + "t").Select(text => text.Value));
-            }
-
-            return (string?)cell.Element(spreadsheet + "v");
+                definedName);
         }
         catch (IOException)
         {
@@ -2353,50 +2273,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private static XDocument? ReadXmlEntry(ZipArchive archive, string entryName)
-    {
-        var entry = archive.GetEntry(entryName);
-        if (entry is null)
-        {
-            return null;
-        }
-
-        using var entryStream = entry.Open();
-        return XDocument.Load(entryStream);
-    }
-
-    private static bool TryParseSingleCellReference(
-        string formula,
-        out string sheetName,
-        out string cellReference)
-    {
-        sheetName = string.Empty;
-        cellReference = string.Empty;
-
-        var separator = formula.LastIndexOf('!');
-        if (separator <= 0 || separator == formula.Length - 1)
-        {
-            return false;
-        }
-
-        sheetName = formula[..separator].Trim().TrimStart('=');
-        if (sheetName.Length >= 2 && sheetName[0] == '\'' && sheetName[^1] == '\'')
-        {
-            sheetName = sheetName[1..^1].Replace("''", "'", StringComparison.Ordinal);
-        }
-
-        cellReference = formula[(separator + 1)..].Trim().Replace("$", string.Empty, StringComparison.Ordinal);
-        return !string.IsNullOrWhiteSpace(sheetName) &&
-            System.Text.RegularExpressions.Regex.IsMatch(cellReference, "^[A-Za-z]+[0-9]+$");
-    }
-
-    private static string ResolveWorkbookRelationshipTarget(string target)
-    {
-        return target.StartsWith("/", StringComparison.Ordinal)
-            ? target[1..]
-            : $"xl/{target}";
-    }
-
     private static RunContext ResolveRunContext()
     {
         var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
@@ -2449,6 +2325,12 @@ public partial class MainWindow : Window
         channel ??= string.IsNullOrWhiteSpace(master)
             ? UpdateChannel.Stable
             : UpdateChannel.LocalMaster;
+        if (channel == UpdateChannel.Development &&
+            master is not null &&
+            LegacyPreviewMigrationBridge.MatchesWorkbookPackages(source, master))
+        {
+            channel = UpdateChannel.Preview;
+        }
         var updatePathPlan = WorkbookUpdatePathPlanner.Resolve(
             source,
             output,

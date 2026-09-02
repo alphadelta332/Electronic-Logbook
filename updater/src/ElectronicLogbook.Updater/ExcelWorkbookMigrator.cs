@@ -617,15 +617,22 @@ public sealed class ExcelWorkbookMigrator
                 {
                     continue;
                 }
-                if (selections.TryGetValue(icao, out bool isBase))
-                {
-                    destination.DataBodyRange.Cells.Item(
-                        row + 1,
-                        GetColumnIndex(destination, "Base")).Value2 = isBase;
-                }
+                destination.DataBodyRange.Cells.Item(
+                    row + 1,
+                    GetColumnIndex(destination, "Base")).Value2 = ResolveBaseAirportSelection(
+                        selections,
+                        icao);
             }
         }
         ApplyNativeCheckboxesIfAvailable(destination, "Base");
+    }
+
+    internal static bool ResolveBaseAirportSelection(
+        IReadOnlyDictionary<string, bool> sourceSelections,
+        string icao)
+    {
+        ArgumentNullException.ThrowIfNull(sourceSelections);
+        return sourceSelections.TryGetValue(icao.Trim(), out var isBase) && isBase;
     }
 
     private static Dictionary<string, bool> ReadSourceBaseAirportSelections(object workbookObject)

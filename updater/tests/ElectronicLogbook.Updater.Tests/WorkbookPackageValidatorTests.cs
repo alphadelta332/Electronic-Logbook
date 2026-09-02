@@ -20,6 +20,39 @@ public sealed class WorkbookPackageValidatorTests : IDisposable
     }
 
     [Fact]
+    public void ReadWorkbookDefinedNameValueReadsVersionAndLegacyPreviewBranch()
+    {
+        var path = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.3",
+            githubBranch: "pilot");
+
+        Assert.Equal(
+            "2.0.3",
+            WorkbookPackageValidator.ReadWorkbookDefinedNameValue(path, "LogbookVersion"));
+        Assert.Equal(
+            "pilot",
+            WorkbookPackageValidator.ReadWorkbookDefinedNameValue(path, "GitHubBranch"));
+    }
+
+    [Fact]
+    public void LegacyPreviewBridgeRecognisesTheExactReleasedWorkbookPackages()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "2.0.3",
+            "source.xlsm",
+            githubBranch: "pilot");
+        var master = TestRepo.CreateMinimalWorkbookPackage(
+            _directory,
+            "3.0.0",
+            "master.xlsm",
+            githubBranch: "dev");
+
+        Assert.True(LegacyPreviewMigrationBridge.MatchesWorkbookPackages(source, master));
+    }
+
+    [Fact]
     public void ValidateStagedWorkbookRejectsVersionMismatch()
     {
         var path = TestRepo.CreateMinimalWorkbookPackage(_directory, "0.0.1");

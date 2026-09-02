@@ -36,6 +36,26 @@ public static class WorkbookPackageValidator
         ValidateWorkbookPackage(workbookPath, expectedVersion);
     }
 
+    public static string ReadWorkbookDefinedNameValue(string workbookPath, string name)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        workbookPath = Path.GetFullPath(workbookPath);
+        if (!File.Exists(workbookPath))
+        {
+            throw new FileNotFoundException("Workbook not found.", workbookPath);
+        }
+
+        using var stream = new FileStream(
+            workbookPath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: false);
+        var workbook = ReadXmlEntry(archive, "xl/workbook.xml");
+        var workbookRelationships = ReadXmlEntry(archive, "xl/_rels/workbook.xml.rels");
+        return ReadDefinedNameValue(archive, workbook, workbookRelationships, name);
+    }
+
     public static string ValidateWorkbookPackage(string workbookPath, string? expectedVersion = null)
     {
         workbookPath = Path.GetFullPath(workbookPath);

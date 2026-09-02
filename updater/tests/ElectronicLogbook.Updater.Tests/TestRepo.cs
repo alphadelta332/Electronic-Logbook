@@ -30,7 +30,8 @@ internal static class TestRepo
         string directory,
         string version,
         string? fileName = null,
-        bool includeAirportsTable = true)
+        bool includeAirportsTable = true,
+        string githubBranch = "main")
     {
         var path = Path.Combine(directory, fileName ?? $"{Guid.NewGuid():N}.xlsm");
         using var archive = ZipFile.Open(path, ZipArchiveMode.Create);
@@ -77,6 +78,7 @@ internal static class TestRepo
             <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
               <sheetData>
                 <row r="1"><c r="A1" t="inlineStr"><is><t>{{version}}</t></is></c></row>
+                <row r="2"><c r="A2" t="inlineStr"><is><t>{{githubBranch}}</t></is></c></row>
               </sheetData>
             </worksheet>
             """);

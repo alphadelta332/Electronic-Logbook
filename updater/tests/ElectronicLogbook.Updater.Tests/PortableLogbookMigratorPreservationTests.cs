@@ -27,6 +27,20 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
     }
 
     [Fact]
+    public void MigratorDoesNotInventBaseAirportSelectionsAfterRefreshingTheDestination()
+    {
+        var sourceSelections = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["YSSY"] = true,
+            ["YMML"] = false
+        };
+
+        Assert.True(ExcelWorkbookMigrator.ResolveBaseAirportSelection(sourceSelections, " yssy "));
+        Assert.False(ExcelWorkbookMigrator.ResolveBaseAirportSelection(sourceSelections, "YMML"));
+        Assert.False(ExcelWorkbookMigrator.ResolveBaseAirportSelection(sourceSelections, "YSCN"));
+    }
+
+    [Fact]
     public void MigratorOnlyPlansMetadataColumnPreservationForPortableSourceTables()
     {
         Assert.False(ExcelWorkbookMigrator.ShouldPreservePortableMetadataColumns(["Year", "Reg", "Circling"]));

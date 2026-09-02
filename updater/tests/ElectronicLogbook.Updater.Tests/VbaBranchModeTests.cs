@@ -128,6 +128,25 @@ public sealed class VbaBranchModeTests
         Assert.Contains("private const string PreviewGitHubBranch = \"preview\"", source, StringComparison.Ordinal);
         Assert.Contains("UpdateChannel.Preview => PreviewGitHubBranch", source, StringComparison.Ordinal);
         Assert.Contains("Preview version:", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyPreviewMigrationBridge.MatchesWorkbookPackages(", source, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("2.0.3", "pilot", "3.0.0", true)]
+    [InlineData("2.0.3", " PILOT ", "3.0.0", true)]
+    [InlineData("2.0.3", "preview", "3.0.0", false)]
+    [InlineData("2.0.3", "dev", "3.0.0", false)]
+    [InlineData("2.0.2", "pilot", "3.0.0", false)]
+    [InlineData("2.0.3", "pilot", "3.0.1", false)]
+    public void LegacyPreviewBridgeOnlyPromotesTheExactReleased203Path(
+        string sourceVersion,
+        string sourceBranch,
+        string masterVersion,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            LegacyPreviewMigrationBridge.Matches(sourceVersion, sourceBranch, masterVersion));
     }
 
     [Fact]
