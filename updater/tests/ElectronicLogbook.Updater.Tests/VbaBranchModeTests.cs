@@ -168,7 +168,16 @@ public sealed class VbaBranchModeTests
         Assert.Contains("$tag = \"dev-wizard-$shortSha\"", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("preview-wizard-channel.txt", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("pilot-wizard-channel.txt", previewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("--clobber", previewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("protected Preview wizard assets", previewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("git/refs/heads/pilot", previewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("-F force=false", previewWorkflow, StringComparison.Ordinal);
+        Assert.Contains("verifiedPilotSha", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("Preserving Preview-channel bridge release", developmentWorkflow, StringComparison.Ordinal);
+        Assert.True(
+            previewWorkflow.IndexOf("Publish Preview bridge release", StringComparison.Ordinal) <
+            previewWorkflow.IndexOf("Align legacy pilot branch after protected publication", StringComparison.Ordinal),
+            "The legacy pilot ref must move only after protected Preview assets are published.");
     }
 
     private static string ReadVbaSource(string fileName)

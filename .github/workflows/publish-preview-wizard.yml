@@ -91,17 +91,20 @@ jobs:
               throw "Release $tag exists for a different commit."
             }
 
-            if ($existing.assets.name -notcontains "preview-wizard-channel.txt") {
-              gh release upload $tag `
-                preview-wizard-channel.txt `
-                --repo $env:GITHUB_REPOSITORY
-            }
-            if ($existing.assets.name -notcontains "pilot-wizard-channel.txt") {
-              gh release upload $tag `
-                pilot-wizard-channel.txt `
-                --repo $env:GITHUB_REPOSITORY
-            }
-            Write-Host "Release $tag already contains immutable wizard assets."
+            # The dev and Preview branches can deliberately point at the same source commit.
+            # The unprotected dev workflow may therefore create this compatibility tag first
+            # with development hosted configuration. Replace every executable/config-bearing
+            # asset with this protected environment's build before exposing the legacy ref.
+            gh release upload $tag `
+              updater/dist/ElectronicLogbook.Updater.Wizard.exe `
+              updater/dist/ElectronicLogbook.Updater.Wizard.win-x64.zip `
+              updater/dist/wizard-signature-report.json `
+              dev-wizard-commit.txt `
+              preview-wizard-channel.txt `
+              pilot-wizard-channel.txt `
+              --repo $env:GITHUB_REPOSITORY `
+              --clobber
+            Write-Host "Release $tag now contains the protected Preview wizard assets."
           } else {
             gh release create $tag `
               updater/dist/ElectronicLogbook.Updater.Wizard.exe `
@@ -116,4 +119,21 @@ jobs:
               --prerelease `
               --target $env:GITHUB_SHA `
               --latest=false
+          }
+
+      - name: Align legacy pilot branch after protected publication
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api `
+            --method PATCH `
+            "repos/$env:GITHUB_REPOSITORY/git/refs/heads/pilot" `
+            -f sha=$env:GITHUB_SHA `
+            -F force=false | Out-Null
+          $verifiedPilotSha = gh api `
+            "repos/$env:GITHUB_REPOSITORY/git/ref/heads/pilot" `
+            --jq '.object.sha'
+          if ($verifiedPilotSha -ne $env:GITHUB_SHA) {
+            throw "Legacy pilot branch did not advance to the protected Preview commit."
           }
