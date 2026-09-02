@@ -32,6 +32,9 @@ public sealed class ExcelWorkbookMigrator
         "RoutesDefinitionVersion",
         "DateAfterExport",
         "suppressWarningsUntil",
+        "FROverride",
+        "IPCOverride",
+        "OPCOverride",
         PortableLogbookWorkbookMetadata.LogbookIdName,
         PortableLogbookWorkbookMetadata.DeviceIdName,
         PortableLogbookWorkbookMetadata.SchemaVersionName

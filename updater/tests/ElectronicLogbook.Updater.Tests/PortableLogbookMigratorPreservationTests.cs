@@ -15,7 +15,7 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
     }
 
     [Fact]
-    public void MigratorPreservesPortableWorkbookNamesWhenPresent()
+    public void MigratorPreservesPortableIdentityAndCurrencyOverrideNamesWhenPresent()
     {
         var field = typeof(ExcelWorkbookMigrator).GetField("PreservedNames", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("PreservedNames field not found.");
@@ -24,6 +24,9 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         Assert.Contains(PortableLogbookWorkbookMetadata.LogbookIdName, names);
         Assert.Contains(PortableLogbookWorkbookMetadata.DeviceIdName, names);
         Assert.Contains(PortableLogbookWorkbookMetadata.SchemaVersionName, names);
+        Assert.Contains("FROverride", names);
+        Assert.Contains("IPCOverride", names);
+        Assert.Contains("OPCOverride", names);
     }
 
     [Fact]
