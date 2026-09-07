@@ -282,6 +282,26 @@ public sealed class PreviewWorkbookPostMigrationHandoffTests : IDisposable
             name => Assert.Equal("1", (string?)name.Attribute("hidden")));
     }
 
+    [Fact]
+    public void WorkbookMigrationStamp_ReadsSharedStringsWrittenByExcelSave()
+    {
+        var workbook = TestRepo.CreateMinimalWorkbookPackage(
+            directory,
+            TestRepo.Version,
+            "shared-string-stamp-metadata.xlsm");
+        var stamp = new WorkbookMigrationStamp(
+            PreviewWorkbookPostMigrationHandoff.CompletedStatus,
+            CompletedAt,
+            new WorkbookMigrationId("mig_shared_strings"));
+
+        PortableLogbookWorkbookPackageStorage.EnsureWorkbookMigrationStamp(workbook, stamp);
+        RewriteMigrationStampCellsAsSharedStrings(workbook);
+
+        Assert.Equal(
+            stamp,
+            PortableLogbookWorkbookPackageStorage.ReadWorkbookMigrationStamp(workbook));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(directory))
@@ -365,4 +385,63 @@ public sealed class PreviewWorkbookPostMigrationHandoffTests : IDisposable
         new(
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             new Dictionary<string, int>());
+
+    private static void RewriteMigrationStampCellsAsSharedStrings(string workbook)
+    {
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        using var archive = ZipFile.Open(workbook, ZipArchiveMode.Update);
+        var workbookDocument = ReadXmlEntry(archive, "xl/workbook.xml");
+        var worksheetDocument = ReadXmlEntry(archive, "xl/worksheets/sheet1.xml");
+        var stampNames = workbookDocument
+            .Descendants(spreadsheet + "definedName")
+            .Where(element => ((string?)element.Attribute("name"))?.StartsWith(
+                "FlightLogXMigration",
+                StringComparison.Ordinal) == true)
+            .ToArray();
+        Assert.Equal(3, stampNames.Length);
+
+        var values = new List<string>();
+        foreach (var definedName in stampNames)
+        {
+            var cellReference = definedName.Value[(definedName.Value.LastIndexOf('!') + 1)..]
+                .Replace("$", string.Empty, StringComparison.Ordinal);
+            var cell = worksheetDocument
+                .Descendants(spreadsheet + "c")
+                .Single(element => string.Equals(
+                    (string?)element.Attribute("r"),
+                    cellReference,
+                    StringComparison.OrdinalIgnoreCase));
+            values.Add(string.Concat(cell.Descendants(spreadsheet + "t").Select(text => text.Value)));
+            cell.RemoveNodes();
+            cell.SetAttributeValue("t", "s");
+            cell.Add(new XElement(spreadsheet + "v", values.Count - 1));
+        }
+
+        var sharedStrings = new XDocument(
+            new XElement(
+                spreadsheet + "sst",
+                new XAttribute("count", values.Count),
+                new XAttribute("uniqueCount", values.Count),
+                values.Select(value => new XElement(
+                    spreadsheet + "si",
+                    new XElement(spreadsheet + "t", value)))));
+        ReplaceXmlEntry(archive, "xl/worksheets/sheet1.xml", worksheetDocument);
+        ReplaceXmlEntry(archive, "xl/sharedStrings.xml", sharedStrings);
+    }
+
+    private static XDocument ReadXmlEntry(ZipArchive archive, string entryName)
+    {
+        using var stream = archive.GetEntry(entryName)!.Open();
+        return XDocument.Load(stream);
+    }
+
+    private static void ReplaceXmlEntry(
+        ZipArchive archive,
+        string entryName,
+        XDocument document)
+    {
+        archive.GetEntry(entryName)?.Delete();
+        using var stream = archive.CreateEntry(entryName).Open();
+        document.Save(stream);
+    }
 }

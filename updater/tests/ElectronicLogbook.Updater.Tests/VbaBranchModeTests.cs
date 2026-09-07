@@ -63,7 +63,7 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void CompletedMigrationWarnsOncePerExcelSessionBeforeAddingALocalEntry()
+    public void CompletedMigrationRequiresExplicitAcknowledgementBeforeAddingALocalEntry()
     {
         var source = ReadVbaSource("modLogbook.bas");
         var normalizedSource = source.ReplaceLineEndings("\n");
@@ -77,16 +77,36 @@ public sealed class VbaBranchModeTests
             source,
             StringComparison.Ordinal);
         Assert.Contains("Private mFlightLogXLocalEditWarningShown As Boolean", source, StringComparison.Ordinal);
-        Assert.Contains("If mFlightLogXLocalEditWarningShown Then Exit Sub", source, StringComparison.Ordinal);
+        Assert.Contains("If mFlightLogXLocalEditWarningShown Then Exit Function", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "If Not ConfirmPostMigrationWorkbookEditStaysLocal() Then Exit Sub",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Private Function ConfirmPostMigrationWorkbookEditStaysLocal() As Boolean",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "vbInformation + vbOKCancel + vbDefaultButton2",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains("If response <> vbOK Then", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "ConfirmPostMigrationWorkbookEditStaysLocal = False",
+            source,
+            StringComparison.Ordinal);
         Assert.Contains("mFlightLogXLocalEditWarningShown = True", source, StringComparison.Ordinal);
         Assert.Contains(
             "Changes you make here stay only in this spreadsheet and are not sent to FlightLogX.",
             source,
             StringComparison.Ordinal);
-        Assert.Contains("You can continue editing after closing this message.", source, StringComparison.Ordinal);
+        Assert.Contains(
+            "Select OK to continue adding this entry, or Cancel to stop.",
+            source,
+            StringComparison.Ordinal);
 
         var warningIndex = normalizedSource.IndexOf(
-            "    WarnIfPostMigrationWorkbookEditStaysLocal\n",
+            "    If Not ConfirmPostMigrationWorkbookEditStaysLocal() Then Exit Sub\n",
             StringComparison.Ordinal);
         var preAddSaveIndex = normalizedSource.IndexOf(
             "    If Not TrySaveWorkbookBeforeAdd(ThisWorkbook) Then",

@@ -1576,7 +1576,7 @@ public static class PortableLogbookWorkbookPackageStorage
                 (string?)element.Attribute("r"),
                 cellReference,
                 StringComparison.OrdinalIgnoreCase));
-        return ReadCellText(cell);
+        return ReadCellText(cell, ReadSharedStrings(archive));
     }
 
     private static DateOnly? ReadOptionalDefinedNameDate(ZipArchive archive, string name)

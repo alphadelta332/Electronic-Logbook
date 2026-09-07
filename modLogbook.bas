@@ -67,7 +67,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
                   "Could not activate the New Entry sheet before adding the logbook entry."
     End If
 
-    WarnIfPostMigrationWorkbookEditStaysLocal
+    If Not ConfirmPostMigrationWorkbookEditStaysLocal() Then Exit Sub
 
     '--- Save workbook before making any changes (safeguard against mid-run crashes)
     If Not TrySaveWorkbookBeforeAdd(ThisWorkbook) Then
@@ -908,19 +908,27 @@ Cleanup:
 
 End Sub
 
-Private Sub WarnIfPostMigrationWorkbookEditStaysLocal()
-    If mFlightLogXLocalEditWarningShown Then Exit Sub
+Private Function ConfirmPostMigrationWorkbookEditStaysLocal() As Boolean
+    Dim response As VbMsgBoxResult
+
+    ConfirmPostMigrationWorkbookEditStaysLocal = True
+    If mFlightLogXLocalEditWarningShown Then Exit Function
 
     If StrComp(Trim$(CStr(GetWorkbookNameValue( _
         ThisWorkbook, FLIGHTLOGX_MIGRATION_STATUS_NAME, vbNullString))), _
-        FLIGHTLOGX_MIGRATION_COMPLETED_STATUS, vbTextCompare) <> 0 Then Exit Sub
+        FLIGHTLOGX_MIGRATION_COMPLETED_STATUS, vbTextCompare) <> 0 Then Exit Function
+
+    response = MsgBox("This spreadsheet has already been moved to FlightLogX." & vbCrLf & vbCrLf & _
+                      "Changes you make here stay only in this spreadsheet and are not sent to FlightLogX." & vbCrLf & vbCrLf & _
+                      "Select OK to continue adding this entry, or Cancel to stop.", _
+                      vbInformation + vbOKCancel + vbDefaultButton2, "Spreadsheet Changes Stay Local")
+    If response <> vbOK Then
+        ConfirmPostMigrationWorkbookEditStaysLocal = False
+        Exit Function
+    End If
 
     mFlightLogXLocalEditWarningShown = True
-    MsgBox "This spreadsheet has already been moved to FlightLogX." & vbCrLf & vbCrLf & _
-           "Changes you make here stay only in this spreadsheet and are not sent to FlightLogX. " & _
-           "You can continue editing after closing this message.", _
-           vbInformation + vbOKOnly, "Spreadsheet Changes Stay Local"
-End Sub
+End Function
 
 Private Function TryActivateNewEntrySheet(ByVal wb As Workbook) As Boolean
     On Error GoTo Fail
