@@ -28,6 +28,13 @@ public sealed class PreviewRunbookTests
         Assert.Contains("Download started...", androidInstall, StringComparison.Ordinal);
         Assert.Contains("Allow from this source", androidInstall, StringComparison.Ordinal);
         Assert.Contains("turn off **Allow from this source**", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("Every external tester must turn", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("retained owner development phone only", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("FlightLogX's own installation-source permission", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("owner exception does not apply", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("Chrome, Firebase App Tester", androidInstall, StringComparison.Ordinal);
+        Assert.Contains("Every external tester must turn off", runbook, StringComparison.Ordinal);
+        Assert.Matches("Android must still\\s+show its scan and installer approval", runbook);
         Assert.Contains("unverified developer", androidInstall, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("24-hour security delay", androidInstall, StringComparison.Ordinal);
         Assert.Contains("Do not work around these failures by removing an existing app", androidInstall, StringComparison.Ordinal);

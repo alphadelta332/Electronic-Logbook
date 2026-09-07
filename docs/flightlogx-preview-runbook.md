@@ -131,9 +131,11 @@ Out of scope:
    environment.
 2. Send `docs/flightlogx-preview-android-install.md` before the invitation. Explain that this
    is a Firebase-distributed APK, that Android will show outside-Play-Store warnings, and
-   that the temporary **Allow from this source** permission is normally turned off after
-   installation. The owner reference device may keep it enabled only for the duration of
-   an explicitly active update rehearsal.
+   that every external tester must turn the temporary **Allow from this source** permission
+   off after installation or update. The retained owner development phone may keep only
+   FlightLogX's own installation-source permission enabled during active Preview development
+   for repeated in-app update testing. This exception does not apply to Chrome, Firebase App
+   Tester, any external tester, or any device leaving the owner's control.
 3. From the repository root, first run the owner-only enrolment as a read-only preflight:
 
    ```powershell
@@ -191,7 +193,11 @@ release remains newer than every `3.0.0` Preview revision.
    version before the check, Firebase release identifier in redacted form, download
    outcome, and the Android installation-approval screen. Do not approve the final install
    until retained state and certificate continuity are confirmed.
-6. Turn off **Allow from this source** after the rehearsal ends.
+6. Every external tester must turn off **Allow from this source** after the update. On the
+   retained owner development phone only, FlightLogX's own permission may remain enabled
+   during active Preview development for repeated in-app update testing. Android must still
+   show its scan and installer approval for every update. Turn the permission off when active
+   development ends or before the device leaves the owner's control.
 
 ## Weekly Check-In
 

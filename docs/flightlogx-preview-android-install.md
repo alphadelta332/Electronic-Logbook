@@ -41,11 +41,13 @@ cloud-storage link, or unrelated website download.
    return to the installer, and select **Install**.
 8. Open FlightLogX. Do not enter real logbook data until the Preview owner confirms that
    the build and account are ready.
-9. For an ordinary tester, turn the temporary installation permission back off:
+9. Every external tester must turn the temporary installation permission back off:
    **Settings > Apps > Special app access > Install unknown apps**, select Chrome or
    Firebase App Tester, then turn off **Allow from this source**. Menu names can differ
-   slightly between Android manufacturers. The owner may leave it enabled only during an
-   explicitly active update-rehearsal session, then must turn it off when that session ends.
+   slightly between Android manufacturers. On the retained owner development phone only,
+   FlightLogX's own installation-source permission may remain enabled during active Preview
+   development for repeated in-app update testing. The owner exception does not apply to
+   Chrome, Firebase App Tester, an external tester, or a device leaving the owner's control.
 
 Firebase App Tester is optional. It can collect Preview releases in one place,
 but installing it does not remove Android's unknown-app permission requirement.
@@ -70,6 +72,7 @@ first check the package, signing certificate, account, and recoverability.
 Use **Settings > Check for Preview update** inside FlightLogX. Android will still require
 you to approve installation of the downloaded update. If **Allow from this source** was
 turned off after the previous install, Android may ask you to enable it again; turn it
-back off after the update completes. Android grants this permission separately to each
-source app, so permission previously granted to Chrome may not cover an update downloaded
-by FlightLogX itself.
+back off after the update completes. The retained owner development phone exception above
+may keep FlightLogX's own permission enabled only during active Preview development. Android
+grants this permission separately to each source app, so permission previously granted to
+Chrome may not cover an update downloaded by FlightLogX itself.
