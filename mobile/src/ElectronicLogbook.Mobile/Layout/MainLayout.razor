@@ -83,6 +83,7 @@
     {
         UiPreferences.Changed += OnUiPreferencesChanged;
         Navigation.LocationChanged += OnLocationChanged;
+        Session.WorkbookStateChanged += OnWorkbookStateChanged;
         await UiPreferences.EnsureLoadedAsync();
     }
 
@@ -125,6 +126,7 @@
         navigationFeedbackCancellation?.Dispose();
         UiPreferences.Changed -= OnUiPreferencesChanged;
         Navigation.LocationChanged -= OnLocationChanged;
+        Session.WorkbookStateChanged -= OnWorkbookStateChanged;
 
         if (networkRestoredSubscriptionId is int subscriptionId)
         {
@@ -141,6 +143,11 @@
     }
 
     private void OnUiPreferencesChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnWorkbookStateChanged()
     {
         _ = InvokeAsync(StateHasChanged);
     }

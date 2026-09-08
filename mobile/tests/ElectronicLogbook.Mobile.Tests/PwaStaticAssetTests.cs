@@ -241,7 +241,7 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
-    public void AndroidNativeFileBridgeSavesPlainJsonBackupsWithoutAllowingPathTraversal()
+    public void AndroidNativeFileBridgeAllowsSupportedExportsWithoutAllowingPathTraversal()
     {
         var plugin = ReadRepositoryFile(
             "android",
@@ -254,7 +254,11 @@ public sealed class PwaStaticAssetTests
             "electroniclogbook",
             "ElectronicLogbookNativeFilesPlugin.java");
 
-        Assert.Contains("lowerName.endsWith(\".elogbook\") || lowerName.endsWith(\".json\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("lowerName.endsWith(\".elogbook\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("lowerName.endsWith(\".json\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("lowerName.endsWith(\".xlsx\")", plugin, StringComparison.Ordinal);
+        Assert.Contains("lowerName.endsWith(\".csv\")", plugin, StringComparison.Ordinal);
+        Assert.Contains(".elogbook, .json, .xlsx, or .csv", plugin, StringComparison.Ordinal);
         Assert.Contains("fileName.contains(\"/\")", plugin, StringComparison.Ordinal);
         Assert.Contains("fileName.contains(\"\\\\\")", plugin, StringComparison.Ordinal);
         Assert.Contains("new File(exportDirectory, fileName)", plugin, StringComparison.Ordinal);

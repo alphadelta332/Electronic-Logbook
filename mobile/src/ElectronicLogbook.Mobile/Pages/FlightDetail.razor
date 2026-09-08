@@ -1,4 +1,5 @@
 @page "/flights/{EntryId}"
+@implements IDisposable
 @inject MobileLogbookSession Session
 @inject NavigationManager Navigation
 
@@ -252,7 +253,18 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        Session.WorkbookStateChanged += OnWorkbookStateChanged;
         await Session.EnsureLoadedWorkbookAsync();
+    }
+
+    private void OnWorkbookStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Session.WorkbookStateChanged -= OnWorkbookStateChanged;
     }
 
     private static DetailGroup CreateDetailGroup(
@@ -313,8 +325,9 @@ else
         IsDeletePending = true;
         try
         {
-            await Session.DeleteWorkbookEntryAsync(CurrentEntry);
+            var deleteTask = Session.DeleteWorkbookEntryAsync(CurrentEntry);
             Navigation.NavigateTo("/flights?view=entries", replace: true);
+            await deleteTask;
         }
         finally
         {
@@ -330,11 +343,14 @@ else
         }
 
         IsRestorePending = true;
+        var entryToRestore = History;
         try
         {
-            if (await Session.RestoreWorkbookEntryAsync(History))
+            Navigation.NavigateTo("/flights?view=entries", replace: true);
+            await Task.Yield();
+            if (!await Session.RestoreWorkbookEntryAsync(entryToRestore))
             {
-                Navigation.NavigateTo("/flights?view=entries", replace: true);
+                Navigation.NavigateTo($"/flights/{entryToRestore.EntryId.Value}", replace: true);
             }
         }
         finally

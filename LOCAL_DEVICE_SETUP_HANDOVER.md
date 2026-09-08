@@ -103,11 +103,12 @@ Known local state is handled as follows:
 | --- | --- | --- |
 | Android signing files | Local transfer | Transfer as an inseparable identity; never regenerate the Preview key. |
 | Supabase, Resend, and recovery-envelope credentials | Local transfer | Keep in their existing scoped files and validate without displaying values. |
-| Google Web client ID | Local transfer | Transfer the public identifier only; Google client-secret files are not consumed or transferred. |
+| Google Web, development Android, and Preview Android client IDs | Local transfer | Transfer these public identifiers and verify that the Web and permanent Preview Android IDs belong to the same OAuth project; Google client-secret downloads are not consumed or transferred. |
 | Participant handoffs | Local transfer | Transfer only when present; keep private and outside git. |
 | Analysis tools | Regenerated dependency | Reinstall or regenerate; do not transfer caches or embedded source repositories. |
 | Evidence | Regenerated output | Recreate when needed; it is not configuration. |
 | Android device-bridge and Gate 1 retained-state backups | Deliberate exclusion | Keep on the source machine; they are device-specific recovery evidence. |
+| Authenticated Android emulator and snapshots | Deliberate exclusion | Treat like a signed-in browser profile. Recreate and authenticate once per trusted machine; never archive, commit, upload, or share it. |
 | User recovery-code files | Deliberate exclusion | Protect separately; they are not development credentials. |
 | GitHub, Firebase, Supabase CLI, and Codex login sessions | Fresh authentication | Sign in again on the destination machine. |
 
@@ -116,6 +117,68 @@ through a short-lived listener bound only to `127.0.0.1`. The updater does not c
 bundle a Google client secret; its hosted provider credentials stay in Google/Supabase,
 while the hosted redirect allow list permits
 `http://127.0.0.1:*/flightlogx-auth/**`.
+
+### Reusable Google-authenticated Android recovery emulator
+
+Routine fresh-install recovery tests do not require typing the Google email and password
+or completing MFA every time. Use the dedicated Google Play API 35 AVD and keep a clean
+machine-local snapshot after the one-time Google login. The snapshot contains a live
+Google session, so it is deliberately excluded from the transfer archive and must be
+handled like a signed-in browser profile.
+
+The approved local values are:
+
+- system image: `system-images;android-35;google_apis_playstore;x86_64`;
+- AVD: `ElectronicLogbook_Pixel_Play_API35`;
+- snapshot: `flightlogx_google_authenticated_clean_v1`.
+
+After the AVD is running and the clean snapshot exists, remove only FlightLogX and
+install the already built Preview APK with:
+
+```powershell
+.\tools\Reset-FlightLogXAndroidRecoveryEmulator.ps1 `
+  -Action ResetAppAndInstall `
+  -ApproveFlightLogXRemoval
+```
+
+The command refuses physical devices and any differently named AVD. It preserves the
+current Google session, removes only the disposable FlightLogX app data, installs the
+selected APK, compares the installed and local SHA-256 hashes, and proves the app has
+never launched. It never prints the Google account identifier or tokens. Open FlightLogX
+afterward and choose the retained account.
+
+Use `RestoreSnapshotAndInstall -ApproveSnapshotRestore` only when the AVD itself needs to
+return to the clean baseline. That fallback rolls back all emulator changes since the
+snapshot, including Google Play updates, so it is not the routine reset path.
+
+To establish this once on another trusted development machine, first run the normal
+development-prerequisite `Install` action. Then create and start the AVD:
+
+```powershell
+& "$env:LOCALAPPDATA\Android\Sdk\cmdline-tools\latest\bin\avdmanager.bat" `
+  create avd `
+  --name ElectronicLogbook_Pixel_Play_API35 `
+  --package "system-images;android-35;google_apis_playstore;x86_64" `
+  --device pixel_6
+
+& "$env:LOCALAPPDATA\Android\Sdk\emulator\emulator.exe" `
+  -avd ElectronicLogbook_Pixel_Play_API35
+```
+
+Open Play Store, sign in to Google manually once, close Play Store, and capture the
+baseline:
+
+```powershell
+.\tools\Reset-FlightLogXAndroidRecoveryEmulator.ps1 -Action CaptureBaseline
+```
+
+If FlightLogX is already installed, `CaptureBaseline` refuses to remove it unless
+`-ApproveFlightLogXRemoval` is supplied. It also refuses to overwrite an existing
+snapshot. Google can still expire or revoke its session; if that happens, remove or
+rename the obsolete snapshot using Android Studio's Device Manager, repeat the one-time
+login, and deliberately create a new baseline. Do not use this snapshot as proof that
+account recovery itself works: the FlightLogX app must still begin each rehearsal with
+no local app state.
 
 The canonical ignored Supabase project metadata file is
 `%LOCALAPPDATA%\ElectronicLogbook\Supabase\hosted-preview-projects.local.json`, with the

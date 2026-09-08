@@ -559,12 +559,19 @@ public sealed class PwaPageWiringTests
         var logbook = ReadMobilePage("Logbook.razor");
         var detail = ReadMobilePage("FlightDetail.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
+        var restoreHandler = detail[detail.IndexOf("private async Task RestoreEntryAsync()", StringComparison.Ordinal)..];
 
         Assert.Contains("Deleted flights", logbook, StringComparison.Ordinal);
         Assert.Contains("review its revisions or restore it", logbook, StringComparison.Ordinal);
         Assert.Contains("class=\"deleted-entry-row\"", logbook, StringComparison.Ordinal);
         Assert.Contains("Restore flight", detail, StringComparison.Ordinal);
-        Assert.Contains("Session.RestoreWorkbookEntryAsync(History)", detail, StringComparison.Ordinal);
+        Assert.Contains("Session.RestoreWorkbookEntryAsync(entryToRestore)", restoreHandler, StringComparison.Ordinal);
+        Assert.True(
+            restoreHandler.IndexOf("Navigation.NavigateTo(\"/flights?view=entries\", replace: true)", StringComparison.Ordinal) <
+            restoreHandler.IndexOf("await Task.Yield()", StringComparison.Ordinal));
+        Assert.True(
+            restoreHandler.IndexOf("await Task.Yield()", StringComparison.Ordinal) <
+            restoreHandler.IndexOf("Session.RestoreWorkbookEntryAsync(entryToRestore)", StringComparison.Ordinal));
         Assert.Contains("Restoring it adds a new revision", detail, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookOperationV2.Correct(", session, StringComparison.Ordinal);
         Assert.Contains("[entry.CurrentRevisionId]", session, StringComparison.Ordinal);
@@ -1012,11 +1019,20 @@ public sealed class PwaPageWiringTests
         var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("@page \"/flights/{EntryId}\"", page, StringComparison.Ordinal);
+        Assert.Contains("@implements IDisposable", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookStateChanged += OnWorkbookStateChanged", page, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookStateChanged -= OnWorkbookStateChanged", page, StringComparison.Ordinal);
         Assert.Contains("Read first", page, StringComparison.Ordinal);
         Assert.Contains("Edit entry", page, StringComparison.Ordinal);
         Assert.Contains("Immutable history", page, StringComparison.Ordinal);
         Assert.Contains("Session.EntryDetails(CurrentEntry.Entry)", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeleteWorkbookEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
+        Assert.True(
+            page.IndexOf("var deleteTask = Session.DeleteWorkbookEntryAsync(CurrentEntry)", StringComparison.Ordinal) <
+            page.IndexOf("Navigation.NavigateTo(\"/flights?view=entries\", replace: true)", StringComparison.Ordinal));
+        Assert.True(
+            page.IndexOf("Navigation.NavigateTo(\"/flights?view=entries\", replace: true)", StringComparison.Ordinal) <
+            page.IndexOf("await deleteTask", StringComparison.Ordinal));
         Assert.Contains("OnClick=\"RequestDeleteEntry\"", page, StringComparison.Ordinal);
         Assert.Contains("ShowDeleteConfirmation", page, StringComparison.Ordinal);
         Assert.Contains("Confirm deletion", page, StringComparison.Ordinal);
@@ -1078,10 +1094,15 @@ public sealed class PwaPageWiringTests
     {
         var feedback = ReadMobileSource(Path.Combine("Layout", "MobileActionFeedback.razor"));
         var layout = ReadMobileSource(Path.Combine("Layout", "MainLayout.razor"));
+        var logbook = ReadMobilePage("Logbook.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
         var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("<MobileActionFeedback />", layout, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookStateChanged += OnWorkbookStateChanged", layout, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookStateChanged -= OnWorkbookStateChanged", layout, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookStateChanged += OnWorkbookStateChanged", logbook, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookStateChanged -= OnWorkbookStateChanged", logbook, StringComparison.Ordinal);
         Assert.Contains("class=\"action-feedback-message @AnimationClass @(ShowCelebration", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ActionFeedbackMessage", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ShouldCelebrateActionFeedback", feedback, StringComparison.Ordinal);
@@ -1091,6 +1112,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("aria-atomic=\"true\"", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.CanUndoLastWorkbookAction", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.UndoLastWorkbookActionAsync()", feedback, StringComparison.Ordinal);
+        Assert.Contains("Navigation.NavigateTo(\"/flights?view=entries\", replace: true)", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ActionFeedbackRemaining", feedback, StringComparison.Ordinal);
         Assert.Contains("Task.Delay(remaining.Value, cancellationToken)", feedback, StringComparison.Ordinal);
         Assert.Contains("PlayExitAsync", feedback, StringComparison.Ordinal);

@@ -70,7 +70,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
         JSArray bytes = call.getArray("bytes");
 
         if (!isSupportedExportFileName(fileName)) {
-            call.reject("Exported file names must be a plain .elogbook or .json file name.");
+            call.reject("Exported file names must be a plain .elogbook, .json, .xlsx, or .csv file name.");
             return;
         }
 
@@ -126,7 +126,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
         JSArray bytes = call.getArray("bytes");
 
         if (!isSupportedExportFileName(fileName)) {
-            call.reject("Exported file names must be a plain .elogbook or .json file name.");
+            call.reject("Exported file names must be a plain .elogbook, .json, .xlsx, or .csv file name.");
             return;
         }
 
@@ -193,7 +193,10 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
         }
 
         String lowerName = fileName.toLowerCase(java.util.Locale.ROOT);
-        return lowerName.endsWith(".elogbook") || lowerName.endsWith(".json");
+        return lowerName.endsWith(".elogbook") ||
+            lowerName.endsWith(".json") ||
+            lowerName.endsWith(".xlsx") ||
+            lowerName.endsWith(".csv");
     }
 
     @PluginMethod

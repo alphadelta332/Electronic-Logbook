@@ -84,6 +84,12 @@ Configure Auth in the Supabase dashboard for each project:
   is required in the updater executable: it contains only the public Supabase project URL
   and publishable/anonymous key and shows the signed-in Google account email after the code
   exchange succeeds.
+- In the Google Cloud project that owns that Web OAuth client, retain a separate Android
+  OAuth client for every distributed Android package/signing-certificate pair. The
+  permanent Preview client uses package `com.alphadelta.electroniclogbook` and the SHA-1
+  of the permanent Preview signing certificate. Do not replace a development client when
+  adding it. A SHA registered only in the separate Firebase App Distribution project does
+  not register the app with the OAuth project selected by `googleWebClientId`.
 - Client sign-in calls must pass the SDK option `shouldCreateUser: false`, which maps to
   the REST field `create_user: false`, so an unknown email address cannot create a new
   account from the app.

@@ -1,4 +1,5 @@
 @page "/flights"
+@implements IDisposable
 @inject MobileLogbookSession Session
 @inject NavigationManager Navigation
 
@@ -322,7 +323,18 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        Session.WorkbookStateChanged += OnWorkbookStateChanged;
         await Session.EnsureLoadedWorkbookAsync();
+    }
+
+    private void OnWorkbookStateChanged()
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        Session.WorkbookStateChanged -= OnWorkbookStateChanged;
     }
 
     protected override void OnParametersSet()

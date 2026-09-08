@@ -20,6 +20,7 @@ public sealed class MobileLogbookSession(
 
     public event Action? HostedSyncChanged;
     public event Action? ActionFeedbackChanged;
+    public event Action? WorkbookStateChanged;
 
     private DeviceId deviceId = new("dev_mobile_preview");
     private readonly PortableLogbookIdFactory portableIdFactory = portableIdFactory ?? PortableLogbookIdFactory.Default;
@@ -617,6 +618,7 @@ public sealed class MobileLogbookSession(
             previousEntry);
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
+        WorkbookStateChanged?.Invoke();
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         SetWorkbookActionFeedback(
@@ -676,6 +678,7 @@ public sealed class MobileLogbookSession(
                 pending.PreviousEntry!);
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
+        WorkbookStateChanged?.Invoke();
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         SetLastActionMessage(pending.UndoKind switch
@@ -684,6 +687,7 @@ public sealed class MobileLogbookSession(
             WorkbookActionUndoKind.DeleteRestoredEntry => "Restoration undone.",
             _ => "Modification undone."
         });
+        WorkbookStateChanged?.Invoke();
         return true;
     }
 

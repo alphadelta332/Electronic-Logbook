@@ -140,7 +140,19 @@ public static class PortableWorkbookMigrationVerification
         HashText(JsonSerializer.Serialize(value, PortableLogbookJson.SerializerOptions));
 
     private static string HashText(string value) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+            CanonicalizeJsonLineEndingsForHash(value)))).ToLowerInvariant();
+
+    internal static string CanonicalizeJsonLineEndingsForHash(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        // Existing workbook migrations were receipted on Windows. Preserve those hashes
+        // while making the same contract deterministic in browser WebAssembly.
+        return value
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace('\r', '\n')
+            .Replace("\n", "\r\n", StringComparison.Ordinal);
+    }
 
     private static bool SameHash(string left, string right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);

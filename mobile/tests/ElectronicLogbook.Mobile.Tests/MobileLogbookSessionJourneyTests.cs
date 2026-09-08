@@ -1299,6 +1299,8 @@ public sealed class MobileLogbookSessionJourneyTests
         var jsRuntime = new JourneyJsRuntime();
         var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-08-14T02:00:00Z"));
         var session = CreateSession(jsRuntime, syncClock: clock);
+        var workbookStateChangedCount = 0;
+        session.WorkbookStateChanged += () => workbookStateChangedCount++;
         await session.EnsureLoadedWorkbookAsync();
         FillWorkbookDraft(session.WorkbookDraft);
         await session.SaveWorkbookEntryAsync();
@@ -1329,6 +1331,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableOperationKind.Correction, restoration.Kind);
         Assert.Equal(deletion.RevisionId, Assert.Single(restoration.ParentRevisionIds));
         Assert.Equal(3, jsRuntime.SaveCount);
+        Assert.Equal(2, workbookStateChangedCount);
     }
 
     [Fact]
@@ -1359,6 +1362,8 @@ public sealed class MobileLogbookSessionJourneyTests
         var jsRuntime = new JourneyJsRuntime();
         var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-08-14T02:00:00Z"));
         var session = CreateSession(jsRuntime, syncClock: clock);
+        var workbookStateChangedCount = 0;
+        session.WorkbookStateChanged += () => workbookStateChangedCount++;
         await session.EnsureLoadedWorkbookAsync();
         FillWorkbookDraft(session.WorkbookDraft);
         await session.SaveWorkbookEntryAsync();
@@ -1385,6 +1390,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableOperationKind.Correction, restoration.Kind);
         Assert.Equal(tombstone.RevisionId, Assert.Single(restoration.ParentRevisionIds));
         Assert.Equal(3, restored.RevisionHistory.Count);
+        Assert.Equal(1, workbookStateChangedCount);
 
         var reloaded = CreateSession(jsRuntime);
         await reloaded.EnsureLoadedWorkbookAsync();

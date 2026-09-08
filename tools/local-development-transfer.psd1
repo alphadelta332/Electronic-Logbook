@@ -25,6 +25,8 @@
         @{ Path = 'ElectronicLogbook/AndroidSigning/flightlogx-pilot-credentials.json'; Required = $true; Classification = 'secret-signing-credentials'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/AndroidSigning/flightlogx-pilot-signing.json'; Required = $true; Classification = 'signing-metadata'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/Google Auth/webclientid.txt'; Required = $false; Classification = 'public-oauth-identifier'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Google Auth/androidclientid.txt'; Required = $false; Classification = 'public-oauth-identifier'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/Google Auth/previewandroidclientid.txt'; Required = $false; Classification = 'public-oauth-identifier'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/Resend/privatepilotauthdevapi.txt'; Required = $true; Classification = 'secret-api-credential'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/Resend/privatepilotauthapi.txt'; Required = $true; Classification = 'secret-api-credential'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/Supabase/access-token.txt'; Required = $true; Classification = 'secret-api-credential'; Lifecycle = 'local-transfer' }
@@ -42,10 +44,15 @@
         @{ Path = 'ElectronicLogbook/AndroidDeviceBridge'; Lifecycle = 'deliberate-exclusion'; Reason = 'Device-specific IndexedDB backups remain on the source machine.' }
         @{ Path = 'ElectronicLogbook/Evidence'; Lifecycle = 'regenerated-output'; Reason = 'Generated local evidence is not an operational prerequisite.' }
         @{ Path = 'ElectronicLogbook/Gate1RetainedState'; Lifecycle = 'deliberate-exclusion'; Reason = 'Retained-device recovery snapshots must not be copied as configuration.' }
-        @{ Path = 'ElectronicLogbook/Google Auth/androidclientid.txt'; Lifecycle = 'deliberate-exclusion'; Reason = 'No active local consumer reads this public identifier.' }
         @{ Path = 'ElectronicLogbook/Google Auth/client_secret_*.json'; Lifecycle = 'deliberate-exclusion'; Reason = 'Google client-secret downloads are not consumed by the updater or Android build.' }
         @{ Path = 'ElectronicLogbook/Google Auth/webclientsecret.txt'; Lifecycle = 'deliberate-exclusion'; Reason = 'The updater uses browser sign-in without a local Google client secret.' }
         @{ Path = 'ElectronicLogbook/Recovery Codes'; Lifecycle = 'deliberate-exclusion'; Reason = 'User recovery artifacts are not development credentials and require separate protected handling.' }
+    )
+
+    # State outside the transfer roots. These entries document security-sensitive local
+    # prerequisites that must be recreated rather than archived.
+    ExternalLocalStateExclusions = @(
+        @{ Path = '%USERPROFILE%/.android/avd'; Lifecycle = 'deliberate-exclusion'; Reason = 'Android virtual devices and snapshots can contain live Google sessions; recreate and authenticate the recovery AVD once on each trusted development machine.' }
     )
 
     CodexAssets = @(
@@ -136,6 +143,10 @@
         JavaMajor = 21
         AndroidPlatform = 'android-36'
         AndroidBuildTools = '35.0.0'
+        AndroidRecoverySystemImage = 'system-images;android-35;google_apis_playstore;x86_64'
+        AndroidRecoveryAvdName = 'ElectronicLogbook_Pixel_Play_API35'
+        AndroidRecoverySnapshotName = 'flightlogx_google_authenticated_clean_v1'
+        AndroidRecoveryResetScript = 'tools/Reset-FlightLogXAndroidRecoveryEmulator.ps1'
         SupabaseVersion = '2.111.0'
         FirebaseCliVersion = '15.28.2'
         FirebaseProjectId = 'flightlogx-private-pilot'
@@ -162,7 +173,9 @@
         'Run firebase login on the new device; Firebase authentication is never transferred.'
         'Open the Codex VS Code extension and sign in; Codex authentication and session databases are never transferred.'
         'Confirm Windows has a default HTTPS browser; updater Google sign-in returns through a temporary 127.0.0.1 loopback callback and needs no local Google client secret.'
+        'Confirm the Google OAuth project that owns the Web client also has separate Android clients for every active package/signing-certificate pair; preserve existing clients when adding the permanent Preview identity.'
         'Review and accept Android SDK licenses, then authorize USB debugging on the unlocked Android device.'
+        'For repeated Google recovery tests, create the documented Google Play API 35 AVD, sign in once, and capture its clean machine-local snapshot; never transfer or share that AVD.'
         'Restart Windows or the terminal when an installer or environment-variable change requires it.'
     )
 }

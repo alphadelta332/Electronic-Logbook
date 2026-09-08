@@ -14,6 +14,24 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
     }
 
     [Fact]
+    public void ReceiptHashCanonicalizationProducesLegacyWindowsLineEndingsOnEveryRuntime()
+    {
+        const string windowsJson = "{\r\n  \"value\": 1\r\n}";
+        const string unixJson = "{\n  \"value\": 1\n}";
+        const string legacyMacJson = "{\r  \"value\": 1\r}";
+
+        Assert.Equal(
+            windowsJson,
+            PortableWorkbookMigrationVerification.CanonicalizeJsonLineEndingsForHash(windowsJson));
+        Assert.Equal(
+            windowsJson,
+            PortableWorkbookMigrationVerification.CanonicalizeJsonLineEndingsForHash(unixJson));
+        Assert.Equal(
+            windowsJson,
+            PortableWorkbookMigrationVerification.CanonicalizeJsonLineEndingsForHash(legacyMacJson));
+    }
+
+    [Fact]
     public void ConvertRowsRetryProducesIdenticalOperationsCiphertextAndExactReceipt()
     {
         var migration = Migration();

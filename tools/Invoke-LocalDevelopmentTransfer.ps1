@@ -319,6 +319,15 @@ function Assert-TransferConfiguration {
             }
         }
     }
+
+    foreach ($exclusion in $script:TransferConfig.ExternalLocalStateExclusions) {
+        if ($exclusion.Lifecycle -notin $allowedLifecycles -or $exclusion.Lifecycle -eq 'local-transfer') {
+            throw "External local-state exclusion has an invalid lifecycle: $($exclusion.Path)"
+        }
+        if ([string]::IsNullOrWhiteSpace($exclusion.Path) -or [string]::IsNullOrWhiteSpace($exclusion.Reason)) {
+            throw 'External local-state exclusions require both a path and a reason.'
+        }
+    }
 }
 
 function Test-LocalPathPolicyMatch {
@@ -737,8 +746,8 @@ function Invoke-InstallAction {
 
     $sdkManager = Find-AndroidSdkManager
     if ($sdkManager) {
-        if ($PSCmdlet.ShouldProcess('Android SDK', 'Install platform 36, build-tools 35.0.0, and platform-tools')) {
-            & $sdkManager --sdk_root=$androidRoot 'platform-tools' "platforms;$($script:TransferConfig.Expected.AndroidPlatform)" "build-tools;$($script:TransferConfig.Expected.AndroidBuildTools)"
+        if ($PSCmdlet.ShouldProcess('Android SDK', 'Install platform 36, build-tools 35.0.0, platform-tools, and the Google Play recovery-emulator image')) {
+            & $sdkManager --sdk_root=$androidRoot 'platform-tools' "platforms;$($script:TransferConfig.Expected.AndroidPlatform)" "build-tools;$($script:TransferConfig.Expected.AndroidBuildTools)" $script:TransferConfig.Expected.AndroidRecoverySystemImage
             if ($LASTEXITCODE -ne 0) { Write-Warning 'Android SDK packages were not fully installed. Review licenses and use Android Studio SDK Manager.' }
         }
     }
@@ -854,6 +863,10 @@ function Invoke-VerifyAction {
     Add-CheckResult $results 'ANDROID_SDK_ROOT' ($env:ANDROID_SDK_ROOT -eq $androidRoot) $true "expected $androidRoot"
     Add-CheckResult $results 'Android SDK 36' (Test-Path -LiteralPath (Join-Path $androidRoot "platforms\$($script:TransferConfig.Expected.AndroidPlatform)")) $true $androidRoot
     Add-CheckResult $results 'Android build-tools' (Test-Path -LiteralPath (Join-Path $androidRoot "build-tools\$($script:TransferConfig.Expected.AndroidBuildTools)")) $true $script:TransferConfig.Expected.AndroidBuildTools
+    $recoveryImagePath = Join-Path $androidRoot (($script:TransferConfig.Expected.AndroidRecoverySystemImage -replace ';', '\'))
+    Add-CheckResult $results 'Android recovery Google Play image' (Test-Path -LiteralPath $recoveryImagePath) $false $script:TransferConfig.Expected.AndroidRecoverySystemImage
+    $recoveryScriptPath = Join-Path $RepoRoot $script:TransferConfig.Expected.AndroidRecoveryResetScript
+    Add-CheckResult $results 'Android recovery reset command' (Test-Path -LiteralPath $recoveryScriptPath -PathType Leaf) $true $script:TransferConfig.Expected.AndroidRecoveryResetScript
 
     $supabaseVersion = Get-NativeCommandOutput -Name 'supabase' -Arguments @('--version')
     Add-CheckResult $results 'Supabase CLI version' ($supabaseVersion -eq $script:TransferConfig.Expected.SupabaseVersion) $true $supabaseVersion
@@ -926,7 +939,20 @@ function Invoke-VerifyAction {
         $secretCheck = Test-RecoveryEnvelopeSecretFile -Path (Join-Path $recoveryRoot $fileName)
         Add-CheckResult $results "Recovery envelope secrets: $fileName" $secretCheck.Passed $true $secretCheck.Detail
     }
-    Add-CheckResult $results 'Google Auth local state' (Test-Path -LiteralPath (Join-Path $electronicLogbookLocalRoot 'Google Auth\webclientid.txt') -PathType Leaf) $false 'required for Android hosted Google sign-in work'
+    $googleAuthRoot = Join-Path $electronicLogbookLocalRoot 'Google Auth'
+    $googleWebClientPath = Join-Path $googleAuthRoot 'webclientid.txt'
+    $googleAndroidClientPath = Join-Path $googleAuthRoot 'previewandroidclientid.txt'
+    $googleClientPairPassed = $false
+    if ((Test-Path -LiteralPath $googleWebClientPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $googleAndroidClientPath -PathType Leaf)) {
+        $googleWebClient = (Get-Content -LiteralPath $googleWebClientPath -Raw -Encoding UTF8).Trim()
+        $googleAndroidClient = (Get-Content -LiteralPath $googleAndroidClientPath -Raw -Encoding UTF8).Trim()
+        $webMatch = [regex]::Match($googleWebClient, '^(\d+)-[a-z0-9]+\.apps\.googleusercontent\.com$')
+        $androidMatch = [regex]::Match($googleAndroidClient, '^(\d+)-[a-z0-9]+\.apps\.googleusercontent\.com$')
+        $googleClientPairPassed = $webMatch.Success -and $androidMatch.Success -and
+            $webMatch.Groups[1].Value -eq $androidMatch.Groups[1].Value
+    }
+    Add-CheckResult $results 'Google OAuth client identifiers' $googleClientPairPassed $false 'public Web and permanent Preview Android client IDs must exist and belong to the same Google project; values are never printed'
 
     $signingRoot = Join-Path $LocalAppDataRoot 'ElectronicLogbook\AndroidSigning'
     $signingMetadata = Join-Path $signingRoot 'electronic-logbook-development.json'

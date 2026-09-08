@@ -1,5 +1,6 @@
 @implements IAsyncDisposable
 @inject MobileLogbookSession Session
+@inject NavigationManager Navigation
 
 @if (AnimationState != ActionFeedbackAnimation.Hidden && !string.IsNullOrWhiteSpace(DisplayedMessage))
 {
@@ -102,6 +103,7 @@
             {
                 feedbackCancellation?.Cancel();
                 await PlayExitAsync(expireFeedback: false, CancellationToken.None);
+                Navigation.NavigateTo("/flights?view=entries", replace: true);
             }
         }
         finally

@@ -8,6 +8,8 @@ $scriptRoot = $PSScriptRoot
 $mobileRoot = Split-Path -Parent $scriptRoot
 $repoRoot = Split-Path -Parent $mobileRoot
 $capacitorConfigPath = Join-Path $mobileRoot "capacitor.config.json"
+$packageJsonPath = Join-Path $mobileRoot "package.json"
+$publishScriptPath = Join-Path $scriptRoot "Publish-MobilePwa.ps1"
 $preparedAssetRoot = Join-Path $mobileRoot "artifacts\capacitor"
 $androidAssetRoot = Join-Path $mobileRoot "android\app\src\main\assets\public"
 $apkRoot = Join-Path $mobileRoot "android\app\build\outputs\apk\debug"
@@ -82,16 +84,22 @@ function Get-Sha256Hash {
 }
 
 Assert-FileExists -Path $capacitorConfigPath -Description "Capacitor configuration"
+Assert-FileExists -Path $packageJsonPath -Description "Mobile package configuration"
+Assert-FileExists -Path $publishScriptPath -Description "Clean mobile PWA publish script"
 Assert-DirectoryExists -Path $preparedAssetRoot -Description "Prepared Capacitor web assets"
 Assert-DirectoryExists -Path $androidAssetRoot -Description "Android embedded web assets"
 Assert-FileExists -Path $apkPath -Description "Android debug APK"
 Assert-FileExists -Path $metadataPath -Description "Android APK metadata"
 
 $config = Get-Content -LiteralPath $capacitorConfigPath -Raw | ConvertFrom-Json
+$package = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
 Assert-Equal -Actual $config.appId -Expected "com.alphadelta.electroniclogbook" -Description "Capacitor appId"
 Assert-Equal -Actual $config.appName -Expected "FlightLogX" -Description "Capacitor appName"
 Assert-Equal -Actual $config.webDir -Expected "artifacts/capacitor" -Description "Capacitor webDir"
 Assert-Equal -Actual $config.server.androidScheme -Expected "https" -Description "Capacitor Android scheme"
+Assert-Equal -Actual $package.scripts.'publish:pwa' `
+    -Expected "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Publish-MobilePwa.ps1" `
+    -Description "Mobile PWA clean publish command"
 
 $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
 Assert-Equal -Actual $metadata.artifactType.type -Expected "APK" -Description "Android artifact type"
@@ -135,6 +143,20 @@ foreach ($relativePath in $requiredAssets) {
 }
 
 Assert-DirectoryExists -Path (Join-Path $androidAssetRoot "_framework") -Description "Android embedded Blazor framework assets"
+
+$embeddedFrameworkRoot = Join-Path $androidAssetRoot "_framework"
+if (Test-Path -LiteralPath (Join-Path $embeddedFrameworkRoot "blazor.boot.json") -PathType Leaf) {
+    throw "Android embedded assets contain an obsolete Blazor boot manifest."
+}
+$embeddedFirstPartyAssemblies = @(Get-ChildItem -LiteralPath $embeddedFrameworkRoot -File |
+    Where-Object { $_.Name -match '^ElectronicLogbook\.(Mobile|Portable).*\.wasm$' })
+$unexpectedEmbeddedAssemblies = @($embeddedFirstPartyAssemblies | Where-Object {
+    $_.Name -notmatch '^ElectronicLogbook\.(Mobile|Portable)\.[a-z0-9]{10}\.wasm$'
+})
+if ($embeddedFirstPartyAssemblies.Count -ne 2 -or $unexpectedEmbeddedAssemblies.Count -gt 0) {
+    $names = @($embeddedFirstPartyAssemblies | Select-Object -ExpandProperty Name)
+    throw "Android embedded assets contain mixed or stale first-party assemblies: $($names -join ', ')"
+}
 
 $compressedAssets = Get-ChildItem -LiteralPath $androidAssetRoot -Recurse -File |
     Where-Object { $_.Extension -eq ".gz" -or $_.Extension -eq ".br" }
