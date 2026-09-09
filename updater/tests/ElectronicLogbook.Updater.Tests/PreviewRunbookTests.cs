@@ -3,6 +3,35 @@ namespace ElectronicLogbook.Updater.Tests;
 public sealed class PreviewRunbookTests
 {
     [Fact]
+    public void PreviewDocumentationUsesOneTimeWorkbookMigrationAndManagedRecoveryModel()
+    {
+        var architecture = File.ReadAllText(TestRepo.FindFile("docs", "hosted-sync-architecture.md"));
+        var recovery = File.ReadAllText(TestRepo.FindFile("docs", "account-recovery-threat-model.md"));
+        var runbook = File.ReadAllText(TestRepo.FindFile("docs", "flightlogx-preview-runbook.md"));
+        var hostedSetup = File.ReadAllText(TestRepo.FindFile("docs", "hosted-preview-supabase.md"));
+        var androidInstall = File.ReadAllText(TestRepo.FindFile("docs", "flightlogx-preview-android-install.md"));
+
+        Assert.Contains("one-time migration source", architecture, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Android is the steady-state client", architecture, StringComparison.Ordinal);
+        Assert.Contains("not a hosted client", architecture, StringComparison.Ordinal);
+        Assert.Contains("managed-envelope service", recovery, StringComparison.Ordinal);
+        Assert.Contains("Advanced/support fallbacks", recovery, StringComparison.Ordinal);
+        Assert.Contains("## External Canary Procedure", runbook, StringComparison.Ordinal);
+        Assert.Matches("first\\s+add attempt", runbook);
+        Assert.Contains("Add-FlightLogXParticipant.ps1", runbook, StringComparison.Ordinal);
+        Assert.Contains("Managed recovery implementation", hostedSetup, StringComparison.Ordinal);
+        Assert.Contains("Existing logbook restored and synced.", androidInstall, StringComparison.Ordinal);
+
+        Assert.DoesNotContain("Excel is an optional synchronized projection", architecture, StringComparison.Ordinal);
+        Assert.DoesNotContain("## Workbook Synchronization Points", architecture, StringComparison.Ordinal);
+        Assert.DoesNotContain("app-to-workbook sync", architecture, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("workbook-to-app sync", architecture, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("current owner connection failure", hostedSetup, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("install:android:debug", hostedSetup, StringComparison.Ordinal);
+        Assert.DoesNotContain("workbook-linked changes in each direction", runbook, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void PreviewRunbookWiresHealthCheckAndLocalEvidence()
     {
         var runbook = File.ReadAllText(TestRepo.FindFile("docs", "flightlogx-preview-runbook.md"));

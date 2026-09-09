@@ -1,5 +1,9 @@
 # FlightLogX Preview Hosted Supabase Setup
 
+Status: implemented controlled-Preview setup
+
+Last reconciled: 2026-09-09
+
 This document is the repeatable project setup note for the invitation-only Preview. It is
 safe to commit because it contains no Supabase URLs, anon keys, service-role keys, JWT
 secrets, SMTP credentials, or Preview emails.
@@ -40,12 +44,15 @@ supabase link --project-ref <preview-project-ref>
 supabase db push
 ```
 
-The initial migration is:
+The migration chain begins with
+`supabase/migrations/20260806000000_hosted_pilot_foundation.sql`. Apply every checked-in
+migration in timestamp order; do not stop after the foundation. Later migrations add and
+harden managed recovery, replacement-device activation, Advanced recovery-code support,
+workbook-migration invitation and lifecycle rules, encrypted configuration revisions,
+and restored final-schema reporting and append protections.
 
-- `supabase/migrations/20260806000000_hosted_pilot_foundation.sql`
-
-It creates the minimum hosted ledger schema, constraints, indexes, RLS policies, and
-bounded sync routines for:
+Together the migrations create the hosted ledger schema, constraints, indexes, RLS
+policies, and bounded routines for:
 
 - invited accounts;
 - owner-managed `app_only` and `workbook_migration` invitation modes;
@@ -53,8 +60,10 @@ bounded sync routines for:
 - Android and workbook devices;
 - append-only encrypted operations;
 - per-device acknowledgements;
-- pairing requests;
-- encrypted key envelopes;
+- pairing and recovery attempts;
+- managed account, recovery-code, and device-wrapped key envelopes;
+- one-time workbook migration state and exact verification receipts;
+- encrypted configuration revisions;
 - redacted security events.
 
 ## Auth Configuration
@@ -68,10 +77,10 @@ Configure Auth in the Supabase dashboard for each project:
   for each Supabase project. Use `FlightLogX <signin@...>` as the sender.
 - Change the shared **Magic Link or OTP** template to display `{{ .Token }}` and no
   clickable confirmation link. Set Email OTP length to 6, expiration to 600 seconds, email sends
-  to 30 per hour, and OTP requests to 30 per hour. Normal Android and updater instructions
-  request only the six-digit code and tell the user to check junk or spam if the message
-  does not arrive. The clients retain URL parsing as an undisclosed support fallback for
-  already-issued links; do not advertise it in normal UI or participant steps.
+  to 30 per hour, and OTP requests to 30 per hour. Advanced/support instructions request
+  only the six-digit code and tell the user to check junk or spam if the message does not
+  arrive. The clients retain URL parsing as an undisclosed support fallback for
+  already-issued links; do not advertise either path in normal UI or participant steps.
 - Keep phone, anonymous, and public signup providers disabled. Email creates the
   owner-managed invitation and remains an Advanced/support fallback. Google is the only
   enabled OAuth provider; it is the normal Windows migration sign-in and returning-user
@@ -129,12 +138,14 @@ secret `ELECTRONIC_LOGBOOK_DEVELOPMENT_SUPABASE_ANON_KEY`. It embeds those publi
 settings in the wizard executable and validates the finished executable before publishing.
 Do not reuse the development values for a Preview or release build.
 
-After a Supabase Auth invitation is accepted, the client should call
-`public.accept_hosted_invitation(...)` with the local device type and platform label. The
-function activates an invited account, registers the device, and records a redacted
-security event. It rejects disabled accounts and authenticated users without a matching
-invited account row, which keeps accidental public self-registration outside the hosted
-ledger even if an Auth user exists.
+`public.accept_hosted_invitation(...)` is the app-only initialization routine. It activates
+an invited account, registers the first device, and records a redacted security event, but
+the controlled workbook-led Preview must not call it to create Android state. A
+`workbook_migration` participant instead uses the authenticated Windows migration
+lifecycle first, then Android managed recovery against the completed membership and
+logbook. Both paths reject disabled accounts and authenticated users without a matching
+invitation, which keeps accidental public self-registration outside the hosted ledger
+even if an Auth identity exists.
 
 Portable client implementations should expose these local auth outcomes without relying
 on live Supabase tests: invitation required, public registration blocked, expired or
@@ -223,7 +234,8 @@ file with `tools\RecoveryEnvelopeSecretGenerator`, deploy it with `supabase secr
 development transfer workflow. `Invoke-LocalDevelopmentTransfer.ps1 -Action Verify`
 confirm-tests the RSA pair and KEK length without printing secret material.
 
-For the Android owner-rehearsal build, create a local gitignored mobile runtime config:
+For an owner-only permanent-package Preview build, create the local gitignored mobile
+runtime config:
 
 ```powershell
 .\tools\New-MobileHostedSyncLocalConfig.ps1 `
@@ -234,34 +246,35 @@ For the Android owner-rehearsal build, create a local gitignored mobile runtime 
 ```
 
 This writes `mobile/src/ElectronicLogbook.Mobile/wwwroot/hosted-sync.local.json`, which
-is gitignored. Use the Preview project URL and anon key only. Re-run
-`npm.cmd run sync:android` or `npm.cmd run install:android:debug` from `mobile/` after
-creating or changing that file so the Capacitor assets include the Preview transport
-configuration.
+is gitignored. Use the Preview project URL and anonymous key only. Build through the
+repository's clean permanent-package Preview workflow; do not install the development
+package as a substitute. The build must prove the packaged config, permanent application
+id, signing certificate, Android version code, first-party asset manifest, and APK hash
+before Firebase distribution.
 
-### Clean-slate connection recovery
+### Managed recovery implementation
 
-The managed-envelope implementation now discovers an existing membership before device
-or logbook creation, restores the logbook key into Android Keystore, restores the latest
-encrypted custom-field and currency-override configuration before replaying hosted
-operations, and activates the replacement device only after exact verification. A
-`workbook_migration` invitation with no completed hosted membership is separately blocked
-from Android initialization and tells the user to finish the Windows migration.
+Managed recovery discovers existing membership before any device or logbook creation,
+restores the key into Android Keystore, restores the latest encrypted custom-field and
+currency-override configuration before operation replay, verifies the completed workbook
+migration receipt, and activates the replacement device only after exact local persistence
+and hosted acknowledgement. A `workbook_migration` invitation without a completed hosted
+logbook is blocked from Android initialization and tells the participant to finish the
+Windows migration.
 
-The disposable `-WorkbookMigrationJourney` rehearsal proves that path after the Windows
-migration has enrolled its managed envelope, including exact configuration and operation
-readback, clean Android durable state, fail-closed envelope cases, and cleanup. It does not
-clear or automate the retained Pixel app data.
+The normal participant action is Google sign-in. Missing, corrupt, unauthorized, or
+unavailable managed recovery stops before activation and never creates an app-only empty
+replacement. Email-code sign-in, recovery-code restore, Package Exchange, and diagnostic
+detail remain Advanced/support tools.
 
-Treat the current owner connection failure as an S2 blocked workflow. Preserve the
-retained credential and the single server device. The diagnostic build exposes a
-read-only/disposable preflight in Settings with the exact failing stage, a stable error
-code, expandable exception/HTTP details, and a **Copy redacted diagnostics** action.
-Only **Recover retained connection** may create the real app-only logbook, and it is
-enabled only after the same attempt has passed every remote and disposable local check.
+The owner clean-reinstall journey has passed on the permanent Pixel. A stale mixed publish
+first failed closed before activation; the clean-publish repair resumed safely, superseded
+the failed pending device, restored exact entries and totals, and created no duplicate
+logbook or operation. Durable evidence is in
+`artifacts/gate4-owner-final-journey-20260908/verification.json`.
 
-Before installing the acceptance build, configure desktop-only values without printing
-them:
+For private owner verification tools, configure only the desktop values required by the
+specific script and never print them:
 
 ```text
 ELB_SUPABASE_PREVIEW_DB_URL
@@ -271,23 +284,19 @@ ELB_SUPABASE_PREVIEW_SERVICE_ROLE_KEY    # desktop administrative validation onl
 ELB_SUPABASE_PREVIEW_DEVICE_ID
 ```
 
-The Preview tools also accept the corresponding legacy `ELB_SUPABASE_PILOT_*` names so
-existing owner machines continue to work during this compatibility window.
+The Preview tools also accept corresponding legacy `ELB_SUPABASE_PILOT_*` names during
+the compatibility window. Remove those aliases only after every retained owner and canary
+resource uses the canonical Preview names.
 
-Then build/sync the isolated app so packaged config copies exist and run the preflight
-once. It verifies packaged-config parity, JWT project/role/expiry, the Auth endpoint,
-database access, a locally configured CLI/service credential, `/auth/v1/user`, the
-active account, the existing active device, and the absence of a hosted logbook. The
-report never writes the supplied secrets or full identifiers.
-
-Do not run recovery if any check fails. Fix only that subsystem, rebuild in place, and
-rerun preflight. Recovery never sends email or calls device registration; it imports the
-new app-only logbook key, saves IndexedDB state, reloads it, and compares account,
-device, and logbook identifiers before displaying Connected.
+The redacted preflight verifies packaged-config parity, JWT project/role/expiry, Auth and
+database access, project health and region, signup/provider restrictions, Google loopback
+configuration, and the expected hosted account/logbook state. Do not continue when any
+check fails. Fix the proven subsystem and rerun the check; do not clear app data, reset the
+database, or initialize a replacement logbook.
 
 ## Verification Before Preview Use
 
-Before inviting Preview users:
+Before provisioning the external canary:
 
 - run the migration against a disposable development project;
 - inspect Supabase Security Advisor and Performance Advisor output;
@@ -295,7 +304,11 @@ Before inviting Preview users:
   replayed operations, revoked devices, disabled accounts, and acknowledgement rollback;
 - rehearse logical export and restore into a separate Sydney project;
 - verify diagnostics redact URLs, keys, tokens, user emails, and ciphertext payloads
-  unless the user explicitly exports a hosted data backup.
+  unless the user explicitly exports a hosted data backup;
+- confirm the final owner customer-surface dress rehearsal passed with no open S0-S2
+  issue; and
+- run `tools\Add-FlightLogXParticipant.ps1` with `-WhatIf` before its mutating run so the
+  same Google email is bound to `workbook_migration` and the approved Firebase group.
 
 Run the checked-in RLS harness only against a disposable local database or development
 project:
@@ -324,8 +337,8 @@ append-only operation trigger is
 bypassed only inside the narrowly scoped cleanup transaction; normal API deletion
 remains blocked.
 
-After the workbook-migration implementation is locally green, run its separate disposable
-journey against the same development project:
+Run the separate disposable workbook journey against the same development project when a
+schema, migration, recovery, or client change could affect the path:
 
 ```powershell
 .\tools\Invoke-HostedRecoveryRehearsal.ps1 -WorkbookMigrationJourney
@@ -339,6 +352,13 @@ envelope long enough to prove both paths fail without saving an empty logbook, r
 separate wrong account, restores the exact ledger into a new device, verifies the temporary
 Windows credential was deleted after completion, writes redacted evidence, and removes every
 disposable Auth and hosted row. It does not install, clear, or automate the retained Pixel app.
+
+The owner has also passed the complete permanent-package workbook-to-Android journey and
+clean reinstall on the physical Pixel. Keep
+`artifacts/gate4-owner-final-journey-20260908/verification.json` as the durable redacted
+baseline. The next live proof is the final owner dress rehearsal followed by one external
+Windows Excel plus Android canary, using the exact procedure in
+`docs/flightlogx-preview-runbook.md`.
 
 ## References
 

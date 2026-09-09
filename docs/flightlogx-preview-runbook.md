@@ -1,269 +1,323 @@
 # FlightLogX Preview Runbook
 
-Status: pre-Preview operating plan
+Status: controlled-cohort operating procedure
 
-Last checked: 2026-08-28
+Last checked: 2026-09-09
 
-This runbook defines the private, invitation-only Android-first Preview for hosted sync.
-It intentionally excludes public signup, billing, public uptime promises, and public
-release hardening.
+This runbook defines the private, invitation-only Android-first Preview. It excludes
+public signup, billing, public uptime promises, app-store distribution, and public release
+hardening.
 
 ## Preview Goal
 
-Run a small eight-week Preview that proves the workbook-led move to FlightLogX without
-manual packages. An existing `2.0.3` workbook is the one-time migration source. After
-the hosted migration is verified, the Android app is the normal editable logbook and
-Excel is used only for fresh exports. Continuing workbook/app synchronization is not
-part of this Preview.
+Prove the workbook-led move to FlightLogX with the owner and then one external Windows
+Excel plus Android canary before starting the eight-week Preview.
 
-The controlled `preview` workbook channel tests `3.0.0` while ordinary `main` workbooks
-stay on `2.0.3`. Its GitHub branch, protected environment, variable, secret, and normal
-bridge marker use the canonical `preview` name. A pinned `pilot` branch and matching bridge
-marker remain only for the coached first hop from `2.0.3`. Preview prerelease files are
-publicly downloadable because the repository and
-the `2.0.3` bootstrap use unauthenticated GitHub Release URLs. They are not advertised,
-linked from the public update channel, or offered to a workbook unless a coach explicitly
-changes that workbook to `GitHubBranch = pilot`.
+An existing Electronic Logbook `2.0.3` workbook is a one-time migration source. After
+exact hosted verification, Android is the normal editable logbook. The upgraded workbook
+remains editable and is stamped `Moved to FlightLogX`, but later changes in that workbook
+stay local. Later Excel, CSV, and PDF files are fresh exports, not synchronized working
+copies.
 
-## Preview Update Channel Bootstrap
+The ordinary journey uses:
 
-### Repository setup
+- the coached `2.0.3` Preview-channel switch;
+- the normal updater wizard and Google sign-in;
+- the Firebase App Distribution invitation and signed permanent Android package;
+- Google sign-in in FlightLogX; and
+- automatic managed-envelope recovery and first sync.
 
-Before coaching any workbook, the owner must confirm all of the following:
+It does not expose packages, recovery codes, encryption keys, logbook ids, hashes,
+databases, file pickers, or manual import/export. The displayed six-digit email sign-in
+and Package Exchange remain Advanced/support only.
 
-1. The remote `preview` branch points to the exact approved `3.x` commit.
-2. The GitHub `preview` environment requires owner approval.
-3. That environment contains repository variable
-   `ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_URL` and secret
-   `ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_ANON_KEY` for the Preview Sydney project.
-4. The `Publish FlightLogX Preview wizard` workflow passed for that exact commit after its environment
-   approval.
-5. The resulting prerelease tag is `dev-wizard-<first 12 characters of the commit>` and
-   contains both `preview-wizard-channel.txt` and the compatibility alias
-   `pilot-wizard-channel.txt`. The old `dev-wizard-` name is intentional: the `2.0.3`
-   launcher requires it for the first hop.
-6. The compatibility branch `pilot` points to the exact same commit as `preview`. Do not
-   develop or publish from `pilot`; it exists only because the `2.0.3` launcher reads its
-   workbook channel as a GitHub branch name.
-7. `origin/main:version.txt` is still `2.0.3` and the public latest release is still
-   `v2.0.3`.
+## Controlled Channel
 
-Do not coach the workbook change if any one of these checks fails. Do not substitute a
-development-branch build or a different Supabase project.
+The canonical controlled workbook channel is `preview`. Ordinary `main` workbooks remain
+on `2.0.3` while the controlled Preview tests `3.0.0`.
 
-### Coached change in the existing 2.0.3 workbook
+A pinned `pilot` branch and bridge marker remain only because the `2.0.3` launcher treats
+its channel as a GitHub branch name. The first hop therefore uses `pilot`; the `3.0.0`
+launcher canonicalizes it to `preview`. Do not develop or publish from `pilot`.
 
-These steps are for the owner or a coached first canary only. They are not customer-facing
-public instructions.
+Preview prerelease files are publicly downloadable because the public repository and the
+`2.0.3` bootstrap use unauthenticated GitHub Release URLs. They are not advertised,
+linked from `main`, or offered unless a coach intentionally changes one workbook to the
+legacy bridge.
 
-1. Open the existing `2.0.3` workbook and save it normally.
-2. Press `Alt+F11` to open the Visual Basic window.
-3. Press `Ctrl+G` to open the Immediate window at the bottom.
-4. Paste this exact line, then press Enter:
+Before coaching a workbook, verify:
+
+1. Remote `preview` points to the exact approved commit.
+2. The GitHub `preview` environment requires owner approval and contains the approved
+   Preview Supabase URL variable and anonymous-key secret.
+3. `Publish FlightLogX Preview wizard` passed for that exact commit after approval.
+4. The prerelease tag is `dev-wizard-<first 12 commit characters>` and contains both
+   `preview-wizard-channel.txt` and `pilot-wizard-channel.txt`.
+5. Remote `pilot` points to the same commit as `preview`.
+6. `origin/main:version.txt` and the public latest release remain `2.0.3` and `v2.0.3`.
+
+Stop if any check fails. Do not substitute a development build or another Supabase
+project.
+
+### Coached `2.0.3` switch
+
+These are private owner/coach instructions, not public documentation:
+
+1. Open the participant's existing `2.0.3` workbook and save it normally.
+2. Press `Alt+F11`.
+3. Press `Ctrl+G` to open the Immediate window.
+4. Paste the following exact line and press Enter:
 
    ```text
    ThisWorkbook.Names("GitHubBranch").RefersToRange.Value2 = "pilot"
    ```
 
-5. Close the Visual Basic window and save the workbook again.
-6. Use the workbook's normal update check and accept the `3.0.0` update.
-7. `2.0.3` will show one warning labelled `Development Updater Warning`. This is expected
-   because `2.0.3` does not yet know the word `pilot`. Confirm it only after the coach has
-   matched the approved Preview commit and prerelease tag from the repository setup above.
-8. Do not accept a second development warning after the workbook has reached `3.0.0`.
-   The `3.0.0` launcher accepts that legacy value and canonicalises it to `preview`.
+5. Close the Visual Basic window and save the workbook.
+6. Use the workbook's normal update check and accept `3.0.0`.
+7. Confirm the one `Development Updater Warning` shown by `2.0.3` only after the coach
+   matches the approved commit and prerelease above.
+8. Do not accept a second development warning after the workbook reaches `3.0.0`. Stop
+   and investigate if one appears.
 
-The updater writes `preview` into the upgraded workbook when the source contains either
-`preview` or the legacy `pilot` value. It does not carry `dev`, `hotfix`, `main`, blank,
-or an arbitrary branch value across migration. This keeps the canary on the Preview
-channel without turning an accidental or hostile branch name into a durable update source.
+The installed workbook must contain `preview`, never `pilot`, `dev`, `hotfix`, an
+arbitrary branch, or blank. Remove the external `pilot` aliases only after the owner and
+canary workbooks and devices use canonical Preview resources.
 
-This channel bootstrap only selects and retains the Preview build. Do not treat it as proof
-that hosted migration, exact readback, Google recovery, workbook stamping, or Android
-arrival is complete; those have separate acceptance gates in `TODO.md`.
+## Cohort And Private Records
 
-## Named Cohort
+Keep all participant names, emails, device details, workbook paths, contact details, and
+raw feedback outside git. The source of truth is the gitignored
+`artifacts/private-pilot-20260806/cohort.md` file or the owner's private tracker.
 
-Keep the participant list out of git. The Preview cohort source of truth is the local,
-gitignored `artifacts/private-pilot-20260806/cohort.md` file or the project owner's
-private tracker.
+Launch sequence:
 
-Use this table shape for each named participant:
+1. final owner dress rehearsal;
+2. resolve every owner S0-S2 issue;
+3. one external canary with Windows Excel and Android;
+4. resolve every external-canary S0-S2 issue; and
+5. begin the eight-week owner-plus-canary Preview only when both journeys are safe.
+
+Record privately for each person:
 
 | Field | Required value |
 | --- | --- |
-| Participant name | Real pilot name or private identifier |
-| Contact email | Invited Supabase Auth email |
-| Environment | Android device model, Android version, workbook use yes/no |
-| Workbook path | Local/private note only; do not commit |
-| Start date | Date invited |
-| Week 4 status | Continue, pause, support needed, or withdrawn |
-| Exit status | Pass, pass with issues, failed, or withdrawn |
+| Participant | Real name or private identifier |
+| Google account | Exact email provisioned in Supabase and Firebase |
+| Environment | Windows/Excel version, Android model and version |
+| Workbook | Private source path and pre-migration backup location |
+| Expected data | Flight count, hours, date range, custom fields and currency dates |
+| Start | Invitation and successful arrival dates |
+| Weekly status | Continue, pause, support needed, or withdrawn |
+| Exit | Pass, pass with issues, failed, or withdrawn |
 
-Minimum cohort before starting: 2 app-only participants and 1 workbook-linked
-participant. Target maximum for the first run: 5 total participants.
+Supported scope is Windows Excel `2.0.3` as the migration source, the approved permanent
+Android package `com.alphadelta.electroniclogbook`, and the Australia/Sydney Preview
+project. iPhone/iPad, public signup, live workbook sync, user-owned cloud-file sync, and
+public support are out of scope.
 
-## Supported Environments
+## Final Owner Dress Rehearsal
 
-Supported for this Preview:
+The dress rehearsal must use disposable workbook data and the permanent Preview app. It
+must not clear or uninstall the separate development app. Destructive changes to the
+permanent app require a written test plan, confirmed recoverability, and explicit owner
+approval for that rehearsal.
 
-- Android first, distributed through the approved Preview installation path once
-  that path passes its acceptance gate;
-- Pixel 8 Pro reference device and comparable Android phones that can run the current
-  WebView/PWA build;
-- Australia/Sydney Supabase development or Preview project;
-- Windows Excel `2.0.3` as the one-time migration source through the controlled `pilot`
-  update channel and checked-in updater flow;
-- local encrypted app cache and hosted encrypted operation ledger.
+Preparation may use private owner tools, but the observed journey itself must use only
+the same visible surfaces given to a canary:
 
-Out of scope:
+1. Record the exact approved commit, wizard tag, Firebase release, APK hash, signing
+   certificate, hosted-project status, and disposable workbook expectations privately.
+2. Run the redacted Preview preflight and stop on any failure.
+3. Provision or reset only the disposable owner rehearsal state according to its explicit
+   test plan. Confirm the development app remains untouched.
+4. Perform the coached `2.0.3` switch and use the workbook's normal update action.
+5. In the updater, review the visible flight count, hours, date range, and warning summary.
+6. Continue with Google and select the invited owner account in the system browser.
+7. Require the wizard to report exact hosted verification, retained untouched timestamped
+   backup, installed workbook, and `Moved to FlightLogX` stamp.
+8. Open the installed workbook and attempt to add one disposable entry. Confirm the first
+   add attempt in that Excel session warns that spreadsheet changes are not sent to
+   FlightLogX. Cancel the add unless that local-edit behavior is itself under test.
+9. Install or update the signed app through Firebase App Distribution and Android's own
+   installation approval.
+10. Open FlightLogX, continue with Google using the same account, and require `Existing
+    logbook restored and synced.` without a picker, package, code, key, or empty logbook.
+11. Compare visible entries, totals, custom fields, and currency dates with the updater
+    summary and workbook. Confirm the app shows `Synced`.
+12. Capture one redacted evidence artifact covering every visible step and an independent
+    hosted readback. Do not record secrets, full identifiers, or the invited email.
 
-- iPhone and iPad;
-- public signup;
-- billing or subscriptions;
-- user-owned cloud-file sync;
-- continuing workbook/app synchronization;
-- public support or uptime commitments.
+Any S0-S2 issue stops external enrolment. Preserve the app, workbook, backup, hosted
+ledger, and redacted diagnostics until the cause is proven and the repair is retested.
 
-## Invitation Process
+## External Canary Procedure
 
-1. Confirm the participant has the supported Android and, if relevant, Windows/Excel
-   environment.
-2. Send `docs/flightlogx-preview-android-install.md` before the invitation. Explain that this
-   is a Firebase-distributed APK, that Android will show outside-Play-Store warnings, and
-   that every external tester must turn the temporary **Allow from this source** permission
-   off after installation or update. The retained owner development phone may keep only
-   FlightLogX's own installation-source permission enabled during active Preview development
-   for repeated in-app update testing. This exception does not apply to Chrome, Firebase App
-   Tester, any external tester, or any device leaving the owner's control.
-3. From the repository root, first run the owner-only enrolment as a read-only preflight:
+Do not improvise this sequence. The canary receives customer-facing instructions and
+plain-language coaching only. Owner preparation stays private.
 
-   ```powershell
-   .\tools\Add-FlightLogXParticipant.ps1 `
-     -Email "participant-google-account@example.com" `
-     -DisplayName "Participant name" `
-     -FirebaseGroupAlias "the-approved-release-group" `
-     -WhatIf
-   ```
+### 1. Confirm readiness
 
-   Check that every precondition passes, then run the same command again without
-   `-WhatIf`. The command creates or reuses the matching hosted invitation in
-   `workbook_migration` mode, adds that same Google email to the existing
-   release-bearing Firebase group, verifies the membership, and writes a private copy of
-   this installation guide under
-   `%LOCALAPPDATA%\ElectronicLogbook\ParticipantHandoffs`. Send that generated file only
-   through the owner's trusted contact path. Public self-registration remains disabled;
-   neither the owner nor participant uses database tools.
-4. Complete the repository and `2.0.3` coached channel checks above.
-5. Start the migration from the existing workbook, accept `3.0.0`, and use Google sign-in
-   in the Windows updater.
-6. Continue only after the updater reports exact hosted readback and completes the
-   workbook migration lifecycle.
-7. Coach the first installation using the tester-facing guide. Treat Firebase's grey
-   **Download started...** state as a direction to use Android notifications or Chrome
-   Downloads, not as live download progress. Stop rather than coaching an ordinary tester
-   through an unverified-developer advanced flow or security delay.
-8. Ask the participant to open the approved Android Preview build and sign in with the same
-   Google account. The app must discover the completed migrated logbook without a workbook
-   picker or manual import.
-9. Keep the displayed six-digit email-code sign-in and package exchange in
-   Advanced/support only.
-10. Record the start date, environment, migration result, warnings encountered, and
-    expected weekly check-in cadence in the private cohort tracker.
+- The final owner dress rehearsal passed with no open S0-S2 issue.
+- The canary has the supported Windows Excel workbook and Android phone.
+- The exact Google-account email is confirmed by the canary.
+- The workbook's expected flight count, logged hours, date range, custom-field labels,
+  and currency dates are recorded privately before migration.
+- The approved Firebase group already contains a distributed permanent-package release.
+- Public self-registration must remain disabled.
 
-### Preview Update Rehearsal
+Send `docs/flightlogx-preview-android-install.md` through the trusted contact path before
+the canary opens any Firebase invitation. Explain the outside-Play-Store warnings and the
+requirement to turn off **Allow from this source** after every install or update.
 
-Android `versionCode` is monotonic and separate from the displayed `version.txt` value.
-FlightLogX reserves four low-order version-code digits for Preview build revisions, so a
-`3.0.0` revision `1` build is newer than the initial Preview APK while a future `3.0.1`
-release remains newer than every `3.0.0` Preview revision.
+### 2. Preflight and provision the same email
 
-1. Confirm the owner-only Firebase group contains exactly the owner and no canary.
-2. Build a higher disposable APK from `mobile/`:
+From the repository root, run the owner-only read-only preflight:
+
+```powershell
+.\tools\Add-FlightLogXParticipant.ps1 `
+  -Email "participant-google-account@example.com" `
+  -DisplayName "Participant name" `
+  -FirebaseGroupAlias "the-approved-release-group" `
+  -WhatIf
+```
+
+Read every result. The command must verify the exact active Sydney hosted project,
+disabled signup, enabled owner-managed email plus Google Auth, the existing Firebase
+group, and at least one release in that group. If it passes, rerun the identical command
+without `-WhatIf`.
+
+That command creates or safely reuses the `workbook_migration` Auth identity and hosted
+invitation, adds the same email to the existing Firebase group, verifies membership, and
+writes a private guide under
+`%LOCALAPPDATA%\ElectronicLogbook\ParticipantHandoffs`. Send the generated guide only to
+the named canary. Neither owner nor participant uses database tools for enrolment.
+
+### 3. Migrate the workbook first
+
+1. Complete the private controlled-channel checks and coach the exact `2.0.3` switch.
+2. Ask the canary to use the workbook's normal update action and accept the approved
+   `3.0.0` move.
+3. Ask them to compare the updater's visible flight count, logged hours, date range, and
+   warning summary with their workbook. Stop on any mismatch.
+4. Ask them to continue with Google in the system browser and select the exact account
+   provisioned above.
+5. Wait for `Migration Complete`. Require the displayed verified flight count, retained
+   untouched timestamped backup, installed original filename, and `Moved to FlightLogX`
+   result. Stop on any other outcome.
+6. Ask the canary to reopen the installed workbook and confirm their expected content.
+7. Ask them to start one add action. Confirm the once-per-Excel-session warning says
+   changes stay only in that spreadsheet and are not sent to FlightLogX. Cancel the add.
+
+Do not install or sign into Android before migration completes. A phone attempt before
+completion must fail closed, but deliberately creating that failure is not part of the
+customer journey.
+
+### 4. Install and arrive automatically
+
+1. Ask the canary to follow the tester guide from the Firebase email through Android's
+   installation approval. A grey **Download started...** button directs them to Android
+   notifications or Chrome Downloads; it is not live progress.
+2. Stop rather than coaching an ordinary tester through an unverified-developer advanced flow
+   or a 24-hour security delay.
+3. Open FlightLogX and choose the ordinary Google sign-in action with the same account.
+4. Require the message `Existing logbook restored and synced.` and the expected migrated
+   flights. No workbook picker, import, package, recovery code, logbook choice, or empty
+   replacement should appear.
+5. Compare visible flight count, entries, totals, custom fields, and currency dates with
+   the recorded migration expectations.
+6. Confirm the app status is `Synced`.
+7. Every external tester must turn off **Allow from this source** for Chrome or Firebase
+   App Tester after installation.
+
+### 5. Observe without translating the product
+
+Ask the canary to describe what they think happened and what they would do next. Do not
+explain internal terms to help them pass. Record privately:
+
+- every instruction they needed clarified;
+- all warnings and visible messages;
+- whether they attempted to find a package, key, code, picker, or database;
+- elapsed time for migration, installation, sign-in, and arrival;
+- final sync state and exact expected-versus-observed content; and
+- any S0-S3 issue.
+
+Do not enrol anyone else until every S0-S2 issue is resolved and the repaired path is
+retested.
+
+## Preview Updates
+
+Android `versionCode` is monotonic and separate from `version.txt`; four low-order digits
+are reserved for Preview revisions.
+
+Before distributing an update:
+
+1. Build a higher signed Preview APK from `mobile/`, using a deliberate revision:
 
    ```powershell
    npm.cmd run build:android:preview -- -PreviewBuildRevision 1
    ```
 
-3. Verify the script reports the permanent package, signing certificate, displayed
-   version, higher Android version code, and APK SHA-256 before uploading it.
-4. Distribute only to the owner-only Firebase group. Do not put an invited email or a
-   Firebase App ID in tracked scripts or evidence.
-5. On the retained Pixel, use **Settings > Check for Preview update**. Record the installed
-   version before the check, Firebase release identifier in redacted form, download
-   outcome, and the Android installation-approval screen. Do not approve the final install
-   until retained state and certificate continuity are confirmed.
-6. Every external tester must turn off **Allow from this source** after the update. On the
-   retained owner development phone only, FlightLogX's own permission may remain enabled
-   during active Preview development for repeated in-app update testing. Android must still
-   show its scan and installer approval for every update. Turn the permission off when active
-   development ends or before the device leaves the owner's control.
+2. Verify the permanent package, signing certificate, displayed version, higher Android
+   version code, clean publish output, and APK SHA-256.
+3. Distribute to the owner first. From **Settings > Check for Preview update**, verify the
+   Firebase prompt, download, Android scan, and installer approval while preserving app
+   data.
+4. After owner success, distribute the same release to the canary group.
+5. Android must still show its scan and installer approval. Every external tester must
+   turn off **Allow from this source** afterward.
+
+On the retained owner development phone only, FlightLogX's own installation-source
+permission may remain enabled during active Preview update work. The exception does not
+apply to Chrome, Firebase App Tester, an external tester, or any device leaving the
+owner's control.
 
 ## Weekly Check-In
 
-Collect these signals weekly for eight weeks:
+Collect these signals for eight weeks:
 
-- app-only entries added, edited, deleted, restored, and exported;
-- workbook-linked changes in each direction;
-- offline edits and later convergence;
-- visible sync status at start and end of use;
-- auth, pairing, reauthentication, recovery, or revoked-device events;
-- user confusion, support contact, and elapsed time to resolution;
-- Supabase usage and upgrade-trigger status.
+- app flights added, corrected, deleted, restored, and freshly exported;
+- offline edits and later automatic convergence;
+- visible sync status before, during, and after outages;
+- Google session renewal and managed recovery outcomes;
+- Firebase installation and update outcomes;
+- any attempt to resume editing the migrated workbook and whether its local-only warning
+  was understood;
+- user confusion, support contacts, and elapsed time to resolution; and
+- Supabase usage, project status, advisors, and upgrade-trigger status.
 
-Keep raw personal feedback private. Commit only redacted summaries or aggregate findings.
+Do not ask for two-way Excel synchronization; it does not exist.
+Keep raw personal feedback private. Commit only redacted evidence or aggregate findings.
 
-## Feedback And Incident Flow
-
-Severity levels:
+## Incidents
 
 | Severity | Definition | Response |
 | --- | --- | --- |
-| S0 data loss | User cannot recover expected logbook data from app, workbook, backup, or hosted ledger | Pause Preview, preserve devices/workbooks, export diagnostics, start rollback |
-| S1 sync/security | Cross-account access, plaintext hosted payload, revoked device syncs, or unrecoverable sync divergence | Disable affected account/device, stop new invites, preserve evidence |
-| S2 blocked workflow | User cannot sign in, pair, sync, restore, or continue normal entry work | Provide workaround or patched build before next check-in |
-| S3 usability | Confusing status, copy, timing, or recovery path without data risk | Track for Preview exit decision |
+| S0 data loss | Expected logbook data cannot be recovered from the app, untouched migration backup, or hosted ledger | Pause Preview, preserve all state, collect redacted diagnostics, begin rollback investigation |
+| S1 sync/security | Cross-account access, plaintext hosted data, revoked-device access, or unexplained divergence | Stop invitations, disable only proven affected access, preserve evidence |
+| S2 blocked workflow | Participant cannot migrate, install, sign in, recover, sync, update, or continue app entry work | Fix and retest before the next participant |
+| S3 usability | Confusing copy, timing, or navigation without data or security risk | Record for the Preview exit decision |
 
-Incident record minimum:
+Record privately: Sydney timestamp, participant identifier, environment and versions,
+last known sync status, exact visible message, redacted diagnostic path, response taken,
+root cause evidence, repair, and prevention decision.
 
-- timestamp in Australia/Sydney;
-- participant private identifier;
-- environment and app/updater version;
-- last known sync status;
-- exact user-visible message;
-- redacted diagnostic bundle path;
-- recovery or rollback action taken;
-- prevention decision.
+## Health And Free-Plan Monitoring
 
-## Free-Tier Monitoring
+Supabase facts checked on 2026-09-09:
 
-Official Supabase pages checked on 2026-08-06:
-
-- https://supabase.com/pricing
 - https://supabase.com/docs/guides/platform/billing-on-supabase
+- https://supabase.com/docs/guides/platform/free-project-pausing
 
-Current free-plan assumptions for Preview monitoring:
+Current operating assumptions are two active Free projects, 50,000 monthly active users,
+500 MB database size per project, 5 GB egress, 5 GB cached egress, 1 GB storage, and
+possible pausing after low activity over seven days. Recheck the live dashboard before a
+launch or upgrade decision.
 
-- 50,000 monthly active users;
-- 500 MB database size per project;
-- 5 GB egress;
-- 5 GB cached egress;
-- 1 GB file storage;
-- 2 active projects;
-- free projects may pause after inactivity.
+Review when database size reaches 250 MB, egress reaches 2.5 GB in a month, active
+accounts exceed 25, project pausing disrupts use, hosted data becomes the only practical
+recovery source, or support requires paid reliability features.
 
-Preview review triggers:
-
-- database reaches 250 MB or health reports `NearLimit`;
-- egress or cached egress reaches 2.5 GB in a month;
-- file storage reaches 500 MB;
-- active Preview accounts exceed 25;
-- free-project pausing disrupts a participant;
-- users begin treating hosted storage as their only practical recovery source;
-- support needs require managed backups, longer log retention, or email support.
-
-Weekly commands use `tools\Invoke-PreviewHealthCheck.ps1`, which queries the legacy
-`public.get_hosted_pilot_health()` without printing the database connection string:
+Weekly redacted health:
 
 ```powershell
 $env:ELB_SUPABASE_PREVIEW_DB_URL = "<preview-db-url>"
@@ -271,72 +325,67 @@ $env:ELB_SUPABASE_PREVIEW_DB_URL = "<preview-db-url>"
   -OutputPath artifacts\flightlogx-preview\health\week-01.json
 ```
 
-Also inspect Supabase Security Advisor, Performance Advisor, Auth configuration, project
-status, and usage dashboards before each new invite batch. The preflight must report the
-Preview project as `ACTIVE_HEALTHY`; a paused or restoring project is not invite-ready.
+This tool currently calls the retained compatibility function
+`public.get_hosted_pilot_health()`. The legacy name does not change the canonical Preview
+product model.
 
-For a single redacted pre-invite report that checks the local Preview files, captures
-health, and can run the adversarial RLS harness:
+Pre-invite report and adversarial RLS harness:
 
 ```powershell
 $env:ELB_SUPABASE_PREVIEW_DB_URL = "<preview-db-url>"
 .\tools\Invoke-PreviewPreflight.ps1 -RunRlsHarness
 ```
 
+Also review Security Advisor, Performance Advisor, Auth configuration, project status,
+and usage dashboards. A project that is paused, restoring, unhealthy, or incorrectly
+configured is not invite-ready.
+
 ## Rollback
 
-Use rollback when an S0/S1 incident occurs or when the exit decision is `failed`.
+For an S0/S1 incident or failed exit decision:
 
-1. Stop new invitations.
-2. Disable affected devices or accounts in Supabase.
-3. Ask participants not to clear app storage, uninstall the app, or overwrite the paired
-   workbook.
-4. Export redacted diagnostics locally.
-5. For app-only users, export the encrypted local logbook backup through Advanced
-   recovery/support.
-6. For workbook-linked users, preserve the workbook, updater backups, and journal files.
-7. Rehearse logical hosted export and restore into a disposable local or separate Sydney
-   project before any destructive hosted cleanup.
-8. Patch and retest with the hosted reliability/security gate before resuming.
+1. Stop new invitations and releases.
+2. Preserve phones, app data, source and installed workbooks, timestamped migration
+   backups, updater evidence, and hosted state.
+3. Disable only accounts or devices proven necessary to contain the issue.
+4. Collect redacted diagnostics. Do not collect keys or plaintext flight data.
+5. If specifically required, use an encrypted local backup through Advanced/support.
+6. Rehearse logical hosted export and restore into a disposable local or separate Sydney
+   project before destructive hosted action.
+7. Prove the cause, patch it, and repeat the relevant owner gate before resuming.
+
+An administrator database reset is not account recovery.
 
 ## Exit Decision
 
-Make the exit decision after the eight-week run or after an S0/S1 stop.
+`pass` requires both active participants to retain usable app logbooks, no unresolved
+S0/S1 incident, successful offline convergence and managed recovery evidence, redacted
+diagnostics, final-schema RLS success, acceptable cost/continuity risk, and Advanced-only
+Package Exchange.
 
-Pass requires:
+`pass with issues` requires the same data and security guarantees but may retain explicit
+S2/S3 work before wider release.
 
-- every active participant can still open and use the app;
-- no unresolved S0 or S1 incidents;
-- app-only and workbook-linked participants each complete at least one offline recovery
-  and later convergence path;
-- hosted diagnostics remain redacted;
-- RLS harness passes against the final Preview schema;
-- free-tier usage stays below review triggers or a paid-upgrade decision is documented;
-- package exchange remains Advanced recovery/support, not normal daily use.
-
-Pass with issues requires the same data-safety guarantees but allows S2/S3 fixes to be
-queued before public-release planning.
-
-Fail if data recovery is uncertain, security boundaries are violated, sync convergence
-cannot be explained, or the support burden is not sustainable for a FlightLogX Preview.
+`failed` applies when data recovery is uncertain, a security boundary is violated,
+convergence cannot be explained, or support burden is not sustainable.
 
 ## Pre-Invite Checklist
 
 - [ ] Private cohort tracker exists outside git.
-- [ ] Development project migration and RLS harness pass.
-- [ ] Preview project is created in `ap-southeast-2`.
-- [ ] Public signup is disabled and email sign-in is configured for invited users only.
-- [ ] Preview project status is `ACTIVE_HEALTHY` immediately before invitations.
-- [ ] Security Advisor and Performance Advisor are reviewed.
+- [ ] Final owner dress rehearsal passed with a redacted artifact and no open S0-S2 issue.
+- [ ] Development project migration, managed recovery rehearsal, and RLS harness pass.
+- [ ] Preview project is active and healthy in `ap-southeast-2`.
+- [ ] Public signup is disabled; owner-managed email and Google are the only approved
+  external Auth providers.
+- [ ] Google loopback callback and Android OAuth package/certificate pairing are verified.
+- [ ] Security Advisor, Performance Advisor, and live usage are reviewed.
 - [ ] Logical export and restore are rehearsed into a separate project or disposable
   local database.
-- [ ] `tools\Invoke-PreviewHealthCheck.ps1` writes a redacted weekly health
-  snapshot.
-- [ ] `tools\Invoke-PreviewPreflight.ps1 -RunRlsHarness` writes a redacted
-  pre-invite readiness report.
-- [ ] Android install path is verified on the reference Pixel device.
-- [ ] Tester receives `docs/flightlogx-preview-android-install.md` before the Firebase invitation
-  and understands when to continue, when to stop, and how to remove the temporary
-  unknown-app installation permission.
-- [ ] Workbook pairing is verified on the Excel-capable release machine.
-- [ ] Rollback contact path and diagnostic collection path are tested.
+- [ ] `Invoke-PreviewHealthCheck.ps1` and `Invoke-PreviewPreflight.ps1 -RunRlsHarness`
+  produce redacted passing reports.
+- [ ] Exact approved wizard, permanent signed APK, Firebase group, and update path are
+  verified first by the owner.
+- [ ] Tester receives `docs/flightlogx-preview-android-install.md` before opening the
+  Firebase invitation.
+- [ ] Owner has the exact Google email and pre-migration workbook expectations.
+- [ ] Rollback contact and diagnostic paths are tested.

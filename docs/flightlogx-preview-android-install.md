@@ -2,7 +2,7 @@
 
 Status: participant-facing Preview instructions
 
-Last checked: 2026-08-31
+Last checked: 2026-09-09
 
 FlightLogX invitation-only Preview builds are distributed by Firebase App Distribution rather
 than Google Play. Android therefore treats the APK as an app from outside the Play
@@ -19,7 +19,9 @@ Confirm all of these details:
 - The page shows **FlightLogX** and package
   `com.alphadelta.electroniclogbook`.
 - You are signed in with the Google Account that accepted the invitation.
-- You understand that a disposable test build must not contain real logbook data.
+- You have already completed the Windows workbook move, the updater reported
+  **Migration Complete**, and the Preview owner confirmed that the app account is ready.
+- You know the expected number of flights and logged hours that should appear after sign-in.
 
 Never install a FlightLogX APK sent as an ordinary email attachment, chat attachment,
 cloud-storage link, or unrelated website download.
@@ -39,9 +41,12 @@ cloud-storage link, or unrelated website download.
 7. If Android says Chrome or Firebase App Tester cannot install unknown apps, select
    **Settings**, turn on **Allow from this source** for the app that downloaded the APK,
    return to the installer, and select **Install**.
-8. Open FlightLogX. Do not enter real logbook data until the Preview owner confirms that
-   the build and account are ready.
-9. Every external tester must turn the temporary installation permission back off:
+8. Open FlightLogX and use the ordinary Google sign-in action. Select the same Google
+   Account used during the Windows workbook move.
+9. Wait for **Existing logbook restored and synced.** Confirm that the expected flights
+   and logged hours are present and that the status is **Synced**. You should not be asked
+   to choose a workbook, import a file, use a package, or enter a recovery code.
+10. Every external tester must turn the temporary installation permission back off:
    **Settings > Apps > Special app access > Install unknown apps**, select Chrome or
    Firebase App Tester, then turn off **Allow from this source**. Menu names can differ
    slightly between Android manufacturers. On the retained owner development phone only,
@@ -51,6 +56,9 @@ cloud-storage link, or unrelated website download.
 
 Firebase App Tester is optional. It can collect Preview releases in one place,
 but installing it does not remove Android's unknown-app permission requirement.
+
+Official tester reference:
+https://firebase.google.com/docs/app-distribution/get-set-up-as-a-tester?platform=android
 
 ## Stop Instead Of Continuing When
 
@@ -62,10 +70,15 @@ app if:
 - Android reports **App not installed**, a certificate conflict, or a package conflict;
 - Android presents an **unverified developer** advanced flow, Developer options steps,
   or a 24-hour security delay; or
-- the installed app opens an unexpected empty logbook where existing data was expected.
+- the app asks for a workbook, file import, package, recovery code, encryption key, or
+  logbook choice;
+- Google sign-in does not finish with **Existing logbook restored and synced.**; or
+- the installed app shows an empty logbook, wrong flight count, or wrong logged hours.
 
 Do not work around these failures by removing an existing app. The Preview owner must
 first check the package, signing certificate, account, and recoverability.
+
+Do not enter new flights in the app until the expected migrated logbook has appeared.
 
 ## Later Preview Updates
 
