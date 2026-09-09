@@ -945,13 +945,21 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3CurrencyPageDoesNotExposeOverrideDateEditing()
+    public void Gate3CurrencyPageExplainsImportedSavedDatesWithoutExposingEditing()
     {
         var page = ReadMobilePage("Currency.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
+        var css = ReadMobileAsset("css", "app.css");
 
-        Assert.DoesNotContain("Override dates", page, StringComparison.Ordinal);
-        Assert.DoesNotContain("override date", page, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Imported check dates", page, StringComparison.Ordinal);
+        Assert.Contains("not from marked flight entries", page, StringComparison.Ordinal);
+        Assert.Contains("uses the later applicable saved date or marked entry", page, StringComparison.Ordinal);
+        Assert.Contains("Session.DocumentV2.CurrencyOverrideDates", page, StringComparison.Ordinal);
+        Assert.Contains("Flight review", page, StringComparison.Ordinal);
+        Assert.Contains("Instrument proficiency check", page, StringComparison.Ordinal);
+        Assert.Contains("Operator proficiency check", page, StringComparison.Ordinal);
+        Assert.Contains(".currency-source-note", css, StringComparison.Ordinal);
+        Assert.Contains(".currency-source-dates", css, StringComparison.Ordinal);
         Assert.DoesNotContain("SaveOverrideDatesAsync", page, StringComparison.Ordinal);
         Assert.DoesNotContain("SaveCurrencyOverrideDatesAsync", session, StringComparison.Ordinal);
     }

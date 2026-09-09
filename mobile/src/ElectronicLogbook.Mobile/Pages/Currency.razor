@@ -38,6 +38,26 @@ else
             </div>
         </section>
 
+        @if (SavedCheckDates.Count > 0)
+        {
+            <section class="currency-source-note" aria-labelledby="currency-source-heading">
+                <MudIcon Icon="@Icons.Material.Filled.Info" aria-hidden="true" />
+                <div>
+                    <h2 id="currency-source-heading">Imported check dates</h2>
+                    <p>These dates came from fields in your previous workbook, not from marked flight entries. FlightLogX uses the later applicable saved date or marked entry when calculating currency.</p>
+                    <dl class="currency-source-dates">
+                        @foreach (var savedDate in SavedCheckDates)
+                        {
+                            <div>
+                                <dt>@savedDate.Label</dt>
+                                <dd>@savedDate.Date.ToString("d MMM yyyy", System.Globalization.CultureInfo.InvariantCulture)</dd>
+                            </div>
+                        }
+                    </dl>
+                </div>
+            </section>
+        }
+
         <section class="currency-category-list" aria-label="Currency requirements">
             @foreach (var category in CurrencyCategories)
             {
@@ -95,6 +115,19 @@ else
 
     private MobileCurrencyRecencySummary Summary =>
         summary ??= Session.GetCurrencyRecencySummary(DateOnly.FromDateTime(DateTime.Today));
+
+    private IReadOnlyList<SavedCheckDate> SavedCheckDates
+    {
+        get
+        {
+            var dates = Session.DocumentV2.CurrencyOverrideDates;
+            var saved = new List<SavedCheckDate>(3);
+            AddSavedCheckDate(saved, "Flight review", dates.FlightReview);
+            AddSavedCheckDate(saved, "Instrument proficiency check", dates.InstrumentProficiencyCheck);
+            AddSavedCheckDate(saved, "Operator proficiency check", dates.OperatorProficiencyCheck);
+            return saved;
+        }
+    }
 
     private IReadOnlyList<PortableLogbookCurrencyRow> SelectedLicenceRows =>
         SelectedEngine == MultiEngine ? Summary.MultiEngineRows : Summary.SingleEngineRows;
@@ -169,5 +202,15 @@ else
     private static bool IsDueSoon(PortableLogbookCurrencyRow row) => !IsExpired(row) && row.DaysRemaining <= 30;
 
     private static bool IsCurrent(PortableLogbookCurrencyRow row) => !IsExpired(row) && !IsDueSoon(row);
+
+    private static void AddSavedCheckDate(List<SavedCheckDate> saved, string label, DateOnly? date)
+    {
+        if (date is { } value)
+        {
+            saved.Add(new SavedCheckDate(label, value));
+        }
+    }
+
+    private sealed record SavedCheckDate(string Label, DateOnly Date);
 
 }
