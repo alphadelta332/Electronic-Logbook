@@ -1535,7 +1535,7 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("signingConfig signingConfigs.electronicLogbookDevelopment", GetGradleBuildType(gradle, "preview"), StringComparison.Ordinal);
 
         Assert.Contains("registerPlugin(ElectronicLogbookPreviewUpdatesPlugin.class);", activity, StringComparison.Ordinal);
-        Assert.Contains("protected void onResume()", activity, StringComparison.Ordinal);
+        Assert.Contains("public void onResume()", activity, StringComparison.Ordinal);
         Assert.Contains("ElectronicLogbookPreviewUpdatesPlugin.checkAndPromptOnResume();", activity, StringComparison.Ordinal);
         Assert.Contains("BuildConfig.PREVIEW_UPDATES_ENABLED", plugin, StringComparison.Ordinal);
         Assert.Contains("AUTOMATIC_CHECK_IN_FLIGHT", plugin, StringComparison.Ordinal);
