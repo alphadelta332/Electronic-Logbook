@@ -18,8 +18,8 @@ public sealed class MobileLogbookEntryWarningsTests
 
         var warnings = MobileLogbookEntryWarnings.Create(draft, []);
 
-        Assert.Contains(warnings, warning => warning.Contains("flight time but no landing", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(warnings, warning => warning.Contains("day time but no day landing", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(PortableLogbookEntryMessages.FlightTimeWithoutLanding, warnings);
+        Assert.Contains(PortableLogbookEntryMessages.DayTimeWithoutDayLanding, warnings);
     }
 
     [Fact]
@@ -36,8 +36,7 @@ public sealed class MobileLogbookEntryWarningsTests
 
         var warnings = MobileLogbookEntryWarnings.Create(draft, []);
 
-        Assert.Contains(warnings, warning => warning.Contains("instrument time", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(warnings, warning => warning.Contains("approach", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(PortableLogbookEntryMessages.InstrumentTimeWithoutApproach, warnings);
     }
 
     [Fact]
