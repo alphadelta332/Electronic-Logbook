@@ -27,7 +27,7 @@ public sealed class MobileWorkbookEntryValidationTests
     }
 
     [Fact]
-    public void ValidationSourceContainsEveryAddToLogbookErrorAndWarningCode()
+    public void ValidationSourceContainsEverySupportedAddToLogbookErrorAndWarningCode()
     {
         var root = FindRepoRoot();
         var vba = File.ReadAllText(Path.Combine(root, "modLogbook.bas"));
@@ -41,8 +41,10 @@ public sealed class MobileWorkbookEntryValidationTests
         var vbaCodes = ValidationCodes(vba);
         var mobileCodes = ValidationCodes(mobile);
 
-        Assert.Equal(vbaCodes, mobileCodes);
-        Assert.Equal(30, mobileCodes.Length);
+        // The legacy workbook treats its four configurable inputs as numeric. The hosted
+        // schema deliberately defines those same workbook custom fields as text.
+        Assert.Equal(vbaCodes.Where(code => code != "NEWENTRY-E008"), mobileCodes);
+        Assert.Equal(29, mobileCodes.Length);
     }
 
     [Fact]
@@ -57,17 +59,13 @@ public sealed class MobileWorkbookEntryValidationTests
             From = null,
             To = null,
             SeCommandDay = null,
-            IfrIf = 1,
-            CustomFields = new Dictionary<CustomFieldId, string?>
-            {
-                [new CustomFieldId("cf_workbook_1")] = "not a number"
-            }
+            IfrIf = 1
         };
 
         var errors = MobileWorkbookEntryValidation.Validate(entry, new DateOnly(2026, 8, 25));
 
         Assert.Equal(
-            ["NEWENTRY-E001", "NEWENTRY-E002", "NEWENTRY-E003", "NEWENTRY-E004", "NEWENTRY-E005", "NEWENTRY-E005", "NEWENTRY-E006", "NEWENTRY-E007", "NEWENTRY-E008"],
+            ["NEWENTRY-E001", "NEWENTRY-E002", "NEWENTRY-E003", "NEWENTRY-E004", "NEWENTRY-E005", "NEWENTRY-E005", "NEWENTRY-E006", "NEWENTRY-E007"],
             errors.Select(error => error.Code));
     }
 
@@ -86,6 +84,29 @@ public sealed class MobileWorkbookEntryValidationTests
 
         var errors = MobileWorkbookEntryValidation.Validate(entry, new DateOnly(2026, 8, 25));
 
+        Assert.Empty(errors);
+    }
+
+    [Fact]
+    public void ValidateAllowsTextInWorkbookCustomFields()
+    {
+        var entry = ValidEntry() with
+        {
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [new CustomFieldId("cf_workbook_1")] = "PIC",
+                [new CustomFieldId("cf_workbook_2")] = "Flight review",
+                [new CustomFieldId("cf_workbook_3")] = "DJ-A",
+                [new CustomFieldId("cf_workbook_4")] = "MARKER-ALPHA"
+            }
+        };
+
+        var errors = MobileWorkbookEntryValidation.Validate(entry, new DateOnly(2026, 8, 25));
+
+        Assert.All(
+            PortableLogbookWorkbookFieldCatalog.PilotEnteredFields.Where(field =>
+                field.Id is "custom1" or "custom2" or "custom3" or "custom4"),
+            field => Assert.Equal(PortableLogbookWorkbookFieldKind.Text, field.Kind));
         Assert.Empty(errors);
     }
 

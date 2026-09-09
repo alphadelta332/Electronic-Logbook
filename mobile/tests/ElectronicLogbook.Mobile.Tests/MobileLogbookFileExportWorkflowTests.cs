@@ -1,6 +1,9 @@
 using System.IO.Compression;
 using System.Text;
 using System.Xml.Linq;
+using DocumentFormat.OpenXml;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Validation;
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
 using Microsoft.JSInterop;
@@ -77,6 +80,7 @@ public sealed class MobileLogbookFileExportWorkflowTests
         XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
         var rows = worksheet.Descendants(spreadsheet + "row").ToArray();
         Assert.Equal(3, rows.Length);
+        Assert.Empty(worksheet.Root!.Elements(spreadsheet + "autoFilter"));
         Assert.Equal(result.Table.Headers, ReadRow(rows[0], spreadsheet));
         Assert.Equal("VH-ONE", ReadCell(rows[1], spreadsheet, "E2"));
         Assert.Equal("YSBK-DCT-YSCN (Training, \"check\") (Flight Review/IPC)", ReadCell(rows[1], spreadsheet, "I2"));
@@ -84,11 +88,25 @@ public sealed class MobileLogbookFileExportWorkflowTests
         Assert.Equal("2", ReadCell(rows[1], spreadsheet, "AL2"));
         Assert.Equal("2026-08-25T23:04:05.000Z", ReadCell(rows[1], spreadsheet, "AM2"));
 
+        var table = ReadXml(archive, "xl/tables/table1.xml");
+        Assert.Single(table.Root!.Elements(spreadsheet + "autoFilter"));
+
         var custom = ReadXml(archive, "docProps/custom.xml");
         Assert.Contains("ExportedAtUtc", custom.ToString(), StringComparison.Ordinal);
         Assert.Contains("2026-08-25T23:04:05.000Z", custom.ToString(), StringComparison.Ordinal);
         Assert.Equal("flightlogx-logbook-20260825T230405Z.xlsx", result.FileName);
         Assert.Equal(BrowserFileStore.ExcelWorkbookContentType, result.ContentType);
+
+        using var documentStream = new MemoryStream(result.Bytes, writable: false);
+        using var document = SpreadsheetDocument.Open(documentStream, false);
+        var validationErrors = new OpenXmlValidator(FileFormatVersions.Office2019)
+            .Validate(document)
+            .ToArray();
+        Assert.True(
+            validationErrors.Length == 0,
+            string.Join(
+                Environment.NewLine,
+                validationErrors.Select(error => $"{error.Part?.Uri}: {error.Description} at {error.Path?.XPath}")));
     }
 
     [Fact]
@@ -110,6 +128,30 @@ public sealed class MobileLogbookFileExportWorkflowTests
         Assert.Equal("TotalHours", result.Table.Headers[^3]);
         Assert.Equal("TotalApps", result.Table.Headers[^2]);
         Assert.Equal("ExportedAtUtc", result.Table.Headers[^1]);
+    }
+
+    [Fact]
+    public void CreateNormalizesBrowserFloatingPointNoiseInWorkbookHours()
+    {
+        var entry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 8,
+            Day = 22,
+            FlightId = "FLOAT-NOISE",
+            SeCommandDay = 2.2999999999999998m,
+            IfrIf = 1.234567m
+        };
+
+        var result = MobileLogbookFileExportWorkflow.Create(
+            [entry],
+            [],
+            new MobileLogbookFileExportRequest(MobileLogbookFileExportFormat.Csv),
+            ExportedAt);
+
+        Assert.Equal(2.3m, result.Table.Rows[0][result.Table.Headers.ToList().IndexOf("SeCommandDay")]);
+        Assert.Equal(1.234567m, result.Table.Rows[0][result.Table.Headers.ToList().IndexOf("IfrIf")]);
+        Assert.DoesNotContain("2.2999999999999998", Encoding.UTF8.GetString(result.Bytes), StringComparison.Ordinal);
     }
 
     [Fact]

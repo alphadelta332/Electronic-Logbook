@@ -1677,6 +1677,21 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
         #18251e;
 }
 
+.entry-validation-feedback {
+    border-color: color-mix(in srgb, #ffb4a8 48%, transparent);
+    background: #4a1d1a;
+}
+
+.entry-validation-feedback .mud-icon-root,
+.entry-validation-feedback .mud-button-root {
+    color: #ffd2cc;
+}
+
+.state-banner-error:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-error) 44%, transparent);
+    outline-offset: 3px;
+}
+
 .action-feedback-content {
     display: flex;
     min-width: 0;

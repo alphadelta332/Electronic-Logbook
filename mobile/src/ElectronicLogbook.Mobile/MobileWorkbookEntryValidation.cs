@@ -76,15 +76,6 @@ public static class MobileWorkbookEntryValidation
             errors.Add(Error("NEWENTRY-E007", PortableLogbookEntryMessages.MissingDestination, nameof(entry.To)));
         }
 
-        if (entry.CustomFields.Values.Any(value =>
-                !string.IsNullOrWhiteSpace(value) && !IsNumeric(value)))
-        {
-            errors.Add(Error(
-                "NEWENTRY-E008",
-                PortableLogbookEntryMessages.InvalidNumericValue,
-                entry.CustomFields.Keys.Select(field => field.Value).ToArray()));
-        }
-
         return errors;
     }
 
@@ -427,10 +418,6 @@ public static class MobileWorkbookEntryValidation
 
     private static string Rounded(double value) =>
         value.ToString("#,##0", CultureInfo.InvariantCulture);
-
-    private static bool IsNumeric(string value) =>
-        decimal.TryParse(value, NumberStyles.Number, CultureInfo.CurrentCulture, out _) ||
-        decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out _);
 
     private static bool IsBlank(string? value) => string.IsNullOrWhiteSpace(value);
 

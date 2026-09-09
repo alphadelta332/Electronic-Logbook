@@ -156,7 +156,11 @@ public static class MobileLogbookFileExportWorkflow
 
     private static MobileLogbookFileExportColumn Hours(
         string header,
-        Func<PortableLogbookWorkbookEntry, decimal?> value) => new(header, entry => value(entry));
+        Func<PortableLogbookWorkbookEntry, decimal?> value) =>
+        new(header, entry => NormalizeHours(value(entry)));
+
+    private static decimal? NormalizeHours(decimal? value) =>
+        value is null ? null : decimal.Round(value.Value, 6, MidpointRounding.ToEven);
 
     private static MobileLogbookFileExportColumn Count(
         string header,
@@ -375,8 +379,8 @@ public static class MobileLogbookFileExportWorkflow
         const string ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
         writer.WriteStartElement("styleSheet", ns);
         writer.WriteStartElement("fonts"); writer.WriteAttributeString("count", "2");
-        writer.WriteStartElement("font"); writer.WriteElementString("sz", ns, "11"); writer.WriteElementString("name", ns, "Aptos"); writer.WriteEndElement();
-        writer.WriteStartElement("font"); writer.WriteElementString("b", ns, string.Empty); writer.WriteStartElement("color", ns); writer.WriteAttributeString("rgb", "FFFFFFFF"); writer.WriteEndElement(); writer.WriteElementString("sz", ns, "11"); writer.WriteElementString("name", ns, "Aptos"); writer.WriteEndElement();
+        writer.WriteStartElement("font"); WriteValueAttributeElement(writer, "sz", "11"); WriteValueAttributeElement(writer, "name", "Aptos"); writer.WriteEndElement();
+        writer.WriteStartElement("font"); writer.WriteElementString("b", ns, string.Empty); WriteValueAttributeElement(writer, "sz", "11"); writer.WriteStartElement("color", ns); writer.WriteAttributeString("rgb", "FFFFFFFF"); writer.WriteEndElement(); WriteValueAttributeElement(writer, "name", "Aptos"); writer.WriteEndElement();
         writer.WriteEndElement();
         writer.WriteStartElement("fills"); writer.WriteAttributeString("count", "3");
         WritePatternFill(writer, "none", null); WritePatternFill(writer, "gray125", null); WritePatternFill(writer, "solid", "1F4E78");
@@ -389,6 +393,13 @@ public static class MobileLogbookFileExportWorkflow
         WriteCellFormat(writer, "2", "0", "0");
         writer.WriteEndElement();
         writer.WriteStartElement("cellStyles"); writer.WriteAttributeString("count", "1"); writer.WriteStartElement("cellStyle"); writer.WriteAttributeString("name", "Normal"); writer.WriteAttributeString("xfId", "0"); writer.WriteAttributeString("builtinId", "0"); writer.WriteEndElement(); writer.WriteEndElement();
+        writer.WriteEndElement();
+    }
+
+    private static void WriteValueAttributeElement(XmlWriter writer, string name, string value)
+    {
+        writer.WriteStartElement(name, "http://schemas.openxmlformats.org/spreadsheetml/2006/main");
+        writer.WriteAttributeString("val", value);
         writer.WriteEndElement();
     }
 
@@ -429,7 +440,6 @@ public static class MobileLogbookFileExportWorkflow
             writer.WriteEndElement();
         }
         writer.WriteEndElement();
-        writer.WriteStartElement("autoFilter"); writer.WriteAttributeString("ref", $"A1:{ColumnName(table.Headers.Count)}{table.Rows.Count + 1}"); writer.WriteEndElement();
         writer.WriteStartElement("tableParts"); writer.WriteAttributeString("count", "1"); writer.WriteStartElement("tablePart"); writer.WriteAttributeString("r", "id", "http://schemas.openxmlformats.org/officeDocument/2006/relationships", "rId1"); writer.WriteEndElement(); writer.WriteEndElement();
         writer.WriteEndElement();
     }

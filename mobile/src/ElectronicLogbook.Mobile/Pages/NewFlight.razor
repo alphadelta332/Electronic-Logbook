@@ -145,14 +145,37 @@ else
 
         @if (Session.ShouldShowWorkbookDraftErrors)
         {
-            <section class="state-banner state-banner-error" role="alert" aria-live="polite">
+            <section @ref="ValidationSummary"
+                     id="workbook-draft-errors"
+                     class="state-banner state-banner-error"
+                     role="region"
+                     aria-labelledby="workbook-draft-errors-title"
+                     tabindex="-1">
                 <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" />
                 <div>
+                    <strong id="workbook-draft-errors-title">Fix these problems</strong>
                     @foreach (var error in Session.WorkbookDraftErrors)
                     {
                         <span>@error</span>
                     }
                 </div>
+            </section>
+        }
+
+        @if (ShowValidationFeedback && Session.ShouldShowWorkbookDraftErrors)
+        {
+            <section @key="ValidationFeedbackVersion"
+                     class="action-feedback-message entry-validation-feedback action-feedback-message-enter"
+                     role="alert"
+                     aria-live="assertive"
+                     aria-atomic="true">
+                <div class="action-feedback-content">
+                    <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" />
+                    <span class="action-feedback-copy">@ValidationFeedbackMessage</span>
+                </div>
+                <MudButton Variant="Variant.Text" OnClick="ReviewErrorsAsync">
+                    Review errors
+                </MudButton>
             </section>
         }
 
@@ -279,7 +302,13 @@ else
     private IReadOnlyList<EntryDetail> ReviewDetails { get; set; } = [];
     private IReadOnlyList<MobileWorkbookEntryIssue> ReviewWarnings { get; set; } = [];
     private bool IsActionPending { get; set; }
+    private bool ShowValidationFeedback { get; set; }
+    private int ValidationFeedbackVersion { get; set; }
+    private ElementReference ValidationSummary { get; set; }
     private string ReviewWarningCountLabel => $"{ReviewWarnings.Count} {(ReviewWarnings.Count == 1 ? "Warning" : "Warnings")}";
+    private string ValidationFeedbackMessage => Session.WorkbookDraftErrors.Count == 1
+        ? "Can't continue. 1 problem needs attention."
+        : $"Can't continue. {Session.WorkbookDraftErrors.Count} problems need attention.";
 
     protected override async Task OnInitializedAsync()
     {
@@ -299,9 +328,11 @@ else
     {
         if (!Session.PrepareWorkbookDraftForReview())
         {
+            ShowValidationFailure();
             return;
         }
 
+        ShowValidationFeedback = false;
         ReviewDetails = Session
             .EntryDetails(Session.WorkbookDraft.ToEntry(Session.WorkbookCustomFields))
             .ToArray();
@@ -320,7 +351,13 @@ else
         try
         {
             await Session.SaveWorkbookEntryAsync();
-            if (!Session.ShouldShowWorkbookDraftErrors)
+            if (Session.ShouldShowWorkbookDraftErrors)
+            {
+                PendingAction = null;
+                ReviewWarnings = [];
+                ShowValidationFailure();
+            }
+            else
             {
                 PendingAction = null;
                 ReviewWarnings = [];
@@ -355,6 +392,7 @@ else
         PendingAction = null;
         if (action == DraftAction.Clear)
         {
+            ShowValidationFeedback = false;
             Session.ResetWorkbookDraft();
             return;
         }
@@ -377,6 +415,19 @@ else
     private static void UpdateHour(ChangeEventArgs args, Action<decimal?> setValue)
     {
         setValue(MobileHourField.Parse(args.Value?.ToString()));
+    }
+
+    private void ShowValidationFailure()
+    {
+        ShowValidationFeedback = true;
+        ValidationFeedbackVersion++;
+    }
+
+    private async Task ReviewErrorsAsync()
+    {
+        ShowValidationFeedback = false;
+        await InvokeAsync(StateHasChanged);
+        await ValidationSummary.FocusAsync();
     }
 
     private void ReturnToDashboard()

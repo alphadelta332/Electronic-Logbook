@@ -1398,6 +1398,29 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate3NewFlightShowsFailedSaveFeedbackInTheCurrentViewport()
+    {
+        var page = ReadMobilePage("NewFlight.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("ShowValidationFailure();", page, StringComparison.Ordinal);
+        Assert.Contains("ShowValidationFeedback && Session.ShouldShowWorkbookDraftErrors", page, StringComparison.Ordinal);
+        Assert.Contains("@key=\"ValidationFeedbackVersion\"", page, StringComparison.Ordinal);
+        Assert.Contains("class=\"action-feedback-message entry-validation-feedback action-feedback-message-enter\"", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"alert\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-live=\"assertive\"", page, StringComparison.Ordinal);
+        Assert.Contains("aria-atomic=\"true\"", page, StringComparison.Ordinal);
+        Assert.Contains("Review errors", page, StringComparison.Ordinal);
+        Assert.Contains("@ref=\"ValidationSummary\"", page, StringComparison.Ordinal);
+        Assert.Contains("role=\"region\"", page, StringComparison.Ordinal);
+        Assert.Contains("tabindex=\"-1\"", page, StringComparison.Ordinal);
+        Assert.Contains("await ValidationSummary.FocusAsync();", page, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.action-feedback-message\s*\{[^}]*position:\s*fixed", css);
+        Assert.Matches(@"(?s)\.entry-validation-feedback\s*\{[^}]*background:\s*#4a1d1a", css);
+        Assert.Contains(".state-banner-error:focus-visible", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3AppBrandHeaderUsesBalancedSpacingAndASingleLargerTitle()
     {
         var layout = ReadMobileSource(Path.Combine("Layout", "MainLayout.razor"));
