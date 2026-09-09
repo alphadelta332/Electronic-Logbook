@@ -28,7 +28,7 @@ public sealed class MobileWorkbookMigrationReaderTests
     }
 
     [Fact]
-    public void InspectReadsWorkbookIdentityRowsCustomFieldsOverridesAndTotalsWithoutChangingSourceBytes()
+    public void InspectPreservesFlightCheckBoxesButIgnoresLegacyOverrideDates()
     {
         var file = CreateWorkbook();
         var before = SHA256.HashData(file.Bytes);
@@ -41,10 +41,6 @@ public sealed class MobileWorkbookMigrationReaderTests
         Assert.Equal(new LogbookId("log_workbook_source"), plan.EmbeddedWorkbookLogbookId);
         Assert.Equal(new LogbookId("log_target"), plan.TargetLogbookId);
         Assert.Equal(["Role", "Employer", "Exercise", "Note"], plan.CustomFieldDefinitions.Select(field => field.Label));
-        Assert.Equal(new DateOnly(2026, 6, 30), plan.CurrencyOverrideDates.FlightReview);
-        Assert.Equal(new DateOnly(2026, 7, 31), plan.CurrencyOverrideDates.InstrumentProficiencyCheck);
-        Assert.Null(plan.CurrencyOverrideDates.OperatorProficiencyCheck);
-
         Assert.Equal(2, plan.Rows.Count);
         var first = plan.Rows[0];
         Assert.Equal(2, first.SourceRowNumber);
@@ -56,6 +52,13 @@ public sealed class MobileWorkbookMigrationReaderTests
         Assert.Equal(0.3m, first.Entry.IfrSim);
         Assert.Equal(2, first.Entry.Ils);
         Assert.Equal(1, first.Entry.Circling);
+        Assert.True(first.Entry.FlightReview);
+        Assert.True(first.Entry.InstrumentProficiencyCheck);
+        Assert.False(first.Entry.OperatorProficiencyCheck);
+        var second = plan.Rows[1];
+        Assert.False(second.Entry.FlightReview);
+        Assert.False(second.Entry.InstrumentProficiencyCheck);
+        Assert.True(second.Entry.OperatorProficiencyCheck);
 
         Assert.Equal(new MobileWorkbookMigrationTotals(2, 2.0m, 0.3m, 2.3m, 1, 1, 3, 1), plan.CalculatedTotals);
         Assert.Equal(new MobileWorkbookMigrationCachedTotals(2.0m, 0.3m, 1m, 1m, 3m), plan.CachedWorkbookTotals);
@@ -131,21 +134,18 @@ public sealed class MobileWorkbookMigrationReaderTests
             SeDualNight = 0.9m,
             LandingsNight = 1
         };
-        var overrides = new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 31), null, null);
-        var plan = CreatePlan(logbookId, logbookId, fields, overrides, first, second);
+        var plan = CreatePlan(logbookId, logbookId, fields, first, second);
 
         var comparison = MobileWorkbookMigrationWorkflow.CompareWithApp(
             plan,
             logbookId,
             [second, first],
-            fields.Reverse(),
-            overrides);
+            fields.Reverse());
 
         Assert.True(comparison.EmbeddedIdentityMatches);
         Assert.True(comparison.EntryCountMatches);
         Assert.True(comparison.EntryValuesMatch);
         Assert.True(comparison.CustomFieldsMatch);
-        Assert.True(comparison.CurrencyOverrideDatesMatch);
         Assert.True(comparison.TotalsMatch);
         Assert.True(comparison.IsExactDataMatch);
         Assert.Equal(2, comparison.AppEntryCount);
@@ -165,7 +165,6 @@ public sealed class MobileWorkbookMigrationReaderTests
             appLogbookId,
             new LogbookId("log_other"),
             workbookFields,
-            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 31), null, null),
             workbookEntry,
             secondWorkbookEntry);
         var appEntry = workbookEntry with { Reg = "VH-APP", SeCommandDay = 2.4m };
@@ -175,14 +174,12 @@ public sealed class MobileWorkbookMigrationReaderTests
             plan,
             appLogbookId,
             [appEntry],
-            appFields,
-            PortableLogbookCurrencyOverrideDates.Empty);
+            appFields);
 
         Assert.False(comparison.EmbeddedIdentityMatches);
         Assert.False(comparison.EntryCountMatches);
         Assert.False(comparison.EntryValuesMatch);
         Assert.False(comparison.CustomFieldsMatch);
-        Assert.False(comparison.CurrencyOverrideDatesMatch);
         Assert.False(comparison.TotalsMatch);
         Assert.False(comparison.IsExactDataMatch);
         Assert.Equal(2, comparison.WorkbookOnlyRows.Count);
@@ -199,7 +196,6 @@ public sealed class MobileWorkbookMigrationReaderTests
         LogbookId targetLogbookId,
         LogbookId embeddedLogbookId,
         IReadOnlyList<CustomFieldDefinition> fields,
-        PortableLogbookCurrencyOverrideDates overrides,
         params PortableLogbookWorkbookEntry[] entries)
     {
         var rows = entries
@@ -213,7 +209,6 @@ public sealed class MobileWorkbookMigrationReaderTests
             embeddedLogbookId,
             targetLogbookId,
             fields,
-            overrides,
             rows,
             totals,
             MobileWorkbookMigrationCachedTotals.Empty,
@@ -282,10 +277,10 @@ public sealed class MobileWorkbookMigrationReaderTests
                         tableColumns))));
 
             var row2 = EntryValues(
-                "ent_source_1", "2026", "7", "24", "C172", "VH-ABC", "AD332", "Alex", "Jamie", "YSBK", "YSCN", "YWOL", "Training", "TRUE", "FALSE", "FALSE",
+                "ent_source_1", "2026", "7", "24", "C172", "VH-ABC", "AD332", "Alex", "Jamie", "YSBK", "YSCN", "YWOL", "Training", "TRUE", "TRUE", "FALSE",
                 "Captain", "Airline", "IFR", "First", seCommandDay: "1.2", ifrSim: "0.3", landingsDay: "1", ils: "2", circling: "1");
             var row3 = EntryValues(
-                string.Empty, "2026", "Jul", "25", "C172", "VH-XYZ", "AD333", "Alex", string.Empty, "YSCN", "YSBK", string.Empty, "Return", "FALSE", "FALSE", "FALSE",
+                string.Empty, "2026", "Jul", "25", "C172", "VH-XYZ", "AD333", "Alex", string.Empty, "YSCN", "YSBK", string.Empty, "Return", "FALSE", "FALSE", "TRUE",
                 "PIC", "Airline", "Night", "Second", seDualNight: "0.8", landingsNight: "1", rnp: "1");
             var totals = new Dictionary<int, string>
             {

@@ -1377,7 +1377,6 @@ static async Task<int> RunWorkbookMigrationJourneyAsync(
                     })
             ],
             MobileLogbookSession.CustomFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
             migration);
         using var workbookLedger = new SupabaseHostedSyncClient(
             configuration.SupabaseUrl,

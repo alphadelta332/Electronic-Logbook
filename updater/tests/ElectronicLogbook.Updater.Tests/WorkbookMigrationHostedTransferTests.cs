@@ -110,7 +110,6 @@ public sealed class WorkbookMigrationHostedTransferTests
                     }
                 })],
             customFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
             migration);
         var key = PortableLogbookKey.Generate();
         var rawKeyBytes = key.ToBytes();
@@ -285,10 +284,6 @@ public sealed class WorkbookMigrationHostedTransferTests
         return WorkbookMigrationPayloadConverter.ConvertRows(
             rows,
             customFields,
-            new PortableLogbookCurrencyOverrideDates(
-                new DateOnly(2026, 7, 1),
-                new DateOnly(2026, 7, 2),
-                null),
             migration);
     }
 

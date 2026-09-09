@@ -16,6 +16,12 @@ public class MainActivity extends BridgeActivity {
         configureBackNavigation();
     }
 
+    @Override
+    protected void onResume() {
+        super.onResume();
+        ElectronicLogbookPreviewUpdatesPlugin.checkAndPromptOnResume();
+    }
+
     private void configureBackNavigation() {
         OnBackPressedCallback callback = new OnBackPressedCallback(true) {
             @Override

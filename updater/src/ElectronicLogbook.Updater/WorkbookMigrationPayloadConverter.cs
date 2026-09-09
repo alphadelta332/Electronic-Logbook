@@ -28,19 +28,16 @@ public static class WorkbookMigrationPayloadConverter
         return ConvertRows(
             rows.Rows,
             customFields,
-            PortableLogbookWorkbookPackageStorage.ReadCurrencyOverrideDates(workbookPath),
             migration);
     }
 
     public static WorkbookMigrationPayload ConvertRows(
         IEnumerable<PortableLogbookWorkbookRowV2> rows,
         IEnumerable<CustomFieldDefinition> customFieldDefinitions,
-        PortableLogbookCurrencyOverrideDates currencyOverrideDates,
         HostedWorkbookMigration migration)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(customFieldDefinitions);
-        ArgumentNullException.ThrowIfNull(currencyOverrideDates);
         ArgumentNullException.ThrowIfNull(migration);
 
         if (migration.Status is not (
@@ -64,7 +61,7 @@ public static class WorkbookMigrationPayloadConverter
         var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
             migration.LogbookId,
             customFieldDefinitions,
-            currencyOverrideDates,
+            PortableLogbookCurrencyOverrideDates.Empty,
             operations);
         var receipt = PortableWorkbookMigrationVerification.CreateReceipt(
             migration.SourceFingerprint,

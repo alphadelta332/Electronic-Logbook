@@ -8,13 +8,11 @@ public static class MobileWorkbookMigrationWorkflow
         MobileWorkbookMigrationPlan plan,
         LogbookId appLogbookId,
         IEnumerable<PortableLogbookWorkbookEntry> appEntries,
-        IEnumerable<CustomFieldDefinition> appCustomFields,
-        PortableLogbookCurrencyOverrideDates appCurrencyOverrideDates)
+        IEnumerable<CustomFieldDefinition> appCustomFields)
     {
         ArgumentNullException.ThrowIfNull(plan);
         ArgumentNullException.ThrowIfNull(appEntries);
         ArgumentNullException.ThrowIfNull(appCustomFields);
-        ArgumentNullException.ThrowIfNull(appCurrencyOverrideDates);
 
         var materializedAppEntries = appEntries.ToArray();
         var appTotals = MobileWorkbookMigrationTotals.Calculate(materializedAppEntries);
@@ -37,7 +35,6 @@ public static class MobileWorkbookMigrationWorkflow
             string.Equals(workbookValuesHash, appValuesHash, StringComparison.OrdinalIgnoreCase),
             customFieldDifferences.Count == 0 &&
             workbookFields.SequenceEqual(currentAppFields, StringComparer.Ordinal),
-            plan.CurrencyOverrideDates == appCurrencyOverrideDates,
             plan.CalculatedTotals == appTotals,
             materializedAppEntries.Length,
             appValuesHash,
@@ -97,7 +94,7 @@ public static class MobileWorkbookMigrationWorkflow
         var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
             currentDocument.LogbookId,
             plan.CustomFieldDefinitions,
-            plan.CurrencyOverrideDates,
+            PortableLogbookCurrencyOverrideDates.Empty,
             operations);
         var receipt = new BrowserWorkbookMigrationReceipt(
             plan.SourceFileName,
@@ -243,7 +240,6 @@ public sealed record MobileWorkbookMigrationComparison(
     bool EntryCountMatches,
     bool EntryValuesMatch,
     bool CustomFieldsMatch,
-    bool CurrencyOverrideDatesMatch,
     bool TotalsMatch,
     int AppEntryCount,
     string AppEntryValuesSha256,
@@ -256,7 +252,6 @@ public sealed record MobileWorkbookMigrationComparison(
         EntryCountMatches &&
         EntryValuesMatch &&
         CustomFieldsMatch &&
-        CurrencyOverrideDatesMatch &&
         TotalsMatch;
 }
 

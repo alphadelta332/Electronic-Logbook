@@ -75,7 +75,7 @@ else
                     </div>
                     <span class="draft-pill">Preview only</span>
                 </div>
-                <MudText Typo="Typo.body2">Check for the latest invitation-only Preview build. If one is available, FlightLogX downloads it and Android asks you to approve the installation.</MudText>
+                <MudText Typo="Typo.body2">FlightLogX checks automatically when you open the app. If an update is available, Android asks you to approve the installation. Use this button to check again now.</MudText>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPreviewUpdateAsync" Disabled="@IsPreviewUpdateBusy">
                     @(IsPreviewUpdateBusy ? "Checking for update…" : "Check for Preview update")
                 </MudButton>

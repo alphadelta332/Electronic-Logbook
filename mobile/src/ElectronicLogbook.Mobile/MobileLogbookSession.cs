@@ -221,7 +221,6 @@ public sealed class MobileLogbookSession(
         {
             currencyRecencySummaryCache = MobileCurrencyRecencySummary.Create(
                 CurrentEntriesV2.Select(materialized => materialized.Entry!),
-                DocumentV2.CurrencyOverrideDates,
                 today);
             currencyRecencySummaryDate = today;
         }

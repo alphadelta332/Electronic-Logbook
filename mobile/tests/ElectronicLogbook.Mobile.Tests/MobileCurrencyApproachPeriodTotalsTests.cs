@@ -17,7 +17,6 @@ public sealed class MobileCurrencyApproachPeriodTotalsTests
 
         var summary = MobileCurrencyRecencySummary.Create(
             [entry],
-            PortableLogbookCurrencyOverrideDates.Empty,
             today);
         var rnpRow = summary.SingleEngineRows.Single(row => row.Requirement == "RNP");
 

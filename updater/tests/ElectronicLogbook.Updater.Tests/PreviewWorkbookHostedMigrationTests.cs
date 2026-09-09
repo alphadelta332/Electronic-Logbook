@@ -228,7 +228,6 @@ public sealed class PreviewWorkbookHostedMigrationTests : IDisposable
                     LandingsDay = 1
                 })],
             [],
-            PortableLogbookCurrencyOverrideDates.Empty,
             migration);
 
     private static SupabaseWorkbookSession Session(HostedAccountId accountId) =>

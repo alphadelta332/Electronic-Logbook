@@ -6,9 +6,23 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.google.firebase.appdistribution.FirebaseAppDistribution;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @CapacitorPlugin(name = "ElectronicLogbookPreviewUpdates")
 public class ElectronicLogbookPreviewUpdatesPlugin extends Plugin {
+    private static final AtomicBoolean AUTOMATIC_CHECK_IN_FLIGHT = new AtomicBoolean(false);
+
+    static void checkAndPromptOnResume() {
+        if (!BuildConfig.PREVIEW_UPDATES_ENABLED ||
+            !AUTOMATIC_CHECK_IN_FLIGHT.compareAndSet(false, true)) {
+            return;
+        }
+
+        FirebaseAppDistribution.getInstance()
+            .updateIfNewReleaseAvailable()
+            .addOnCompleteListener(task -> AUTOMATIC_CHECK_IN_FLIGHT.set(false));
+    }
+
     @PluginMethod
     public void isAvailable(PluginCall call) {
         JSObject result = new JSObject();

@@ -945,21 +945,16 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3CurrencyPageExplainsImportedSavedDatesWithoutExposingEditing()
+    public void Gate3CurrencyPageDoesNotExposeOrUseWorkbookOverrideDates()
     {
         var page = ReadMobilePage("Currency.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
         var css = ReadMobileAsset("css", "app.css");
 
-        Assert.Contains("Imported check dates", page, StringComparison.Ordinal);
-        Assert.Contains("not from marked flight entries", page, StringComparison.Ordinal);
-        Assert.Contains("uses the later applicable saved date or marked entry", page, StringComparison.Ordinal);
-        Assert.Contains("Session.DocumentV2.CurrencyOverrideDates", page, StringComparison.Ordinal);
-        Assert.Contains("Flight review", page, StringComparison.Ordinal);
-        Assert.Contains("Instrument proficiency check", page, StringComparison.Ordinal);
-        Assert.Contains("Operator proficiency check", page, StringComparison.Ordinal);
-        Assert.Contains(".currency-source-note", css, StringComparison.Ordinal);
-        Assert.Contains(".currency-source-dates", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("Imported check dates", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("CurrencyOverrideDates", page, StringComparison.Ordinal);
+        Assert.DoesNotContain(".currency-source-note", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".currency-source-dates", css, StringComparison.Ordinal);
         Assert.DoesNotContain("SaveOverrideDatesAsync", page, StringComparison.Ordinal);
         Assert.DoesNotContain("SaveCurrencyOverrideDatesAsync", session, StringComparison.Ordinal);
     }
@@ -1536,11 +1531,16 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("signingConfig signingConfigs.electronicLogbookDevelopment", GetGradleBuildType(gradle, "preview"), StringComparison.Ordinal);
 
         Assert.Contains("registerPlugin(ElectronicLogbookPreviewUpdatesPlugin.class);", activity, StringComparison.Ordinal);
+        Assert.Contains("protected void onResume()", activity, StringComparison.Ordinal);
+        Assert.Contains("ElectronicLogbookPreviewUpdatesPlugin.checkAndPromptOnResume();", activity, StringComparison.Ordinal);
         Assert.Contains("BuildConfig.PREVIEW_UPDATES_ENABLED", plugin, StringComparison.Ordinal);
+        Assert.Contains("AUTOMATIC_CHECK_IN_FLIGHT", plugin, StringComparison.Ordinal);
+        Assert.Contains("static void checkAndPromptOnResume()", plugin, StringComparison.Ordinal);
         Assert.Contains("updateIfNewReleaseAvailable()", plugin, StringComparison.Ordinal);
         Assert.Contains("window.electronicLogbookPreviewUpdates", javascript, StringComparison.Ordinal);
         Assert.Contains("electronicLogbookPreviewUpdates.isAvailable", settings, StringComparison.Ordinal);
         Assert.Contains("FlightLogX Preview", settings, StringComparison.Ordinal);
+        Assert.Contains("checks automatically when you open the app", settings, StringComparison.Ordinal);
         Assert.Contains("Check for Preview update", settings, StringComparison.Ordinal);
         Assert.DoesNotContain("Private pilot", settings, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Preview updates are not included", plugin, StringComparison.Ordinal);

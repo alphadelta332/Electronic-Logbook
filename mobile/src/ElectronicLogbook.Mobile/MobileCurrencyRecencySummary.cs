@@ -62,34 +62,33 @@ public sealed class MobileCurrencyRecencySummary
 
     public static MobileCurrencyRecencySummary Create(
         IEnumerable<PortableLogbookWorkbookEntry> entries,
-        PortableLogbookCurrencyOverrideDates overrideDates,
         DateOnly today)
     {
         ArgumentNullException.ThrowIfNull(entries);
-        ArgumentNullException.ThrowIfNull(overrideDates);
 
         var entryArray = entries.ToArray();
+        var entryOnlyDates = PortableLogbookCurrencyOverrideDates.Empty;
         var singleEngineRows = new PortableLogbookCurrencyRow[]
         {
-            PortableLogbookCurrencyRows.CreateSingleEngineFlightReview(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateSingleEngineInstrumentProficiencyCheck(entryArray, overrideDates, today),
+            PortableLogbookCurrencyRows.CreateSingleEngineFlightReview(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateSingleEngineInstrumentProficiencyCheck(entryArray, entryOnlyDates, today),
             PortableLogbookCurrencyRows.CreateDayPassengerCarrying(entryArray, today),
             PortableLogbookCurrencyRows.CreateNightPassengerCarrying(entryArray, today),
-            PortableLogbookCurrencyRows.CreateIfrApps(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateNvfr(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateSinglePilotIfr(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateIlsApproach(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateVorApproach(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateRnpApproach(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateNdbApproach(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateDgaCdiApproach(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateDgaAziApproach(entryArray, overrideDates, today),
+            PortableLogbookCurrencyRows.CreateIfrApps(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateNvfr(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateSinglePilotIfr(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateIlsApproach(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateVorApproach(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateRnpApproach(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateNdbApproach(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateDgaCdiApproach(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateDgaAziApproach(entryArray, entryOnlyDates, today),
             PortableLogbookCurrencyRows.CreateCirclingApproach(entryArray, today)
         };
         var multiEngineRows = new PortableLogbookCurrencyRow[]
         {
-            PortableLogbookCurrencyRows.CreateMultiEngineFlightReview(entryArray, overrideDates, today),
-            PortableLogbookCurrencyRows.CreateMultiEngineInstrumentProficiencyCheck(entryArray, overrideDates, today)
+            PortableLogbookCurrencyRows.CreateMultiEngineFlightReview(entryArray, entryOnlyDates, today),
+            PortableLogbookCurrencyRows.CreateMultiEngineInstrumentProficiencyCheck(entryArray, entryOnlyDates, today)
         };
 
         return new MobileCurrencyRecencySummary(

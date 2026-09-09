@@ -1170,59 +1170,6 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-error);
 }
 
-.currency-source-note {
-    display: grid;
-    grid-template-columns: 28px minmax(0, 1fr);
-    gap: 12px;
-    padding: 14px;
-    border: 1px solid color-mix(in srgb, var(--app-primary) 38%, var(--app-border));
-    border-radius: 8px;
-    color: var(--app-text);
-    background: color-mix(in srgb, var(--app-surface) 88%, var(--app-primary));
-}
-
-.currency-source-note > .mud-icon-root {
-    margin-top: 1px;
-    color: var(--app-primary);
-}
-
-.currency-source-note h2 {
-    margin: 0;
-    font-size: 16px;
-    line-height: 1.35;
-}
-
-.currency-source-note p {
-    max-width: 70ch;
-    margin: 4px 0 0;
-    color: var(--app-text-muted);
-    line-height: 1.5;
-}
-
-.currency-source-dates {
-    display: grid;
-    gap: 6px;
-    margin: 12px 0 0;
-}
-
-.currency-source-dates > div {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: baseline;
-}
-
-.currency-source-dates dt {
-    font-weight: 700;
-}
-
-.currency-source-dates dd {
-    margin: 0;
-    color: var(--app-text-muted);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
 .currency-engine-switch {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));

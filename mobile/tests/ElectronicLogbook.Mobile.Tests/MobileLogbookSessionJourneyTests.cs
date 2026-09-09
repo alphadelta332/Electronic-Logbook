@@ -53,7 +53,6 @@ public sealed class MobileLogbookSessionJourneyTests
             new LogbookId("log_legacy_source"),
             logbookId,
             customFields,
-            new PortableLogbookCurrencyOverrideDates(new DateOnly(2026, 7, 31), null, null),
             rows,
             totals,
             MobileWorkbookMigrationCachedTotals.Empty,
@@ -129,7 +128,6 @@ public sealed class MobileLogbookSessionJourneyTests
             logbookId,
             logbookId,
             session.WorkbookCustomFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
             rows,
             totals,
             MobileWorkbookMigrationCachedTotals.Empty,
@@ -141,8 +139,7 @@ public sealed class MobileLogbookSessionJourneyTests
             plan,
             session.DocumentV2.LogbookId,
             session.CurrentEntriesV2.Select(entry => entry.Entry!),
-            session.WorkbookCustomFields,
-            session.DocumentV2.CurrencyOverrideDates);
+            session.WorkbookCustomFields);
         Assert.True(comparison.IsExactDataMatch);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>

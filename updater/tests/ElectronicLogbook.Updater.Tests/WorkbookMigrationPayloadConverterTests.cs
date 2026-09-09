@@ -32,7 +32,7 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
     }
 
     [Fact]
-    public void ConvertRowsRetryProducesIdenticalOperationsCiphertextAndExactReceipt()
+    public void ConvertRowsPreservesCheckBoxesUsesNoOverridesAndProducesStableRetry()
     {
         var migration = Migration();
         var customFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
@@ -50,7 +50,10 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
                     {
                         [customFields[1].Id] = "Night exercise",
                         [customFields[0].Id] = "Line flight"
-                    })),
+                    }) with
+                {
+                    FlightReview = true
+                }),
             new PortableLogbookWorkbookRowV2(
                 new EntryId("ent_ignored_source_id"),
                 new RevisionId("rev_ignored_source_revision"),
@@ -63,6 +66,8 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
                         [customFields[0].Id] = "Check"
                     }) with
                 {
+                    InstrumentProficiencyCheck = true,
+                    OperatorProficiencyCheck = true,
                     LandingsDay = 2,
                     LandingsNight = 1,
                     Ils = 1,
@@ -70,20 +75,13 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
                     Circling = 1
                 })
         };
-        var overrides = new PortableLogbookCurrencyOverrideDates(
-            new DateOnly(2026, 6, 1),
-            new DateOnly(2026, 6, 2),
-            new DateOnly(2026, 6, 3));
-
         var first = WorkbookMigrationPayloadConverter.ConvertRows(
             rows,
             customFields,
-            overrides,
             migration);
         var retry = WorkbookMigrationPayloadConverter.ConvertRows(
             rows,
             customFields,
-            overrides,
             migration with
             {
                 Status = HostedWorkbookMigrationStatus.Completed,
@@ -107,6 +105,10 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
         });
         Assert.Equal(migration.StartedAt, first.Document.Operations[0].CreatedAt);
         Assert.Equal(migration.StartedAt.AddMilliseconds(1), first.Document.Operations[1].CreatedAt);
+        Assert.True(first.Document.Operations[0].Entry?.FlightReview);
+        Assert.True(first.Document.Operations[1].Entry?.InstrumentProficiencyCheck);
+        Assert.True(first.Document.Operations[1].Entry?.OperatorProficiencyCheck);
+        Assert.Equal(PortableLogbookCurrencyOverrideDates.Empty, first.Document.CurrencyOverrideDates);
         Assert.Equal(
             new PortableWorkbookMigrationTotals(2, 2.0m, 0.3m, 2.3m, 3, 1, 3, 1),
             first.Receipt.CalculatedTotals);
@@ -151,7 +153,6 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
         var converted = WorkbookMigrationPayloadConverter.ConvertRows(
             [new PortableLogbookWorkbookRowV2(null, null, Flight(new DateOnly(2026, 7, 1), 1.2m, 0.3m))],
             customFields,
-            PortableLogbookCurrencyOverrideDates.Empty,
             migration);
         var changedOperation = converted.Document.Operations[0] with
         {
@@ -204,7 +205,6 @@ public sealed class WorkbookMigrationPayloadConverterTests : IDisposable
             WorkbookMigrationPayloadConverter.ConvertRows(
                 [new PortableLogbookWorkbookRowV2(null, null, Flight(new DateOnly(2026, 7, 1), 1m, null))],
                 [],
-                PortableLogbookCurrencyOverrideDates.Empty,
                 migration));
 
         Assert.Contains("pending or completed", error.Message, StringComparison.OrdinalIgnoreCase);

@@ -52,7 +52,6 @@ public static class MobileWorkbookMigrationReader
             var rows = ReadRows(tableRoot, tableReference, columnNames, customFields, cells);
             var calculatedTotals = MobileWorkbookMigrationTotals.Calculate(rows.Select(row => row.Entry));
             var cachedTotals = ReadCachedTotals(tableRoot, tableReference, columnNames, cells);
-            var currencyOverrides = ReadCurrencyOverrides(archive, sharedStrings);
             var entryValuesSha256 = ComputeEntryValuesSha256(rows);
             var sourceSha256 = Convert.ToHexString(SHA256.HashData(file.Bytes)).ToLowerInvariant();
 
@@ -63,7 +62,6 @@ public static class MobileWorkbookMigrationReader
                 ReadLogbookId(archive, sharedStrings),
                 targetLogbookId,
                 customFields,
-                currencyOverrides,
                 rows,
                 calculatedTotals,
                 cachedTotals,
@@ -352,41 +350,6 @@ public static class MobileWorkbookMigrationReader
             ReadDecimal("TotalApps"));
     }
 
-    private static PortableLogbookCurrencyOverrideDates ReadCurrencyOverrides(
-        ZipArchive archive,
-        IReadOnlyList<string> sharedStrings) =>
-        new(
-            ReadDefinedNameDate(archive, sharedStrings, "FROverride"),
-            ReadDefinedNameDate(archive, sharedStrings, "IPCOverride"),
-            ReadDefinedNameDate(archive, sharedStrings, "OPCOverride"));
-
-    private static DateOnly? ReadDefinedNameDate(ZipArchive archive, IReadOnlyList<string> sharedStrings, string name)
-    {
-        var value = ReadDefinedNameValue(archive, sharedStrings, name);
-        if (string.IsNullOrWhiteSpace(value) || value == "0")
-        {
-            return null;
-        }
-
-        if (DateOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
-        {
-            return date;
-        }
-
-        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var serial))
-        {
-            try
-            {
-                return DateOnly.FromDateTime(DateTime.FromOADate(serial));
-            }
-            catch (ArgumentException)
-            {
-            }
-        }
-
-        throw new InvalidDataException($"Workbook named value '{name}' is not a readable date.");
-    }
-
     private static LogbookId? ReadLogbookId(ZipArchive archive, IReadOnlyList<string> sharedStrings)
     {
         var value = ReadDefinedNameValue(archive, sharedStrings, PortableLogbookWorkbookMetadata.LogbookIdName);
@@ -652,7 +615,6 @@ public sealed record MobileWorkbookMigrationPlan(
     LogbookId? EmbeddedWorkbookLogbookId,
     LogbookId TargetLogbookId,
     IReadOnlyList<CustomFieldDefinition> CustomFieldDefinitions,
-    PortableLogbookCurrencyOverrideDates CurrencyOverrideDates,
     IReadOnlyList<MobileWorkbookMigrationRow> Rows,
     MobileWorkbookMigrationTotals CalculatedTotals,
     MobileWorkbookMigrationCachedTotals CachedWorkbookTotals,

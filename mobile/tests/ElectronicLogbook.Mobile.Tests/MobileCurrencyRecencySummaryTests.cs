@@ -10,7 +10,7 @@ public sealed class MobileCurrencyRecencySummaryTests
     {
         var today = new DateOnly(2026, 7, 27);
 
-        var summary = MobileCurrencyRecencySummary.Create([], PortableLogbookCurrencyOverrideDates.Empty, today);
+        var summary = MobileCurrencyRecencySummary.Create([], today);
 
         Assert.Equal(14, summary.SingleEngineRows.Count);
         Assert.Equal(2, summary.MultiEngineRows.Count);
@@ -29,12 +29,16 @@ public sealed class MobileCurrencyRecencySummaryTests
     public void CreateShowsEarliestFutureSingleEngineExpiryWithDaysRemaining()
     {
         var today = new DateOnly(2026, 7, 27);
-        var overrides = new PortableLogbookCurrencyOverrideDates(
-            new DateOnly(2024, 8, 1),
-            null,
-            null);
+        var flightReview = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2024,
+            Month = 8,
+            Day = 1,
+            FlightReview = true,
+            SeCommandDay = 1
+        };
 
-        var summary = MobileCurrencyRecencySummary.Create([], overrides, today);
+        var summary = MobileCurrencyRecencySummary.Create([flightReview], today);
 
         var nextExpiring = Assert.IsType<PortableLogbookCurrencyRow>(summary.NextExpiringSingleEngineRow);
         Assert.Equal("Flight Review", nextExpiring.Requirement);
@@ -49,12 +53,16 @@ public sealed class MobileCurrencyRecencySummaryTests
     public void CreateCountsDueSoonRowsUsingTheCurrencyPageThirtyDayThreshold()
     {
         var today = new DateOnly(2026, 7, 27);
-        var overrides = new PortableLogbookCurrencyOverrideDates(
-            new DateOnly(2024, 7, 1),
-            null,
-            null);
+        var flightReview = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2024,
+            Month = 7,
+            Day = 1,
+            FlightReview = true,
+            SeCommandDay = 1
+        };
 
-        var summary = MobileCurrencyRecencySummary.Create([], overrides, today);
+        var summary = MobileCurrencyRecencySummary.Create([flightReview], today);
 
         Assert.Equal(0, summary.CurrentCount);
         Assert.Equal(1, summary.DueSoonCount);

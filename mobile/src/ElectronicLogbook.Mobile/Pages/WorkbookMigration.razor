@@ -134,7 +134,6 @@ else
                             <MigrationFact Label="Active entries" Value="@ComparisonLabel(comparison.EntryCountMatches, plan.Rows.Count, comparison.AppEntryCount)" />
                             <MigrationFact Label="All entry values" Value="@MatchLabel(comparison.EntryValuesMatch)" />
                             <MigrationFact Label="Custom fields" Value="@MatchLabel(comparison.CustomFieldsMatch)" />
-                            <MigrationFact Label="Currency override dates" Value="@MatchLabel(comparison.CurrencyOverrideDatesMatch)" />
                             <MigrationFact Label="Calculated totals" Value="@MatchLabel(comparison.TotalsMatch)" />
                             <MigrationFact Label="App values fingerprint" Value="@ShortHash(comparison.AppEntryValuesSha256)" />
                             <MigrationFact Label="Flight time" Value="@HoursComparison(plan.CalculatedTotals.FlightHours, comparison.AppTotals.FlightHours)" />
@@ -228,8 +227,7 @@ else
                     Plan,
                     Session.DocumentV2.LogbookId,
                     Session.CurrentEntriesV2.Select(entry => entry.Entry!),
-                    Session.WorkbookCustomFields,
-                    Session.DocumentV2.CurrencyOverrideDates);
+                    Session.WorkbookCustomFields);
             }
         }
         catch (Exception ex) when (ex is BrowserFileStoreException or InvalidDataException or JSException)
