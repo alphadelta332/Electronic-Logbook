@@ -1289,6 +1289,7 @@ public sealed class ExcelWorkbookMigrator
         RestoreHeaderPalette(sourceWorkbook, outputWorkbook, destination);
         ApplyHiddenHourHeaderFormatting(destination);
         ApplyNativeCheckboxesIfAvailable(destination, "FR", "IPC", "OPC");
+        RestoreLogbookDataRowHeights(source, destination);
 
         var lastDataRow =
             (int)destination.DataBodyRange.Row + (int)destination.DataBodyRange.Rows.Count - 1;
@@ -1299,6 +1300,27 @@ public sealed class ExcelWorkbookMigrator
         }
 
         RepairLogbookActionButtons(destination);
+    }
+
+    internal static void RestoreLogbookDataRowHeights(
+        object sourceTableObject,
+        object destinationTableObject)
+    {
+        dynamic source = sourceTableObject;
+        dynamic destination = destinationTableObject;
+        var sourceRows = (int)source.ListRows.Count;
+        var destinationRows = (int)destination.ListRows.Count;
+        if (sourceRows != destinationRows)
+        {
+            throw new InvalidDataException(
+                $"Source and destination Logbook tables have different row counts ({sourceRows} and {destinationRows}) while restoring row heights.");
+        }
+
+        for (var index = 1; index <= sourceRows; index++)
+        {
+            var sourceHeight = (double)source.DataBodyRange.Rows.Item(index).RowHeight;
+            destination.DataBodyRange.Rows.Item(index).RowHeight = sourceHeight;
+        }
     }
 
     private static void RepairLogbookActionButtons(dynamic destination)

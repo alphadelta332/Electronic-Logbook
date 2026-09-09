@@ -5,29 +5,29 @@ namespace ElectronicLogbook.Portable;
 // Edit entry validation and warning wording here. Rule logic belongs in the rule classes.
 public static class PortableLogbookEntryMessages
 {
-    public const string InvalidDate = "The Date field is not valid or is in the future.";
-    public const string InvalidWorkbookDate = "The Date field is not valid. Use a valid day, three-letter month, and year, and make sure the date is not in the future.";
-    public const string MissingAircraftType = "Aircraft type is required before this entry can be added.";
-    public const string MissingType = "Type is required before this entry can be added.";
-    public const string MissingPic = "PIC is required before this entry can be added.";
-    public const string MissingRegistration = "Registration is required for a flight entry.";
-    public const string MissingWorkbookRegistration = "Registration is required for a flight entry. Enter the aircraft registration, or record simulator time instead.";
-    public const string MissingDeparture = "Departure airport is required for a flight entry.";
-    public const string MissingDestination = "Destination airport is required for a flight entry.";
-    public const string MissingLoggedTime = "Total flight or simulator time cannot be zero.";
-    public const string MissingWorkbookLoggedTime = "Total flight or simulator time cannot be zero. Enter at least one hour value before adding the entry.";
-    public const string InstrumentTimeExceedsFlightTime = "In-flight instrument time cannot be greater than the total flight time for this entry.";
+    public const string InvalidDate = "Invalid Date.";
+    public const string InvalidWorkbookDate = "Invalid Date. Ensure correct three-letter month is used, and the date is not in the future.";
+    public const string MissingAircraftType = "Missing Aircraft Type.";
+    public const string MissingType = "Missing Aircraft Type.";
+    public const string MissingPic = "Missing PIC.";
+    public const string MissingRegistration = "Missing Aircraft Registration.";
+    public const string MissingWorkbookRegistration = "Missing Aircraft Registration.";
+    public const string MissingDeparture = "Missing Departure Airport.";
+    public const string MissingDestination = "Missing Destination Airport.";
+    public const string MissingLoggedTime = "Missing Hours.";
+    public const string MissingWorkbookLoggedTime = "Missing Hours.";
+    public const string InstrumentTimeExceedsFlightTime = "In-flight instrument time is greater than the total flight time.";
     public const string InvalidNumericValue = "Hours, landings, and approaches must be numbers.";
 
     public const string FlightTimeWithoutDayOrNight = "This entry has flight time but no day or night time.";
     public const string DayNightTimeExceedsFlightTime = "Day and night time exceed the total flight time for this entry.";
-    public const string FlightTimeWithoutLanding = "This entry has flight time but no landings.";
-    public const string DayTimeWithoutDayLanding = "This entry has day time but no day landing.";
-    public const string DayLandingWithoutDayTime = "This entry has a day landing but no day time.";
-    public const string NightTimeWithoutNightLanding = "This entry has night time but no night landing.";
-    public const string NightLandingWithoutNightTime = "This entry has a night landing but no night time.";
-    public const string ApproachWithoutInstrumentTime = "This entry has approach activity but no instrument time.";
-    public const string InstrumentTimeWithoutApproach = "This entry has instrument time but no approach activity.";
+    public const string FlightTimeWithoutLanding = "No Landings recorded.";
+    public const string DayTimeWithoutDayLanding = "No Day Landings recorded.";
+    public const string DayLandingWithoutDayTime = "No Day Hours recorded (at least one day landing was recorded).";
+    public const string NightTimeWithoutNightLanding = "No Night Landings recorded.";
+    public const string NightLandingWithoutNightTime = "No Night Hours recorded (at least one night landing was recorded).";
+    public const string ApproachWithoutInstrumentTime = "No Instrument Time recorded (at least one instrument approach was recorded).";
+    public const string InstrumentTimeWithoutApproach = "No Approaches recorded (instrument hours were recorded).";
     public const string HighLandingsForFlightTime = "The number of landings seems high compared with the total flight time.";
     public const string HighApproachesForFlightTime = "The number of approaches seems high compared with the total flight time.";
 

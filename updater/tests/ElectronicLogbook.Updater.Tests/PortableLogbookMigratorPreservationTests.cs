@@ -193,6 +193,31 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
     }
 
     [Fact]
+    public void MigratorRestoresSourceLogbookDataRowHeightsAfterEnrollment()
+    {
+        var source = new FakeLogbookTable([15d, 24d, 15.75d]);
+        var destination = new FakeLogbookTable([90d, 90d, 90.75d]);
+
+        ExcelWorkbookMigrator.RestoreLogbookDataRowHeights(source, destination);
+
+        Assert.Equal([15d, 24d, 15.75d], destination.RowHeights);
+    }
+
+    [Fact]
+    public void MigratorRejectsMismatchedLogbookRowCountsWhileRestoringHeights()
+    {
+        var source = new FakeLogbookTable([15d, 15.75d]);
+        var destination = new FakeLogbookTable([90d]);
+
+        var exception = Assert.Throws<InvalidDataException>(() =>
+            ExcelWorkbookMigrator.RestoreLogbookDataRowHeights(source, destination));
+
+        Assert.Equal(
+            "Source and destination Logbook tables have different row counts (2 and 1) while restoring row heights.",
+            exception.Message);
+    }
+
+    [Fact]
     public void MigratorSkipsPortableMetadataCopyForLegacySourceTables()
     {
         var plan = ExcelWorkbookMigrator.CreatePortableMetadataMigrationPlan(
@@ -264,5 +289,54 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         {
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    public sealed class FakeLogbookTable
+    {
+        public FakeLogbookTable(IReadOnlyList<double> rowHeights)
+        {
+            ListRows = new FakeListRows(rowHeights.Count);
+            DataBodyRange = new FakeDataBodyRange(rowHeights);
+        }
+
+        public FakeListRows ListRows { get; }
+
+        public FakeDataBodyRange DataBodyRange { get; }
+
+        public IReadOnlyList<double> RowHeights => DataBodyRange.Rows.Values
+            .Select(row => row.RowHeight)
+            .ToArray();
+    }
+
+    public sealed class FakeListRows(int count)
+    {
+        public int Count { get; } = count;
+    }
+
+    public sealed class FakeDataBodyRange
+    {
+        public FakeDataBodyRange(IReadOnlyList<double> rowHeights)
+        {
+            Rows = new FakeRows(rowHeights);
+        }
+
+        public FakeRows Rows { get; }
+    }
+
+    public sealed class FakeRows
+    {
+        public FakeRows(IReadOnlyList<double> rowHeights)
+        {
+            Values = rowHeights.Select(height => new FakeRow(height)).ToArray();
+        }
+
+        public IReadOnlyList<FakeRow> Values { get; }
+
+        public FakeRow Item(int index) => Values[index - 1];
+    }
+
+    public sealed class FakeRow(double rowHeight)
+    {
+        public double RowHeight { get; set; } = rowHeight;
     }
 }
