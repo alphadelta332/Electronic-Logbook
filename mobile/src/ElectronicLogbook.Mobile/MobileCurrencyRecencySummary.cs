@@ -3,7 +3,7 @@ using ElectronicLogbook.Portable;
 namespace ElectronicLogbook.Mobile;
 
 /// <summary>
-/// Makes the workbook-faithful Currency + Recency rows available to the mobile UI.
+/// Calculates the mobile Currency + Recency rows from marked flight entries only.
 /// </summary>
 public sealed class MobileCurrencyRecencySummary
 {

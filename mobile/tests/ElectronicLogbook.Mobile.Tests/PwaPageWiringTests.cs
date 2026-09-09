@@ -949,6 +949,7 @@ public sealed class PwaPageWiringTests
     {
         var page = ReadMobilePage("Currency.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
+        var summary = ReadMobileSource("MobileCurrencyRecencySummary.cs");
         var css = ReadMobileAsset("css", "app.css");
 
         Assert.DoesNotContain("Imported check dates", page, StringComparison.Ordinal);
@@ -957,6 +958,9 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain(".currency-source-dates", css, StringComparison.Ordinal);
         Assert.DoesNotContain("SaveOverrideDatesAsync", page, StringComparison.Ordinal);
         Assert.DoesNotContain("SaveCurrencyOverrideDatesAsync", session, StringComparison.Ordinal);
+        Assert.DoesNotContain("DocumentV2.CurrencyOverrideDates", session, StringComparison.Ordinal);
+        Assert.Contains("PortableLogbookCurrencyOverrideDates.Empty", summary, StringComparison.Ordinal);
+        Assert.DoesNotContain("PortableLogbookCurrencyOverrideDates overrideDates", summary, StringComparison.Ordinal);
     }
 
     [Fact]

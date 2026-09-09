@@ -295,8 +295,8 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(7, session.HostedSync?.LastAcknowledgedHostedRevision);
         Assert.Equal("Restored field", Assert.Single(session.DocumentV2.CustomFieldDefinitions).Label);
         var afterRecovery = session.GetCurrencyRecencySummary(new DateOnly(2026, 7, 27));
-        Assert.Equal(1, afterRecovery.CurrentCount);
-        Assert.Equal(13, afterRecovery.ExpiredCount);
+        Assert.Equal(0, afterRecovery.CurrentCount);
+        Assert.Equal(14, afterRecovery.ExpiredCount);
         Assert.Equal("Ready", session.PackageKeyStatus);
         Assert.Equal("Existing logbook restored and synced.", session.LastActionMessage);
     }
