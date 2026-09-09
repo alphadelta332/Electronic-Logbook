@@ -7,7 +7,9 @@ param(
     [string]$AccessToken = $env:ELB_SUPABASE_PREVIEW_ACCESS_TOKEN,
     [string]$RefreshToken = $env:ELB_SUPABASE_PREVIEW_REFRESH_TOKEN,
     [string]$ServiceRoleKey = $env:ELB_SUPABASE_PREVIEW_SERVICE_ROLE_KEY,
+    [string]$ExpectedAccountEmail,
     [string]$ExpectedDeviceId = $env:ELB_SUPABASE_PREVIEW_DEVICE_ID,
+    [string]$RlsConnectionString = $env:ELB_SUPABASE_RLS_DB_URL,
     [string]$OutputPath,
     [switch]$RunRlsHarness
 )
@@ -66,6 +68,9 @@ if ([string]::IsNullOrWhiteSpace($ConnectionString) -and $null -ne $localSupabas
         $poolerHost = "aws-0-{0}.pooler.supabase.com" -f $previewProject.region
         $ConnectionString = "postgresql://postgres.{0}:{1}@{2}:5432/postgres" -f $previewProject.project_ref, $encodedPassword, $poolerHost
     }
+}
+if ([string]::IsNullOrWhiteSpace($RlsConnectionString)) {
+    $RlsConnectionString = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
 }
 if ([string]::IsNullOrWhiteSpace($OutputPath)) {
     $OutputPath = Join-Path $repoRoot "artifacts\flightlogx-preview\preflight.json"
@@ -292,20 +297,44 @@ $runtimeConfig = $null
 }))
 
 $authUserId = $null
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "retained access token through auth user endpoint" -Action {
-    if ([string]::IsNullOrWhiteSpace($AccessToken)) { throw "retained access token is not configured on the desktop" }
-    $accessClaims = Read-JwtPayload -Token $AccessToken
-    if ($accessClaims.exp -and [DateTimeOffset]::FromUnixTimeSeconds([long]$accessClaims.exp) -le [DateTimeOffset]::UtcNow) {
-        if ([string]::IsNullOrWhiteSpace($RefreshToken)) { throw "access token is expired and no retained refresh token is configured" }
-        $refreshBody = @{ refresh_token = $RefreshToken } | ConvertTo-Json -Compress
-        $refreshed = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/token?grant_type=refresh_token")) `
-            -Headers @{ apikey = $runtimeConfig.anonKey } -Method Post -ContentType "application/json" -Body $refreshBody
-        $script:AccessToken = $refreshed.access_token
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "expected owner Auth identity" -Action {
+    if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
+        $accessClaims = Read-JwtPayload -Token $AccessToken
+        if ($accessClaims.exp -and [DateTimeOffset]::FromUnixTimeSeconds([long]$accessClaims.exp) -le [DateTimeOffset]::UtcNow) {
+            if ([string]::IsNullOrWhiteSpace($RefreshToken)) { throw "access token is expired and no retained refresh token is configured" }
+            $refreshBody = @{ refresh_token = $RefreshToken } | ConvertTo-Json -Compress
+            $refreshed = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/token?grant_type=refresh_token")) `
+                -Headers @{ apikey = $runtimeConfig.anonKey } -Method Post -ContentType "application/json" -Body $refreshBody
+            $script:AccessToken = $refreshed.access_token
+        }
+        $user = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/user")) `
+            -Headers @{ apikey = $runtimeConfig.anonKey; Authorization = "Bearer $AccessToken" } -Method Get
+        if ([string]::IsNullOrWhiteSpace($user.id)) { throw "Auth user response did not contain an account identifier" }
+        $script:authUserId = $user.id
+        return
     }
-    $user = Invoke-RestMethod -Uri ([Uri]::new([Uri]$runtimeConfig.supabaseUrl, "/auth/v1/user")) `
-        -Headers @{ apikey = $runtimeConfig.anonKey; Authorization = "Bearer $AccessToken" } -Method Get
-    if ([string]::IsNullOrWhiteSpace($user.id)) { throw "Auth user response did not contain an account identifier" }
-    $script:authUserId = $user.id
+
+    if ([string]::IsNullOrWhiteSpace($ExpectedAccountEmail)) {
+        throw "neither a retained access token nor the expected invited account email was provided"
+    }
+    if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+        throw "database connection is not configured for invited-account lookup"
+    }
+    $normalizedEmail = $ExpectedAccountEmail.Trim().ToLowerInvariant()
+    $parsedEmail = [System.Net.Mail.MailAddress]::new($normalizedEmail)
+    if (-not [string]::Equals($parsedEmail.Address, $normalizedEmail, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "expected invited account email is invalid"
+    }
+    $escapedEmail = $normalizedEmail.Replace("'", "''")
+    $psql = Get-Command psql -ErrorAction Stop
+    $row = & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -t -A -F '|' -c `
+        "select count(*), coalesce(min(id::text), '') from auth.users where lower(email) = '$escapedEmail';"
+    if ($LASTEXITCODE -ne 0) { throw "database Auth identity lookup failed" }
+    $parts = ([string]$row).Trim().Split('|')
+    if ($parts.Count -ne 2 -or $parts[0] -ne '1' -or [string]::IsNullOrWhiteSpace($parts[1])) {
+        throw "expected exactly one Auth identity for the invited account"
+    }
+    $script:authUserId = $parts[1]
 }))
 
 $requiredFiles = @(
@@ -328,7 +357,9 @@ foreach ($relativePath in $requiredFiles) {
 $runbook = Get-Content -LiteralPath (Join-Path $repoRoot "docs\flightlogx-preview-runbook.md") -Raw -Encoding UTF8
 [void]$checks.Add((New-Check `
     -Name "runbook defines invitation process" `
-    -Passed ($runbook -match "## Invitation Process" -and $runbook -match "Public\s+self-registration must remain disabled") `
+    -Passed ($runbook -match "## External Canary Procedure" `
+        -and $runbook -match "### 2\. Preflight and provision the same email" `
+        -and $runbook -match "Public\s+self-registration must remain disabled") `
     -Detail "checks committed runbook text"))
 [void]$checks.Add((New-Check `
     -Name "runbook defines incident severities" `
@@ -336,7 +367,8 @@ $runbook = Get-Content -LiteralPath (Join-Path $repoRoot "docs\flightlogx-previe
     -Detail "checks committed runbook text"))
 [void]$checks.Add((New-Check `
     -Name "runbook defines exit decision criteria" `
-    -Passed ($runbook -match "Pass requires:" -and $runbook -match "Fail if data recovery is uncertain") `
+    -Passed ($runbook -match '(?i)`pass` requires' `
+        -and $runbook -match '(?i)`failed` applies when data recovery is uncertain') `
     -Detail "checks committed runbook text"))
 
 $publicGate = Get-Content -LiteralPath (Join-Path $repoRoot "docs\public-release-hardening-gate.md") -Raw -Encoding UTF8
@@ -364,7 +396,7 @@ if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
         -Detail "redacted health snapshot captured"))
 }
 
-[void]$checks.Add((Invoke-SecretSafeCheck -Name "active account and existing registered device" -Action {
+[void]$checks.Add((Invoke-SecretSafeCheck -Name "active account, hosted logbook, and registered device" -Action {
     if ([string]::IsNullOrWhiteSpace($ConnectionString)) { throw "database connection is not configured" }
     if ([string]::IsNullOrWhiteSpace($authUserId)) { throw "retained Auth user was not validated" }
     $accountGuid = [Guid]::Parse($authUserId).ToString("D")
@@ -383,17 +415,28 @@ select
     $row = & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -t -A -F '|' -c $query
     if ($LASTEXITCODE -ne 0) { throw "database account/device read failed" }
     $counts = ([string]$row).Trim().Split('|')
-    if ($counts.Count -ne 3 -or $counts[0] -ne '1' -or $counts[1] -ne '1' -or $counts[2] -ne '1') {
-        throw "expected one active account, one matching active device, and one hosted logbook"
+    $deviceCountIsValid = if ([string]::IsNullOrWhiteSpace($ExpectedDeviceId)) {
+        $counts.Count -eq 3 -and [long]$counts[1] -ge 1
+    } else {
+        $counts.Count -eq 3 -and $counts[1] -eq '1'
+    }
+    if ($counts.Count -ne 3 -or $counts[0] -ne '1' -or -not $deviceCountIsValid -or $counts[2] -ne '1') {
+        throw "expected one active account, at least one active or matching device, and one hosted logbook"
     }
 }))
 
 if ($RunRlsHarness) {
-    if ([string]::IsNullOrWhiteSpace($ConnectionString)) {
+    if ([string]::IsNullOrWhiteSpace($RlsConnectionString)) {
         [void]$checks.Add((New-Check `
             -Name "hosted RLS harness" `
             -Passed $false `
-            -Detail "skipped; provide -ConnectionString or ELB_SUPABASE_PREVIEW_DB_URL"))
+            -Detail "skipped; provide a disposable -RlsConnectionString or ELB_SUPABASE_RLS_DB_URL"))
+    } elseif ((Get-PreviewDbHost -DatabaseConnectionString $RlsConnectionString) -eq
+        (Get-PreviewDbHost -DatabaseConnectionString $ConnectionString)) {
+        [void]$checks.Add((New-Check `
+            -Name "hosted RLS harness" `
+            -Passed $false `
+            -Detail "refused; the adversarial RLS target must be separate from the hosted Preview database"))
     } else {
         $psql = Get-Command psql -ErrorAction SilentlyContinue
         if ($null -eq $psql) {
@@ -402,11 +445,11 @@ if ($RunRlsHarness) {
                 -Passed $false `
                 -Detail "psql was not found on PATH"))
         } else {
-            & $psql.Source $ConnectionString -v ON_ERROR_STOP=1 -f (Join-Path $repoRoot "supabase\tests\hosted_preview_rls.sql") | Out-Host
+            & $psql.Source $RlsConnectionString -v ON_ERROR_STOP=1 -f (Join-Path $repoRoot "supabase\tests\hosted_preview_rls.sql") *> $null
             [void]$checks.Add((New-Check `
                 -Name "hosted RLS harness" `
                 -Passed ($LASTEXITCODE -eq 0) `
-                -Detail "adversarial RLS script completed"))
+                -Detail "adversarial RLS script completed against a separate disposable target"))
         }
     }
 } else {

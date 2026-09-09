@@ -231,8 +231,8 @@ public sealed class PortableLogbookValidatorTests
 
         Assert.False(result.IsValid);
         Assert.Contains(result.Errors, error => error.Code == PortableLogbookValidationCode.InvalidEntryField);
-        Assert.Contains(result.Errors, error => error.Message.Contains("Registration is required", StringComparison.Ordinal));
-        Assert.Contains(result.Errors, error => error.Message.Contains("cannot be zero", StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Message.Contains(PortableLogbookEntryMessages.MissingRegistration, StringComparison.Ordinal));
+        Assert.Contains(result.Errors, error => error.Message.Contains(PortableLogbookEntryMessages.MissingLoggedTime, StringComparison.Ordinal));
     }
 
     [Fact]

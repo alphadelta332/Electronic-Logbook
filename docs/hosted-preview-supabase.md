@@ -294,6 +294,13 @@ configuration, and the expected hosted account/logbook state. Do not continue wh
 check fails. Fix the proven subsystem and rerun the check; do not clear app data, reset the
 database, or initialize a replacement logbook.
 
+For an already-provisioned owner without a retained desktop Auth session, pass the exact
+invited email with `-ExpectedAccountEmail` from an in-memory PowerShell variable. The
+preflight resolves that email to exactly one Auth identity through the administrative
+database connection and does not write the email to its redacted report. A retained access
+token remains the stronger alternative when one is already available; do not extract one
+from the Android app or write either credential to disk for this check.
+
 ## Verification Before Preview Use
 
 Before provisioning the external canary:
