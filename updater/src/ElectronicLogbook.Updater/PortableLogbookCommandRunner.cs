@@ -1019,7 +1019,9 @@ public static class PortableLogbookCommandRunner
 
     private static PortableLogbookOperation ToPresentationOperation(PortableLogbookOperationV2 operation)
     {
-        var entry = operation.Entry is null ? null : ToPresentationEntry(operation.Entry);
+        var entry = operation.Entry is null
+            ? null
+            : WorkbookEntryPresentationProjection.Create(operation.Entry);
         return operation.Kind switch
         {
             PortableOperationKind.Create => new CreateEntryOperation(
@@ -1035,46 +1037,6 @@ public static class PortableLogbookCommandRunner
                 entry ?? throw new InvalidOperationException("Conflict-resolution operation is missing its workbook entry."), operation.ResolutionNote),
             _ => throw new ArgumentOutOfRangeException(nameof(operation), operation.Kind, "Unknown portable operation kind.")
         };
-    }
-
-    private static PortableLogbookEntry ToPresentationEntry(PortableLogbookWorkbookEntry entry) => new(
-        entry.Date,
-        entry.Type,
-        entry.Reg,
-        entry.FlightId,
-        entry.From,
-        entry.To,
-        entry.Via,
-        entry.Remarks,
-        Sum(entry.MeIcusDay, entry.MeIcusNight),
-        Sum(entry.SeCommandDay, entry.SeCommandNight, entry.MeCommandDay, entry.MeCommandNight),
-        Sum(entry.CopilotDay, entry.CopilotNight),
-        Sum(entry.SeDualDay, entry.SeDualNight, entry.MeDualDay, entry.MeDualNight),
-        null,
-        Sum(entry.SeIcusDay, entry.SeDualDay, entry.SeCommandDay, entry.MeIcusDay, entry.MeDualDay, entry.MeCommandDay, entry.CopilotDay),
-        Sum(entry.SeIcusNight, entry.SeDualNight, entry.SeCommandNight, entry.MeIcusNight, entry.MeDualNight, entry.MeCommandNight, entry.CopilotNight),
-        entry.IfrIf,
-        entry.IfrSim,
-        null,
-        null,
-        entry.LandingsDay,
-        entry.LandingsNight,
-        Sum(entry.Ils, entry.Vor, entry.Rnp, entry.Ndb, entry.DgaCdi, entry.DgaAzi, entry.Circling),
-        null,
-        entry.Rnp,
-        entry.Circling,
-        entry.CustomFields);
-
-    private static decimal? Sum(params decimal?[] values)
-    {
-        var presentValues = values.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
-        return presentValues.Length == 0 ? null : presentValues.Sum();
-    }
-
-    private static int? Sum(params int?[] values)
-    {
-        var presentValues = values.Where(value => value.HasValue).Select(value => value!.Value).ToArray();
-        return presentValues.Length == 0 ? null : presentValues.Sum();
     }
 
     private static V2CommandImportPlan CreateImportPlanV2(
