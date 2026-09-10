@@ -3,6 +3,41 @@ namespace ElectronicLogbook.Updater.Tests;
 public sealed class WizardPreviewMigrationStagingTests
 {
     [Fact]
+    public void PreviewReviewStepKeepsDiagnosticOptionReachableInTheWindowViewport()
+    {
+        var xaml = File.ReadAllText(TestRepo.FindFile(
+            "updater/src/ElectronicLogbook.Updater.Wizard/MainWindow.xaml"));
+        var document = System.Xml.Linq.XDocument.Parse(xaml);
+        var presentation = System.Xml.Linq.XNamespace.Get(
+            "http://schemas.microsoft.com/winfx/2006/xaml/presentation");
+        var x = System.Xml.Linq.XNamespace.Get(
+            "http://schemas.microsoft.com/winfx/2006/xaml");
+        var readyPanel = document
+            .Descendants(presentation + "ScrollViewer")
+            .Single(element => (string?)element.Attribute(x + "Name") == "ReadyPanel");
+        var warnings = document
+            .Descendants(presentation + "ScrollViewer")
+            .Single(element =>
+                (string?)element.Attribute(x + "Name") == "PreMigrationWarningsScrollViewer");
+        var contentGrid = readyPanel.Parent;
+        var firstContentRow = contentGrid?
+            .Element(presentation + "Grid.RowDefinitions")?
+            .Elements(presentation + "RowDefinition")
+            .First();
+
+        Assert.NotNull(contentGrid);
+        Assert.Equal("Grid", contentGrid!.Name.LocalName);
+        Assert.Equal("*", (string?)firstContentRow?.Attribute("Height"));
+        Assert.Equal("Auto", (string?)readyPanel.Attribute("VerticalScrollBarVisibility"));
+        Assert.Equal("Disabled", (string?)readyPanel.Attribute("HorizontalScrollBarVisibility"));
+        Assert.Contains(
+            readyPanel.Descendants(presentation + "CheckBox"),
+            element => (string?)element.Attribute(x + "Name") == "DetailedLoggingCheckBox");
+        Assert.Equal("80", (string?)warnings.Attribute("MaxHeight"));
+        Assert.Equal("Auto", (string?)warnings.Attribute("VerticalScrollBarVisibility"));
+    }
+
+    [Fact]
     public void PreviewUpdateShowsPlainLanguageWorkbookSummaryBeforeStagingAndGoogleSignIn()
     {
         var wizard = File.ReadAllText(TestRepo.FindFile(

@@ -27,7 +27,7 @@
 
         <Grid Grid.Row="1" Margin="0,14,0,14">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -112,34 +112,41 @@
                 <TextBlock Margin="0,8,0,0" x:Name="PreflightSummaryText" Text="Checks have not run yet." />
             </StackPanel>
 
-            <StackPanel Grid.Row="0" x:Name="ReadyPanel" Visibility="Collapsed">
-                <TextBlock x:Name="ReadyTitleText" Text="Ready to Update" FontSize="20" FontWeight="SemiBold" />
-                <TextBlock x:Name="ReadyDescriptionText" Margin="0,8,0,0" TextWrapping="Wrap" Text="Click Start to begin the update." />
-                <Border x:Name="PreMigrationSummaryPanel"
-                        Visibility="Collapsed"
-                        Margin="0,14,0,0"
-                        Padding="12"
-                        CornerRadius="4"
-                        Background="#F8FAFC"
-                        BorderBrush="#CBD5E1"
-                        BorderThickness="1">
-                    <StackPanel>
-                        <TextBlock Text="Workbook summary" FontWeight="SemiBold" />
-                        <TextBlock x:Name="PreMigrationFlightCountText" Margin="0,8,0,0" />
-                        <TextBlock x:Name="PreMigrationLoggedHoursText" Margin="0,4,0,0" />
-                        <TextBlock x:Name="PreMigrationDateRangeText" Margin="0,4,0,0" />
-                        <TextBlock Margin="0,12,0,0" Text="Check these workbook warnings:" FontWeight="SemiBold" />
-                        <ScrollViewer Margin="0,6,0,0"
-                                      MaxHeight="120"
-                                      VerticalScrollBarVisibility="Auto"
-                                      HorizontalScrollBarVisibility="Disabled">
-                            <TextBlock x:Name="PreMigrationWarningsText"
-                                       TextWrapping="Wrap" />
-                        </ScrollViewer>
-                    </StackPanel>
-                </Border>
-                <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write local redacted diagnostic report beside output workbook" IsChecked="False" />
-            </StackPanel>
+            <ScrollViewer Grid.Row="0"
+                          x:Name="ReadyPanel"
+                          Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto"
+                          HorizontalScrollBarVisibility="Disabled">
+                <StackPanel>
+                    <TextBlock x:Name="ReadyTitleText" Text="Ready to Update" FontSize="20" FontWeight="SemiBold" />
+                    <TextBlock x:Name="ReadyDescriptionText" Margin="0,8,0,0" TextWrapping="Wrap" Text="Click Start to begin the update." />
+                    <Border x:Name="PreMigrationSummaryPanel"
+                            Visibility="Collapsed"
+                            Margin="0,14,0,0"
+                            Padding="12"
+                            CornerRadius="4"
+                            Background="#F8FAFC"
+                            BorderBrush="#CBD5E1"
+                            BorderThickness="1">
+                        <StackPanel>
+                            <TextBlock Text="Workbook summary" FontWeight="SemiBold" />
+                            <TextBlock x:Name="PreMigrationFlightCountText" Margin="0,8,0,0" />
+                            <TextBlock x:Name="PreMigrationLoggedHoursText" Margin="0,4,0,0" />
+                            <TextBlock x:Name="PreMigrationDateRangeText" Margin="0,4,0,0" />
+                            <TextBlock Margin="0,12,0,0" Text="Check these workbook warnings:" FontWeight="SemiBold" />
+                            <ScrollViewer x:Name="PreMigrationWarningsScrollViewer"
+                                          Margin="0,6,0,0"
+                                          MaxHeight="80"
+                                          VerticalScrollBarVisibility="Auto"
+                                          HorizontalScrollBarVisibility="Disabled">
+                                <TextBlock x:Name="PreMigrationWarningsText"
+                                           TextWrapping="Wrap" />
+                            </ScrollViewer>
+                        </StackPanel>
+                    </Border>
+                    <CheckBox Margin="0,12,0,0" x:Name="DetailedLoggingCheckBox" Content="Write local redacted diagnostic report beside output workbook" IsChecked="False" />
+                </StackPanel>
+            </ScrollViewer>
 
             <StackPanel Grid.Row="0" x:Name="UpdatingPanel" Visibility="Collapsed">
                 <TextBlock Text="Updating" FontSize="20" FontWeight="SemiBold" />

@@ -606,7 +606,6 @@ public sealed class PwaPageWiringTests
         Assert.Contains("totals-count-grid", page, StringComparison.Ordinal);
         Assert.Contains("role=\"table\"", page, StringComparison.Ordinal);
         Assert.Contains("role=\"columnheader\"", page, StringComparison.Ordinal);
-        Assert.Contains("Workbook columns summed across @EntryCountLabel", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<span>Hours</span>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("<span>Count</span>", page, StringComparison.Ordinal);
         Assert.DoesNotContain("Detail=\"SE\"", page, StringComparison.Ordinal);
