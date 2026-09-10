@@ -42,6 +42,7 @@
                 <Button Margin="0,16,0,0"
                         Height="34"
                         x:Name="HostedConnectButton"
+                        Visibility="Collapsed"
                         Content="Connect to Electronic Logbook"
                         Click="HostedConnectButton_OnClick" />
                 <TextBlock x:Name="AdvancedRecoveryHeadingText" Margin="0,16,0,0" Text="Advanced recovery and support" FontWeight="SemiBold" />

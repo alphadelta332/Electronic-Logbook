@@ -55,6 +55,31 @@ public sealed class WizardPortableLogbookStatusTests
     }
 
     [Fact]
+    public void HostedConnectionActionAppearsOnlyInExplicitConnectionMode()
+    {
+        var xaml = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml")));
+        var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(
+            "updater",
+            "src",
+            "ElectronicLogbook.Updater.Wizard",
+            "MainWindow.xaml.cs")));
+        var updateView = ExtractMethodBody(codeBehind, "private void UpdateWizardView");
+
+        Assert.Contains("x:Name=\"HostedConnectButton\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("Visibility=\"Collapsed\"", xaml, StringComparison.Ordinal);
+        Assert.Contains("if (_context.ConnectHosted)", updateView, StringComparison.Ordinal);
+        Assert.Contains("HostedConnectButton.Visibility = Visibility.Visible;", updateView, StringComparison.Ordinal);
+        Assert.Contains("HostedConnectButton.Visibility = Visibility.Collapsed;", updateView, StringComparison.Ordinal);
+        Assert.True(
+            updateView.IndexOf("HostedConnectButton.Visibility = Visibility.Visible;", StringComparison.Ordinal) <
+            updateView.IndexOf("HostedConnectButton.Visibility = Visibility.Collapsed;", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TextPromptKeepsItsWidthWhenLongContentIsPasted()
     {
         var codeBehind = File.ReadAllText(FindRepoFile(Path.Combine(

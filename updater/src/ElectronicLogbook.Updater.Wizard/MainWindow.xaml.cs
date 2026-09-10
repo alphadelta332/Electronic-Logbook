@@ -130,9 +130,15 @@ public partial class MainWindow : Window
             BackButton.Visibility = Visibility.Collapsed;
             NextButton.Visibility = Visibility.Collapsed;
             CancelButton.Content = "Close";
+            HostedConnectButton.Visibility = Visibility.Visible;
             HostedConnectButton.IsEnabled = !_isUpdating && File.Exists(_context.SourcePath);
             return;
         }
+
+        // Connecting an already-migrated workbook is a separate launcher mode. Showing
+        // this action in the ordinary update flow is misleading because a first-time
+        // workbook-migration account intentionally has no hosted logbook yet.
+        HostedConnectButton.Visibility = Visibility.Collapsed;
 
         StepHeaderText.Text = $"Step {_stepIndex + 1} of {TotalSteps}: {_stepTitles[_stepIndex]}";
 
