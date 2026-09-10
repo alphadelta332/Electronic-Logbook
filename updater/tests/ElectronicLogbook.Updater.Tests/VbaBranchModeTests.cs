@@ -148,6 +148,7 @@ public sealed class VbaBranchModeTests
         Assert.Contains("private const string PreviewGitHubBranch = \"preview\"", source, StringComparison.Ordinal);
         Assert.Contains("UpdateChannel.Preview => PreviewGitHubBranch", source, StringComparison.Ordinal);
         Assert.Contains("Preview version:", source, StringComparison.Ordinal);
+        Assert.Contains("LegacyPreviewSourceResolver.Resolve(", source, StringComparison.Ordinal);
         Assert.Contains("LegacyPreviewMigrationBridge.MatchesWorkbookPackages(", source, StringComparison.Ordinal);
     }
 

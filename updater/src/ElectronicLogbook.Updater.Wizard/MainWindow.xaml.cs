@@ -2319,12 +2319,18 @@ public partial class MainWindow : Window
 
         source ??= GetDefaultSourcePath();
         source = Path.GetFullPath(source);
-        output ??= WorkbookOutputNamer.BuildDefaultOutputPath(source);
-        output = Path.GetFullPath(output);
         master = string.IsNullOrWhiteSpace(master) ? null : Path.GetFullPath(master);
         channel ??= string.IsNullOrWhiteSpace(master)
             ? UpdateChannel.Stable
             : UpdateChannel.LocalMaster;
+        if (channel == UpdateChannel.Development &&
+            master is not null &&
+            !File.Exists(source))
+        {
+            source = LegacyPreviewSourceResolver.Resolve(source, master);
+        }
+        output ??= WorkbookOutputNamer.BuildDefaultOutputPath(source);
+        output = Path.GetFullPath(output);
         if (channel == UpdateChannel.Development &&
             master is not null &&
             LegacyPreviewMigrationBridge.MatchesWorkbookPackages(source, master))
