@@ -26,7 +26,7 @@ public sealed class ExcelWorkbookMigrator
     private const int XlUp = -4162;
     private const int BaseAirportsTopCount = 10;
 
-    private static readonly string[] PreservedNames =
+    private static readonly string[] ExcelPreservedNames =
     [
         "RoutesBuilt",
         "RoutesDefinitionVersion",
@@ -34,10 +34,20 @@ public sealed class ExcelWorkbookMigrator
         "suppressWarningsUntil",
         "FROverride",
         "IPCOverride",
-        "OPCOverride",
+        "OPCOverride"
+    ];
+
+    private static readonly string[] PackagePreservedNames =
+    [
         PortableLogbookWorkbookMetadata.LogbookIdName,
         PortableLogbookWorkbookMetadata.DeviceIdName,
         PortableLogbookWorkbookMetadata.SchemaVersionName
+    ];
+
+    private static readonly string[] PreservedNames =
+    [
+        .. ExcelPreservedNames,
+        .. PackagePreservedNames
     ];
 
     private readonly IUpdaterProgressSink? _progressSink;
@@ -191,6 +201,7 @@ public sealed class ExcelWorkbookMigrator
 
             step = SetStep(UpdaterPhaseIds.CopyPortableStorage, "copying portable logbook storage");
             CopyPortableWorkbookStorage(request.SourcePath, request.OutputPath);
+            ValidatePortableWorkbookIdentityPreserved(request.SourcePath, request.OutputPath);
 
             _progressSink?.Report(new UpdaterProgressEvent(
                 UpdaterProgressEventTypes.UpdateCompleted,
@@ -281,6 +292,17 @@ public sealed class ExcelWorkbookMigrator
         var envelopeCopied = PortableLogbookWorkbookPackageStorage.CopyEnvelope(sourcePath, outputPath);
         var identityCopied = PortableLogbookWorkbookPackageStorage.CopyWorkbookIdentityMetadata(sourcePath, outputPath);
         return envelopeCopied || identityCopied;
+    }
+
+    internal static void ValidatePortableWorkbookIdentityPreserved(string sourcePath, string outputPath)
+    {
+        var sourceIdentity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(sourcePath);
+        var outputIdentity = PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(outputPath);
+        if (sourceIdentity != outputIdentity)
+        {
+            throw new InvalidDataException(
+                "Portable workbook identity validation failed after copying the closed workbook package.");
+        }
     }
 
     private static void UnprotectWorkbookForMigration(object workbookObject)
@@ -2105,7 +2127,10 @@ public sealed class ExcelWorkbookMigrator
     {
         var fingerprints = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Preferences"] = FingerprintNames(workbook, PreservedNames)
+            // Portable identity names are copied after Excel closes because a clean
+            // release master intentionally does not contain them. Validate those
+            // separately after the closed-package copy instead of failing here.
+            ["Preferences"] = FingerprintNames(workbook, ExcelPreservedNames)
         };
         if (GetTableOrNull(workbook, "Keywords") is not null)
         {

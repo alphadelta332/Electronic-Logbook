@@ -20,10 +20,16 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         var field = typeof(ExcelWorkbookMigrator).GetField("PreservedNames", BindingFlags.NonPublic | BindingFlags.Static)
             ?? throw new InvalidOperationException("PreservedNames field not found.");
         var names = Assert.IsType<string[]>(field.GetValue(null));
+        var excelField = typeof(ExcelWorkbookMigrator).GetField("ExcelPreservedNames", BindingFlags.NonPublic | BindingFlags.Static)
+            ?? throw new InvalidOperationException("ExcelPreservedNames field not found.");
+        var excelNames = Assert.IsType<string[]>(excelField.GetValue(null));
 
         Assert.Contains(PortableLogbookWorkbookMetadata.LogbookIdName, names);
         Assert.Contains(PortableLogbookWorkbookMetadata.DeviceIdName, names);
         Assert.Contains(PortableLogbookWorkbookMetadata.SchemaVersionName, names);
+        Assert.DoesNotContain(PortableLogbookWorkbookMetadata.LogbookIdName, excelNames);
+        Assert.DoesNotContain(PortableLogbookWorkbookMetadata.DeviceIdName, excelNames);
+        Assert.DoesNotContain(PortableLogbookWorkbookMetadata.SchemaVersionName, excelNames);
         Assert.Contains("FROverride", names);
         Assert.Contains("IPCOverride", names);
         Assert.Contains("OPCOverride", names);
@@ -281,6 +287,49 @@ public sealed class PortableLogbookMigratorPreservationTests : IDisposable
         Assert.Equal(create.LogbookId, identity.LogbookId);
         Assert.Equal(create.DeviceId, identity.DeviceId);
         Assert.Equal(document.SchemaVersion, identity.SchemaVersion);
+    }
+
+    [Fact]
+    public void MigratorPreservesPortableIdentityWithoutAnEnvelopeAfterExcelCloses()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version, "orphaned-identity-source.xlsm");
+        var output = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version, "orphaned-identity-output.xlsm");
+        var expected = new PortableLogbookWorkbookIdentity(
+            new LogbookId("log_orphaned_identity"),
+            new DeviceId("dev_orphaned_identity"),
+            PortableLogbookDocument.CurrentSchemaVersion);
+        PortableLogbookWorkbookPackageStorage.EnsureWorkbookIdentityMetadata(
+            source,
+            expected.LogbookId,
+            expected.DeviceId,
+            expected.SchemaVersion);
+
+        Assert.Null(PortableLogbookWorkbookPackageStorage.ReadEnvelope(source));
+
+        var copied = ExcelWorkbookMigrator.CopyPortableWorkbookStorage(source, output);
+        ExcelWorkbookMigrator.ValidatePortableWorkbookIdentityPreserved(source, output);
+
+        Assert.True(copied);
+        Assert.Equal(expected, PortableLogbookWorkbookPackageStorage.ReadWorkbookIdentityMetadata(output));
+    }
+
+    [Fact]
+    public void MigratorRejectsPortableIdentityMismatchAfterExcelCloses()
+    {
+        var source = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version, "identity-mismatch-source.xlsm");
+        var output = TestRepo.CreateMinimalWorkbookPackage(directory, TestRepo.Version, "identity-mismatch-output.xlsm");
+        PortableLogbookWorkbookPackageStorage.EnsureWorkbookIdentityMetadata(
+            source,
+            new LogbookId("log_source_identity"),
+            new DeviceId("dev_source_identity"),
+            PortableLogbookDocument.CurrentSchemaVersion);
+
+        var error = Assert.Throws<InvalidDataException>(() =>
+            ExcelWorkbookMigrator.ValidatePortableWorkbookIdentityPreserved(source, output));
+
+        Assert.Equal(
+            "Portable workbook identity validation failed after copying the closed workbook package.",
+            error.Message);
     }
 
     public void Dispose()
