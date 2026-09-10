@@ -116,6 +116,7 @@ try {
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'mobile/android/app/google-services.json' -and $_.Required -and $_.Classification -eq 'private-config' }).Count -eq 1) 'private Firebase Android config must be transferred for Preview development'
     Assert-True ($config.Expected.FirebaseProjectId -eq 'flightlogx-private-pilot') 'Firebase project verifier must target the approved Preview project with its retained legacy external ID'
     Assert-True ($config.Expected.FirebaseAndroidPackageName -eq 'com.alphadelta.electroniclogbook') 'Firebase package verifier must target the permanent Android ID'
+    Assert-True ($config.Expected.FirebaseAndroidBuildVariant -eq 'preview') 'Firebase Google Services configuration must be restricted to the permanent Preview build variant'
     Assert-True ($config.Expected.HostedProjectMetadataFile -eq 'hosted-preview-projects.local.json') 'canonical hosted project metadata filename must use Preview wording'
     Assert-True ($config.Expected.LegacyHostedProjectMetadataFile -eq 'hosted-pilot-projects.local.json') 'legacy hosted project metadata filename must remain a narrow compatibility alias'
     Assert-True ($config.Expected.PreviewSigningKeystoreFile -eq 'flightlogx-pilot.keystore') 'permanent Preview keystore must retain its legacy transfer filename'
@@ -175,6 +176,10 @@ try {
     Assert-True ($entrypointText -match 'Assert-LocalAppDataInventoryClassified') 'export must reject newly discovered unclassified local files'
     Assert-True ($entrypointText -match 'winget\.exe list' -and $entrypointText -match "wingetAction = if.*'upgrade'") 'installer must distinguish installed Winget packages from missing packages'
     Assert-True ($entrypointText -match 'stillInstalled') 'installer must re-verify a package after a nonzero Winget upgrade result'
+
+    $handoverText = Get-Content -LiteralPath (Join-Path $repoRoot 'LOCAL_DEVICE_SETUP_HANDOVER.md') -Raw -Encoding UTF8
+    Assert-True ($handoverText -match 'Gradle applies this descriptor only to the permanent-package `preview` variant') 'handover must explain that the Firebase descriptor is restricted to Preview builds'
+    Assert-True ($handoverText -match 'Debug\s+and acceptance builds deliberately skip it') 'handover must explain why suffixed development variants skip the Firebase descriptor'
 
     $ignored = & git -C $repoRoot check-ignore 'LOCAL_DEVICE_SETUP_HANDOVER.md' 2>$null
     Assert-True ($LASTEXITCODE -ne 0) 'the sanitized handover must be trackable'

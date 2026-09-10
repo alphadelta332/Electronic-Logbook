@@ -452,7 +452,9 @@ public sealed record BrowserHostedSyncState(
     string? AttentionRequiredReason = null,
     int PendingLocalOperationCount = 0,
     IReadOnlyList<RevisionId>? UploadedRevisionIds = null,
-    int LedgerCursorVersion = 0)
+    int LedgerCursorVersion = 0,
+    RevisionId? PendingConfigurationRevisionId = null,
+    DateTimeOffset? PendingConfigurationCreatedAt = null)
 {
     public const int CurrentLedgerCursorVersion = 1;
 

@@ -28,6 +28,14 @@ public interface IHostedConfigurationRevisionLedger
 {
     public const int MaxConfigurationPageSize = 200;
 
+    ValueTask<HostedConfigurationRevisionEnvelope> AppendConfigurationRevisionAsync(
+        LogbookId logbookId,
+        DeviceId deviceId,
+        HostedConfigurationRevisionUpload revision,
+        CancellationToken cancellationToken = default) =>
+        ValueTask.FromException<HostedConfigurationRevisionEnvelope>(
+            new NotSupportedException("This hosted configuration ledger is read only."));
+
     ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
         LogbookId logbookId,
         long afterHostedRevision,

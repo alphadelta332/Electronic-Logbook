@@ -19,28 +19,65 @@ else
     <section class="settings-page">
         <section class="form-section settings-overview-card" aria-labelledby="settings-heading">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Settings</span>
-                    <h1 id="settings-heading">Account and sync</h1>
-                </div>
+                <h1 id="settings-heading">Account and sync</h1>
                 <span class="draft-pill">@Session.HostedSyncStatusLabel</span>
             </div>
             <div class="settings-connection-summary" role="status" aria-live="polite">
                 <MudIcon Icon="@Icons.Material.Filled.SyncLock" />
                 <div>
-                    <strong>Connection status</strong>
+                    <strong>@(Session.HasHostedSync ? "Connected" : "Sign in required")</strong>
                     <span>@Session.HostedSyncStatusDetail</span>
                     <span>@AttentionGuidance</span>
                 </div>
             </div>
+            @if (Session.ShouldOfferHostedAuthentication)
+            {
+                <div class="field-grid">
+                    <MudButton Variant="Variant.Filled"
+                               Color="Color.Primary"
+                               StartIcon="@(IsGoogleSignInBusy ? Icons.Material.Filled.Sync : Icons.Material.Filled.AccountCircle)"
+                               OnClick="SignInWithGoogleAsync"
+                               Disabled="@IsAccountBusy"
+                               aria-busy="@IsGoogleSignInBusy">
+                        @(IsGoogleSignInBusy
+                            ? "Signing in with Google…"
+                            : Session.HasHostedSync ? "Reauthenticate with Google" : "Sign in with Google")
+                    </MudButton>
+                    <MudText Typo="Typo.caption">@(Session.HasHostedSync
+                        ? "Sign in again to repair the account connection without deleting the local logbook."
+                        : "Use the same Google account used for the workbook migration.")</MudText>
+                </div>
+            }
+            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncNowAsync" Disabled="@(!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)">
+                @(IsSyncBusy ? "Syncing…" : "Sync now")
+            </MudButton>
+            @if (IsGoogleSignInBusy)
+            {
+                <span class="settings-status-line" role="status" aria-live="polite">
+                    Signing in with Google… This can take a moment.
+                </span>
+            }
+            @if (!string.IsNullOrWhiteSpace(AccountMessage))
+            {
+                <span class="settings-status-line" role="status">@AccountMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(AccountError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@AccountError</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(SyncMessage))
+            {
+                <span class="settings-status-line" role="status">@SyncMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(SyncError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@SyncError</span>
+            }
         </section>
 
         <section class="form-section">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Appearance</span>
-                    <h2>Theme</h2>
-                </div>
+                <h2>Theme</h2>
                 <span class="draft-pill">@UiPreferences.ThemeMode</span>
             </div>
             <div class="segmented-control" aria-label="Appearance">
@@ -65,18 +102,123 @@ else
             </div>
         </section>
 
+        <section class="form-section" aria-labelledby="custom-entry-settings-heading">
+            <div class="section-title-row">
+                <h2 id="custom-entry-settings-heading">Custom entries</h2>
+                <span class="draft-pill">@Session.WorkbookCustomFields.Count / @MobileCustomFieldSettings.MaximumActiveFields</span>
+            </div>
+            <p class="settings-section-intro">
+                Add up to four fields for values you want to record with each flight. A field can only be renamed or removed while its total is zero.
+            </p>
+            <div class="custom-entry-settings-list">
+                @foreach (var fieldTotal in Session.WorkbookCustomFieldTotals)
+                {
+                    var fieldId = fieldTotal.Definition.Id;
+                    var editorId = $"custom-entry-{fieldId.Value}";
+                    var guidanceId = $"custom-entry-guidance-{fieldId.Value}";
+                    var isLocked = fieldTotal.Total != 0m;
+                    <article class="custom-entry-setting">
+                        <div class="custom-entry-setting-heading">
+                            <label for="@editorId">Entry @fieldTotal.Definition.Order</label>
+                            <span>Total @fieldTotal.FormattedTotal</span>
+                        </div>
+                        <input id="@editorId"
+                               value="@CustomFieldLabel(fieldId)"
+                               maxlength="@MobileCustomFieldSettings.MaximumLabelLength"
+                               disabled="@(IsCustomFieldBusy || isLocked)"
+                               aria-describedby="@guidanceId"
+                               @oninput="args => SetCustomFieldLabel(fieldId, args.Value?.ToString())" />
+                        <small id="@guidanceId">
+                            @(isLocked
+                                ? $"Locked while the total is {fieldTotal.FormattedTotal}."
+                                : "Total is zero, so this entry can be renamed or removed.")
+                        </small>
+                        <div class="custom-entry-setting-actions">
+                            @if (PendingCustomFieldRemoval == fieldId)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="@(() => RemoveCustomFieldAsync(fieldId))" Disabled="@IsCustomFieldBusy">
+                                    Confirm remove
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" OnClick="CancelCustomFieldRemoval" Disabled="@IsCustomFieldBusy">
+                                    Cancel
+                                </MudButton>
+                            }
+                            else
+                            {
+                                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => RenameCustomFieldAsync(fieldId))" Disabled="@(IsCustomFieldBusy || isLocked || !CustomFieldLabelChanged(fieldTotal.Definition))">
+                                    Save name
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="@(() => RequestCustomFieldRemoval(fieldId))" Disabled="@(IsCustomFieldBusy || isLocked)">
+                                    Remove
+                                </MudButton>
+                            }
+                        </div>
+                    </article>
+                }
+            </div>
+            @if (Session.WorkbookCustomFields.Count < MobileCustomFieldSettings.MaximumActiveFields)
+            {
+                <div class="custom-entry-add-row">
+                    <label for="new-custom-entry">New custom entry</label>
+                    <input id="new-custom-entry"
+                           value="@NewCustomFieldLabel"
+                           maxlength="@MobileCustomFieldSettings.MaximumLabelLength"
+                           disabled="@IsCustomFieldBusy"
+                           placeholder="e.g. Night vision"
+                           @oninput="args => NewCustomFieldLabel = args.Value?.ToString() ?? string.Empty" />
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Add" OnClick="AddCustomFieldAsync" Disabled="@(IsCustomFieldBusy || string.IsNullOrWhiteSpace(NewCustomFieldLabel))">
+                        Add custom entry
+                    </MudButton>
+                </div>
+            }
+            @if (IsCustomFieldBusy)
+            {
+                <span class="settings-status-line" role="status" aria-live="polite">Saving custom entries…</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(CustomFieldMessage))
+            {
+                <span class="settings-status-line" role="status" aria-live="polite">@CustomFieldMessage</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(CustomFieldError))
+            {
+                <span class="settings-status-line settings-status-error" role="alert">@CustomFieldError</span>
+            }
+        </section>
+
+        <section class="form-section">
+            <div class="section-title-row">
+                <h2>Export logbook</h2>
+                <span class="draft-pill">New file</span>
+            </div>
+            <div class="settings-connection-summary">
+                <MudIcon Icon="@Icons.Material.Filled.FileDownload" />
+                <div>
+                    <strong>XLSX or UTF-8 CSV</strong>
+                    <span>Create a new dated file from this app logbook. Existing workbooks are never opened or changed.</span>
+                </div>
+            </div>
+            <MudButton Href="/export" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload">
+                Export logbook
+            </MudButton>
+        </section>
+
+        <details class="settings-advanced">
+            <summary>
+                <span>
+                    <strong>Advanced settings</strong>
+                    <small>Diagnostics, recovery, backups and Preview tools</small>
+                </span>
+            </summary>
+
         @if (IsPreviewUpdateAvailable)
         {
             <section class="form-section">
                 <div class="section-title-row">
-                    <div>
-                        <span class="eyebrow">FlightLogX Preview</span>
-                        <h2>FlightLogX updates</h2>
-                    </div>
+                    <h2>FlightLogX updates</h2>
                     <span class="draft-pill">Preview only</span>
                 </div>
-                <MudText Typo="Typo.body2">FlightLogX checks automatically when you open the app. If an update is available, Android asks you to approve the installation. Use this button to check again now.</MudText>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPreviewUpdateAsync" Disabled="@IsPreviewUpdateBusy">
+                <MudText Typo="Typo.body2">FlightLogX Preview checks automatically when you open the app. Check again here if support asks you to.</MudText>
+                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPreviewUpdateAsync" Disabled="@IsPreviewUpdateBusy">
                     @(IsPreviewUpdateBusy ? "Checking for update…" : "Check for Preview update")
                 </MudButton>
                 @if (!string.IsNullOrWhiteSpace(PreviewUpdateMessage))
@@ -92,30 +234,7 @@ else
 
         <section class="form-section">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Your records</span>
-                    <h2>Export logbook</h2>
-                </div>
-                <span class="draft-pill">New file</span>
-            </div>
-            <div class="settings-connection-summary">
-                <MudIcon Icon="@Icons.Material.Filled.FileDownload" />
-                <div>
-                    <strong>XLSX or UTF-8 CSV</strong>
-                    <span>Create a new dated file from this app logbook. Existing workbooks are never opened or changed.</span>
-                </div>
-            </div>
-            <MudButton Href="/export" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload">
-                Export logbook
-            </MudButton>
-        </section>
-
-        <section class="form-section">
-            <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Device health</span>
-                    <h2>Offline copy and backup</h2>
-                </div>
+                <h2>Device health</h2>
                 <span class="draft-pill">@DeviceHealthLabel</span>
             </div>
             <div class="device-health-grid">
@@ -139,35 +258,16 @@ else
 
         <section class="form-section">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Connection</span>
-                    <h2>Hosted sync</h2>
-                </div>
+                <h2>Hosted sync details</h2>
                 <span class="draft-pill">@Session.HostedSyncStatusLabel</span>
             </div>
             <div class="device-health-grid">
-                <article class="device-health-item">
-                    <span>Account</span>
-                    <strong>@(Session.HasHostedSync ? "Connected" : "Not connected")</strong>
-                    <small>@Session.HostedSyncStatusDetail</small>
-                </article>
                 <article class="device-health-item">
                     <span>Workbook migration</span>
                     <strong>@MigrationStatus</strong>
                     <small>@MigrationDetail</small>
                 </article>
             </div>
-            @if (Session.ShouldOfferHostedAuthentication)
-            {
-                <div class="field-grid">
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.AccountCircle" OnClick="SignInWithGoogleAsync" Disabled="@IsAccountBusy">
-                        @(Session.HasHostedSync ? "Reauthenticate with Google" : "Sign in with Google")
-                    </MudButton>
-                    <MudText Typo="Typo.caption">@(Session.HasHostedSync
-                        ? "The connection preflight found a retained sign-in or device-access problem. Reauthenticate without deleting the local logbook."
-                        : "Use the same Google account that completed the spreadsheet migration on Windows.")</MudText>
-                </div>
-            }
             @if (!Session.HasHostedSync || Session.HostedSyncStatusLabel == "Needs attention")
             {
                 <div class="connection-diagnostic-actions">
@@ -181,17 +281,6 @@ else
                         </MudButton>
                     }
                 </div>
-            }
-            <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Sync" OnClick="SyncNowAsync" Disabled="@(!Session.HasHostedSync || Session.IsStorageBlocked || IsSyncBusy)">
-                Sync now
-            </MudButton>
-            @if (!string.IsNullOrWhiteSpace(AccountMessage))
-            {
-                <span class="settings-status-line">@AccountMessage</span>
-            }
-            @if (!string.IsNullOrWhiteSpace(AccountError))
-            {
-                <span class="settings-status-line settings-status-error" role="alert">@AccountError</span>
             }
             @if (Session.LastConnectionDiagnostics is { } diagnostics)
             {
@@ -217,14 +306,6 @@ else
                         <small>@ConnectionDiagnosticMessage</small>
                     }
                 </article>
-            }
-            @if (!string.IsNullOrWhiteSpace(SyncMessage))
-            {
-                <span class="settings-status-line">@SyncMessage</span>
-            }
-            @if (!string.IsNullOrWhiteSpace(SyncError))
-            {
-                <span class="settings-status-line settings-status-error" role="alert">@SyncError</span>
             }
             @if (Session.HostedSync is { } hostedSync && Session.HostedSyncDiagnostics is { } syncDiagnostics)
             {
@@ -310,10 +391,7 @@ else
 
         <section class="form-section">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Advanced recovery</span>
-                    <h2>Support and account data</h2>
-                </div>
+                <h2>Support and account data</h2>
             </div>
             <div class="device-health-grid">
                 <article class="device-health-item">
@@ -411,10 +489,7 @@ else
 
         <section class="form-section">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Support</span>
-                    <h2>Local summary</h2>
-                </div>
+                <h2>Local summary</h2>
             </div>
             <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Summarize" OnClick="ExportSupportSummaryAsync" Disabled="@(Session.IsStorageBlocked || IsSupportSummaryBusy)">
                 Support summary
@@ -428,6 +503,7 @@ else
                 <span class="settings-status-line settings-status-error" role="alert">@SupportSummaryError</span>
             }
         </section>
+        </details>
     </section>
 }
 
@@ -436,13 +512,18 @@ else
     private bool IsDeviceStateExportBusy { get; set; }
     private bool IsSyncBusy { get; set; }
     private bool IsAccountBusy { get; set; }
+    private bool IsGoogleSignInBusy { get; set; }
     private bool IsConnectionDiagnosticBusy { get; set; }
     private bool IsPreviewUpdateAvailable { get; set; }
     private bool IsPreviewUpdateBusy { get; set; }
+    private bool IsCustomFieldBusy { get; set; }
     private string HostedEmail { get; set; } = string.Empty;
     private string HostedVerificationCode { get; set; } = string.Empty;
     private string AccountRecoveryCode { get; set; } = string.Empty;
     private string RecoveryCodeConfirmation { get; set; } = string.Empty;
+    private string NewCustomFieldLabel { get; set; } = string.Empty;
+    private Dictionary<CustomFieldId, string> CustomFieldLabels { get; } = [];
+    private CustomFieldId? PendingCustomFieldRemoval { get; set; }
     private string? SupportSummaryMessage { get; set; }
     private string? SupportSummaryError { get; set; }
     private string? DeviceStateExportMessage { get; set; }
@@ -456,6 +537,8 @@ else
     private string? ConnectionDiagnosticMessage { get; set; }
     private string? PreviewUpdateMessage { get; set; }
     private string? PreviewUpdateError { get; set; }
+    private string? CustomFieldMessage { get; set; }
+    private string? CustomFieldError { get; set; }
 
     private bool CanRecoverConnection =>
         !IsConnectionDiagnosticBusy
@@ -465,6 +548,7 @@ else
     {
         Session.HostedSyncChanged += OnHostedSyncChanged;
         await Session.EnsureLoadedWorkbookAsync();
+        RefreshCustomFieldEditors();
         await UiPreferences.EnsureLoadedAsync();
         try
         {
@@ -479,7 +563,92 @@ else
 
     public void Dispose() => Session.HostedSyncChanged -= OnHostedSyncChanged;
 
-    private void OnHostedSyncChanged() => _ = InvokeAsync(StateHasChanged);
+    private void OnHostedSyncChanged() => _ = InvokeAsync(() =>
+    {
+        if (!IsCustomFieldBusy)
+        {
+            RefreshCustomFieldEditors();
+        }
+        StateHasChanged();
+    });
+
+    private string CustomFieldLabel(CustomFieldId fieldId) =>
+        CustomFieldLabels.GetValueOrDefault(fieldId, string.Empty);
+
+    private void SetCustomFieldLabel(CustomFieldId fieldId, string? label) =>
+        CustomFieldLabels[fieldId] = label ?? string.Empty;
+
+    private bool CustomFieldLabelChanged(CustomFieldDefinition definition) =>
+        !string.Equals(CustomFieldLabel(definition.Id).Trim(), definition.Label, StringComparison.Ordinal);
+
+    private void RefreshCustomFieldEditors()
+    {
+        foreach (var definition in Session.WorkbookCustomFields)
+        {
+            CustomFieldLabels[definition.Id] = definition.Label;
+        }
+    }
+
+    private async Task RenameCustomFieldAsync(CustomFieldId fieldId) =>
+        await RunCustomFieldActionAsync(
+            () => Session.RenameWorkbookCustomFieldAsync(fieldId, CustomFieldLabel(fieldId)),
+            "Custom entry name saved.");
+
+    private async Task AddCustomFieldAsync()
+    {
+        var label = NewCustomFieldLabel;
+        await RunCustomFieldActionAsync(
+            () => Session.AddWorkbookCustomFieldAsync(label),
+            "Custom entry added.");
+        if (CustomFieldError is null)
+        {
+            NewCustomFieldLabel = string.Empty;
+        }
+    }
+
+    private void RequestCustomFieldRemoval(CustomFieldId fieldId) =>
+        PendingCustomFieldRemoval = fieldId;
+
+    private void CancelCustomFieldRemoval() => PendingCustomFieldRemoval = null;
+
+    private async Task RemoveCustomFieldAsync(CustomFieldId fieldId)
+    {
+        await RunCustomFieldActionAsync(
+            () => Session.RemoveWorkbookCustomFieldAsync(fieldId),
+            "Custom entry removed.");
+        if (CustomFieldError is null)
+        {
+            PendingCustomFieldRemoval = null;
+        }
+    }
+
+    private async Task RunCustomFieldActionAsync(Func<Task> action, string successMessage)
+    {
+        if (IsCustomFieldBusy)
+        {
+            return;
+        }
+
+        IsCustomFieldBusy = true;
+        CustomFieldMessage = null;
+        CustomFieldError = null;
+        try
+        {
+            await action();
+            RefreshCustomFieldEditors();
+            CustomFieldMessage = Session.HostedSync?.PendingConfigurationRevisionId is null
+                ? successMessage
+                : $"{successMessage} Saved on this device and waiting to sync.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            CustomFieldError = ex.Message;
+        }
+        finally
+        {
+            IsCustomFieldBusy = false;
+        }
+    }
 
     private Task SetSystemThemeModeAsync() => UiPreferences.SetThemeModeAsync("System");
 
@@ -539,10 +708,10 @@ else
 
     private string AttentionGuidance => Session.HostedSyncStatusLabel switch
     {
-        "Needs attention" => "Resolve conflicts, reauthenticate, restore a lost key, or recover a revoked device from Advanced recovery/support.",
+        "Needs attention" => "You can reauthenticate here, or open Advanced settings to restore a lost key or recover a revoked device.",
         "Signing in" => "Finish sign-in with the six-digit code sent to the invited email. Check your junk or spam folder if it does not arrive.",
         "Offline" => "You can keep working; queued edits sync when the network returns.",
-        _ => "Daily sync stays automatic. Package tools are only for Advanced recovery/support."
+        _ => "Sync is automatic. Recovery and support tools are in Advanced settings."
     };
 
     private async Task StartHostedSignInAsync()
@@ -638,6 +807,7 @@ else
         }
 
         IsAccountBusy = true;
+        IsGoogleSignInBusy = true;
         AccountMessage = null;
         AccountError = null;
         try
@@ -651,6 +821,7 @@ else
         }
         finally
         {
+            IsGoogleSignInBusy = false;
             IsAccountBusy = false;
         }
     }

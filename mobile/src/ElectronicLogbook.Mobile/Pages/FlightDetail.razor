@@ -53,30 +53,9 @@ else if (CurrentEntry?.Entry is null)
             <section class="notice-panel" role="status">
                 <MudIcon Icon="@Icons.Material.Filled.DeleteOutline" />
                 <div>
-                    <strong>Deletion history</strong>
-                    <span>This entry is no longer active. Restoring it adds a new revision; the deletion and every earlier revision remain in the audit trail.</span>
+                    <strong>Deleted flight</strong>
+                    <span>This flight is no longer active. Restore it to return it to your logbook.</span>
                 </div>
-            </section>
-
-            <section class="form-section">
-                <div class="section-title-row">
-                    <div>
-                        <span class="eyebrow">Immutable history</span>
-                        <h2>Revisions</h2>
-                    </div>
-                </div>
-                @foreach (var revisionId in History.RevisionHistory)
-                {
-                    var revision = Session.FindOperationV2(revisionId);
-                    <div class="history-row">
-                        <div>
-                            <strong>@revision.Kind</strong>
-                            <span>@MobileLogbookSession.FormatTimestamp(revision.CreatedAt)</span>
-                        </div>
-                        <span>@revision.RevisionId.Value</span>
-                    </div>
-                }
-                <MudButton Href="/flights" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.ArrowBack">Logbook</MudButton>
             </section>
         </section>
     }
@@ -107,7 +86,7 @@ else
                     <div>
                         <span class="eyebrow">Confirm deletion</span>
                         <h2 id="delete-flight-dialog-title">Delete this flight?</h2>
-                        <p>The flight will leave your active logbook. Its audit history will remain, and you can undo this deletion for about five seconds.</p>
+                        <p>The flight will move to Deleted flights, where you can restore it later. You can also undo this deletion for about five seconds.</p>
                     </div>
                 </header>
                 <footer class="entry-action-dialog-actions">
@@ -186,28 +165,6 @@ else
             </div>
         </section>
 
-        @if (History is not null)
-        {
-            <section class="form-section">
-                <div class="section-title-row">
-                    <div>
-                        <span class="eyebrow">Immutable history</span>
-                        <h2>Revisions</h2>
-                    </div>
-                </div>
-                @foreach (var revisionId in History.RevisionHistory)
-                {
-                    var revision = Session.FindOperationV2(revisionId);
-                    <div class="history-row">
-                        <div>
-                            <strong>@revision.Kind</strong>
-                            <span>@MobileLogbookSession.FormatTimestamp(revision.CreatedAt)</span>
-                        </div>
-                        <span>@revision.RevisionId.Value</span>
-                    </div>
-                }
-            </section>
-        }
     </section>
 }
 

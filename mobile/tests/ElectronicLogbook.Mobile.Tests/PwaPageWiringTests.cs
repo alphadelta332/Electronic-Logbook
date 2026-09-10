@@ -10,7 +10,7 @@ public sealed class PwaPageWiringTests
         var settings = ReadMobilePage("Settings.razor");
         var migration = ReadMobilePage("WorkbookMigration.razor");
         var advancedStart = settings.IndexOf(
-            "<span class=\"eyebrow\">Advanced recovery</span>",
+            "<details class=\"settings-advanced\">",
             StringComparison.Ordinal);
 
         Assert.True(advancedStart >= 0);
@@ -76,6 +76,22 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("<h1>@History.EntryId.Value</h1>", flightDetail, StringComparison.Ordinal);
         Assert.DoesNotContain("<strong>@entry.EntryId.Value</strong>", logbook, StringComparison.Ordinal);
         Assert.DoesNotContain("<strong>@conflict.EntryId.Value</strong>", logbook, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate5UserFacingFlightPagesDoNotExposeImmutableRevisionHistory()
+    {
+        var flightDetail = ReadMobilePage("FlightDetail.razor");
+        var logbook = ReadMobilePage("Logbook.razor");
+        var packageExchange = ReadMobilePage("PackageExchange.razor");
+        var userFacingPages = string.Join(Environment.NewLine, flightDetail, logbook, packageExchange);
+
+        Assert.DoesNotContain("Immutable history", userFacingPages, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("<h2>Revisions</h2>", flightDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("History.RevisionHistory", flightDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("revision.RevisionId.Value", flightDetail, StringComparison.Ordinal);
+        Assert.DoesNotContain("review its revisions", logbook, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("audit trail", logbook, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -337,7 +353,8 @@ public sealed class PwaPageWiringTests
         var settings = ReadMobilePage("Settings.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
 
-        Assert.Contains("Connection status", settings, StringComparison.Ordinal);
+        Assert.Contains("Sign in required", settings, StringComparison.Ordinal);
+        Assert.Contains("Connected", settings, StringComparison.Ordinal);
         Assert.Contains("Hosted sync", settings, StringComparison.Ordinal);
         Assert.Contains("Invited account email", settings, StringComparison.Ordinal);
         Assert.Contains("Enter the email address that received the FlightLogX code.", settings, StringComparison.Ordinal);
@@ -391,21 +408,21 @@ public sealed class PwaPageWiringTests
     public void SettingsKeepsGoogleArrivalNormalAndEmailCodeRecoveryAdvanced()
     {
         var settings = ReadMobilePage("Settings.razor");
-        var connectionStart = settings.IndexOf(
-            "<span class=\"eyebrow\">Connection</span>",
-            StringComparison.Ordinal);
+        var connectionStart = settings.IndexOf("<h1 id=\"settings-heading\">Account and sync</h1>", StringComparison.Ordinal);
         var advancedStart = settings.IndexOf(
-            "<span class=\"eyebrow\">Advanced recovery</span>",
+            "<details class=\"settings-advanced\">",
             StringComparison.Ordinal);
+        var codeStart = settings.IndexOf("@code {", StringComparison.Ordinal);
 
         Assert.True(connectionStart >= 0);
         Assert.True(advancedStart > connectionStart);
+        Assert.True(codeStart > advancedStart);
         var normalConnection = settings[connectionStart..advancedStart];
-        var advancedRecovery = settings[advancedStart..];
+        var advancedRecovery = settings[advancedStart..codeStart];
 
         Assert.Contains("Sign in with Google", normalConnection, StringComparison.Ordinal);
         Assert.Contains(
-            "Use the same Google account that completed the spreadsheet migration on Windows.",
+            "Use the same Google account used for the workbook migration.",
             normalConnection,
             StringComparison.Ordinal);
         Assert.DoesNotContain("HostedEmail", normalConnection, StringComparison.Ordinal);
@@ -423,12 +440,106 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Add Google sign-in", advancedRecovery, StringComparison.Ordinal);
         Assert.Contains(
             "MobileHostedDiagnosticException diagnostic",
-            advancedRecovery,
+            settings,
             StringComparison.Ordinal);
         Assert.Contains(
             "Contact FlightLogX support and provide code",
-            advancedRecovery,
+            settings,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsKeepsOnlyEverydayControlsAheadOfCollapsedAdvancedSettings()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+        var accountStart = settings.IndexOf("<h1 id=\"settings-heading\">Account and sync</h1>", StringComparison.Ordinal);
+        var themeStart = settings.IndexOf("<h2>Theme</h2>", StringComparison.Ordinal);
+        var exportStart = settings.IndexOf("<h2>Export logbook</h2>", StringComparison.Ordinal);
+        var advancedStart = settings.IndexOf("<details class=\"settings-advanced\">", StringComparison.Ordinal);
+        var codeStart = settings.IndexOf("@code {", StringComparison.Ordinal);
+
+        Assert.True(accountStart >= 0);
+        Assert.True(themeStart > accountStart);
+        Assert.True(exportStart > themeStart);
+        Assert.True(advancedStart > exportStart);
+        Assert.True(codeStart > advancedStart);
+
+        var everydaySettings = settings[accountStart..advancedStart];
+        var advancedSettings = settings[advancedStart..codeStart];
+
+        Assert.Contains("Sign in with Google", everydaySettings, StringComparison.Ordinal);
+        Assert.Contains("Sync now", everydaySettings, StringComparison.Ordinal);
+        Assert.Contains("System", everydaySettings, StringComparison.Ordinal);
+        Assert.Contains("Export logbook", everydaySettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Run connection preflight", everydaySettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Manual Package Exchange", everydaySettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Support summary", everydaySettings, StringComparison.Ordinal);
+        Assert.DoesNotContain("<details class=\"settings-advanced\" open", settings, StringComparison.Ordinal);
+
+        Assert.Contains("Advanced settings", advancedSettings, StringComparison.Ordinal);
+        Assert.Contains("FlightLogX updates", advancedSettings, StringComparison.Ordinal);
+        Assert.Contains("Device health", advancedSettings, StringComparison.Ordinal);
+        Assert.Contains("Hosted sync details", advancedSettings, StringComparison.Ordinal);
+        Assert.Contains("Support and account data", advancedSettings, StringComparison.Ordinal);
+        Assert.Contains("Local summary", advancedSettings, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.settings-advanced\s*>\s*summary\s*\{[^}]*min-height:\s*56px", css);
+        Assert.Contains(".settings-advanced > summary:focus-visible", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsShowsProgressWhileGoogleSignInIsRunning()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var signInStart = settings.IndexOf(
+            "private async Task SignInWithGoogleAsync()",
+            StringComparison.Ordinal);
+        var signInEnd = settings.IndexOf(
+            "private async Task LinkGoogleIdentityAsync()",
+            signInStart,
+            StringComparison.Ordinal);
+
+        Assert.True(signInStart >= 0 && signInEnd > signInStart);
+        var signInFlow = settings[signInStart..signInEnd];
+        var busyStart = signInFlow.IndexOf("IsGoogleSignInBusy = true;", StringComparison.Ordinal);
+        var signInAwait = signInFlow.IndexOf(
+            "await Session.SignInWithGoogleAsync();",
+            StringComparison.Ordinal);
+        var finallyStart = signInFlow.IndexOf("finally", StringComparison.Ordinal);
+        var busyEnd = signInFlow.IndexOf("IsGoogleSignInBusy = false;", StringComparison.Ordinal);
+
+        Assert.True(
+            busyStart >= 0
+            && signInAwait > busyStart
+            && finallyStart > signInAwait
+            && busyEnd > finallyStart,
+            "Google sign-in must expose a busy state for the entire awaited operation.");
+        Assert.Contains("aria-busy=\"@IsGoogleSignInBusy\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Signing in with Google…", settings, StringComparison.Ordinal);
+        Assert.Contains("This can take a moment.", settings, StringComparison.Ordinal);
+        Assert.Contains("role=\"status\" aria-live=\"polite\"", settings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate5SettingsProvidesZeroTotalCustomEntryManagement()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("<h2 id=\"custom-entry-settings-heading\">Custom entries</h2>", settings, StringComparison.Ordinal);
+        Assert.Contains("A field can only be renamed or removed while its total is zero.", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookCustomFieldTotals", settings, StringComparison.Ordinal);
+        Assert.Contains("isLocked = fieldTotal.Total != 0m", settings, StringComparison.Ordinal);
+        Assert.Contains("RenameWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("RemoveWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("AddWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("Confirm remove", settings, StringComparison.Ordinal);
+        Assert.Contains("maxlength=\"@MobileCustomFieldSettings.MaximumLabelLength\"", settings, StringComparison.Ordinal);
+        Assert.Contains("public IReadOnlyList<MobileCustomFieldTotal> WorkbookCustomFieldTotals", session, StringComparison.Ordinal);
+        Assert.Contains("PendingConfigurationRevisionId", session, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.mud-button-root\s*\{[^}]*min-height:\s*48px", css);
+        Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -562,7 +673,7 @@ public sealed class PwaPageWiringTests
         var restoreHandler = detail[detail.IndexOf("private async Task RestoreEntryAsync()", StringComparison.Ordinal)..];
 
         Assert.Contains("Deleted flights", logbook, StringComparison.Ordinal);
-        Assert.Contains("review its revisions or restore it", logbook, StringComparison.Ordinal);
+        Assert.Contains("review its details or restore it", logbook, StringComparison.Ordinal);
         Assert.Contains("class=\"deleted-entry-row\"", logbook, StringComparison.Ordinal);
         Assert.Contains("Restore flight", detail, StringComparison.Ordinal);
         Assert.Contains("Session.RestoreWorkbookEntryAsync(entryToRestore)", restoreHandler, StringComparison.Ordinal);
@@ -572,7 +683,7 @@ public sealed class PwaPageWiringTests
         Assert.True(
             restoreHandler.IndexOf("await Task.Yield()", StringComparison.Ordinal) <
             restoreHandler.IndexOf("Session.RestoreWorkbookEntryAsync(entryToRestore)", StringComparison.Ordinal));
-        Assert.Contains("Restoring it adds a new revision", detail, StringComparison.Ordinal);
+        Assert.Contains("Restore it to return it to your logbook.", detail, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookOperationV2.Correct(", session, StringComparison.Ordinal);
         Assert.Contains("[entry.CurrentRevisionId]", session, StringComparison.Ordinal);
         Assert.Contains("\"Entry restored.\"", session, StringComparison.Ordinal);
@@ -906,6 +1017,23 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate5FlightDatesShowASecondaryRelativeDateIndicator()
+    {
+        var lastFlight = ReadMobilePage("DashboardLastFlight.razor");
+        var logbookRow = ReadMobilePage("LogbookFlightRow.razor");
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Contains("MobileRelativeDate.Format(flight.Date)", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("MobileRelativeDate.Format(Entry.Entry.Date)", logbookRow, StringComparison.Ordinal);
+        Assert.Contains("class=\"relative-date\"", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("class=\"relative-date\"", logbookRow, StringComparison.Ordinal);
+        Assert.Contains("<time datetime=", lastFlight, StringComparison.Ordinal);
+        Assert.Contains("<time datetime=", logbookRow, StringComparison.Ordinal);
+        Assert.Contains(".relative-date", css, StringComparison.Ordinal);
+        Assert.Contains("color: var(--app-text-muted);", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3CurrencyPageShowsWorkbookFaithfulEngineRowsAndExpirySummaries()
     {
         var page = ReadMobilePage("Currency.razor");
@@ -1019,7 +1147,7 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3FlightDetailIsReadFirstWithEditHistoryAndDeleteActions()
+    public void Gate3FlightDetailIsReadFirstWithEditAndDeleteActions()
     {
         var page = ReadMobilePage("FlightDetail.razor");
         var css = ReadMobileAsset("css", "app.css");
@@ -1030,7 +1158,6 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Session.WorkbookStateChanged -= OnWorkbookStateChanged", page, StringComparison.Ordinal);
         Assert.Contains("Read first", page, StringComparison.Ordinal);
         Assert.Contains("Edit entry", page, StringComparison.Ordinal);
-        Assert.Contains("Immutable history", page, StringComparison.Ordinal);
         Assert.Contains("Session.EntryDetails(CurrentEntry.Entry)", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeleteWorkbookEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
         Assert.True(
@@ -1044,10 +1171,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Confirm deletion", page, StringComparison.Ordinal);
         Assert.Contains("Delete this flight?", page, StringComparison.Ordinal);
         Assert.Contains("Delete flight", page, StringComparison.Ordinal);
-        Assert.Contains("you can undo this deletion for about five seconds", page, StringComparison.Ordinal);
+        Assert.Contains("You can also undo this deletion for about five seconds", page, StringComparison.Ordinal);
         Assert.Contains("History?.IsDeleted == true", page, StringComparison.Ordinal);
         Assert.Contains("Deleted entry", page, StringComparison.Ordinal);
-        Assert.Contains("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo($\"/flights/{CurrentEntry.EntryId.Value}/edit\")", page, StringComparison.Ordinal);
         Assert.Contains("record-field-groups", page, StringComparison.Ordinal);
         Assert.Contains("Crew and route", page, StringComparison.Ordinal);

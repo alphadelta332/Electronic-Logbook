@@ -59,10 +59,51 @@ public sealed class WizardPreviewMigrationStagingTests
 
         var summaryIndex = wizard.IndexOf("WorkbookPreMigrationInspector.Inspect(source)", StringComparison.Ordinal);
         var stagingIndex = wizard.IndexOf("await stager.StageAsync", StringComparison.Ordinal);
-        var signInIndex = wizard.IndexOf("await connectionClient.SignInWithGoogleAsync", StringComparison.Ordinal);
+        var signInIndex = wizard.IndexOf("await SignInWithGoogleInBrowserAsync", StringComparison.Ordinal);
         Assert.True(
             summaryIndex >= 0 && stagingIndex > summaryIndex && signInIndex > stagingIndex,
             "The customer summary must be prepared before staging and Google sign-in.");
+    }
+
+    [Fact]
+    public void PreviewGoogleSignInMinimizesWizardUntilBrowserFlowFinishes()
+    {
+        var wizard = File.ReadAllText(TestRepo.FindFile(
+            "updater/src/ElectronicLogbook.Updater.Wizard/MainWindow.xaml.cs"));
+        var start = wizard.IndexOf(
+            "private async Task<SupabaseWorkbookSession> SignInWithGoogleInBrowserAsync(",
+            StringComparison.Ordinal);
+        Assert.True(start >= 0, "The browser sign-in window handoff could not be found.");
+        var end = wizard.IndexOf(
+            "private async Task StartUpdateAsync()",
+            start,
+            StringComparison.Ordinal);
+        Assert.True(end > start, "The browser sign-in window handoff could not be isolated.");
+        var signInFlow = wizard[start..end];
+
+        var captureStateIndex = signInFlow.IndexOf(
+            "var previousWindowState = WindowState;",
+            StringComparison.Ordinal);
+        var minimizeIndex = signInFlow.IndexOf(
+            "WindowState = System.Windows.WindowState.Minimized;",
+            StringComparison.Ordinal);
+        var signInIndex = signInFlow.IndexOf(
+            "await connectionClient.SignInWithGoogleAsync(cancellationToken)",
+            StringComparison.Ordinal);
+        var finallyIndex = signInFlow.IndexOf("finally", StringComparison.Ordinal);
+        var restoreIndex = signInFlow.IndexOf(
+            "WindowState = previousWindowState;",
+            StringComparison.Ordinal);
+        var activateIndex = signInFlow.IndexOf("Activate();", StringComparison.Ordinal);
+
+        Assert.True(
+            captureStateIndex >= 0
+            && minimizeIndex > captureStateIndex
+            && signInIndex > minimizeIndex
+            && finallyIndex > signInIndex
+            && restoreIndex > finallyIndex
+            && activateIndex > restoreIndex,
+            "The updater must leave the foreground for browser sign-in, then restore itself on every exit path.");
     }
 
     [Fact]
@@ -83,7 +124,7 @@ public sealed class WizardPreviewMigrationStagingTests
         Assert.Contains("_context.Channel == UpdateChannel.Preview", updateFlow, StringComparison.Ordinal);
         Assert.Contains("new WorkbookMigrationStager(progressSink)", updateFlow, StringComparison.Ordinal);
         Assert.Contains("await stager.StageAsync(", updateFlow, StringComparison.Ordinal);
-        Assert.Contains("await connectionClient.SignInWithGoogleAsync", updateFlow, StringComparison.Ordinal);
+        Assert.Contains("await SignInWithGoogleInBrowserAsync", updateFlow, StringComparison.Ordinal);
         Assert.Contains("new PreviewWorkbookHostedMigration(", updateFlow, StringComparison.Ordinal);
         Assert.Contains("await hostedMigration.RunAsync(", updateFlow, StringComparison.Ordinal);
         Assert.Contains("Signed in as {previewAccountEmail}", updateFlow, StringComparison.Ordinal);
@@ -96,7 +137,7 @@ public sealed class WizardPreviewMigrationStagingTests
         Assert.Contains("else if (_context.UseInPlaceSwap)", updateFlow, StringComparison.Ordinal);
         var stagingIndex = updateFlow.IndexOf("await stager.StageAsync", StringComparison.Ordinal);
         var googleSignInIndex = updateFlow.IndexOf(
-            "await connectionClient.SignInWithGoogleAsync",
+            "await SignInWithGoogleInBrowserAsync",
             StringComparison.Ordinal);
         var hostedMigrationIndex = updateFlow.IndexOf(
             "await hostedMigration.RunAsync",

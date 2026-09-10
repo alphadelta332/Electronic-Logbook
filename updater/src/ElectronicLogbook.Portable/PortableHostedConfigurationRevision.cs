@@ -54,10 +54,7 @@ public static class HostedConfigurationRevisionCipher
         ArgumentNullException.ThrowIfNull(key);
         ValidateRevision(revision);
 
-        var serialized = JsonSerializer.SerializeToUtf8Bytes(
-            revision,
-            PortableLogbookJson.SerializerOptions);
-        var plaintext = Compress(serialized);
+        var plaintext = CreateCompressedPayload(revision);
         var ciphertext = new byte[plaintext.Length];
         var nonce = DeriveNonce(revision.LogbookId, revision.RevisionId, plaintext);
         var tag = new byte[TagSizeBytes];
@@ -163,6 +160,14 @@ public static class HostedConfigurationRevisionCipher
     }
 
     public static byte[] CreateAdditionalData(
+        PortableHostedConfigurationRevision revision)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        ValidateRevision(revision);
+        return AdditionalData(revision);
+    }
+
+    public static byte[] CreateAdditionalData(
         LogbookId logbookId,
         HostedConfigurationRevisionEnvelope envelope)
     {
@@ -174,6 +179,15 @@ public static class HostedConfigurationRevisionCipher
             envelope.DeviceId,
             envelope.CreatedAt,
             envelope.SchemaVersion);
+    }
+
+    public static byte[] CreateCompressedPayload(PortableHostedConfigurationRevision revision)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        ValidateRevision(revision);
+        return Compress(JsonSerializer.SerializeToUtf8Bytes(
+            revision,
+            PortableLogbookJson.SerializerOptions));
     }
 
     public static PortableHostedConfigurationRevision DeserializeDecryptedPayload(

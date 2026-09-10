@@ -9,6 +9,168 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class MobileLogbookSessionJourneyTests
 {
     [Fact]
+    public async Task HostedSyncRestoresWorkbookCustomFieldLabelsForAnExistingPhoneLogbook()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var logbookId = new LogbookId("log_migrated_labels");
+        var phoneDeviceId = new DeviceId("dev_android");
+        var migrationDeviceId = new DeviceId("dev_workbook_migration");
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-09-10T08:00:00Z"));
+        var key = PortableLogbookKey.FromBytes(Enumerable.Repeat((byte)7, 32).ToArray());
+        await new BrowserPackageKeyStore(jsRuntime).ImportRecoveryCodeAsync(logbookId, key.ToRecoveryCode());
+
+        var workbookFields = PortableLogbookCustomFieldSet.CreateWorkbookCustomFields(
+            ["Operation", "Training course", "Client", "Notes"]);
+        var entry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 9,
+            Day = 10,
+            Reg = "VH-MIG",
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [workbookFields[0].Id] = "1.5"
+            }
+        };
+        var operation = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_migrated"),
+            new RevisionId("rev_migrated"),
+            migrationDeviceId,
+            clock.UtcNow.AddMinutes(-5),
+            entry);
+        var retainedPhoneDocument = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [operation]);
+        var hosted = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            logbookId,
+            phoneDeviceId,
+            0,
+            PortableHostedSyncStatus.Synced);
+        await new BrowserLogbookStore(jsRuntime).SaveStateAsync(
+            new BrowserLogbookStateV2(retainedPhoneDocument, [], null, HostedSync: hosted));
+
+        var configurationDocument = retainedPhoneDocument with
+        {
+            CustomFieldDefinitions = workbookFields
+        };
+        var configurationRevision = PortableHostedConfigurationRevision.Create(
+            configurationDocument,
+            new RevisionId("rev_workbook_configuration"),
+            migrationDeviceId,
+            clock.UtcNow.AddMinutes(-4));
+        var encryptedConfiguration = HostedConfigurationRevisionCipher.Encrypt(configurationRevision, key);
+        var configurationLedger = new SingleConfigurationLedger(
+            new HostedConfigurationRevisionEnvelope(
+                1,
+                encryptedConfiguration.RevisionId,
+                encryptedConfiguration.DeviceId,
+                encryptedConfiguration.CreatedAt,
+                encryptedConfiguration.SchemaVersion,
+                encryptedConfiguration.PayloadCiphertext,
+                encryptedConfiguration.PayloadNonce,
+                encryptedConfiguration.PayloadTag,
+                encryptedConfiguration.PayloadHash));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(
+            hosted.AccountId,
+            phoneDeviceId,
+            clock);
+        _ = await authenticator.StartEmailSignInAsync("preview@example.com");
+        _ = await authenticator.CompleteEmailSignInAsync("123456");
+        var session = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            new InMemoryHostedLogbookLedger(),
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+            hostedConfigurationLedger: configurationLedger);
+
+        await session.EnsureLoadedWorkbookAsync();
+
+        Assert.Equal(PortableHostedSyncStatus.Synced, session.HostedSync?.LastStatus);
+        Assert.Equal(
+            ["Operation", "Training course", "Client", "Notes"],
+            session.WorkbookCustomFields.Select(field => field.Label));
+        var migrated = Assert.Single(session.CurrentEntriesV2).Entry;
+        Assert.NotNull(migrated);
+        Assert.Contains(
+            session.EntryDetails(migrated),
+            detail => detail.Label == "Operation" && detail.Value == "1.5");
+        var totals = MobileCustomFieldTotals.Calculate(session.WorkbookCustomFields, [migrated]);
+        Assert.Equal("Operation", totals[0].Definition.Label);
+        Assert.Equal("1.5", totals[0].FormattedTotal);
+        var persisted = await new BrowserLogbookStore(jsRuntime).LoadStateV2Async();
+        Assert.NotNull(persisted);
+        Assert.Equal(workbookFields, persisted.Document.CustomFieldDefinitions);
+    }
+
+    [Fact]
+    public async Task CustomFieldChangeMadeOfflineIsPublishedAndRestoredAfterReload()
+    {
+        var jsRuntime = new JourneyJsRuntime();
+        var logbookId = new LogbookId("log_custom_field_sync");
+        var deviceId = new DeviceId("dev_android");
+        var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-09-10T09:00:00Z"));
+        var key = PortableLogbookKey.FromBytes(Enumerable.Repeat((byte)9, 32).ToArray());
+        await new BrowserPackageKeyStore(jsRuntime).ImportRecoveryCodeAsync(logbookId, key.ToRecoveryCode());
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            logbookId,
+            MobileLogbookSession.CustomFields,
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+        var hosted = new BrowserHostedSyncState(
+            new HostedAccountId("acct_private"),
+            logbookId,
+            deviceId,
+            0,
+            PortableHostedSyncStatus.Synced);
+        await new BrowserLogbookStore(jsRuntime).SaveStateAsync(
+            new BrowserLogbookStateV2(document, [], null, HostedSync: hosted));
+        var authenticator = new InMemoryHostedLogbookAuthenticator(hosted.AccountId, deviceId, clock);
+        _ = await authenticator.StartEmailSignInAsync("preview@example.com");
+        _ = await authenticator.CompleteEmailSignInAsync("123456");
+        var operationLedger = new InMemoryHostedLogbookLedger();
+        var configurationLedger = new RecordingConfigurationLedger();
+        var offline = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            operationLedger,
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: false)),
+            hostedConfigurationLedger: configurationLedger);
+        await offline.EnsureLoadedWorkbookAsync();
+
+        await offline.RenameWorkbookCustomFieldAsync(
+            new CustomFieldId("cf_workbook_2"),
+            "Training exercise");
+
+        Assert.Empty(configurationLedger.Appended);
+        Assert.NotNull(offline.HostedSync?.PendingConfigurationRevisionId);
+        Assert.Equal("Training exercise", offline.WorkbookCustomFields[1].Label);
+
+        var online = CreateSession(
+            jsRuntime,
+            authenticator,
+            clock,
+            operationLedger,
+            new StaticNetworkStatus(new NetworkAvailability(IsOnline: true)),
+            hostedConfigurationLedger: configurationLedger);
+        await online.EnsureLoadedWorkbookAsync();
+
+        Assert.Single(configurationLedger.Appended);
+        Assert.Null(online.HostedSync?.PendingConfigurationRevisionId);
+        Assert.Equal("Training exercise", online.WorkbookCustomFields[1].Label);
+        var persisted = await new BrowserLogbookStore(jsRuntime).LoadStateV2Async();
+        Assert.NotNull(persisted);
+        Assert.Null(persisted.HostedSync?.PendingConfigurationRevisionId);
+        Assert.Equal("Training exercise", persisted.Document.CustomFieldDefinitions.Single(
+            field => field.Id == new CustomFieldId("cf_workbook_2")).Label);
+    }
+
+    [Fact]
     public async Task WorkbookMigrationPersistsExactValuesTotalsAndVerificationReceiptAcrossReload()
     {
         var jsRuntime = new JourneyJsRuntime();
@@ -1628,7 +1790,8 @@ public sealed class MobileLogbookSessionJourneyTests
         IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
         IMobileGoogleHostedAuthenticator? googleAuthenticator = null,
         IMobileReplacementRecoveryWorkflow? replacementRecovery = null,
-        MobileConnectionRecoveryWorkflow? connectionRecovery = null) =>
+        MobileConnectionRecoveryWorkflow? connectionRecovery = null,
+        IHostedConfigurationRevisionLedger? hostedConfigurationLedger = null) =>
         new(
             new BrowserLogbookStore(jsRuntime),
             new BrowserPackageKeyStore(jsRuntime),
@@ -1639,7 +1802,68 @@ public sealed class MobileLogbookSessionJourneyTests
             connectionRecovery: connectionRecovery,
             recoveryEnvelopeService: recoveryEnvelopeService,
             googleAuthenticator: googleAuthenticator,
-            replacementRecovery: replacementRecovery);
+            replacementRecovery: replacementRecovery,
+            hostedConfigurationLedger: hostedConfigurationLedger);
+
+    private sealed class SingleConfigurationLedger(HostedConfigurationRevisionEnvelope revision)
+        : IHostedConfigurationRevisionLedger
+    {
+        public ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult(afterHostedRevision < revision.HostedRevision
+                ? new HostedConfigurationRevisionPage([revision], revision.HostedRevision, HasMore: false)
+                : new HostedConfigurationRevisionPage([], afterHostedRevision, HasMore: false));
+    }
+
+    private sealed class RecordingConfigurationLedger : IHostedConfigurationRevisionLedger
+    {
+        public List<HostedConfigurationRevisionEnvelope> Appended { get; } = [];
+
+        public ValueTask<HostedConfigurationRevisionEnvelope> AppendConfigurationRevisionAsync(
+            LogbookId logbookId,
+            DeviceId deviceId,
+            HostedConfigurationRevisionUpload revision,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.Equal(deviceId, revision.DeviceId);
+            var envelope = new HostedConfigurationRevisionEnvelope(
+                Appended.Count + 1,
+                revision.RevisionId,
+                revision.DeviceId,
+                revision.CreatedAt,
+                revision.SchemaVersion,
+                revision.PayloadCiphertext,
+                revision.PayloadNonce,
+                revision.PayloadTag,
+                revision.PayloadHash);
+            Appended.Add(envelope);
+            return ValueTask.FromResult(envelope);
+        }
+
+        public ValueTask<HostedConfigurationRevisionPage> ReadConfigurationRevisionsAsync(
+            LogbookId logbookId,
+            long afterHostedRevision,
+            int pageSize,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var revisions = Appended
+                .Where(revision => revision.HostedRevision > afterHostedRevision)
+                .Take(pageSize)
+                .ToArray();
+            var through = revisions.Length == 0
+                ? afterHostedRevision
+                : revisions.Max(revision => revision.HostedRevision);
+            return ValueTask.FromResult(new HostedConfigurationRevisionPage(
+                revisions,
+                through,
+                Appended.Any(revision => revision.HostedRevision > through)));
+        }
+    }
 
     private sealed class InactiveDeviceRecoveryClient(
         HostedAccountId accountId,

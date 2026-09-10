@@ -725,11 +725,31 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     font-weight: 850;
 }
 
-.dashboard-last-flight-heading time {
+.dashboard-last-flight-heading .date-with-relative {
     margin-left: auto;
+}
+
+.date-with-relative {
+    display: inline-flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 3px 8px;
+}
+
+.dashboard-last-flight-heading time {
     color: var(--app-text);
     font-size: 12px;
     font-weight: 750;
+    white-space: nowrap;
+}
+
+.relative-date {
+    color: var(--app-text-muted);
+    font-size: 11px;
+    font-weight: 650;
+    letter-spacing: normal;
+    text-transform: none;
     white-space: nowrap;
 }
 
@@ -1020,6 +1040,59 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .settings-connection-summary span {
     color: var(--app-text-muted);
+}
+
+.settings-advanced[open] {
+    display: grid;
+    gap: 12px;
+}
+
+.settings-advanced > summary {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 16px;
+    min-height: 56px;
+    padding: 14px 16px;
+    border: 1px solid var(--app-border);
+    border-radius: 14px;
+    background: var(--app-surface);
+    cursor: pointer;
+    list-style: none;
+}
+
+.settings-advanced > summary::-webkit-details-marker {
+    display: none;
+}
+
+.settings-advanced > summary::after {
+    width: 9px;
+    height: 9px;
+    border-right: 2px solid var(--app-text-muted);
+    border-bottom: 2px solid var(--app-text-muted);
+    content: "";
+    transform: rotate(45deg);
+    transition: transform 160ms ease-out;
+}
+
+.settings-advanced[open] > summary::after {
+    transform: rotate(225deg);
+}
+
+.settings-advanced > summary:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 38%, transparent);
+    outline-offset: 2px;
+}
+
+.settings-advanced > summary span {
+    display: grid;
+    gap: 3px;
+}
+
+.settings-advanced > summary small {
+    color: var(--app-text-muted);
+    font-weight: 400;
+    line-height: 1.35;
 }
 
 .empty-state {
@@ -1367,7 +1440,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .logbook-page .logbook-row-date {
     grid-area: date;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
     align-self: start;
+    gap: 3px 8px;
     color: var(--app-text-muted);
     font-size: 13px;
     font-weight: 800;
@@ -2063,7 +2140,8 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .dashboard-currency-panel-chevron {
+    .dashboard-currency-panel-chevron,
+    .settings-advanced > summary::after {
         transition: none;
     }
 
@@ -2154,6 +2232,82 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .accent-option[data-accent="plum"] { --accent-swatch: #9c3d78; }
 .accent-option[data-accent="rose"] { --accent-swatch: #b4345c; }
 .accent-option[data-accent="teal"] { --accent-swatch: #007c78; }
+
+.settings-section-intro {
+    margin: 0;
+    color: var(--app-text-muted);
+    line-height: 1.5;
+}
+
+.custom-entry-settings-list {
+    display: grid;
+    gap: 10px;
+}
+
+.custom-entry-setting {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    padding-block: 12px;
+    border-top: 1px solid var(--app-border);
+}
+
+.custom-entry-setting-heading {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.custom-entry-setting-heading label {
+    font-weight: 800;
+}
+
+.custom-entry-setting-heading span {
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.custom-entry-setting input,
+.custom-entry-add-row input {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+}
+
+.custom-entry-setting small {
+    color: var(--app-text-muted);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.custom-entry-setting-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.custom-entry-setting-actions .mud-button-root {
+    min-height: 48px;
+}
+
+.custom-entry-add-row {
+    display: grid;
+    gap: 8px;
+    padding-top: 14px;
+    border-top: 1px solid var(--app-border);
+}
+
+.custom-entry-add-row > label {
+    font-weight: 800;
+}
+
+.custom-entry-add-row .mud-button-root {
+    justify-self: start;
+    min-height: 48px;
+}
 
 .settings-status-line {
     display: block;

@@ -887,6 +887,40 @@ public sealed class MobileSupabaseHostedSyncClient(
             rows.Any(row => row.HasMore));
     }
 
+    public async ValueTask<HostedConfigurationRevisionEnvelope> AppendConfigurationRevisionAsync(
+        LogbookId logbookId,
+        DeviceId deviceId,
+        HostedConfigurationRevisionUpload revision,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(revision);
+        if (revision.DeviceId != deviceId)
+        {
+            throw new HostedLedgerException(
+                HostedLedgerFailureReason.InvalidIdentifier,
+                "The configuration revision belongs to a different device.");
+        }
+
+        var options = await GetConfigAsync(cancellationToken);
+        await EnsureHostedLogbookAsync(options, logbookId, cancellationToken);
+        var row = await RpcSingleAsync<AppendConfigurationRevisionRequest, HostedConfigurationRevisionRow>(
+            options,
+            "append_hosted_configuration_revision",
+            new AppendConfigurationRevisionRequest(
+                ToHostedUuid(logbookId.Value, "log_"),
+                ToHostedUuid(deviceId.Value, "dev_"),
+                ToHostedUuid(revision.RevisionId.Value, "rev_"),
+                revision.RevisionId.Value,
+                revision.SchemaVersion - 1,
+                revision.PayloadCiphertext,
+                revision.PayloadNonce,
+                revision.PayloadTag,
+                revision.PayloadHash,
+                revision.CreatedAt),
+            cancellationToken);
+        return ToConfigurationEnvelope(row);
+    }
+
     public async ValueTask RecordAcknowledgementAsync(
         LogbookId logbookId,
         DeviceId deviceId,
@@ -1701,6 +1735,18 @@ public sealed class MobileSupabaseHostedSyncClient(
         [property: JsonPropertyName("p_logbook_id")] string LogbookId,
         [property: JsonPropertyName("p_after_revision")] long AfterHostedRevision,
         [property: JsonPropertyName("p_page_size")] int PageSize);
+
+    private sealed record AppendConfigurationRevisionRequest(
+        [property: JsonPropertyName("p_logbook_id")] string LogbookId,
+        [property: JsonPropertyName("p_device_id")] string DeviceId,
+        [property: JsonPropertyName("p_configuration_id")] string ConfigurationId,
+        [property: JsonPropertyName("p_portable_revision_id")] string PortableRevisionId,
+        [property: JsonPropertyName("p_configuration_format_version")] int ConfigurationFormatVersion,
+        [property: JsonPropertyName("p_payload_ciphertext")] string PayloadCiphertext,
+        [property: JsonPropertyName("p_payload_nonce")] string PayloadNonce,
+        [property: JsonPropertyName("p_payload_tag")] string PayloadTag,
+        [property: JsonPropertyName("p_payload_hash")] string PayloadHash,
+        [property: JsonPropertyName("p_client_created_at")] DateTimeOffset ClientCreatedAt);
 
     private sealed record RecordAckRequest(
         [property: JsonPropertyName("p_logbook_id")] string LogbookId,

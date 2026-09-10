@@ -61,4 +61,5 @@ public sealed record CustomFieldDefinition(
     CustomFieldId Id,
     string Label,
     int Order,
-    string? Description = null);
+    string? Description = null,
+    bool IsActive = true);

@@ -812,6 +812,59 @@ public sealed class MobileSupabaseHostedSyncClientTests
     }
 
     [Fact]
+    public async Task AppendConfigurationRevisionUsesEncryptedWriterRpcAndMapsAcceptedRevision()
+    {
+        var handler = new RecordingHandler();
+        handler.ResponseOverrides["/rest/v1/rpc/append_hosted_configuration_revision"] =
+            (HttpStatusCode.OK, """
+                {
+                  "revision": 4,
+                  "configuration_id": "60000000-0000-0000-0000-000000000004",
+                  "portable_revision_id": "rev_60000000000000000000000000000004",
+                  "author_device_id": "40000000-0000-0000-0000-000000000001",
+                  "configuration_format_version": 1,
+                  "payload_ciphertext": "AQIDBA==",
+                  "payload_nonce": "AAAAAAAAAAAAAAAA",
+                  "payload_tag": "AAAAAAAAAAAAAAAAAAAAAA==",
+                  "payload_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "client_created_at": "2026-09-10T00:00:00Z",
+                  "received_at": "2026-09-10T00:00:01Z",
+                  "highest_revision": 4,
+                  "has_more": false
+                }
+                """);
+        var store = new BrowserHostedCredentialStore(new MemoryJsRuntime());
+        await store.SaveAsync(ValidCredential());
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://app.local/") };
+        var client = new MobileSupabaseHostedSyncClient(
+            http,
+            store,
+            new ManualSyncClock(DateTimeOffset.Parse("2026-09-10T00:00:00Z")));
+        var logbookId = new LogbookId("log_20000000000000000000000000000001");
+        var deviceId = new DeviceId("dev_40000000000000000000000000000001");
+        var upload = new HostedConfigurationRevisionUpload(
+            new RevisionId("rev_60000000000000000000000000000004"),
+            deviceId,
+            DateTimeOffset.Parse("2026-09-10T00:00:00Z"),
+            PortableHostedConfigurationRevision.CurrentSchemaVersion,
+            "AQIDBA==",
+            "AAAAAAAAAAAAAAAA",
+            "AAAAAAAAAAAAAAAAAAAAAA==",
+            new string('0', 64));
+
+        var appended = await client.AppendConfigurationRevisionAsync(logbookId, deviceId, upload);
+
+        Assert.Equal(4, appended.HostedRevision);
+        Assert.Equal(upload.RevisionId, appended.RevisionId);
+        var request = Assert.Single(handler.Requests.Where(request =>
+            request.Path == "/rest/v1/rpc/append_hosted_configuration_revision"));
+        Assert.Equal(1, request.Body.GetProperty("p_configuration_format_version").GetInt32());
+        Assert.Equal("60000000-0000-0000-0000-000000000004", request.Body.GetProperty("p_configuration_id").GetString());
+        Assert.Equal("AQIDBA==", request.Body.GetProperty("p_payload_ciphertext").GetString());
+        Assert.DoesNotContain("custom field", request.Body.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ClientPersistsVerifiedCredentialAndResumesInterruptedDeviceRegistrationWithoutAnotherEmail()
     {
         var handler = new RecordingHandler();

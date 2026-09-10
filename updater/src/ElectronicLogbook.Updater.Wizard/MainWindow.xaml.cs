@@ -1466,6 +1466,24 @@ public partial class MainWindow : Window
         Close();
     }
 
+    private async Task<SupabaseWorkbookSession> SignInWithGoogleInBrowserAsync(
+        SupabaseWorkbookConnectionClient connectionClient,
+        CancellationToken cancellationToken)
+    {
+        var previousWindowState = WindowState;
+        WindowState = System.Windows.WindowState.Minimized;
+
+        try
+        {
+            return await connectionClient.SignInWithGoogleAsync(cancellationToken);
+        }
+        finally
+        {
+            WindowState = previousWindowState;
+            Activate();
+        }
+    }
+
     private async Task StartUpdateAsync()
     {
         if (_isUpdating)
@@ -1567,7 +1585,9 @@ public partial class MainWindow : Window
                         "Google sign-in is not configured in this Preview updater."));
                 FooterStatusText.Text = "Opening Google sign-in in your browser...";
                 AppendLog("Opening secure Google sign-in in the system browser...");
-                var previewSession = await connectionClient.SignInWithGoogleAsync(_updateCts.Token);
+                var previewSession = await SignInWithGoogleInBrowserAsync(
+                    connectionClient,
+                    _updateCts.Token);
                 previewAccountEmail = previewSession.AccountDisplay;
                 AppendLog("Google sign-in completed.");
 

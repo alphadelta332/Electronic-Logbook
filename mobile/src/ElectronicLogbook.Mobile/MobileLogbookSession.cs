@@ -14,7 +14,8 @@ public sealed class MobileLogbookSession(
     MobileConnectionRecoveryWorkflow? connectionRecovery = null,
     IMobileGoogleHostedAuthenticator? googleAuthenticator = null,
     IMobileRecoveryEnvelopeService? recoveryEnvelopeService = null,
-    IMobileReplacementRecoveryWorkflow? replacementRecovery = null)
+    IMobileReplacementRecoveryWorkflow? replacementRecovery = null,
+    IHostedConfigurationRevisionLedger? hostedConfigurationLedger = null)
 {
     public static readonly TimeSpan ActionFeedbackWindow = TimeSpan.FromSeconds(5);
 
@@ -86,10 +87,18 @@ public sealed class MobileLogbookSession(
     public MobileWorkbookEntryDraft WorkbookDraft { get; private set; } =
         MobileWorkbookEntryDraft.Create(CustomFields);
 
-    public IReadOnlyList<CustomFieldDefinition> WorkbookCustomFields =>
+    public IReadOnlyList<CustomFieldDefinition> AllWorkbookCustomFields =>
         DocumentV2.CustomFieldDefinitions.Count > 0
             ? DocumentV2.CustomFieldDefinitions.OrderBy(customField => customField.Order).ToArray()
             : CustomFields;
+
+    public IReadOnlyList<CustomFieldDefinition> WorkbookCustomFields =>
+        AllWorkbookCustomFields.Where(customField => customField.IsActive).ToArray();
+
+    public IReadOnlyList<MobileCustomFieldTotal> WorkbookCustomFieldTotals =>
+        MobileCustomFieldSettings.Summarize(
+            AllWorkbookCustomFields,
+            CurrentEntriesV2.Select(entry => entry.Entry!));
 
     public bool HasAttemptedSubmit { get; private set; }
 
@@ -476,6 +485,24 @@ public sealed class MobileLogbookSession(
         EditingEntryId = null;
         EditingRevisionId = null;
     }
+
+    public Task RenameWorkbookCustomFieldAsync(CustomFieldId fieldId, string label) =>
+        SaveWorkbookCustomFieldsAsync(MobileCustomFieldSettings.Rename(
+            AllWorkbookCustomFields,
+            CurrentEntriesV2.Select(entry => entry.Entry!),
+            fieldId,
+            label));
+
+    public Task RemoveWorkbookCustomFieldAsync(CustomFieldId fieldId) =>
+        SaveWorkbookCustomFieldsAsync(MobileCustomFieldSettings.Remove(
+            AllWorkbookCustomFields,
+            CurrentEntriesV2.Select(entry => entry.Entry!),
+            fieldId));
+
+    public Task AddWorkbookCustomFieldAsync(string label) =>
+        SaveWorkbookCustomFieldsAsync(MobileCustomFieldSettings.Add(
+            AllWorkbookCustomFields,
+            label));
 
     public void CloneEntry(PortableLogbookEntry entry)
     {
@@ -1620,6 +1647,38 @@ public sealed class MobileLogbookSession(
     private ValueTask SaveStateV2Async() =>
         logbookStore.SaveStateAsync(new BrowserLogbookStateV2(DocumentV2, ImportReceipts, LastSuccessfulExportAt, LastSuccessfulExport, HostedSync, WorkbookMigration));
 
+    private async Task SaveWorkbookCustomFieldsAsync(IReadOnlyList<CustomFieldDefinition> definitions)
+    {
+        if (IsStorageBlocked)
+        {
+            throw new InvalidOperationException("Custom entries cannot be changed while local storage needs attention.");
+        }
+
+        DocumentV2 = DocumentV2 with
+        {
+            CustomFieldDefinitions = definitions
+                .OrderBy(definition => definition.Order)
+                .ThenBy(definition => definition.Id.Value, StringComparer.Ordinal)
+                .ToArray()
+        };
+        if (HostedSync is not null)
+        {
+            HostedSync = HostedSync with
+            {
+                PendingConfigurationRevisionId = portableIdFactory.NewRevisionId(),
+                PendingConfigurationCreatedAt = syncClock.UtcNow
+            };
+        }
+
+        foreach (var definition in definitions.Where(definition => definition.IsActive))
+        {
+            WorkbookDraft.CustomValues.TryAdd(definition.Id, string.Empty);
+        }
+        WorkbookStateChanged?.Invoke();
+        await SaveStateV2Async();
+        await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
+    }
+
     private async Task TrySyncHostedAsync(BackgroundSyncReason reason)
     {
         if (HostedSync is null || hostedLedger is null || networkStatus is null || hostedAuthenticator is null)
@@ -1670,6 +1729,61 @@ public sealed class MobileLogbookSession(
                 networkStatus,
                 syncClock)
             .SyncAsync(new PortableHostedSyncRequestContext(DocumentV2, HostedSync, reason));
+        if (result.Status == PortableHostedSyncStatus.Synced && hostedConfigurationLedger is not null)
+        {
+            try
+            {
+                if (HostedSync.PendingConfigurationRevisionId is { } pendingRevisionId)
+                {
+                    await new MobileHostedConfigurationPublisher(
+                            packageKeyStore,
+                            hostedConfigurationLedger)
+                        .PublishAsync(
+                            result.Document,
+                            pendingRevisionId,
+                            HostedSync.DeviceId,
+                            HostedSync.PendingConfigurationCreatedAt ?? syncClock.UtcNow);
+                    HostedSync = HostedSync with
+                    {
+                        PendingConfigurationRevisionId = null,
+                        PendingConfigurationCreatedAt = null
+                    };
+                }
+
+                var configuration = await new MobileHostedConfigurationRestore(
+                        packageKeyStore,
+                        hostedConfigurationLedger)
+                    .RestoreLatestAsync(result.Document.LogbookId);
+                if (configuration is not null)
+                {
+                    result = result with
+                    {
+                        Document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+                            result.Document.LogbookId,
+                            configuration.CustomFieldDefinitions,
+                            configuration.CurrencyOverrideDates,
+                            result.Document.Operations)
+                    };
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex) when (ex is HostedLedgerException
+                or HostedConfigurationRevisionCipherException
+                or InvalidDataException
+                or HttpRequestException
+                or NotSupportedException
+                or JSException)
+            {
+                result = result with
+                {
+                    Status = PortableHostedSyncStatus.NeedsAttention,
+                    AttentionRequiredReason = "Hosted logbook settings could not be restored. Retry Sync now."
+                };
+            }
+        }
         var recoveryEnrollment = (result.Document.LogbookId, HostedSync.DeviceId);
         if (result.Status == PortableHostedSyncStatus.Synced
             && recoveryEnvelopeService is not null

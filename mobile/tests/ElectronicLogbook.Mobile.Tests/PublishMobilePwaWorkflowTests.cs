@@ -86,6 +86,94 @@ public sealed class PublishMobilePwaWorkflowTests
     }
 
     [Fact]
+    public void AndroidDebugBuildUsesAStableDevelopmentOnlyAppName()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var debugStrings = File.ReadAllText(Path.Combine(
+            mobileRoot,
+            "android",
+            "app",
+            "src",
+            "debug",
+            "res",
+            "values",
+            "strings.xml"));
+        var productionStrings = File.ReadAllText(Path.Combine(
+            mobileRoot,
+            "android",
+            "app",
+            "src",
+            "main",
+            "res",
+            "values",
+            "strings.xml"));
+
+        Assert.Contains("<string name=\"app_name\">FlightLogX Dev</string>", debugStrings, StringComparison.Ordinal);
+        Assert.Contains("<string name=\"title_activity_main\">FlightLogX Dev</string>", debugStrings, StringComparison.Ordinal);
+        Assert.Contains("<string name=\"package_name\">com.alphadelta.electroniclogbook.dev</string>", debugStrings, StringComparison.Ordinal);
+        Assert.DoesNotContain("FlightLogX Gate 3", debugStrings, StringComparison.Ordinal);
+        Assert.Contains("<string name=\"app_name\">FlightLogX</string>", productionStrings, StringComparison.Ordinal);
+        Assert.Contains("<string name=\"title_activity_main\">FlightLogX</string>", productionStrings, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidGoogleServicesConfigurationIsRestrictedToThePermanentPreviewVariant()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var gradle = File.ReadAllText(Path.Combine(mobileRoot, "android", "app", "build.gradle"));
+
+        Assert.Contains("def googleServicesRequested", gradle, StringComparison.Ordinal);
+        Assert.Contains("contains('preview')", gradle, StringComparison.Ordinal);
+        Assert.Contains("if (googleServicesRequested)", gradle, StringComparison.Ordinal);
+        Assert.Contains("Preview builds require mobile/android/app/google-services.json", gradle, StringComparison.Ordinal);
+        Assert.Contains("apply plugin: 'com.google.gms.google-services'", gradle, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AndroidShellRefreshesBundledWebAssetsAfterAnInPlaceUpdateWithoutClearingUserState()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var activity = File.ReadAllText(Path.Combine(
+            mobileRoot,
+            "android",
+            "app",
+            "src",
+            "main",
+            "java",
+            "com",
+            "alphadelta",
+            "electroniclogbook",
+            "MainActivity.java"));
+
+        Assert.Contains("refreshBundledWebAssetsAfterUpdate();", activity, StringComparison.Ordinal);
+        Assert.Contains(".lastUpdateTime", activity, StringComparison.Ordinal);
+        Assert.Contains("getSharedPreferences(WEB_ASSET_STATE, MODE_PRIVATE)", activity, StringComparison.Ordinal);
+        Assert.Contains("getBridge().getWebView().clearCache(true);", activity, StringComparison.Ordinal);
+        Assert.Contains("getBridge().getWebView().reload();", activity, StringComparison.Ordinal);
+        Assert.DoesNotContain("clearData", activity, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("deleteDatabase", activity, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("IndexedDB", activity, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void AndroidUpgradePreservesProductionAndDebugApplicationIdentity()
     {
         var mobileRoot = Path.GetFullPath(Path.Combine(

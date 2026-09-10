@@ -1,7 +1,13 @@
 @inject MobileLogbookSession Session
 
 <NavLink class="flight-row logbook-entry-row" href="@($"/flights/{Entry.EntryId.Value}")">
-    <strong class="logbook-row-date" aria-label="Flight date">@FormatRowDate(Entry.Entry!.Date)</strong>
+    <span class="logbook-row-date">
+        <time datetime="@DateIso(Entry.Entry!.Date)" aria-label="@($"Flight date {FormatRowDate(Entry.Entry.Date)}")">@FormatRowDate(Entry.Entry!.Date)</time>
+        @if (MobileRelativeDate.Format(Entry.Entry.Date) is { } relativeDate)
+        {
+            <small class="relative-date">@relativeDate</small>
+        }
+    </span>
     <span class="logbook-row-route">
         <strong aria-label="Flight route">@Session.FormatRoute(Entry.Entry!)</strong>
         <span class="logbook-row-secondary">
@@ -51,6 +57,9 @@
 
     private static string FormatRowDate(DateOnly? date) =>
         date?.ToString("dd MMM yy", System.Globalization.CultureInfo.InvariantCulture) ?? "No date";
+
+    private static string DateIso(DateOnly? date) =>
+        date?.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty;
 
     private static string EntryAircraftMeta(PortableLogbookWorkbookEntry entry)
     {

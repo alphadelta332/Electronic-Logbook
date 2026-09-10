@@ -24,7 +24,13 @@ else
         <span class="dashboard-last-flight-body">
             <span class="dashboard-last-flight-heading">
                 <strong class="dashboard-last-flight-label">Last flight</strong>
-                <time datetime="@DateIso(flight.Date)">@FormatDate(flight.Date)</time>
+                <span class="date-with-relative">
+                    <time datetime="@DateIso(flight.Date)">@FormatDate(flight.Date)</time>
+                    @if (MobileRelativeDate.Format(flight.Date) is { } relativeDate)
+                    {
+                        <small class="relative-date">@relativeDate</small>
+                    }
+                </span>
             </span>
             <strong class="dashboard-last-flight-route">@Session.FormatRoute(flight)</strong>
             <span class="dashboard-last-flight-aircraft">@AircraftMeta(flight)</span>

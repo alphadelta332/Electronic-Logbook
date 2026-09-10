@@ -185,6 +185,18 @@ else
                     </div>
                 </section>
 
+                <section class="totals-group" aria-labelledby="custom-field-totals-heading">
+                    <div class="totals-group-heading">
+                        <h3 id="custom-field-totals-heading">Custom fields</h3>
+                    </div>
+                    <div class="totals-count-grid">
+                        @foreach (var total in CustomFieldTotals)
+                        {
+                            <StatusMetric Label="@total.Definition.Label" Value="@total.FormattedTotal" />
+                        }
+                    </div>
+                </section>
+
                 <section class="totals-group" aria-labelledby="movement-totals-heading">
                     <div class="totals-group-heading">
                         <h3 id="movement-totals-heading">Landings</h3>
@@ -221,7 +233,7 @@ else
                     </div>
                     <span class="draft-pill">@Session.DeletedEntriesV2.Count deleted</span>
                 </div>
-                <p class="totals-intro">Deleted flights stay in the audit trail. Open a flight to review its revisions or restore it to the active logbook.</p>
+                <p class="totals-intro">Deleted flights remain available here. Open a flight to review its details or restore it to the active logbook.</p>
 
                 @if (Session.DeletedEntriesV2.Count == 0)
                 {
@@ -313,6 +325,11 @@ else
             .Where(MatchesSearch)
             .Where(MatchesActiveFilters)
             .ToArray();
+
+    private IReadOnlyList<MobileCustomFieldTotal> CustomFieldTotals =>
+        MobileCustomFieldTotals.Calculate(
+            Session.WorkbookCustomFields,
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!));
 
     private string FormatHoursTotal(Func<PortableLogbookWorkbookEntry, decimal?> column) =>
         MobileLogbookSession.FormatHours(Session.CurrentEntriesV2.Sum(entry => column(entry.Entry!).GetValueOrDefault()));

@@ -157,11 +157,18 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
-try {
+// The private Firebase descriptor is registered to the permanent package used by the
+// Preview variant. Applying it to debug or acceptance makes Google Services reject their
+// deliberately suffixed application IDs before those builds can compile.
+def googleServicesRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName.toLowerCase(java.util.Locale.ROOT).contains('preview')
+}
+if (googleServicesRequested) {
     def servicesJSON = file('google-services.json')
-    if (servicesJSON.text) {
-        apply plugin: 'com.google.gms.google-services'
+    if (!servicesJSON.isFile() || !servicesJSON.text.trim()) {
+        throw new GradleException(
+            "Preview builds require mobile/android/app/google-services.json for the permanent package.")
     }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+
+    apply plugin: 'com.google.gms.google-services'
 }
