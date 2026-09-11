@@ -1,43 +1,48 @@
 apply plugin: 'com.android.application'
 
-def productVersion = rootProject.file('../../version.txt').text.trim()
-def productVersionMatch = productVersion =~ /^(\d+)\.(\d+)\.(\d+)$/
-if (!productVersionMatch.matches()) {
-    throw new GradleException("version.txt must contain a numeric major.minor.patch version.")
-}
-
-def productVersionParts = [
-    major: productVersionMatch[0][1].toInteger(),
-    minor: productVersionMatch[0][2].toInteger(),
-    patch: productVersionMatch[0][3].toInteger()
-]
-if (productVersionParts.major > 20 || productVersionParts.minor > 99 || productVersionParts.patch > 99) {
-    throw new GradleException("Android versions require major <= 20, minor <= 99, and patch <= 99.")
-}
-// Reserve four low-order digits for signed Preview build revisions. Android versionCode
-// is monotonic and intentionally independent from the user-visible versionName.
-def productVersionCode =
-    productVersionParts.major * 100000000 +
-    productVersionParts.minor * 1000000 +
-    productVersionParts.patch * 10000
-def previewBuildRevisionText = providers.gradleProperty('flightLogXPreviewBuildRevision').orNull
-def legacyPilotBuildRevisionText = providers.gradleProperty('flightLogXPilotBuildRevision').orNull
-if (previewBuildRevisionText != null && legacyPilotBuildRevisionText != null &&
-        previewBuildRevisionText != legacyPilotBuildRevisionText) {
-    throw new GradleException("Preview and legacy pilot build revisions must match when both are supplied.")
-}
-previewBuildRevisionText = previewBuildRevisionText ?: legacyPilotBuildRevisionText
-def previewBuildRevision = 0
-if (previewBuildRevisionText != null) {
-    if (!(previewBuildRevisionText ==~ /^\d+$/)) {
-        throw new GradleException("flightLogXPreviewBuildRevision must be a whole number from 1 to 9999.")
-    }
-    previewBuildRevision = previewBuildRevisionText.toInteger()
-    if (previewBuildRevision < 1 || previewBuildRevision > 9999) {
-        throw new GradleException("flightLogXPreviewBuildRevision must be a whole number from 1 to 9999.")
+def versionManifest = [:]
+rootProject.file('../../versions.properties').eachLine('UTF-8') { rawLine ->
+    def line = rawLine.trim()
+    if (line && !line.startsWith('#')) {
+        def separator = line.indexOf('=')
+        if (separator < 1 || separator == line.length() - 1) {
+            throw new GradleException("versions.properties contains an invalid line: '${line}'. Expected key=value.")
+        }
+        def key = line.substring(0, separator)
+        def value = line.substring(separator + 1).trim()
+        if (versionManifest.containsKey(key)) {
+            throw new GradleException("versions.properties contains duplicate key '${key}'.")
+        }
+        versionManifest[key] = value
     }
 }
-def androidVersionCode = productVersionCode + previewBuildRevision
+def requiredVersionKeys = ['sheet_version', 'app_version', 'android_version_code']
+def unknownVersionKeys = versionManifest.keySet() - requiredVersionKeys
+if (!unknownVersionKeys.isEmpty()) {
+    throw new GradleException("versions.properties contains unknown key '${unknownVersionKeys.first()}'.")
+}
+requiredVersionKeys.each { key ->
+    if (!versionManifest.containsKey(key)) {
+        throw new GradleException("versions.properties is missing required key '${key}'.")
+    }
+}
+def appVersion = versionManifest.app_version
+def sheetVersion = versionManifest.sheet_version
+if (!(sheetVersion ==~ /^\d+\.\d+\.\d+$/)) {
+    throw new GradleException("versions.properties key 'sheet_version' must contain a numeric major.minor.patch version.")
+}
+if (!(appVersion ==~ /^\d+\.\d+\.\d+$/)) {
+    throw new GradleException("versions.properties key 'app_version' must contain a numeric major.minor.patch version.")
+}
+def androidVersionCodeText = versionManifest.android_version_code
+if (!(androidVersionCodeText ==~ /^\d+$/)) {
+    throw new GradleException("versions.properties key 'android_version_code' must be a positive integer.")
+}
+def androidVersionCodeValue = new BigInteger(androidVersionCodeText)
+if (androidVersionCodeValue < 1 || androidVersionCodeValue > 2100000000) {
+    throw new GradleException("versions.properties key 'android_version_code' must be between 1 and 2100000000.")
+}
+def androidVersionCode = androidVersionCodeValue.toInteger()
 def developmentKeystorePath = System.getenv('ELECTRONIC_LOGBOOK_DEV_KEYSTORE')
 def previewSigningEnvironment = [
     keystore: System.getenv('ELECTRONIC_LOGBOOK_PREVIEW_KEYSTORE') ?: System.getenv('ELECTRONIC_LOGBOOK_PILOT_KEYSTORE'),
@@ -62,7 +67,7 @@ android {
         minSdkVersion = rootProject.ext.minSdkVersion
         targetSdkVersion = rootProject.ext.targetSdkVersion
         versionCode = androidVersionCode
-        versionName = productVersion
+        versionName = appVersion
         buildConfigField "boolean", "PREVIEW_UPDATES_ENABLED", "false"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
@@ -122,10 +127,6 @@ android {
 gradle.taskGraph.whenReady { graph ->
     def previewArtifactTasks = ['assemblePreview', 'bundlePreview', 'packagePreview']
     def previewArtifactRequested = graph.allTasks.any { previewArtifactTasks.contains(it.name) }
-    if (previewBuildRevision > 0 && !previewArtifactRequested) {
-        throw new GradleException(
-            "flightLogXPreviewBuildRevision may only be used for a signed Preview artifact task.")
-    }
     if (previewArtifactRequested && !previewSigningConfigured) {
         throw new GradleException(
             "Preview artifacts must use the permanent FlightLogX signing identity. Run npm.cmd run build:android:preview.")

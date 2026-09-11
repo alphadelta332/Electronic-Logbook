@@ -24,6 +24,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 $expectedTag = "v$Version"
 
 function Write-Step {
@@ -108,12 +109,19 @@ function Assert-CommitOnMain {
 function Assert-ReleaseMetadata {
     param([Parameter(Mandatory)][string]$ResolvedCommit)
 
-    $versionAtCommit = (git -C $repoRoot show "$ResolvedCommit`:version.txt").Trim()
+    $versionManifestAtCommit = (git -C $repoRoot show "$ResolvedCommit`:versions.properties") -join "`n"
     if ($LASTEXITCODE -ne 0) {
-        throw "Could not read version.txt at $ResolvedCommit."
+        throw "Could not read versions.properties at $ResolvedCommit."
     }
+    $versionAtCommit = (ConvertFrom-VersionManifestText `
+        -Text $versionManifestAtCommit `
+        -Source "versions.properties at $ResolvedCommit").SheetVersion
     if ($versionAtCommit -ne $Version) {
-        throw "version.txt at $ResolvedCommit is '$versionAtCommit', expected '$Version'."
+        throw "versions.properties sheet_version at $ResolvedCommit is '$versionAtCommit', expected '$Version'."
+    }
+    $compatibilityVersionAtCommit = (git -C $repoRoot show "$ResolvedCommit`:version.txt").Trim()
+    if ($LASTEXITCODE -ne 0 -or $compatibilityVersionAtCommit -ne $Version) {
+        throw "version.txt compatibility value at $ResolvedCommit is '$compatibilityVersionAtCommit', expected '$Version'."
     }
 
     $readmeAtCommit = git -C $repoRoot show "$ResolvedCommit`:README.md"

@@ -102,7 +102,7 @@ Invoke-WorkbookEdit -WorkbookPath $workbookPath -ReadOnly -Operation {
 
     $workbookVersion = (Get-WorkbookNameText -Workbook $Workbook -Name "LogbookVersion").Trim()
     if ($workbookVersion -ne $version) {
-        $issues.Add("LogbookVersion is '$workbookVersion' but version.txt is '$version'.")
+        $issues.Add("LogbookVersion is '$workbookVersion' but versions.properties sheet_version is '$version'.")
     }
 
     try {

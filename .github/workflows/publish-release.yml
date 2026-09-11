@@ -51,9 +51,17 @@ jobs:
             throw "Selected release commit $resolvedCommit is not on origin/main."
           }
 
-          $version = (git show "$resolvedCommit`:version.txt").Trim()
-          if ($LASTEXITCODE -ne 0 -or $version -notmatch "^\d+\.\d+\.\d+$") {
-            throw "version.txt at $resolvedCommit must contain semantic version X.Y.Z. Found: $version"
+          $versionManifestText = (git show "$resolvedCommit`:versions.properties") -join "`n"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not read versions.properties at $resolvedCommit."
+          }
+          Import-Module ./tools/ReleaseTools.psm1 -Force
+          $version = (ConvertFrom-VersionManifestText `
+            -Text $versionManifestText `
+            -Source "versions.properties at $resolvedCommit").SheetVersion
+          $compatibilityVersion = (git show "$resolvedCommit`:version.txt").Trim()
+          if ($LASTEXITCODE -ne 0 -or $compatibilityVersion -ne $version) {
+            throw "version.txt compatibility value at $resolvedCommit must match sheet_version $version. Found: $compatibilityVersion"
           }
 
           $readme = git show "$resolvedCommit`:README.md"
@@ -141,10 +149,8 @@ jobs:
             throw "Selected release commit $resolvedCommit is not on origin/main."
           }
 
-          $version = (Get-Content version.txt -Raw).Trim()
-          if ($version -notmatch "^\d+\.\d+\.\d+$") {
-            throw "version.txt must contain semantic version X.Y.Z. Found: $version"
-          }
+          Import-Module ./tools/ReleaseTools.psm1 -Force
+          $version = Get-ReleaseVersion -RepoRoot $PWD
 
           $tag = "v$version"
           $existingTag = git rev-parse -q --verify "refs/tags/$tag"

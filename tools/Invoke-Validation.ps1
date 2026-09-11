@@ -14,6 +14,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
+Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 if ([string]::IsNullOrWhiteSpace($ArtifactsPath)) {
     $ArtifactsPath = $repoRoot
 }
@@ -72,14 +73,14 @@ function Test-ReleaseArtifacts {
         -ManifestPath $manifestPath `
         -SignaturePath $manifestSignaturePath `
         -PublicKeyPemPath (Join-Path $repoRoot "updater\release-manifest-signing-public-key.pem")
-    $version = (Get-Content -LiteralPath (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
+    $version = Get-ReleaseVersion -RepoRoot $repoRoot
     $head = (git -C $repoRoot rev-parse HEAD).Trim()
     if ($LASTEXITCODE -ne 0) {
         throw "Could not resolve current commit for release artifact validation."
     }
 
     if ($manifest.version -ne $version) {
-        throw "release-manifest.json version '$($manifest.version)' does not match version.txt '$version'."
+        throw "release-manifest.json version '$($manifest.version)' does not match versions.properties sheet_version '$version'."
     }
     if ($manifest.tag -ne "v$version") {
         throw "release-manifest.json tag '$($manifest.tag)' does not match v$version."

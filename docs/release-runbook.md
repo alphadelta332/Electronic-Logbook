@@ -5,7 +5,10 @@ of reconstructing release steps from `AGENTS.md`.
 
 ## Release Shape
 
-- Version source of truth: `version.txt`
+- Version source of truth: `versions.properties` (`sheet_version` for workbook releases,
+  `app_version` for the user-visible app version, and `android_version_code` for
+  Android upgrade ordering)
+- Legacy workbook update endpoint: `version.txt`, generated from `sheet_version`
 - Public workbook: `Electronic_Logbook_Master.xlsm`
 - Release branch/channel in public workbooks: `main`
 - Release workflow: `.github/workflows/publish-release.yml`
@@ -35,7 +38,9 @@ Use `-NoWatch` only when handing the release off to someone else after dispatch.
 
 ## Release Preparation
 
-1. Confirm `version.txt` contains the intended semantic version.
+1. Confirm `versions.properties` contains the intended `sheet_version` and that
+   compatibility `version.txt` matches it. Do not change
+   `app_version` or `android_version_code` as part of a workbook-only release.
 2. Confirm `README.md` has the intended changelog entry and that the target
    version is the first release entry under `## Changelog`.
 3. Prepare the workbook and artifacts:
@@ -59,7 +64,7 @@ Import-Module .\tools\ReleaseTools.psm1 -Force
 Set-WorkbookCustomPropertyFileValue `
   -WorkbookPath .\Electronic_Logbook_Master.xlsm `
   -Name ElectronicLogbookVersion `
-  -Value ((Get-Content .\version.txt -Raw).Trim())
+  -Value (Get-ReleaseVersion -RepoRoot $PWD)
 .\tools\Test-WorkbookPublicReadiness.ps1
 ```
 
@@ -74,7 +79,9 @@ Before dispatching the release workflow, verify:
 
 - `git status --short` has no unreviewed tracked changes.
 - The selected commit is on `origin/main`.
-- `git show <commit>:version.txt` matches the intended version.
+- `sheet_version` in `git show <commit>:versions.properties` matches the intended version.
+- `git show <commit>:version.txt` is the matching bare semantic version required by
+  already-released workbook update clients.
 - `README.md` at the selected commit has one changelog heading for the version.
 - No remote tag `vX.Y.Z` exists.
 - No GitHub release `vX.Y.Z` exists.

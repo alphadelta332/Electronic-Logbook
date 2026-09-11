@@ -63,7 +63,9 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("LOCALAPPDATA", signingScript, StringComparison.Ordinal);
         Assert.Contains("ELECTRONIC_LOGBOOK_DEV_KEYSTORE", signingScript, StringComparison.Ordinal);
         Assert.Contains("ELECTRONIC_LOGBOOK_DEV_KEYSTORE", gradle, StringComparison.Ordinal);
-        Assert.Contains("rootProject.file('../../version.txt')", gradle, StringComparison.Ordinal);
+        Assert.Contains("rootProject.file('../../versions.properties')", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionManifest.app_version", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionManifest.android_version_code", gradle, StringComparison.Ordinal);
         Assert.Contains("$packageName = \"com.alphadelta.electroniclogbook.dev\"", installScript, StringComparison.Ordinal);
         Assert.Contains("Invoke-DataPreservingDebugInstall", installScript, StringComparison.Ordinal);
         Assert.Contains("adb devices failed", installScript, StringComparison.Ordinal);
@@ -83,6 +85,28 @@ public sealed class PublishMobilePwaWorkflowTests
             bridgeScript.IndexOf("source-backup-verified", StringComparison.Ordinal) <
             bridgeScript.IndexOf("\"uninstall\", $PackageName", StringComparison.Ordinal));
         Assert.DoesNotContain("pm clear", bridgeScript, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MobileAssemblyVersionComesFromTheCentralVersionManifest()
+    {
+        var mobileRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory,
+            "..",
+            "..",
+            "..",
+            "..",
+            ".."));
+        var project = File.ReadAllText(Path.Combine(
+            mobileRoot,
+            "src",
+            "ElectronicLogbook.Mobile",
+            "ElectronicLogbook.Mobile.csproj"));
+
+        Assert.Contains("versions.properties", project, StringComparison.Ordinal);
+        Assert.Contains("app_version", project, StringComparison.Ordinal);
+        Assert.Contains("<Version>$(AppVersionFromManifest)</Version>", project, StringComparison.Ordinal);
+        Assert.Contains("ValidateAppVersionManifest", project, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -197,10 +221,7 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("applicationIdSuffix \".dev\"", gradle, StringComparison.Ordinal);
         Assert.Contains("applicationIdSuffix \".acceptance\"", gradle, StringComparison.Ordinal);
         Assert.Contains("versionCode = androidVersionCode", gradle, StringComparison.Ordinal);
-        Assert.Contains("productVersionParts.major * 100000000", gradle, StringComparison.Ordinal);
-        Assert.Contains("productVersionParts.minor * 1000000", gradle, StringComparison.Ordinal);
-        Assert.Contains("productVersionParts.patch * 10000", gradle, StringComparison.Ordinal);
-        Assert.Contains("versionName = productVersion", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionName = appVersion", gradle, StringComparison.Ordinal);
         Assert.Contains("Assert-Equal -Actual $metadata.applicationId -Expected \"com.alphadelta.electroniclogbook.dev\"", acceptancePrepScript, StringComparison.Ordinal);
         Assert.Contains("/Android/data/com.alphadelta.electroniclogbook/files/exports/logbook.elogbook", browserFileStoreTests, StringComparison.Ordinal);
     }

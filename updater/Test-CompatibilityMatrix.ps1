@@ -203,7 +203,7 @@ try {
         throw "Unsupported compatibility policy source: $($policy.source)"
     }
 
-    $currentVersionText = (Get-Content -LiteralPath (Join-Path $repoRoot "version.txt") -Raw).Trim()
+    $currentVersionText = Get-ReleaseVersion -RepoRoot $repoRoot
     $currentVersion = ConvertTo-SemVer $currentVersionText
     $tags = @(git -C $repoRoot tag --list "v*" --sort=version:refname)
     if ($LASTEXITCODE -ne 0) {

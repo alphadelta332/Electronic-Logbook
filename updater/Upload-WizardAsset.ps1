@@ -15,8 +15,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 if ([string]::IsNullOrWhiteSpace($Tag)) {
-    $version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
+    $version = Get-ReleaseVersion -RepoRoot $repoRoot
     $Tag = "v$version"
 }
 

@@ -1654,10 +1654,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("ELECTRONIC_LOGBOOK_PILOT_KEYSTORE", gradle, StringComparison.Ordinal);
         Assert.Contains("signingConfig signingConfigs.flightLogXPreview", gradle, StringComparison.Ordinal);
         Assert.Contains("Preview artifacts must use the permanent FlightLogX signing identity", gradle, StringComparison.Ordinal);
-        Assert.Contains("productVersionParts.major * 100000000", gradle, StringComparison.Ordinal);
-        Assert.Contains("flightLogXPreviewBuildRevision", gradle, StringComparison.Ordinal);
-        Assert.Contains("legacyPilotBuildRevisionText", gradle, StringComparison.Ordinal);
-        Assert.Contains("flightLogXPreviewBuildRevision may only be used for a signed Preview artifact task", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionManifest.app_version", gradle, StringComparison.Ordinal);
+        Assert.Contains("versionManifest.android_version_code", gradle, StringComparison.Ordinal);
         Assert.DoesNotContain("signingConfig signingConfigs.electronicLogbookDevelopment", GetGradleBuildType(gradle, "preview"), StringComparison.Ordinal);
 
         Assert.Contains("registerPlugin(ElectronicLogbookPreviewUpdatesPlugin.class);", activity, StringComparison.Ordinal);
@@ -1685,10 +1683,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("apksigner.bat", build, StringComparison.Ordinal);
         Assert.Contains("aapt.exe", build, StringComparison.Ordinal);
         Assert.Contains("com.alphadelta.electroniclogbook", build, StringComparison.Ordinal);
-        Assert.Contains("[ValidateRange(0, 9999)]", build, StringComparison.Ordinal);
-        Assert.Contains("[Alias(\"PilotBuildRevision\")]", build, StringComparison.Ordinal);
-        Assert.Contains("-PflightLogXPreviewBuildRevision=$PreviewBuildRevision", build, StringComparison.Ordinal);
-        Assert.Contains("The built APK version metadata does not match the requested Preview build revision", build, StringComparison.Ordinal);
+        Assert.Contains("Get-VersionManifest", build, StringComparison.Ordinal);
+        Assert.Contains("AndroidVersionCode", build, StringComparison.Ordinal);
+        Assert.Contains("The built APK version metadata does not match versions.properties", build, StringComparison.Ordinal);
         Assert.Contains("/google-services.json", appGitIgnore, StringComparison.Ordinal);
     }
 

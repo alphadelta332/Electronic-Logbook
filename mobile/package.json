@@ -1,7 +1,6 @@
 {
   "name": "electronic-logbook-mobile-shell",
   "private": true,
-  "version": "0.1.0",
   "scripts": {
     "generate:icons": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Generate-AppIcons.ps1",
     "publish:pwa": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/Publish-MobilePwa.ps1",

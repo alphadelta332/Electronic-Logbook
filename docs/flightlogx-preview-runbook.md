@@ -246,24 +246,28 @@ retested.
 
 ## Preview Updates
 
-Android `versionCode` is monotonic and separate from `version.txt`; four low-order digits
-are reserved for Preview revisions.
+The app's user-visible semantic version and Android's monotonic install-order number
+live in the root `versions.properties` as `app_version` and
+`android_version_code`. They are deliberately separate: changing the visible version
+must never make Android see an older build.
 
 Before distributing an update:
 
-1. Build a higher signed Preview APK from `mobile/`, using a deliberate revision:
+1. Increment `android_version_code` in the root `versions.properties`. Change
+   `app_version` only when the user-visible semantic version should change.
+2. Build the signed Preview APK from `mobile/`:
 
    ```powershell
-   npm.cmd run build:android:preview -- -PreviewBuildRevision 1
+   npm.cmd run build:android:preview
    ```
 
-2. Verify the permanent package, signing certificate, displayed version, higher Android
+3. Verify the permanent package, signing certificate, displayed version, higher Android
    version code, clean publish output, and APK SHA-256.
-3. Distribute to the owner first. From **Settings > Check for Preview update**, verify the
+4. Distribute to the owner first. From **Settings > Check for Preview update**, verify the
    Firebase prompt, download, Android scan, and installer approval while preserving app
    data.
-4. After owner success, distribute the same release to the canary group.
-5. Android must still show its scan and installer approval. Every external tester must
+5. After owner success, distribute the same release to the canary group.
+6. Android must still show its scan and installer approval. Every external tester must
    turn off **Allow from this source** afterward.
 
 On the retained owner development phone only, FlightLogX's own installation-source

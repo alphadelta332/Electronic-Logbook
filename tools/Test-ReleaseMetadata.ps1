@@ -10,7 +10,17 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path $RepoRoot).Path
 Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
-$version = Get-ReleaseVersion -RepoRoot $repoRoot
+$versions = Get-VersionManifest -RepoRoot $repoRoot
+$version = $versions.SheetVersion
+$package = Get-Content (Join-Path $repoRoot "mobile\package.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($null -ne $package.PSObject.Properties["version"]) {
+    throw "mobile/package.json must not duplicate app_version; versions.properties is the source of truth."
+}
+# 300000015 has already been assigned to a signed Preview artifact. Android requires
+# the next distributable artifact to use a greater versionCode.
+if ($versions.AndroidVersionCode -lt 300000016) {
+    throw "versions.properties android_version_code '$($versions.AndroidVersionCode)' would downgrade an existing Preview installation."
+}
 $readmePath = Join-Path $repoRoot "README.md"
 $pdfPath = Join-Path $repoRoot "README.pdf"
 $publicDocs = @("LICENSE.md", "SECURITY.md", "CONTRIBUTING.md")

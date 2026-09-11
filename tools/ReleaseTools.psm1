@@ -28,6 +28,92 @@ function Get-ReleaseConfig {
     return [pscustomobject]$config
 }
 
+function ConvertFrom-VersionManifestText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Text,
+        [string]$Source = "versions.properties"
+    )
+
+    $values = [ordered]@{}
+    $allowedKeys = @("sheet_version", "app_version", "android_version_code")
+    foreach ($rawLine in ($Text -split "`r?`n")) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith("#")) {
+            continue
+        }
+
+        if ($line -notmatch '^(?<key>[a-z][a-z0-9_]*)=(?<value>.+)$') {
+            throw "$Source contains an invalid line: '$line'. Expected key=value."
+        }
+
+        $key = $Matches["key"]
+        $value = $Matches["value"].Trim()
+        if ($allowedKeys -notcontains $key) {
+            throw "$Source contains unknown key '$key'."
+        }
+        if ($values.Contains($key)) {
+            throw "$Source contains duplicate key '$key'."
+        }
+        $values[$key] = $value
+    }
+
+    foreach ($key in $allowedKeys) {
+        if (-not $values.Contains($key)) {
+            throw "$Source is missing required key '$key'."
+        }
+    }
+
+    foreach ($key in @("sheet_version", "app_version")) {
+        if ($values[$key] -notmatch '^\d+\.\d+\.\d+$') {
+            throw "$Source key '$key' must contain a numeric major.minor.patch version. Found '$($values[$key])'."
+        }
+    }
+
+    $androidVersionCode = 0
+    if (-not [int]::TryParse(
+        $values["android_version_code"],
+        [Globalization.NumberStyles]::None,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [ref]$androidVersionCode) -or $androidVersionCode -lt 1 -or $androidVersionCode -gt 2100000000) {
+        throw "$Source key 'android_version_code' must be between 1 and 2100000000. Found '$($values["android_version_code"])'."
+    }
+
+    return [pscustomobject]@{
+        SheetVersion = [string]$values["sheet_version"]
+        AppVersion = [string]$values["app_version"]
+        AndroidVersionCode = $androidVersionCode
+    }
+}
+
+function Get-VersionManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$RepoRoot
+    )
+
+    $manifestPath = Join-Path $RepoRoot "versions.properties"
+    if (-not (Test-Path $manifestPath)) {
+        throw "versions.properties not found at $manifestPath"
+    }
+
+    $text = Get-Content $manifestPath -Raw -Encoding UTF8
+    $manifest = ConvertFrom-VersionManifestText -Text $text -Source $manifestPath
+
+    $compatibilityVersionPath = Join-Path $RepoRoot "version.txt"
+    if (-not (Test-Path $compatibilityVersionPath)) {
+        throw "Workbook compatibility version.txt not found at $compatibilityVersionPath"
+    }
+    $compatibilityVersion = (Get-Content $compatibilityVersionPath -Raw -Encoding UTF8).Trim()
+    if ($compatibilityVersion -ne $manifest.SheetVersion) {
+        throw "version.txt compatibility value '$compatibilityVersion' does not match versions.properties sheet_version '$($manifest.SheetVersion)'."
+    }
+
+    return $manifest
+}
+
 function Get-ReleaseVersion {
     [CmdletBinding()]
     param(
@@ -35,17 +121,7 @@ function Get-ReleaseVersion {
         [string]$RepoRoot
     )
 
-    $versionPath = Join-Path $RepoRoot "version.txt"
-    if (-not (Test-Path $versionPath)) {
-        throw "version.txt not found at $versionPath"
-    }
-
-    $version = (Get-Content $versionPath -Raw -Encoding UTF8).Trim()
-    if ($version -notmatch '^\d+\.\d+\.\d+$') {
-        throw "version.txt must contain a semantic version like 1.2.3. Found '$version'."
-    }
-
-    return $version
+    return (Get-VersionManifest -RepoRoot $RepoRoot).SheetVersion
 }
 
 function Close-ExcelComObjects {
@@ -412,4 +488,4 @@ function Set-WorkbookOpenView {
     Write-Host "  Active sheet = $targetWorksheetName" -ForegroundColor Green
 }
 
-Export-ModuleMember -Function Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-WorkbookCustomPropertyFileValue, Set-LogbookWorkbookState, Set-WorkbookOpenView, Assert-VbaProjectAccess, Invoke-WorkbookMacro
+Export-ModuleMember -Function ConvertFrom-VersionManifestText, Get-VersionManifest, Get-ReleaseConfig, Get-ReleaseVersion, Invoke-WorkbookEdit, Set-WorkbookNameValue, Set-WorkbookCustomPropertyFileValue, Set-LogbookWorkbookState, Set-WorkbookOpenView, Assert-VbaProjectAccess, Invoke-WorkbookMacro

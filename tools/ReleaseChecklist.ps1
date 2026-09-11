@@ -18,6 +18,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path $PSScriptRoot -Parent
+Import-Module (Join-Path $PSScriptRoot "ReleaseTools.psm1") -Force
 
 Write-Host "=== Electronic Logbook Release Checklist ===" -ForegroundColor Cyan
 Write-Host ""
@@ -101,7 +102,7 @@ Write-Host "  1. Test the updated copy in Excel"
 Write-Host "  2. Review git diff/status"
 Write-Host "  3. Commit to dev"
 Write-Host "  4. Open and merge PR from dev to main"
-$version = (Get-Content (Join-Path $repoRoot "version.txt") -Raw -Encoding UTF8).Trim()
+$version = Get-ReleaseVersion -RepoRoot $repoRoot
 Write-Host "  5. Tag the release as v$version"
 Write-Host "  6. Upload wizard assets with:"
 Write-Host "     .\updater\Upload-WizardAsset.ps1 -Tag v$version"

@@ -22,7 +22,7 @@ public sealed class MobileWorkbookMigrationReaderTests
             new LogbookId("log_read_only_contract"));
 
         Assert.Equal(before, SHA256.HashData(File.ReadAllBytes(workbookPath)));
-        Assert.Equal(File.ReadAllText(Path.Combine(repoRoot, "version.txt")).Trim(), plan.WorkbookVersion);
+        Assert.Equal(ReadVersionValue(repoRoot, "sheet_version"), plan.WorkbookVersion);
         Assert.Equal(PortableLogbookCustomFieldSet.WorkbookCustomFieldCount, plan.CustomFieldDefinitions.Count);
         Assert.True(plan.CachedTotalsMatch);
     }
@@ -413,7 +413,7 @@ public sealed class MobileWorkbookMigrationReaderTests
     {
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory); directory is not null; directory = directory.Parent)
         {
-            if (File.Exists(Path.Combine(directory.FullName, "version.txt")) &&
+            if (File.Exists(Path.Combine(directory.FullName, "versions.properties")) &&
                 File.Exists(Path.Combine(directory.FullName, "Electronic_Logbook_Master.xlsm")))
             {
                 return directory.FullName;
@@ -421,5 +421,12 @@ public sealed class MobileWorkbookMigrationReaderTests
         }
 
         throw new DirectoryNotFoundException("Repository root was not found from the test output directory.");
+    }
+
+    private static string ReadVersionValue(string repoRoot, string key)
+    {
+        var line = File.ReadLines(Path.Combine(repoRoot, "versions.properties"))
+            .Single(candidate => candidate.StartsWith($"{key}=", StringComparison.Ordinal));
+        return line[(key.Length + 1)..].Trim();
     }
 }

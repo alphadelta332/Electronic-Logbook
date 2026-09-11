@@ -1,9 +1,6 @@
 [CmdletBinding()]
 param(
-    [switch] $SkipSync,
-    [ValidateRange(0, 9999)]
-    [Alias("PilotBuildRevision")]
-    [int] $PreviewBuildRevision = 0
+    [switch] $SkipSync
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,9 +12,10 @@ $androidRoot = Join-Path $mobileRoot "android"
 $apkPath = Join-Path $androidRoot "app\build\outputs\apk\preview\app-preview.apk"
 $outputMetadataPath = Join-Path $androidRoot "app\build\outputs\apk\preview\output-metadata.json"
 $packageName = "com.alphadelta.electroniclogbook"
-$versionPath = Join-Path (Split-Path -Parent $mobileRoot) "version.txt"
+$repoRoot = Split-Path -Parent $mobileRoot
 
 . (Join-Path $scriptRoot "AndroidPreviewSigning.ps1")
+Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
 function Find-PreviewAndroidSdk {
     $candidates = @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)
@@ -72,17 +70,9 @@ $env:ANDROID_SDK_ROOT = $sdkRoot
 $signingIdentity = Initialize-AndroidPreviewSigning
 Write-Host "Using permanent FlightLogX Preview certificate $($signingIdentity.CertificateSha256)."
 
-$productVersion = (Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8).Trim()
-if ($productVersion -notmatch '^(\d+)\.(\d+)\.(\d+)$') {
-    throw "version.txt must contain a numeric major.minor.patch version."
-}
-$major = [int] $Matches[1]
-$minor = [int] $Matches[2]
-$patch = [int] $Matches[3]
-if ($major -gt 20 -or $minor -gt 99 -or $patch -gt 99) {
-    throw "Android versions require major <= 20, minor <= 99, and patch <= 99."
-}
-$expectedVersionCode = ($major * 100000000) + ($minor * 1000000) + ($patch * 10000) + $PreviewBuildRevision
+$versions = Get-VersionManifest -RepoRoot $repoRoot
+$appVersion = $versions.AppVersion
+$expectedVersionCode = $versions.AndroidVersionCode
 
 if (-not $SkipSync) {
     Push-Location $mobileRoot
@@ -95,11 +85,7 @@ if (-not $SkipSync) {
 
 Push-Location $androidRoot
 try {
-    $gradleArguments = @("assemblePreview")
-    if ($PreviewBuildRevision -gt 0) {
-        $gradleArguments += "-PflightLogXPreviewBuildRevision=$PreviewBuildRevision"
-    }
-    & .\gradlew.bat @gradleArguments
+    & .\gradlew.bat assemblePreview
     if ($LASTEXITCODE -ne 0) { throw "Signed Preview APK build failed." }
 }
 finally { Pop-Location }
@@ -117,8 +103,8 @@ if ($outputMetadata.applicationId -ne $packageName -or $outputMetadata.variantNa
 }
 $builtVersionCode = [int64] $outputMetadata.elements[0].versionCode
 $builtVersionName = [string] $outputMetadata.elements[0].versionName
-if ($builtVersionCode -ne $expectedVersionCode -or $builtVersionName -ne $productVersion) {
-    throw "The built APK version metadata does not match the requested Preview build revision."
+if ($builtVersionCode -ne $expectedVersionCode -or $builtVersionName -ne $appVersion) {
+    throw "The built APK version metadata does not match versions.properties."
 }
 
 $apkSigner = Find-PreviewBuildTool -SdkRoot $sdkRoot -FileName "apksigner.bat"
@@ -148,7 +134,7 @@ if ($null -eq $packageLine -or $packageLine -notmatch "^package:\s+name='([^']+)
 $apkHash = Get-PreviewFileSha256 -Path $apkPath
 Write-Host "Signed Preview APK verified: $apkPath"
 Write-Host "Package: $packageName"
-Write-Host "Version: $builtVersionName ($builtVersionCode; Preview revision $PreviewBuildRevision)"
+Write-Host "Version: $builtVersionName (Android version code $builtVersionCode)"
 Write-Host "Certificate SHA-256: $apkFingerprint"
 Write-Host "APK SHA-256: $apkHash"
 
@@ -157,7 +143,6 @@ return [pscustomobject]@{
     PackageName = $packageName
     VersionName = $builtVersionName
     VersionCode = $builtVersionCode
-    PreviewBuildRevision = $PreviewBuildRevision
     CertificateSha256 = $apkFingerprint
     ApkSha256 = $apkHash
 }

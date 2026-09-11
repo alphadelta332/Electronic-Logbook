@@ -32,7 +32,8 @@ jobs:
             throw "Preview wizard publication must run from the preview branch."
           }
 
-          $version = (Get-Content -LiteralPath version.txt -Raw).Trim()
+          Import-Module ./tools/ReleaseTools.psm1 -Force
+          $version = Get-ReleaseVersion -RepoRoot $PWD
           if ($version -notmatch '^3\.\d+\.\d+$') {
             throw "Preview workbook version must be 3.x.x. Found: $version"
           }
@@ -62,7 +63,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $version = (Get-Content -LiteralPath version.txt -Raw).Trim()
+          Import-Module ./tools/ReleaseTools.psm1 -Force
+          $version = Get-ReleaseVersion -RepoRoot $PWD
           $shortSha = $env:GITHUB_SHA.Substring(0, 12)
           $tag = "dev-wizard-$shortSha"
           $title = "FlightLogX Preview workbook updater $version ($shortSha)"

@@ -19,8 +19,10 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path $RepoRoot).Path
-$versionPath = Join-Path $repoRoot "version.txt"
+$manifestPath = Join-Path $repoRoot "versions.properties"
+$compatibilityVersionPath = Join-Path $repoRoot "version.txt"
 $readmePath = Join-Path $repoRoot "README.md"
+Import-Module (Join-Path $repoRoot "tools\ReleaseTools.psm1") -Force
 
 function Write-Step {
     param([string]$Message)
@@ -39,17 +41,25 @@ function Assert-CleanMergeState {
 }
 
 function Set-VersionFile {
-    if (-not (Test-Path -LiteralPath $versionPath)) {
-        throw "version.txt not found at $versionPath"
+    if (-not (Test-Path -LiteralPath $manifestPath)) {
+        throw "versions.properties not found at $manifestPath"
     }
 
-    $currentVersion = (Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8).Trim()
+    $manifestText = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8
+    $currentVersion = (ConvertFrom-VersionManifestText -Text $manifestText -Source $manifestPath).SheetVersion
     if ($currentVersion -ne $Version) {
-        Set-Content -LiteralPath $versionPath -Value $Version -Encoding UTF8 -NoNewline
-        Write-Host "version.txt: $currentVersion -> $Version" -ForegroundColor Green
+        $updatedManifest = [regex]::Replace(
+            $manifestText,
+            '(?m)^sheet_version=.*$',
+            "sheet_version=$Version")
+        [IO.File]::WriteAllText($manifestPath, $updatedManifest, [Text.UTF8Encoding]::new($false))
+        Write-Host "versions.properties sheet_version: $currentVersion -> $Version" -ForegroundColor Green
     } else {
-        Write-Host "version.txt already set to $Version." -ForegroundColor Green
+        Write-Host "versions.properties sheet_version already set to $Version." -ForegroundColor Green
     }
+
+    [IO.File]::WriteAllText($compatibilityVersionPath, $Version, [Text.UTF8Encoding]::new($false))
+    Write-Host "version.txt compatibility value = $Version" -ForegroundColor Green
 }
 
 function Add-ChangelogSkeleton {
@@ -87,9 +97,9 @@ function Add-ChangelogSkeleton {
 }
 
 function Test-ReleaseDocumentation {
-    $versionText = (Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8).Trim()
+    $versionText = (Get-VersionManifest -RepoRoot $repoRoot).SheetVersion
     if ($versionText -ne $Version) {
-        throw "version.txt contains '$versionText', expected '$Version'."
+        throw "versions.properties sheet_version contains '$versionText', expected '$Version'."
     }
 
     $readmeLines = Get-Content -LiteralPath $readmePath -Encoding UTF8

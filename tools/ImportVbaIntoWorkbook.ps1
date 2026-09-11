@@ -27,7 +27,7 @@ if ($IncludeModUpdate) {
 }
 
 Write-Host "Importing VBA into: $WorkbookPath"
-Write-Host "Version source: version.txt = $version"
+Write-Host "Version source: versions.properties sheet_version = $version"
 if (-not $IncludeModUpdate) {
     Write-Host "modUpdate.bas is not embedded by default; modBoot launches the external wizard directly." -ForegroundColor Yellow
 }

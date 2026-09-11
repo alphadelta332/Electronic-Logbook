@@ -5,7 +5,14 @@ using System.Text;
 
 internal static class TestRepo
 {
-    public static string Version => File.ReadAllText(FindFile("version.txt")).Trim();
+    public static string Version => ReadVersionValue("sheet_version");
+
+    public static string ReadVersionValue(string key)
+    {
+        var line = File.ReadLines(FindFile("versions.properties"))
+            .Single(candidate => candidate.StartsWith($"{key}=", StringComparison.Ordinal));
+        return line[(key.Length + 1)..].Trim();
+    }
 
     public static string FindFile(params string[] relativeParts)
     {

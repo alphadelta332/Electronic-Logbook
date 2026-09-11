@@ -5,7 +5,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <ServiceWorkerAssetsManifest>service-worker-assets.js</ServiceWorkerAssetsManifest>
+    <VersionManifestPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\..\versions.properties'))</VersionManifestPath>
+    <VersionManifestText>$([System.IO.File]::ReadAllText('$(VersionManifestPath)'))</VersionManifestText>
+    <AppVersionFromManifest>$([System.Text.RegularExpressions.Regex]::Match('$(VersionManifestText)', '(?m)^app_version=(\d+\.\d+\.\d+)\s*$').Groups[1].Value)</AppVersionFromManifest>
+    <Version>$(AppVersionFromManifest)</Version>
   </PropertyGroup>
+
+  <Target Name="ValidateAppVersionManifest" BeforeTargets="GenerateAssemblyInfo">
+    <Error Condition="'$(AppVersionFromManifest)' == ''"
+           Text="versions.properties must contain app_version in numeric major.minor.patch form." />
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />

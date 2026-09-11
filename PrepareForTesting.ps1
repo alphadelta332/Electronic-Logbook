@@ -25,7 +25,7 @@ if ([string]::IsNullOrWhiteSpace($WorkingCopyPath)) {
 }
 
 Write-Host "=== Prepare for Testing ===" -ForegroundColor Cyan
-Write-Host "Version source: version.txt = $version"
+Write-Host "Version source: versions.properties sheet_version = $version"
 Write-Host ""
 
 Set-LogbookWorkbookState -WorkbookPath $WorkbookPath -Branch "dev" -Version $version
