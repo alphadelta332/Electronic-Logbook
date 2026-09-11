@@ -2283,6 +2283,14 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     overflow-wrap: anywhere;
 }
 
+.custom-entry-removal-warning {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 13px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
 .custom-entry-setting-actions {
     display: flex;
     flex-wrap: wrap;

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ElectronicLogbook.Portable;
 
 public sealed record PortableLogbookEntry(
@@ -62,4 +64,8 @@ public sealed record CustomFieldDefinition(
     string Label,
     int Order,
     string? Description = null,
-    bool IsActive = true);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsInactive = false)
+{
+    [JsonIgnore]
+    public bool IsActive => !IsInactive;
+}

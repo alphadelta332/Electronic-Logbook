@@ -133,6 +133,12 @@ else
                                 ? $"Locked while the total is {fieldTotal.FormattedTotal}."
                                 : "Total is zero, so this entry can be renamed or removed.")
                         </small>
+                        @if (PendingCustomFieldRemoval == fieldId)
+                        {
+                            <p class="custom-entry-removal-warning">
+                                This hides the field from new flights and totals. Its encrypted history is retained.
+                            </p>
+                        }
                         <div class="custom-entry-setting-actions">
                             @if (PendingCustomFieldRemoval == fieldId)
                             {

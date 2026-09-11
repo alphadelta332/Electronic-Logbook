@@ -535,6 +535,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("RemoveWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
         Assert.Contains("AddWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
         Assert.Contains("Confirm remove", settings, StringComparison.Ordinal);
+        Assert.Contains("Its encrypted history is retained.", settings, StringComparison.Ordinal);
         Assert.Contains("maxlength=\"@MobileCustomFieldSettings.MaximumLabelLength\"", settings, StringComparison.Ordinal);
         Assert.Contains("public IReadOnlyList<MobileCustomFieldTotal> WorkbookCustomFieldTotals", session, StringComparison.Ordinal);
         Assert.Contains("PendingConfigurationRevisionId", session, StringComparison.Ordinal);

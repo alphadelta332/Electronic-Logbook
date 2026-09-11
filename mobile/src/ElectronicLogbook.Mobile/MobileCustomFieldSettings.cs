@@ -41,7 +41,7 @@ public static class MobileCustomFieldSettings
         EnsureZeroTotal(field, entries);
         return definitionArray
             .Select(definition => definition.Id == fieldId
-                ? definition with { IsActive = false }
+                ? definition with { IsInactive = true }
                 : definition)
             .ToArray();
     }

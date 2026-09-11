@@ -856,8 +856,9 @@ public sealed class MobileSupabaseHostedSyncClientTests
 
         Assert.Equal(4, appended.HostedRevision);
         Assert.Equal(upload.RevisionId, appended.RevisionId);
-        var request = Assert.Single(handler.Requests.Where(request =>
-            request.Path == "/rest/v1/rpc/append_hosted_configuration_revision"));
+        var request = Assert.Single(
+            handler.Requests,
+            request => request.Path == "/rest/v1/rpc/append_hosted_configuration_revision");
         Assert.Equal(1, request.Body.GetProperty("p_configuration_format_version").GetInt32());
         Assert.Equal("60000000-0000-0000-0000-000000000004", request.Body.GetProperty("p_configuration_id").GetString());
         Assert.Equal("AQIDBA==", request.Body.GetProperty("p_payload_ciphertext").GetString());

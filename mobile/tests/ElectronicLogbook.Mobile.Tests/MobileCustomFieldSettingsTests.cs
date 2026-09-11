@@ -17,7 +17,7 @@ public sealed class MobileCustomFieldSettingsTests
             new CustomFieldId("cf_removed"),
             "Removed",
             3,
-            IsActive: false);
+            IsInactive: true);
         var entries = new[]
         {
             Entry((Used.Id, "1.25"), (Empty.Id, "not numeric"), (removed.Id, "9")),
@@ -59,7 +59,7 @@ public sealed class MobileCustomFieldSettingsTests
     [Fact]
     public void AddUsesAnAvailableOrderAndANewStableIdentity()
     {
-        var removed = Empty with { IsActive = false };
+        var removed = Empty with { IsInactive = true };
         var newId = new CustomFieldId("cf_new_stable");
 
         var updated = MobileCustomFieldSettings.Add([Used, removed], "Night vision", newId);

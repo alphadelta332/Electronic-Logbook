@@ -1,6 +1,7 @@
 namespace ElectronicLogbook.Updater.Tests;
 
 using ElectronicLogbook.Portable;
+using System.Text.Json;
 
 public sealed class PortableLogbookDocumentV2Tests
 {
@@ -58,6 +59,40 @@ public sealed class PortableLogbookDocumentV2Tests
         Assert.Equal("Alpha", roundTrippedOperation.Entry.CustomFields[customFieldId]);
         Assert.Equal(1.2m, roundTrippedOperation.Entry.SeCommandDay);
         Assert.Equal(2, roundTrippedOperation.Entry.Ils);
+    }
+
+    [Fact]
+    public void JsonOmitsActiveMarkerAndRoundTripsInactiveCustomFieldHistory()
+    {
+        var activeField = new CustomFieldDefinition(new CustomFieldId("cf_active"), "Active", 1);
+        var inactiveField = new CustomFieldDefinition(
+            new CustomFieldId("cf_workbook_1"),
+            "Removed",
+            2,
+            IsInactive: true);
+        var operation = CreateOperation(
+            new LogbookId("log_v2"),
+            "ent_1",
+            "rev_1",
+            DateTimeOffset.Parse("2026-07-24T00:00:00Z"));
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            new LogbookId("log_v2"),
+            [activeField, inactiveField],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            [operation]);
+
+        var json = PortableLogbookJson.SerializeV2(document);
+        var roundTripped = PortableLogbookJson.DeserializeV2(json);
+        using var parsed = JsonDocument.Parse(json);
+        var customFields = parsed.RootElement.GetProperty("customFieldDefinitions");
+
+        Assert.DoesNotContain("isActive", json, StringComparison.Ordinal);
+        Assert.False(customFields[0].TryGetProperty("isInactive", out _));
+        Assert.True(customFields[1].GetProperty("isInactive").GetBoolean());
+        Assert.NotNull(roundTripped);
+        Assert.True(roundTripped.CustomFieldDefinitions.Single(field => field.Id == activeField.Id).IsActive);
+        Assert.False(roundTripped.CustomFieldDefinitions.Single(field => field.Id == inactiveField.Id).IsActive);
+        Assert.True(PortableLogbookValidatorV2.Validate(roundTripped, new DateOnly(2026, 7, 24)).IsValid);
     }
 
     [Fact]
