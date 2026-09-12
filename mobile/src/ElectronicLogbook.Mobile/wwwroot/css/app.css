@@ -2570,6 +2570,186 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     gap: 12px;
 }
 
+.totals-filter-count {
+    margin: -6px 0 0;
+    color: var(--app-text-muted);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.totals-filter-sheet {
+    display: grid;
+    gap: 14px;
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    padding: 14px;
+    background: var(--app-surface-alt);
+}
+
+.totals-filter-explanation {
+    display: grid;
+    gap: 4px;
+}
+
+.totals-filter-explanation strong {
+    font-size: 15px;
+}
+
+.totals-filter-explanation span,
+.totals-filter-empty {
+    margin: 0;
+    color: var(--app-text-muted);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.totals-active-filters {
+    display: grid;
+    gap: 8px;
+}
+
+.totals-active-filter {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 48px;
+    align-items: center;
+    min-height: 56px;
+    border-bottom: 1px solid var(--app-border);
+}
+
+.totals-active-filter > span {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.totals-active-filter small {
+    overflow: hidden;
+    color: var(--app-text-muted);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.totals-active-filter .mud-icon-button {
+    width: 48px;
+    height: 48px;
+}
+
+.totals-filter-field,
+.totals-filter-search,
+.totals-filter-date-range label {
+    display: grid;
+    gap: 6px;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.totals-filter-field select,
+.totals-filter-search input,
+.totals-filter-date-range input {
+    width: 100%;
+    min-height: 48px;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: var(--app-surface);
+    color: var(--app-text);
+    font: inherit;
+    font-size: 15px;
+    font-weight: 650;
+}
+
+.totals-filter-field select:focus-visible,
+.totals-filter-search input:focus-visible,
+.totals-filter-date-range input:focus-visible,
+.totals-filter-values input:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
+    outline-offset: 2px;
+}
+
+.totals-filter-date-range {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.totals-filter-hint {
+    margin-top: -8px;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.totals-filter-value-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 4px;
+    margin: -6px 0;
+}
+
+.totals-filter-value-actions .mud-button-root,
+.totals-active-filters > .mud-button-root {
+    min-height: 48px;
+}
+
+.totals-filter-values {
+    display: grid;
+    max-height: 288px;
+    overflow-y: auto;
+    border-block: 1px solid var(--app-border);
+    scrollbar-color: var(--app-primary) var(--app-surface-alt);
+    scrollbar-width: thin;
+}
+
+.totals-filter-values label {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 48px;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--app-border);
+    color: var(--app-text);
+    font-weight: 700;
+}
+
+.totals-filter-values label:last-child {
+    border-bottom: 0;
+}
+
+.totals-filter-values input {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--app-primary);
+}
+
+.totals-filter-values small {
+    min-width: 2ch;
+    color: var(--app-text-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.totals-filter-no-match {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--app-border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: var(--app-surface);
+    color: var(--app-text-muted);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.totals-filter-no-match .mud-icon-root {
+    flex: 0 0 auto;
+    color: var(--app-primary);
+}
+
 .totals-intro {
     margin: -6px 0 2px;
     color: var(--app-text-muted);

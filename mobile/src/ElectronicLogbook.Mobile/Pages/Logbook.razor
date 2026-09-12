@@ -97,7 +97,107 @@ else
                         <span class="eyebrow">Totals</span>
                         <h2>Flying totals</h2>
                     </div>
+                    <MudButton class="logbook-filter-button" Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowTotalsFilters = !ShowTotalsFilters)">
+                        @TotalsFilterButtonLabel
+                    </MudButton>
                 </div>
+
+                <p class="totals-filter-count" role="status">@TotalsEntryCountLabel</p>
+
+                @if (ShowTotalsFilters)
+                {
+                    <section class="totals-filter-sheet" aria-label="Totals filters">
+                        <div class="totals-filter-explanation">
+                            <strong>Filter the flights included in these totals</strong>
+                            <span>Choose values from any logbook column. Values in one column use “or”; different columns use “and”.</span>
+                        </div>
+
+                        @if (TotalsFilterCount > 0)
+                        {
+                            <div class="totals-active-filters" aria-label="Active totals filters">
+                                @if (HasTotalsDateRange)
+                                {
+                                    <div class="totals-active-filter">
+                                        <span>
+                                            <strong>Date</strong>
+                                            <small>@TotalsDateRangeSummary</small>
+                                        </span>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="ClearTotalsDateRange" aria-label="Clear Date filter" />
+                                    </div>
+                                }
+                                @foreach (var selection in ActiveTotalsFilterSelections)
+                                {
+                                    var field = TotalsFilterFields.Single(filterField => filterField.Id == selection.Key);
+                                    <div class="totals-active-filter">
+                                        <span>
+                                            <strong>@field.Label</strong>
+                                            <small>@TotalsFilterSelectionSummary(field, selection.Value)</small>
+                                        </span>
+                                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => ClearTotalsFilter(field.Id))" aria-label="@($"Clear {field.Label} filter")" />
+                                    </div>
+                                }
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearAllTotalsFilters">Clear all filters</MudButton>
+                            </div>
+                        }
+
+                        <label class="totals-filter-field">
+                            Logbook column
+                            <select value="@SelectedTotalsFilterFieldId" @onchange="OnTotalsFilterFieldChanged">
+                                @foreach (var field in TotalsFilterFields)
+                                {
+                                    <option value="@field.Id">@(TotalsFilterSelections.ContainsKey(field.Id) ? $"{field.Label} (filtered)" : field.Label)</option>
+                                }
+                            </select>
+                        </label>
+
+                        @if (SelectedTotalsFilterField.Kind == MobileLogbookTotalsFilterFieldKind.Date)
+                        {
+                            <div class="totals-filter-date-range">
+                                <label>Start date <input type="date" value="@TotalsStartDateText" max="@TotalsEndDateText" @onchange="OnTotalsStartDateChanged" /></label>
+                                <label>End date <input type="date" value="@TotalsEndDateText" min="@TotalsStartDateText" @onchange="OnTotalsEndDateChanged" /></label>
+                            </div>
+                            <small class="totals-filter-hint">The date range includes both selected dates. Leave either end blank for an open range.</small>
+                        }
+                        else
+                        {
+                            <label class="totals-filter-search">
+                                Find a value
+                                <input @bind="TotalsFilterValueSearchText" @bind:event="oninput" placeholder="Search values in this column" />
+                            </label>
+
+                            <div class="totals-filter-value-actions">
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SelectAllTotalsFilterValues">Select all</MudButton>
+                                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SelectNoTotalsFilterValues">Select none</MudButton>
+                            </div>
+
+                            @if (VisibleTotalsFilterValues.Count == 0)
+                            {
+                                <p class="totals-filter-empty">No column values match that search.</p>
+                            }
+                            else
+                            {
+                                <div class="totals-filter-values" role="group" aria-label="@($"Values for {SelectedTotalsFilterField.Label}")">
+                                    @foreach (var value in VisibleTotalsFilterValues)
+                                    {
+                                        <label>
+                                            <input type="checkbox" checked="@IsTotalsFilterValueSelected(value.Key)" @onchange="@(args => ToggleTotalsFilterValue(value.Key, args))" />
+                                            <span>@value.Label</span>
+                                            <small>@value.EntryCount</small>
+                                        </label>
+                                    }
+                                </div>
+                            }
+                        }
+                    </section>
+                }
+
+                @if (TotalsEntries.Count == 0 && Session.CurrentEntriesV2.Count > 0)
+                {
+                    <section class="totals-filter-no-match" role="alert">
+                        <MudIcon Icon="@Icons.Material.Filled.FilterAltOff" aria-hidden="true" />
+                        <span>No flights match these filters. The totals below are zero.</span>
+                    </section>
+                }
 
                 <section class="totals-group" aria-labelledby="single-engine-totals-heading">
                     <div class="totals-group-heading">
@@ -313,6 +413,14 @@ else
     private bool ShowFilters { get; set; }
     private bool FilterRecentOnly { get; set; }
     private bool FilterFlightsWithApproachesOnly { get; set; }
+    private bool ShowTotalsFilters { get; set; }
+    private string SelectedTotalsFilterFieldId { get; set; } = "date";
+    private string TotalsFilterValueSearchText { get; set; } = string.Empty;
+    private string? TotalsStartDateText { get; set; }
+    private string? TotalsEndDateText { get; set; }
+    private Dictionary<string, HashSet<string>> TotalsFilterSelections { get; } = new(StringComparer.Ordinal);
+    private IReadOnlyList<MobileLogbookTotalsFilterField> totalsFilterFields = [];
+    private IReadOnlyList<PortableLogbookMaterializedEntryV2> totalsEntries = [];
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
     private string DeletedTabClass => ActiveView == LogbookView.Deleted ? "active" : string.Empty;
@@ -326,26 +434,77 @@ else
             .Where(MatchesActiveFilters)
             .ToArray();
 
+    private IReadOnlyList<MobileLogbookTotalsFilterField> TotalsFilterFields =>
+        totalsFilterFields;
+
+    private MobileLogbookTotalsFilterField SelectedTotalsFilterField =>
+        TotalsFilterFields.FirstOrDefault(filterField => filterField.Id == SelectedTotalsFilterFieldId) ?? TotalsFilterFields[0];
+
+    private IReadOnlyList<MobileLogbookTotalsFilterValue> SelectedTotalsFilterValues =>
+        MobileLogbookTotalsFilters.Values(
+            SelectedTotalsFilterField,
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!));
+
+    private IReadOnlyList<MobileLogbookTotalsFilterValue> VisibleTotalsFilterValues =>
+        SelectedTotalsFilterValues
+            .Where(value => string.IsNullOrWhiteSpace(TotalsFilterValueSearchText) ||
+                            value.Label.Contains(TotalsFilterValueSearchText, StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+    private IReadOnlyList<PortableLogbookMaterializedEntryV2> TotalsEntries =>
+        totalsEntries;
+
+    private IReadOnlyList<KeyValuePair<string, HashSet<string>>> ActiveTotalsFilterSelections =>
+        TotalsFilterSelections
+            .Where(selection => TotalsFilterFields.Any(filterField => filterField.Id == selection.Key))
+            .ToArray();
+
+    private DateOnly? TotalsStartDate => ParseTotalsDate(TotalsStartDateText);
+    private DateOnly? TotalsEndDate => ParseTotalsDate(TotalsEndDateText);
+    private bool HasTotalsDateRange => TotalsStartDate is not null || TotalsEndDate is not null;
+    private int TotalsFilterCount => ActiveTotalsFilterSelections.Count + (HasTotalsDateRange ? 1 : 0);
+
+    private string TotalsFilterButtonLabel => TotalsFilterCount == 0
+        ? "Filter totals"
+        : $"Filters ({TotalsFilterCount})";
+
+    private string TotalsEntryCountLabel => TotalsFilterCount == 0
+        ? EntryCountLabel
+        : $"{TotalsEntries.Count} of {Session.CurrentEntriesV2.Count} active entries included";
+
+    private string TotalsDateRangeSummary => (TotalsStartDate, TotalsEndDate) switch
+    {
+        ({ } start, { } end) => $"{FormatFilterDate(start)} to {FormatFilterDate(end)}",
+        ({ } start, null) => $"From {FormatFilterDate(start)}",
+        (null, { } end) => $"Up to {FormatFilterDate(end)}",
+        _ => "All dates"
+    };
+
     private IReadOnlyList<MobileCustomFieldTotal> CustomFieldTotals =>
         MobileCustomFieldTotals.Calculate(
             Session.WorkbookCustomFields,
-            Session.CurrentEntriesV2.Select(entry => entry.Entry!));
+            TotalsEntries.Select(entry => entry.Entry!));
 
     private string FormatHoursTotal(Func<PortableLogbookWorkbookEntry, decimal?> column) =>
-        MobileLogbookSession.FormatHours(Session.CurrentEntriesV2.Sum(entry => column(entry.Entry!).GetValueOrDefault()));
+        MobileLogbookSession.FormatHours(TotalsEntries.Sum(entry => column(entry.Entry!).GetValueOrDefault()));
 
     private string FormatCountTotal(Func<PortableLogbookWorkbookEntry, int?> column) =>
-        Session.CurrentEntriesV2.Sum(entry => column(entry.Entry!).GetValueOrDefault()).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        TotalsEntries.Sum(entry => column(entry.Entry!).GetValueOrDefault()).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     protected override async Task OnInitializedAsync()
     {
         Session.WorkbookStateChanged += OnWorkbookStateChanged;
         await Session.EnsureLoadedWorkbookAsync();
+        RefreshTotalsProjection();
     }
 
     private void OnWorkbookStateChanged()
     {
-        _ = InvokeAsync(StateHasChanged);
+        _ = InvokeAsync(() =>
+        {
+            RefreshTotalsProjection();
+            StateHasChanged();
+        });
     }
 
     public void Dispose()
@@ -412,6 +571,148 @@ else
         FilterRecentOnly = false;
         FilterFlightsWithApproachesOnly = false;
     }
+
+    private void OnTotalsFilterFieldChanged(ChangeEventArgs args)
+    {
+        SelectedTotalsFilterFieldId = args.Value?.ToString() ?? TotalsFilterFields[0].Id;
+        TotalsFilterValueSearchText = string.Empty;
+    }
+
+    private void OnTotalsStartDateChanged(ChangeEventArgs args)
+    {
+        TotalsStartDateText = args.Value?.ToString();
+        RefreshTotalsProjection();
+    }
+
+    private void OnTotalsEndDateChanged(ChangeEventArgs args)
+    {
+        TotalsEndDateText = args.Value?.ToString();
+        RefreshTotalsProjection();
+    }
+
+    private bool IsTotalsFilterValueSelected(string valueKey) =>
+        !TotalsFilterSelections.TryGetValue(SelectedTotalsFilterField.Id, out var selectedValues) ||
+        selectedValues.Contains(valueKey);
+
+    private void ToggleTotalsFilterValue(string valueKey, ChangeEventArgs args)
+    {
+        var fieldId = SelectedTotalsFilterField.Id;
+        if (!TotalsFilterSelections.TryGetValue(fieldId, out var selectedValues))
+        {
+            selectedValues = SelectedTotalsFilterValues
+                .Select(value => value.Key)
+                .ToHashSet(StringComparer.Ordinal);
+            TotalsFilterSelections[fieldId] = selectedValues;
+        }
+
+        if (args.Value is true)
+        {
+            selectedValues.Add(valueKey);
+        }
+        else
+        {
+            selectedValues.Remove(valueKey);
+        }
+
+        var allValueKeys = SelectedTotalsFilterValues.Select(value => value.Key).ToHashSet(StringComparer.Ordinal);
+        if (selectedValues.SetEquals(allValueKeys))
+        {
+            TotalsFilterSelections.Remove(fieldId);
+        }
+
+        RefreshTotalsProjection();
+    }
+
+    private void SelectAllTotalsFilterValues()
+    {
+        TotalsFilterSelections.Remove(SelectedTotalsFilterField.Id);
+        RefreshTotalsProjection();
+    }
+
+    private void SelectNoTotalsFilterValues()
+    {
+        TotalsFilterSelections[SelectedTotalsFilterField.Id] = new HashSet<string>(StringComparer.Ordinal);
+        RefreshTotalsProjection();
+    }
+
+    private void ClearTotalsFilter(string fieldId)
+    {
+        TotalsFilterSelections.Remove(fieldId);
+        RefreshTotalsProjection();
+    }
+
+    private void ClearAllTotalsFilters()
+    {
+        TotalsFilterSelections.Clear();
+        TotalsStartDateText = null;
+        TotalsEndDateText = null;
+        RefreshTotalsProjection();
+    }
+
+    private void ClearTotalsDateRange()
+    {
+        TotalsStartDateText = null;
+        TotalsEndDateText = null;
+        RefreshTotalsProjection();
+    }
+
+    private string TotalsFilterSelectionSummary(
+        MobileLogbookTotalsFilterField field,
+        HashSet<string> selectedValues)
+    {
+        var labels = MobileLogbookTotalsFilters.Values(
+                field,
+                Session.CurrentEntriesV2.Select(entry => entry.Entry!))
+            .Where(value => selectedValues.Contains(value.Key))
+            .Select(value => value.Label)
+            .ToArray();
+
+        return labels.Length switch
+        {
+            0 => "No values selected",
+            <= 2 => string.Join(" or ", labels),
+            _ => $"{labels.Length} values selected"
+        };
+    }
+
+    private void RefreshTotalsProjection()
+    {
+        totalsFilterFields = MobileLogbookTotalsFilters.CreateFields(Session.WorkbookCustomFields);
+        var validFieldIds = totalsFilterFields.Select(filterField => filterField.Id).ToHashSet(StringComparer.Ordinal);
+        foreach (var staleFieldId in TotalsFilterSelections.Keys.Where(fieldId => !validFieldIds.Contains(fieldId)).ToArray())
+        {
+            TotalsFilterSelections.Remove(staleFieldId);
+        }
+
+        if (!validFieldIds.Contains(SelectedTotalsFilterFieldId))
+        {
+            SelectedTotalsFilterFieldId = totalsFilterFields[0].Id;
+            TotalsFilterValueSearchText = string.Empty;
+        }
+
+        totalsEntries = Session.CurrentEntriesV2
+            .Where(materialized => materialized.Entry is not null &&
+                                   MobileLogbookTotalsFilters.Matches(
+                                       materialized.Entry,
+                                       TotalsFilterSelections,
+                                       totalsFilterFields,
+                                       TotalsStartDate,
+                                       TotalsEndDate))
+            .ToArray();
+    }
+
+    private static DateOnly? ParseTotalsDate(string? value) =>
+        DateOnly.TryParseExact(
+            value,
+            "yyyy-MM-dd",
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None,
+            out var date)
+                ? date
+                : null;
+
+    private static string FormatFilterDate(DateOnly date) =>
+        date.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
 
     private static int CountApproaches(PortableLogbookWorkbookEntry entry) =>
         MobileLogbookSession.WorkbookApproaches(entry);

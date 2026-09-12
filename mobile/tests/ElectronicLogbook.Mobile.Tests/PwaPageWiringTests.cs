@@ -729,6 +729,41 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void LogbookTotalsCanFilterEveryDisplayedTotalUsingExcelStyleColumnSelections()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+        var filters = ReadMobileSource("MobileLogbookTotalsFilters.cs");
+        var css = ReadMobileAsset("css", "app.css");
+
+        Assert.Contains("Filter totals", page, StringComparison.Ordinal);
+        Assert.Contains("Values in one column use “or”; different columns use “and”.", page, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookTotalsFilters.Matches", page, StringComparison.Ordinal);
+        Assert.Contains("TotalsEntries.Select(entry => entry.Entry!)", page, StringComparison.Ordinal);
+        Assert.Contains("TotalsEntries.Sum", page, StringComparison.Ordinal);
+        Assert.Contains("Select all", page, StringComparison.Ordinal);
+        Assert.Contains("Select none", page, StringComparison.Ordinal);
+        Assert.Contains("(Blanks)", filters, StringComparison.Ordinal);
+        Assert.Contains("Aircraft type", filters, StringComparison.Ordinal);
+        Assert.Contains("Single engine command — day", filters, StringComparison.Ordinal);
+        Assert.Contains("Circling approaches", filters, StringComparison.Ordinal);
+        Assert.Contains(".totals-filter-values", css, StringComparison.Ordinal);
+        Assert.Contains("min-height: 48px;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LogbookTotalsDateColumnUsesTheNativeInclusiveDateRangeSelector()
+    {
+        var page = ReadMobilePage("Logbook.razor");
+
+        Assert.Contains("SelectedTotalsFilterField.Kind == MobileLogbookTotalsFilterFieldKind.Date", page, StringComparison.Ordinal);
+        Assert.Contains("Start date <input type=\"date\"", page, StringComparison.Ordinal);
+        Assert.Contains("End date <input type=\"date\"", page, StringComparison.Ordinal);
+        Assert.Contains("The date range includes both selected dates.", page, StringComparison.Ordinal);
+        Assert.Contains("TotalsStartDate", page, StringComparison.Ordinal);
+        Assert.Contains("TotalsEndDate", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3LogbookTotalsAlignHourFiguresOnSharedColumnTracks()
     {
         var css = ReadMobileAsset("css", "app.css");
