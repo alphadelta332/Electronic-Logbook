@@ -42,6 +42,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("MobileLogbookFileExportWorkflow.ExportAsync", export, StringComparison.Ordinal);
         Assert.Contains("Export XLSX", export, StringComparison.Ordinal);
         Assert.Contains("Export UTF-8 CSV", export, StringComparison.Ordinal);
+        Assert.Contains("Full", export, StringComparison.Ordinal);
+        Assert.Contains("Compact", export, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookFileExportLayout.Full", export, StringComparison.Ordinal);
+        Assert.DoesNotContain("CombineDetails", export, StringComparison.Ordinal);
         Assert.Contains("Target app logbook", migration, StringComparison.Ordinal);
         Assert.Contains("Custom fields", migration, StringComparison.Ordinal);
         Assert.Contains("Totals from visible flight rows", migration, StringComparison.Ordinal);
@@ -550,6 +554,26 @@ public sealed class PwaPageWiringTests
         Assert.Contains("PendingConfigurationRevisionId", session, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.mud-button-root\s*\{[^}]*min-height:\s*48px", css);
         Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate5SettingsLetsEachCustomEntryChooseDecimalsOrWholeNumbersWithFractionalValueConfirmation()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var session = ReadMobileSource("MobileLogbookSession.cs");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("aria-label=\"Number format for @fieldTotal.Definition.Label\"", settings, StringComparison.Ordinal);
+        Assert.Contains(">Decimals</button>", settings, StringComparison.Ordinal);
+        Assert.Contains(">Whole numbers</button>", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileCustomFieldSettings.FractionalValueCount", settings, StringComparison.Ordinal);
+        Assert.Contains("Some recorded values have decimals.", settings, StringComparison.Ordinal);
+        Assert.Contains("Exact values will stay saved.", settings, StringComparison.Ordinal);
+        Assert.Contains("Use whole numbers", settings, StringComparison.Ordinal);
+        Assert.Contains("Keep decimals", settings, StringComparison.Ordinal);
+        Assert.Contains("SetWorkbookCustomFieldNumberFormatAsync", settings, StringComparison.Ordinal);
+        Assert.Contains("public Task SetWorkbookCustomFieldNumberFormatAsync", session, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.custom-entry-number-format\s+\.segmented-control\s+button\s*\{[^}]*min-height:\s*48px", css);
     }
 
     [Fact]

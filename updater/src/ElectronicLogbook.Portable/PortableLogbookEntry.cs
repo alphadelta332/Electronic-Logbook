@@ -59,13 +59,26 @@ public sealed record PortableLogbookEntry(
         new Dictionary<CustomFieldId, string?>());
 }
 
+public enum CustomFieldNumberFormat
+{
+    Decimals = 1,
+    WholeNumbers = 2
+}
+
 public sealed record CustomFieldDefinition(
     CustomFieldId Id,
     string Label,
     int Order,
     string? Description = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsInactive = false)
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IsInactive = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] CustomFieldNumberFormat? NumberFormat = null)
 {
     [JsonIgnore]
     public bool IsActive => !IsInactive;
+
+    [JsonIgnore]
+    public CustomFieldNumberFormat EffectiveNumberFormat => NumberFormat
+        ?? (Order == PortableLogbookCustomFieldSet.WorkbookCustomFieldCount
+            ? CustomFieldNumberFormat.WholeNumbers
+            : CustomFieldNumberFormat.Decimals);
 }

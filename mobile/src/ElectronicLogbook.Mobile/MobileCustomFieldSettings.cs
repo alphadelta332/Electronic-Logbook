@@ -1,3 +1,4 @@
+using System.Globalization;
 using ElectronicLogbook.Portable;
 
 namespace ElectronicLogbook.Mobile;
@@ -30,6 +31,37 @@ public static class MobileCustomFieldSettings
     }
 
     public static bool RenameRequiresConfirmation(decimal currentTotal) => currentTotal != 0m;
+
+    public static IReadOnlyList<CustomFieldDefinition> SetNumberFormat(
+        IEnumerable<CustomFieldDefinition> definitions,
+        CustomFieldId fieldId,
+        CustomFieldNumberFormat numberFormat)
+    {
+        if (!Enum.IsDefined(numberFormat))
+        {
+            throw new ArgumentOutOfRangeException(nameof(numberFormat), numberFormat, "The custom entry number format is not supported.");
+        }
+
+        var definitionArray = definitions.ToArray();
+        _ = ActiveField(definitionArray, fieldId);
+        return definitionArray
+            .Select(definition => definition.Id == fieldId
+                ? definition with { NumberFormat = numberFormat }
+                : definition)
+            .ToArray();
+    }
+
+    public static int FractionalValueCount(
+        IEnumerable<PortableLogbookWorkbookEntry> entries,
+        CustomFieldId fieldId)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        return entries.Count(entry =>
+            entry.CustomFields.TryGetValue(fieldId, out var value)
+            && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
+            && number != decimal.Truncate(number));
+    }
 
     public static IReadOnlyList<CustomFieldDefinition> Remove(
         IEnumerable<CustomFieldDefinition> definitions,

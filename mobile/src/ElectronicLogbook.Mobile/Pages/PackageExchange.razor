@@ -73,17 +73,17 @@ else
             <section class="form-section custom-field-resolution" aria-labelledby="custom-field-resolution-heading">
                 <div class="section-title-row">
                     <div>
-                        <span class="eyebrow">Resolve labels</span>
+                        <span class="eyebrow">Resolve settings</span>
                         <h2 id="custom-field-resolution-heading">Custom field differences</h2>
                     </div>
                 </div>
-                <span class="settings-status-line">Choose which labels this device should keep. Flight values are preserved.</span>
+                <span class="settings-status-line">Choose which custom field settings this device should keep. Flight values are preserved.</span>
                 @foreach (var conflict in ImportExchangePlan.Preview.CustomFieldDefinitions.Conflicts)
                 {
                     <article class="custom-field-resolution-row">
                         <strong>@conflict.Id.Value</strong>
-                        <span>On this device: @conflict.LocalDefinition.Label</span>
-                        <span>In package: @conflict.IncomingDefinition.Label</span>
+                        <span>On this device: @CustomFieldDefinitionLabel(conflict.LocalDefinition)</span>
+                        <span>In package: @CustomFieldDefinitionLabel(conflict.IncomingDefinition)</span>
                     </article>
                 }
                 <div class="row-actions">
@@ -204,7 +204,7 @@ else
             ImportExchangePlan = result.Plan;
             if (result.Status == MobilePackageImportApplyStatus.RequiresResolution)
             {
-                Error = "Choose which custom-field labels to keep before importing this package.";
+                Error = "Choose which custom-field settings to keep before importing this package.";
                 return;
             }
 
@@ -216,7 +216,7 @@ else
     {
         await RunExchangeAsync(async () =>
         {
-            var file = PendingImportFile ?? throw new InvalidOperationException("Preview the package before resolving custom-field labels.");
+            var file = PendingImportFile ?? throw new InvalidOperationException("Preview the package before resolving custom-field settings.");
             var plan = ImportExchangePlan ?? throw new InvalidOperationException("Import the package once to inspect its custom-field differences.");
             var resolutions = plan.Preview.CustomFieldDefinitions.Conflicts
                 .Select(conflict => new PortableLogbookCustomFieldDefinitionResolution(conflict.Id, choice))
@@ -283,6 +283,9 @@ else
         MobilePackageImportApplyStatus.AppliedWithConflicts => "Package imported; entry conflicts need resolution in the logbook.",
         _ => "Package imported successfully."
     };
+
+    private static string CustomFieldDefinitionLabel(CustomFieldDefinition definition) =>
+        $"{definition.Label} · {(definition.EffectiveNumberFormat == CustomFieldNumberFormat.WholeNumbers ? "Whole numbers" : "Decimals")}";
 
     private static string FormatTimestamp(DateTimeOffset value) => value.ToLocalTime().ToString("dd MMM yyyy, HH:mm");
 }

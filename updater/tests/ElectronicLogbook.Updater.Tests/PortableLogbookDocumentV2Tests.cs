@@ -96,6 +96,35 @@ public sealed class PortableLogbookDocumentV2Tests
     }
 
     [Fact]
+    public void JsonOmitsLegacyNumberFormatAndRoundTripsAnExplicitCustomFieldNumberFormat()
+    {
+        var legacyField = new CustomFieldDefinition(new CustomFieldId("cf_legacy"), "Legacy", 1);
+        var explicitField = new CustomFieldDefinition(
+            new CustomFieldId("cf_whole"),
+            "Whole",
+            2,
+            NumberFormat: CustomFieldNumberFormat.WholeNumbers);
+        var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
+            new LogbookId("log_number_format"),
+            [legacyField, explicitField],
+            PortableLogbookCurrencyOverrideDates.Empty,
+            []);
+
+        var json = PortableLogbookJson.SerializeV2(document);
+        var roundTripped = PortableLogbookJson.DeserializeV2(json);
+        using var parsed = JsonDocument.Parse(json);
+        var customFields = parsed.RootElement.GetProperty("customFieldDefinitions");
+
+        Assert.False(customFields[0].TryGetProperty("numberFormat", out _));
+        Assert.Equal(
+            (int)CustomFieldNumberFormat.WholeNumbers,
+            customFields[1].GetProperty("numberFormat").GetInt32());
+        Assert.NotNull(roundTripped);
+        Assert.Null(roundTripped.CustomFieldDefinitions[0].NumberFormat);
+        Assert.Equal(CustomFieldNumberFormat.WholeNumbers, roundTripped.CustomFieldDefinitions[1].NumberFormat);
+    }
+
+    [Fact]
     public void SerializedV2EntryUsesWorkbookFieldNamesNotAbandonedCollapsedV1Names()
     {
         var document = PortableLogbookDocumentV2.CreateAustraliaFirst(

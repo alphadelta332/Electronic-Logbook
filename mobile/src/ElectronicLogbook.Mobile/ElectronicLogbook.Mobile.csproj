@@ -32,6 +32,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Data\airports.json.gz" LogicalName="ElectronicLogbook.Mobile.Data.airports.json.gz" />
+    <EmbeddedResource Include="Templates\LogbookExportCompact.xlsx" LogicalName="ElectronicLogbook.Mobile.Templates.LogbookExportCompact.xlsx" />
+    <EmbeddedResource Include="Templates\LogbookExportFull.xlsx" LogicalName="ElectronicLogbook.Mobile.Templates.LogbookExportFull.xlsx" />
   </ItemGroup>
 
 </Project>

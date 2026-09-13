@@ -165,10 +165,14 @@ public sealed class MobileLogbookSessionJourneyTests
         await offline.RenameWorkbookCustomFieldAsync(
             populatedFieldId,
             "Training exercise");
+        await offline.SetWorkbookCustomFieldNumberFormatAsync(
+            populatedFieldId,
+            CustomFieldNumberFormat.WholeNumbers);
 
         Assert.Empty(configurationLedger.Appended);
         Assert.NotNull(offline.HostedSync?.PendingConfigurationRevisionId);
         Assert.Equal("Training exercise", offline.WorkbookCustomFields[1].Label);
+        Assert.Equal(CustomFieldNumberFormat.WholeNumbers, offline.WorkbookCustomFields[1].NumberFormat);
         Assert.Equal("2.5", Assert.Single(offline.CurrentEntriesV2).Entry?.CustomFields[populatedFieldId]);
 
         var online = CreateSession(
@@ -183,12 +187,15 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Single(configurationLedger.Appended);
         Assert.Null(online.HostedSync?.PendingConfigurationRevisionId);
         Assert.Equal("Training exercise", online.WorkbookCustomFields[1].Label);
+        Assert.Equal(CustomFieldNumberFormat.WholeNumbers, online.WorkbookCustomFields[1].NumberFormat);
         Assert.Equal("2.5", Assert.Single(online.CurrentEntriesV2).Entry?.CustomFields[populatedFieldId]);
         var persisted = await new BrowserLogbookStore(jsRuntime).LoadStateV2Async();
         Assert.NotNull(persisted);
         Assert.Null(persisted.HostedSync?.PendingConfigurationRevisionId);
         Assert.Equal("Training exercise", persisted.Document.CustomFieldDefinitions.Single(
             field => field.Id == populatedFieldId).Label);
+        Assert.Equal(CustomFieldNumberFormat.WholeNumbers, persisted.Document.CustomFieldDefinitions.Single(
+            field => field.Id == populatedFieldId).NumberFormat);
     }
 
     [Fact]

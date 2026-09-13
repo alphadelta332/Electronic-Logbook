@@ -492,6 +492,14 @@ public sealed class MobileLogbookSession(
             fieldId,
             label));
 
+    public Task SetWorkbookCustomFieldNumberFormatAsync(
+        CustomFieldId fieldId,
+        CustomFieldNumberFormat numberFormat) =>
+        SaveWorkbookCustomFieldsAsync(MobileCustomFieldSettings.SetNumberFormat(
+            AllWorkbookCustomFields,
+            fieldId,
+            numberFormat));
+
     public Task RemoveWorkbookCustomFieldAsync(CustomFieldId fieldId) =>
         SaveWorkbookCustomFieldsAsync(MobileCustomFieldSettings.Remove(
             AllWorkbookCustomFields,
@@ -1616,7 +1624,11 @@ public sealed class MobileLogbookSession(
         foreach (var field in WorkbookCustomFields)
         {
             entry.CustomFields.TryGetValue(field.Id, out var customValue);
-            yield return new(field.Label, FormatText(customValue), EntryDetailGroup.CustomFields, field.Id.Value);
+            yield return new(
+                field.Label,
+                MobileCustomFieldTotals.FormatValue(field, customValue),
+                EntryDetailGroup.CustomFields,
+                field.Id.Value);
         }
     }
 

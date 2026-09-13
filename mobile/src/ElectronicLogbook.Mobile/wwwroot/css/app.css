@@ -2277,6 +2277,38 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     min-height: 48px;
 }
 
+.custom-entry-number-format {
+    display: grid;
+    gap: 6px;
+}
+
+.custom-entry-number-format > span {
+    color: var(--app-text-muted);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.custom-entry-number-format .segmented-control button {
+    min-height: 48px;
+}
+
+.custom-entry-number-format-warning {
+    display: grid;
+    gap: 4px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--app-warning) 58%, var(--app-border));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--app-warning) 10%, var(--app-surface));
+    color: var(--app-text);
+    font-size: 13px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+.custom-entry-number-format-warning > strong:first-child {
+    color: var(--app-warning);
+}
+
 .custom-entry-setting small {
     color: var(--app-text-muted);
     line-height: 1.4;

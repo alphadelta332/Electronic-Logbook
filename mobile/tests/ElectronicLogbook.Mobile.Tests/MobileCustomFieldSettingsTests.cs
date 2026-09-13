@@ -70,6 +70,36 @@ public sealed class MobileCustomFieldSettingsTests
     }
 
     [Fact]
+    public void SetNumberFormatPersistsTheExplicitChoiceWithoutChangingRecordedValues()
+    {
+        var entries = new[] { Entry((Used.Id, "1.5")) };
+
+        var updated = MobileCustomFieldSettings.SetNumberFormat(
+            [Used, Empty],
+            Used.Id,
+            CustomFieldNumberFormat.WholeNumbers);
+
+        Assert.Equal(
+            CustomFieldNumberFormat.WholeNumbers,
+            updated.Single(field => field.Id == Used.Id).NumberFormat);
+        Assert.Equal("1.5", entries.Single().CustomFields[Used.Id]);
+    }
+
+    [Fact]
+    public void FractionalValueCountCountsOnlyNumericValuesWithAFractionalPart()
+    {
+        var entries = new[]
+        {
+            Entry((Used.Id, "1.5")),
+            Entry((Used.Id, "2.0")),
+            Entry((Used.Id, "not numeric")),
+            Entry((Used.Id, "-3.25"))
+        };
+
+        Assert.Equal(2, MobileCustomFieldSettings.FractionalValueCount(entries, Used.Id));
+    }
+
+    [Fact]
     public void AddUsesAnAvailableOrderAndANewStableIdentity()
     {
         var removed = Empty with { IsInactive = true };

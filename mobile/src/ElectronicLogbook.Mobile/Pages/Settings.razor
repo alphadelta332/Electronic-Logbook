@@ -123,6 +123,28 @@ else
                                maxlength="@MobileCustomFieldSettings.MaximumLabelLength"
                                disabled="@(IsCustomFieldBusy || PendingCustomFieldRenameRequest?.FieldId == fieldId)"
                                @oninput="args => SetCustomFieldLabel(fieldId, args.Value?.ToString())" />
+                        <div class="custom-entry-number-format">
+                            <span>Number format</span>
+                            <div class="segmented-control" role="group" aria-label="Number format for @fieldTotal.Definition.Label">
+                                <button type="button"
+                                        class="@CustomFieldNumberFormatButtonClass(fieldTotal.Definition, CustomFieldNumberFormat.Decimals)"
+                                        aria-pressed="@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.Decimals)"
+                                        disabled="@IsCustomFieldBusy"
+                                        @onclick="() => RequestCustomFieldNumberFormatAsync(fieldTotal.Definition, CustomFieldNumberFormat.Decimals)">Decimals</button>
+                                <button type="button"
+                                        class="@CustomFieldNumberFormatButtonClass(fieldTotal.Definition, CustomFieldNumberFormat.WholeNumbers)"
+                                        aria-pressed="@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.WholeNumbers)"
+                                        disabled="@IsCustomFieldBusy"
+                                        @onclick="() => RequestCustomFieldNumberFormatAsync(fieldTotal.Definition, CustomFieldNumberFormat.WholeNumbers)">Whole numbers</button>
+                            </div>
+                        </div>
+                        @if (PendingCustomFieldNumberFormatRequest is { } numberFormatRequest && numberFormatRequest.FieldId == fieldId)
+                        {
+                            <div class="custom-entry-number-format-warning" role="alert">
+                                <strong>Some recorded values have decimals.</strong>
+                                <span>@FractionalValueWarning(numberFormatRequest.FractionalValueCount) They will display rounded as whole numbers. Exact values will stay saved.</span>
+                            </div>
+                        }
                         @if (PendingCustomFieldRenameRequest is { } renameRequest && renameRequest.FieldId == fieldId)
                         {
                             <div class="custom-entry-rename-warning" role="alert">
@@ -138,7 +160,16 @@ else
                             </p>
                         }
                         <div class="custom-entry-setting-actions">
-                            @if (PendingCustomFieldRenameRequest?.FieldId == fieldId)
+                            @if (PendingCustomFieldNumberFormatRequest?.FieldId == fieldId)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="ConfirmCustomFieldNumberFormatAsync" Disabled="@IsCustomFieldBusy">
+                                    Use whole numbers
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" OnClick="CancelCustomFieldNumberFormat" Disabled="@IsCustomFieldBusy">
+                                    Keep decimals
+                                </MudButton>
+                            }
+                            else if (PendingCustomFieldRenameRequest?.FieldId == fieldId)
                             {
                                 <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="ConfirmCustomFieldRenameAsync" Disabled="@IsCustomFieldBusy">
                                     Confirm rename
@@ -537,6 +568,7 @@ else
     private string NewCustomFieldLabel { get; set; } = string.Empty;
     private Dictionary<CustomFieldId, string> CustomFieldLabels { get; } = [];
     private CustomFieldRenameConfirmation? PendingCustomFieldRenameRequest { get; set; }
+    private CustomFieldNumberFormatConfirmation? PendingCustomFieldNumberFormatRequest { get; set; }
     private CustomFieldId? PendingCustomFieldRemoval { get; set; }
     private string? SupportSummaryMessage { get; set; }
     private string? SupportSummaryError { get; set; }
@@ -595,6 +627,11 @@ else
     private bool CustomFieldLabelChanged(CustomFieldDefinition definition) =>
         !string.Equals(CustomFieldLabel(definition.Id).Trim(), definition.Label, StringComparison.Ordinal);
 
+    private static string CustomFieldNumberFormatButtonClass(
+        CustomFieldDefinition definition,
+        CustomFieldNumberFormat numberFormat) =>
+        definition.EffectiveNumberFormat == numberFormat ? "active" : string.Empty;
+
     private void RefreshCustomFieldEditors()
     {
         foreach (var definition in Session.WorkbookCustomFields)
@@ -633,6 +670,7 @@ else
         }
 
         PendingCustomFieldRemoval = null;
+        PendingCustomFieldNumberFormatRequest = null;
         PendingCustomFieldRenameRequest = new(
             fieldTotal.Definition.Id,
             fieldTotal.Definition.Label,
@@ -665,6 +703,64 @@ else
             () => Session.RenameWorkbookCustomFieldAsync(fieldId, label),
             "Custom entry name saved.");
 
+    private async Task RequestCustomFieldNumberFormatAsync(
+        CustomFieldDefinition definition,
+        CustomFieldNumberFormat numberFormat)
+    {
+        if (IsCustomFieldBusy || definition.EffectiveNumberFormat == numberFormat)
+        {
+            return;
+        }
+
+        CustomFieldMessage = null;
+        CustomFieldError = null;
+        PendingCustomFieldRenameRequest = null;
+        PendingCustomFieldRemoval = null;
+        PendingCustomFieldNumberFormatRequest = null;
+        if (numberFormat == CustomFieldNumberFormat.WholeNumbers)
+        {
+            var fractionalValueCount = MobileCustomFieldSettings.FractionalValueCount(
+                Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+                definition.Id);
+            if (fractionalValueCount > 0)
+            {
+                PendingCustomFieldNumberFormatRequest = new(definition.Id, fractionalValueCount);
+                return;
+            }
+        }
+
+        await SetCustomFieldNumberFormatAsync(definition.Id, numberFormat);
+    }
+
+    private async Task ConfirmCustomFieldNumberFormatAsync()
+    {
+        if (PendingCustomFieldNumberFormatRequest is not { } request)
+        {
+            return;
+        }
+
+        await SetCustomFieldNumberFormatAsync(request.FieldId, CustomFieldNumberFormat.WholeNumbers);
+        if (CustomFieldError is null)
+        {
+            PendingCustomFieldNumberFormatRequest = null;
+        }
+    }
+
+    private void CancelCustomFieldNumberFormat() => PendingCustomFieldNumberFormatRequest = null;
+
+    private async Task SetCustomFieldNumberFormatAsync(
+        CustomFieldId fieldId,
+        CustomFieldNumberFormat numberFormat) =>
+        await RunCustomFieldActionAsync(
+            () => Session.SetWorkbookCustomFieldNumberFormatAsync(fieldId, numberFormat),
+            numberFormat == CustomFieldNumberFormat.WholeNumbers
+                ? "Custom entry now displays whole numbers."
+                : "Custom entry now displays decimals.",
+            refreshEditors: false);
+
+    private static string FractionalValueWarning(int count) =>
+        $"{count} recorded {(count == 1 ? "value has" : "values have")} a decimal.";
+
     private async Task AddCustomFieldAsync()
     {
         var label = NewCustomFieldLabel;
@@ -680,6 +776,7 @@ else
     private void RequestCustomFieldRemoval(CustomFieldId fieldId)
     {
         PendingCustomFieldRenameRequest = null;
+        PendingCustomFieldNumberFormatRequest = null;
         PendingCustomFieldRemoval = fieldId;
     }
 
@@ -696,7 +793,10 @@ else
         }
     }
 
-    private async Task RunCustomFieldActionAsync(Func<Task> action, string successMessage)
+    private async Task RunCustomFieldActionAsync(
+        Func<Task> action,
+        string successMessage,
+        bool refreshEditors = true)
     {
         if (IsCustomFieldBusy)
         {
@@ -709,7 +809,10 @@ else
         try
         {
             await action();
-            RefreshCustomFieldEditors();
+            if (refreshEditors)
+            {
+                RefreshCustomFieldEditors();
+            }
             CustomFieldMessage = Session.HostedSync?.PendingConfigurationRevisionId is null
                 ? successMessage
                 : $"{successMessage} Saved on this device and waiting to sync.";
@@ -743,6 +846,10 @@ else
         string CurrentLabel,
         string ProposedLabel,
         string FormattedTotal);
+
+    private sealed record CustomFieldNumberFormatConfirmation(
+        CustomFieldId FieldId,
+        int FractionalValueCount);
 
     private string DeviceHealthLabel => Session.IsStorageBlocked || Session.PackageKeyStatus == "Unavailable"
         ? "Needs attention"

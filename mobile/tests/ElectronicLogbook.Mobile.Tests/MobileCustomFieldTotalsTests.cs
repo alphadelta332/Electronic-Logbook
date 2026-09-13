@@ -46,6 +46,24 @@ public sealed class MobileCustomFieldTotalsTests
         Assert.Equal("0", new MobileCustomFieldTotal(CountField, 0m).FormattedTotal);
     }
 
+    [Fact]
+    public void FormattedTotal_UsesExplicitNumberFormatInsteadOfTheLegacyPositionDefault()
+    {
+        var wholeNumberFirstField = DecimalField with
+        {
+            NumberFormat = CustomFieldNumberFormat.WholeNumbers
+        };
+        var decimalFourthField = CountField with
+        {
+            NumberFormat = CustomFieldNumberFormat.Decimals
+        };
+
+        Assert.Equal("4", new MobileCustomFieldTotal(wholeNumberFirstField, 3.5m).FormattedTotal);
+        Assert.Equal("2.0", new MobileCustomFieldTotal(decimalFourthField, 2m).FormattedTotal);
+        Assert.Equal("4", MobileCustomFieldTotals.FormatValue(wholeNumberFirstField, "3.5"));
+        Assert.Equal("raw note", MobileCustomFieldTotals.FormatValue(wholeNumberFirstField, " raw note "));
+    }
+
     private static PortableLogbookWorkbookEntry Entry(
         params (CustomFieldId Id, string? Value)[] customFields) =>
         PortableLogbookWorkbookEntry.Empty with

@@ -42,7 +42,11 @@ else
                 <label>Start date <input type="date" value="@StartDateText" @onchange="args => StartDateText = args.Value?.ToString()" /></label>
                 <label>End date <input type="date" value="@EndDateText" @onchange="args => EndDateText = args.Value?.ToString()" /></label>
             </div>
-            <label class="migration-confirmation"><input type="checkbox" @bind="CombineDetails" /> Combine route, remarks, and check flags into one Details column.</label>
+            <div class="segmented-control" role="group" aria-label="Export layout">
+                <button type="button" class="@LayoutButtonClass(MobileLogbookFileExportLayout.Full)" aria-pressed="@(Layout == MobileLogbookFileExportLayout.Full)" @onclick="() => Layout = MobileLogbookFileExportLayout.Full">Full</button>
+                <button type="button" class="@LayoutButtonClass(MobileLogbookFileExportLayout.Compact)" aria-pressed="@(Layout == MobileLogbookFileExportLayout.Compact)" @onclick="() => Layout = MobileLogbookFileExportLayout.Compact">Compact</button>
+            </div>
+            <small>Full keeps route, remarks, and check flags in separate columns. Compact combines them into one Details column.</small>
             <small>Leave both dates blank to export every active flight. The date range includes both selected dates.</small>
         </section>
 
@@ -81,7 +85,7 @@ else
 @code {
     private string? StartDateText { get; set; }
     private string? EndDateText { get; set; }
-    private bool CombineDetails { get; set; } = true;
+    private MobileLogbookFileExportLayout Layout { get; set; } = MobileLogbookFileExportLayout.Full;
     private bool IsBusy { get; set; }
     private string? Message { get; set; }
     private string? Error { get; set; }
@@ -106,9 +110,9 @@ else
                 format,
                 ParseOptionalDate(StartDateText, "start"),
                 ParseOptionalDate(EndDateText, "end"),
-                CombineDetails);
+                Layout);
             var result = await MobileLogbookFileExportWorkflow.ExportAsync(
-                Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+                Session.CurrentEntriesV2,
                 Session.WorkbookCustomFields,
                 request,
                 FileStore,
@@ -126,6 +130,9 @@ else
             IsBusy = false;
         }
     }
+
+    private string LayoutButtonClass(MobileLogbookFileExportLayout layout) =>
+        Layout == layout ? "active" : string.Empty;
 
     private static DateOnly? ParseOptionalDate(string? value, string label)
     {
