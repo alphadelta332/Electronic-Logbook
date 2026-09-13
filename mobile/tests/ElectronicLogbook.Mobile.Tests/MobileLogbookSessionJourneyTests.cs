@@ -116,11 +116,30 @@ public sealed class MobileLogbookSessionJourneyTests
         var clock = new ManualSyncClock(DateTimeOffset.Parse("2026-09-10T09:00:00Z"));
         var key = PortableLogbookKey.FromBytes(Enumerable.Repeat((byte)9, 32).ToArray());
         await new BrowserPackageKeyStore(jsRuntime).ImportRecoveryCodeAsync(logbookId, key.ToRecoveryCode());
+        var populatedFieldId = new CustomFieldId("cf_workbook_2");
+        var populatedEntry = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026,
+            Month = 9,
+            Day = 10,
+            Reg = "VH-REN",
+            CustomFields = new Dictionary<CustomFieldId, string?>
+            {
+                [populatedFieldId] = "2.5"
+            }
+        };
+        var populatedOperation = PortableLogbookOperationV2.Create(
+            logbookId,
+            new EntryId("ent_populated_custom_field"),
+            new RevisionId("rev_populated_custom_field"),
+            deviceId,
+            clock.UtcNow.AddMinutes(-10),
+            populatedEntry);
         var document = PortableLogbookDocumentV2.CreateAustraliaFirst(
             logbookId,
             MobileLogbookSession.CustomFields,
             PortableLogbookCurrencyOverrideDates.Empty,
-            []);
+            [populatedOperation]);
         var hosted = new BrowserHostedSyncState(
             new HostedAccountId("acct_private"),
             logbookId,
@@ -144,12 +163,13 @@ public sealed class MobileLogbookSessionJourneyTests
         await offline.EnsureLoadedWorkbookAsync();
 
         await offline.RenameWorkbookCustomFieldAsync(
-            new CustomFieldId("cf_workbook_2"),
+            populatedFieldId,
             "Training exercise");
 
         Assert.Empty(configurationLedger.Appended);
         Assert.NotNull(offline.HostedSync?.PendingConfigurationRevisionId);
         Assert.Equal("Training exercise", offline.WorkbookCustomFields[1].Label);
+        Assert.Equal("2.5", Assert.Single(offline.CurrentEntriesV2).Entry?.CustomFields[populatedFieldId]);
 
         var online = CreateSession(
             jsRuntime,
@@ -163,11 +183,12 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Single(configurationLedger.Appended);
         Assert.Null(online.HostedSync?.PendingConfigurationRevisionId);
         Assert.Equal("Training exercise", online.WorkbookCustomFields[1].Label);
+        Assert.Equal("2.5", Assert.Single(online.CurrentEntriesV2).Entry?.CustomFields[populatedFieldId]);
         var persisted = await new BrowserLogbookStore(jsRuntime).LoadStateV2Async();
         Assert.NotNull(persisted);
         Assert.Null(persisted.HostedSync?.PendingConfigurationRevisionId);
         Assert.Equal("Training exercise", persisted.Document.CustomFieldDefinitions.Single(
-            field => field.Id == new CustomFieldId("cf_workbook_2")).Label);
+            field => field.Id == populatedFieldId).Label);
     }
 
     [Fact]

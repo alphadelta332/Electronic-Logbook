@@ -107,16 +107,12 @@ else
                 <h2 id="custom-entry-settings-heading">Custom entries</h2>
                 <span class="draft-pill">@Session.WorkbookCustomFields.Count / @MobileCustomFieldSettings.MaximumActiveFields</span>
             </div>
-            <p class="settings-section-intro">
-                Add up to four fields for values you want to record with each flight. A field can only be renamed or removed while its total is zero.
-            </p>
             <div class="custom-entry-settings-list">
                 @foreach (var fieldTotal in Session.WorkbookCustomFieldTotals)
                 {
                     var fieldId = fieldTotal.Definition.Id;
                     var editorId = $"custom-entry-{fieldId.Value}";
-                    var guidanceId = $"custom-entry-guidance-{fieldId.Value}";
-                    var isLocked = fieldTotal.Total != 0m;
+                    var removalLocked = fieldTotal.Total != 0m;
                     <article class="custom-entry-setting">
                         <div class="custom-entry-setting-heading">
                             <label for="@editorId">Entry @fieldTotal.Definition.Order</label>
@@ -125,14 +121,16 @@ else
                         <input id="@editorId"
                                value="@CustomFieldLabel(fieldId)"
                                maxlength="@MobileCustomFieldSettings.MaximumLabelLength"
-                               disabled="@(IsCustomFieldBusy || isLocked)"
-                               aria-describedby="@guidanceId"
+                               disabled="@(IsCustomFieldBusy || PendingCustomFieldRenameRequest?.FieldId == fieldId)"
                                @oninput="args => SetCustomFieldLabel(fieldId, args.Value?.ToString())" />
-                        <small id="@guidanceId">
-                            @(isLocked
-                                ? $"Locked while the total is {fieldTotal.FormattedTotal}."
-                                : "Total is zero, so this entry can be renamed or removed.")
-                        </small>
+                        @if (PendingCustomFieldRenameRequest is { } renameRequest && renameRequest.FieldId == fieldId)
+                        {
+                            <div class="custom-entry-rename-warning" role="alert">
+                                <strong>Check this name describes the existing values.</strong>
+                                <span><strong>@renameRequest.CurrentLabel</strong> will become <strong>@renameRequest.ProposedLabel</strong>.</span>
+                                <span>This field currently totals @renameRequest.FormattedTotal. The total and all recorded values will stay unchanged.</span>
+                            </div>
+                        }
                         @if (PendingCustomFieldRemoval == fieldId)
                         {
                             <p class="custom-entry-removal-warning">
@@ -140,7 +138,16 @@ else
                             </p>
                         }
                         <div class="custom-entry-setting-actions">
-                            @if (PendingCustomFieldRemoval == fieldId)
+                            @if (PendingCustomFieldRenameRequest?.FieldId == fieldId)
+                            {
+                                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="ConfirmCustomFieldRenameAsync" Disabled="@IsCustomFieldBusy">
+                                    Confirm rename
+                                </MudButton>
+                                <MudButton Variant="Variant.Text" OnClick="CancelCustomFieldRename" Disabled="@IsCustomFieldBusy">
+                                    Keep current name
+                                </MudButton>
+                            }
+                            else if (PendingCustomFieldRemoval == fieldId)
                             {
                                 <MudButton Variant="Variant.Filled" Color="Color.Error" OnClick="@(() => RemoveCustomFieldAsync(fieldId))" Disabled="@IsCustomFieldBusy">
                                     Confirm remove
@@ -151,10 +158,10 @@ else
                             }
                             else
                             {
-                                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => RenameCustomFieldAsync(fieldId))" Disabled="@(IsCustomFieldBusy || isLocked || !CustomFieldLabelChanged(fieldTotal.Definition))">
+                                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => RequestCustomFieldRenameAsync(fieldTotal))" Disabled="@(IsCustomFieldBusy || !CustomFieldLabelChanged(fieldTotal.Definition))">
                                     Save name
                                 </MudButton>
-                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="@(() => RequestCustomFieldRemoval(fieldId))" Disabled="@(IsCustomFieldBusy || isLocked)">
+                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="@(() => RequestCustomFieldRemoval(fieldId))" Disabled="@(IsCustomFieldBusy || removalLocked)">
                                     Remove
                                 </MudButton>
                             }
@@ -529,6 +536,7 @@ else
     private string RecoveryCodeConfirmation { get; set; } = string.Empty;
     private string NewCustomFieldLabel { get; set; } = string.Empty;
     private Dictionary<CustomFieldId, string> CustomFieldLabels { get; } = [];
+    private CustomFieldRenameConfirmation? PendingCustomFieldRenameRequest { get; set; }
     private CustomFieldId? PendingCustomFieldRemoval { get; set; }
     private string? SupportSummaryMessage { get; set; }
     private string? SupportSummaryError { get; set; }
@@ -595,9 +603,66 @@ else
         }
     }
 
-    private async Task RenameCustomFieldAsync(CustomFieldId fieldId) =>
+    private async Task RequestCustomFieldRenameAsync(MobileCustomFieldTotal fieldTotal)
+    {
+        if (IsCustomFieldBusy)
+        {
+            return;
+        }
+
+        var proposedLabel = CustomFieldLabel(fieldTotal.Definition.Id).Trim();
+        CustomFieldMessage = null;
+        CustomFieldError = null;
+        try
+        {
+            _ = MobileCustomFieldSettings.Rename(
+                Session.AllWorkbookCustomFields,
+                fieldTotal.Definition.Id,
+                proposedLabel);
+        }
+        catch (InvalidOperationException ex)
+        {
+            CustomFieldError = ex.Message;
+            return;
+        }
+
+        if (!MobileCustomFieldSettings.RenameRequiresConfirmation(fieldTotal.Total))
+        {
+            await RenameCustomFieldAsync(fieldTotal.Definition.Id, proposedLabel);
+            return;
+        }
+
+        PendingCustomFieldRemoval = null;
+        PendingCustomFieldRenameRequest = new(
+            fieldTotal.Definition.Id,
+            fieldTotal.Definition.Label,
+            proposedLabel,
+            fieldTotal.FormattedTotal);
+    }
+
+    private async Task ConfirmCustomFieldRenameAsync()
+    {
+        if (PendingCustomFieldRenameRequest is not { } request)
+        {
+            return;
+        }
+
+        await RenameCustomFieldAsync(request.FieldId, request.ProposedLabel);
+        if (CustomFieldError is null)
+        {
+            PendingCustomFieldRenameRequest = null;
+        }
+    }
+
+    private void CancelCustomFieldRename()
+    {
+        PendingCustomFieldRenameRequest = null;
+        RefreshCustomFieldEditors();
+    }
+
+    private async Task RenameCustomFieldAsync(CustomFieldId fieldId, string label) =>
         await RunCustomFieldActionAsync(
-            () => Session.RenameWorkbookCustomFieldAsync(fieldId, CustomFieldLabel(fieldId)),
+            () => Session.RenameWorkbookCustomFieldAsync(fieldId, label),
             "Custom entry name saved.");
 
     private async Task AddCustomFieldAsync()
@@ -612,8 +677,11 @@ else
         }
     }
 
-    private void RequestCustomFieldRemoval(CustomFieldId fieldId) =>
+    private void RequestCustomFieldRemoval(CustomFieldId fieldId)
+    {
+        PendingCustomFieldRenameRequest = null;
         PendingCustomFieldRemoval = fieldId;
+    }
 
     private void CancelCustomFieldRemoval() => PendingCustomFieldRemoval = null;
 
@@ -669,6 +737,12 @@ else
 
     private string AccentButtonClass(string accent) =>
         UiPreferences.Accent == accent ? "accent-option active" : "accent-option";
+
+    private sealed record CustomFieldRenameConfirmation(
+        CustomFieldId FieldId,
+        string CurrentLabel,
+        string ProposedLabel,
+        string FormattedTotal);
 
     private string DeviceHealthLabel => Session.IsStorageBlocked || Session.PackageKeyStatus == "Unavailable"
         ? "Needs attention"

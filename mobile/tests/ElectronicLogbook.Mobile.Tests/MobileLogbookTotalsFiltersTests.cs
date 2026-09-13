@@ -94,9 +94,42 @@ public sealed class MobileLogbookTotalsFiltersTests
         };
 
         Assert.Equal(["02 Jan 2025", "12 Sep 2026", "(Blanks)"], Labels("date", entries));
-        Assert.Equal(["1.2", "2.0", "10.0"], Labels("seCommandDay", entries));
+        Assert.Equal(["Non-zero"], Labels("seCommandDay", entries));
         Assert.Equal(["No", "Yes", "(Blanks)"], Labels("fr", entries));
         Assert.Equal(["Goggle", "(Blanks)"], Labels("custom:cf_workbook_1", entries));
+    }
+
+    [Fact]
+    public void NumericFields_GroupExactValuesAndMatchOnlyEntriesWithANonZeroValue()
+    {
+        var entries = new[]
+        {
+            Entry("C208", "VH-BLANK"),
+            Entry("C208", "VH-ZERO", seCommandDay: 0m) with { LandingsDay = 0, Ils = 0 },
+            Entry("C208", "VH-ONE", seCommandDay: 1.2m) with { LandingsDay = 1, Ils = 1 },
+            Entry("C208", "VH-TWO", seCommandDay: 2.3m) with { LandingsDay = 2, Ils = 2 }
+        };
+
+        foreach (var fieldId in new[] { "seCommandDay", "landingsDay", "ils" })
+        {
+            var field = Field(fieldId);
+            var values = MobileLogbookTotalsFilters.Values(field, entries);
+            var nonZero = Assert.Single(values, value => value.Label == "Non-zero");
+            var zeroOrBlank = Assert.Single(values, value => value.Label == "Zero or blank");
+            var selections = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal)
+            {
+                [field.Id] = new([nonZero.Key], StringComparer.Ordinal)
+            };
+
+            Assert.Equal(2, nonZero.EntryCount);
+            Assert.Equal(2, zeroOrBlank.EntryCount);
+            Assert.Equal(
+                ["VH-ONE", "VH-TWO"],
+                entries
+                    .Where(entry => MobileLogbookTotalsFilters.Matches(entry, selections, Fields))
+                    .Select(entry => entry.Reg!)
+                    .ToArray());
+        }
     }
 
     [Fact]

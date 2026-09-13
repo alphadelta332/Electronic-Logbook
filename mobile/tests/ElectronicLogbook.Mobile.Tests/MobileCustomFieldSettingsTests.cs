@@ -31,23 +31,36 @@ public sealed class MobileCustomFieldSettingsTests
     }
 
     [Fact]
-    public void RenameAndRemoveRejectAFieldWhoseTotalIsNotZero()
+    public void RenameAllowsAFieldWhoseTotalIsNotZeroButRemoveStillRejectsIt()
     {
         var entries = new[] { Entry((Used.Id, "1.5")) };
 
-        var renameError = Assert.Throws<InvalidOperationException>(() =>
-            MobileCustomFieldSettings.Rename([Used, Empty], entries, Used.Id, "Duty"));
+        var renamed = MobileCustomFieldSettings.Rename([Used, Empty], Used.Id, "Duty");
         var removeError = Assert.Throws<InvalidOperationException>(() =>
             MobileCustomFieldSettings.Remove([Used, Empty], entries, Used.Id));
 
-        Assert.Contains("total is not zero", renameError.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("Duty", renamed.Single(field => field.Id == Used.Id).Label);
+        Assert.Equal("1.5", entries.Single().CustomFields[Used.Id]);
         Assert.Contains("total is not zero", removeError.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1.5, true)]
+    [InlineData(-1.5, true)]
+    public void RenameRequiresConfirmationOnlyWhenTheExistingTotalIsNotZero(
+        double total,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            MobileCustomFieldSettings.RenameRequiresConfirmation((decimal)total));
     }
 
     [Fact]
     public void RenameTrimsAndRemoveDeactivatesWithoutDeletingHistoricalDefinition()
     {
-        var renamed = MobileCustomFieldSettings.Rename([Used, Empty], [], Empty.Id, "  Exercise  ");
+        var renamed = MobileCustomFieldSettings.Rename([Used, Empty], Empty.Id, "  Exercise  ");
         var removed = MobileCustomFieldSettings.Remove(renamed, [], Empty.Id);
 
         Assert.Equal("Exercise", renamed.Single(field => field.Id == Empty.Id).Label);

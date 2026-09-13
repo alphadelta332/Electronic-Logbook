@@ -489,7 +489,6 @@ public sealed class MobileLogbookSession(
     public Task RenameWorkbookCustomFieldAsync(CustomFieldId fieldId, string label) =>
         SaveWorkbookCustomFieldsAsync(MobileCustomFieldSettings.Rename(
             AllWorkbookCustomFields,
-            CurrentEntriesV2.Select(entry => entry.Entry!),
             fieldId,
             label));
 

@@ -16,13 +16,11 @@ public static class MobileCustomFieldSettings
 
     public static IReadOnlyList<CustomFieldDefinition> Rename(
         IEnumerable<CustomFieldDefinition> definitions,
-        IEnumerable<PortableLogbookWorkbookEntry> entries,
         CustomFieldId fieldId,
         string label)
     {
         var definitionArray = definitions.ToArray();
-        var field = ActiveField(definitionArray, fieldId);
-        EnsureZeroTotal(field, entries);
+        _ = ActiveField(definitionArray, fieldId);
         var normalizedLabel = NormalizeLabel(label, definitionArray, fieldId);
         return definitionArray
             .Select(definition => definition.Id == fieldId
@@ -30,6 +28,8 @@ public static class MobileCustomFieldSettings
                 : definition)
             .ToArray();
     }
+
+    public static bool RenameRequiresConfirmation(decimal currentTotal) => currentTotal != 0m;
 
     public static IReadOnlyList<CustomFieldDefinition> Remove(
         IEnumerable<CustomFieldDefinition> definitions,
@@ -90,7 +90,7 @@ public static class MobileCustomFieldSettings
         if (total != 0m)
         {
             throw new InvalidOperationException(
-                $"{field.Label} cannot be changed because its current total is not zero.");
+                $"{field.Label} cannot be removed because its current total is not zero.");
         }
     }
 

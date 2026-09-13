@@ -26,6 +26,8 @@ public enum MobileLogbookTotalsFilterFieldKind
 public static class MobileLogbookTotalsFilters
 {
     private const string BlankKey = "blank:";
+    private const string NonZeroKey = "numeric:non-zero";
+    private const string ZeroOrBlankKey = "numeric:zero-or-blank";
 
     public static IReadOnlyList<MobileLogbookTotalsFilterField> CreateFields(
         IEnumerable<CustomFieldDefinition> customFieldDefinitions)
@@ -111,8 +113,7 @@ public static class MobileLogbookTotalsFilters
                 .ThenBy(value => value.Key, StringComparer.Ordinal)
                 .ToArray(),
             MobileLogbookTotalsFilterFieldKind.DecimalHours or MobileLogbookTotalsFilterFieldKind.Count => values
-                .OrderBy(value => value.Key == BlankKey)
-                .ThenBy(value => NumericSortValue(value.Key))
+                .OrderBy(value => value.Key != NonZeroKey)
                 .ToArray(),
             _ => values
                 .OrderBy(value => value.Key == BlankKey)
@@ -199,7 +200,14 @@ public static class MobileLogbookTotalsFilters
         MobileLogbookTotalsFilterField field,
         object? rawValue)
     {
-        if (rawValue is null || rawValue is string text && string.IsNullOrWhiteSpace(text))
+        if (rawValue is null)
+        {
+            return field.Kind is MobileLogbookTotalsFilterFieldKind.DecimalHours or MobileLogbookTotalsFilterFieldKind.Count
+                ? new NormalizedFilterValue(ZeroOrBlankKey, "Zero or blank")
+                : new NormalizedFilterValue(BlankKey, "(Blanks)");
+        }
+
+        if (rawValue is string text && string.IsNullOrWhiteSpace(text))
         {
             return new NormalizedFilterValue(BlankKey, "(Blanks)");
         }
@@ -211,12 +219,17 @@ public static class MobileLogbookTotalsFilters
             MobileLogbookTotalsFilterFieldKind.Boolean when rawValue is bool flag =>
                 new NormalizedFilterValue($"boolean:{flag.ToString().ToLowerInvariant()}", flag ? "Yes" : "No"),
             MobileLogbookTotalsFilterFieldKind.DecimalHours when rawValue is decimal hours =>
-                new NormalizedFilterValue($"number:{hours.ToString("G29", CultureInfo.InvariantCulture)}", hours.ToString("0.0###", CultureInfo.InvariantCulture)),
+                NormalizeNumeric(hours),
             MobileLogbookTotalsFilterFieldKind.Count when rawValue is int count =>
-                new NormalizedFilterValue($"number:{count.ToString(CultureInfo.InvariantCulture)}", count.ToString(CultureInfo.InvariantCulture)),
+                NormalizeNumeric(count),
             _ => NormalizeText(rawValue.ToString() ?? string.Empty)
         };
     }
+
+    private static NormalizedFilterValue NormalizeNumeric(decimal value) =>
+        value == 0m
+            ? new NormalizedFilterValue(ZeroOrBlankKey, "Zero or blank")
+            : new NormalizedFilterValue(NonZeroKey, "Non-zero");
 
     private static NormalizedFilterValue NormalizeText(string value)
     {
@@ -225,12 +238,6 @@ public static class MobileLogbookTotalsFilters
             ? new NormalizedFilterValue(BlankKey, "(Blanks)")
             : new NormalizedFilterValue($"text:{label.ToUpperInvariant()}", label);
     }
-
-    private static decimal NumericSortValue(string key) =>
-        key.StartsWith("number:", StringComparison.Ordinal) &&
-        decimal.TryParse(key["number:".Length..], NumberStyles.Number, CultureInfo.InvariantCulture, out var value)
-            ? value
-            : decimal.MaxValue;
 
     private sealed record NormalizedFilterValue(string Key, string Label);
 }

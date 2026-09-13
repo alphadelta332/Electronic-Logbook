@@ -521,16 +521,25 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate5SettingsProvidesZeroTotalCustomEntryManagement()
+    public void Gate5SettingsAllowsPopulatedCustomEntryRenamingButKeepsRemovalProtected()
     {
         var settings = ReadMobilePage("Settings.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
         var css = ReadMobileWebAsset("css/app.css");
 
         Assert.Contains("<h2 id=\"custom-entry-settings-heading\">Custom entries</h2>", settings, StringComparison.Ordinal);
-        Assert.Contains("A field can only be renamed or removed while its total is zero.", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Add up to four fields for values you want to record with each flight.", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Renaming requires confirmation because this field contains values", settings, StringComparison.Ordinal);
         Assert.Contains("Session.WorkbookCustomFieldTotals", settings, StringComparison.Ordinal);
-        Assert.Contains("isLocked = fieldTotal.Total != 0m", settings, StringComparison.Ordinal);
+        Assert.Contains("removalLocked = fieldTotal.Total != 0m", settings, StringComparison.Ordinal);
+        Assert.Contains("disabled=\"@(IsCustomFieldBusy || PendingCustomFieldRenameRequest?.FieldId == fieldId)\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(IsCustomFieldBusy || !CustomFieldLabelChanged(fieldTotal.Definition))\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Disabled=\"@(IsCustomFieldBusy || removalLocked)\"", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileCustomFieldSettings.RenameRequiresConfirmation(fieldTotal.Total)", settings, StringComparison.Ordinal);
+        Assert.Contains("Check this name describes the existing values.", settings, StringComparison.Ordinal);
+        Assert.Contains("The total and all recorded values will stay unchanged.", settings, StringComparison.Ordinal);
+        Assert.Contains("Confirm rename", settings, StringComparison.Ordinal);
+        Assert.Contains("Keep current name", settings, StringComparison.Ordinal);
         Assert.Contains("RenameWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
         Assert.Contains("RemoveWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
         Assert.Contains("AddWorkbookCustomFieldAsync", settings, StringComparison.Ordinal);
@@ -746,6 +755,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Aircraft type", filters, StringComparison.Ordinal);
         Assert.Contains("Single engine command — day", filters, StringComparison.Ordinal);
         Assert.Contains("Circling approaches", filters, StringComparison.Ordinal);
+        Assert.Contains("Non-zero", filters, StringComparison.Ordinal);
+        Assert.Contains("Zero or blank", filters, StringComparison.Ordinal);
         Assert.Contains(".totals-filter-values", css, StringComparison.Ordinal);
         Assert.Contains("min-height: 48px;", css, StringComparison.Ordinal);
     }
