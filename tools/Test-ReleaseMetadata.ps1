@@ -16,9 +16,9 @@ $package = Get-Content (Join-Path $repoRoot "mobile\package.json") -Raw -Encodin
 if ($null -ne $package.PSObject.Properties["version"]) {
     throw "mobile/package.json must not duplicate app_version; versions.properties is the source of truth."
 }
-# 300000015 has already been assigned to a signed Preview artifact. Android requires
-# the next distributable artifact to use a greater versionCode.
-if ($versions.AndroidVersionCode -lt 300000016) {
+# 300000018 has already been assigned to a signed Preview artifact. Android requires
+# any future distributable artifact to use a greater versionCode.
+if ($versions.AndroidVersionCode -lt 300000018) {
     throw "versions.properties android_version_code '$($versions.AndroidVersionCode)' would downgrade an existing Preview installation."
 }
 $readmePath = Join-Path $repoRoot "README.md"
