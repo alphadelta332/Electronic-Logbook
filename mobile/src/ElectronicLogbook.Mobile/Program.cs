@@ -18,6 +18,7 @@ builder.Services.AddScoped<BrowserUiPreferencesStore>();
 builder.Services.AddScoped<MobileUiPreferenceState>();
 builder.Services.AddScoped<ISyncClock>(_ => SystemSyncClock.Instance);
 builder.Services.AddScoped<BrowserNetworkStatus>();
+builder.Services.AddScoped<BrowserPreviewUpdateState>();
 builder.Services.AddScoped<INetworkStatus>(sp => sp.GetRequiredService<BrowserNetworkStatus>());
 builder.Services.AddScoped<MobileSupabaseHostedSyncClient>();
 builder.Services.AddScoped<IHostedLogbookAuthenticator>(sp => sp.GetRequiredService<MobileSupabaseHostedSyncClient>());

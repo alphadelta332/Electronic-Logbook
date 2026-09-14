@@ -178,6 +178,154 @@ public sealed class MobileLogbookFileExportWorkflowTests
     }
 
     [Theory]
+    [InlineData(MobileLogbookFileExportLayout.Full)]
+    [InlineData(MobileLogbookFileExportLayout.Compact)]
+    public void CreateXlsxFreezesCanonicalHeaderRows(MobileLogbookFileExportLayout layout)
+    {
+        var result = MobileLogbookFileExportWorkflow.Create(
+            CanonicalEntries(),
+            CanonicalFields,
+            new MobileLogbookFileExportRequest(
+                MobileLogbookFileExportFormat.Xlsx,
+                Layout: layout),
+            ExportedAt);
+
+        using var stream = new MemoryStream(result.Bytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var worksheet = ReadXml(archive, "xl/worksheets/sheet1.xml");
+        var pane = Assert.Single(worksheet.Descendants(spreadsheet + "pane"));
+
+        Assert.Equal("5", pane.Attribute("ySplit")?.Value);
+        Assert.Equal("2", pane.Attribute("xSplit")?.Value);
+        Assert.Equal("C6", pane.Attribute("topLeftCell")?.Value);
+        Assert.Equal("bottomRight", pane.Attribute("activePane")?.Value);
+        Assert.Equal("frozen", pane.Attribute("state")?.Value);
+        Assert.DoesNotContain(
+            worksheet.Descendants(spreadsheet + "row"),
+            row => row.Attribute("hidden")?.Value == "1");
+    }
+
+    [Theory]
+    [InlineData(MobileLogbookFileExportLayout.Full)]
+    [InlineData(MobileLogbookFileExportLayout.Compact)]
+    public void CreateXlsxDisablesWrappingForFlightDataAndTotalsRows(MobileLogbookFileExportLayout layout)
+    {
+        var result = MobileLogbookFileExportWorkflow.Create(
+            CanonicalEntries(),
+            CanonicalFields,
+            new MobileLogbookFileExportRequest(
+                MobileLogbookFileExportFormat.Xlsx,
+                Layout: layout),
+            ExportedAt);
+
+        using var stream = new MemoryStream(result.Bytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var worksheet = ReadXml(archive, "xl/worksheets/sheet1.xml");
+        var styles = ReadXml(archive, "xl/styles.xml");
+        var table = ReadXml(archive, "xl/tables/table1.xml");
+        var cellFormats = styles.Root!
+            .Element(spreadsheet + "cellXfs")!
+            .Elements(spreadsheet + "xf")
+            .ToArray();
+        var (_, headerRow, _, totalsRow) = ParseRange(table.Root!.Attribute("ref")!.Value);
+
+        bool IsWrapped(XElement cell)
+        {
+            var styleIndex = (int?)cell.Attribute("s") ?? 0;
+            return cellFormats[styleIndex]
+                .Element(spreadsheet + "alignment")?
+                .Attribute("wrapText")?
+                .Value == "1";
+        }
+
+        var headingCells = worksheet.Descendants(spreadsheet + "row")
+            .Where(row => (int)row.Attribute("r")! < headerRow)
+            .SelectMany(row => row.Elements(spreadsheet + "c"));
+        Assert.Contains(headingCells, IsWrapped);
+
+        var flightAndTotalCells = worksheet.Descendants(spreadsheet + "row")
+            .Where(row => (int)row.Attribute("r")! > headerRow && (int)row.Attribute("r")! <= totalsRow + 1)
+            .SelectMany(row => row.Elements(spreadsheet + "c"));
+        Assert.DoesNotContain(flightAndTotalCells, IsWrapped);
+    }
+
+    [Fact]
+    public void CreateFullXlsxCentersViaFlightValues()
+    {
+        var result = MobileLogbookFileExportWorkflow.Create(
+            CanonicalEntries(),
+            CanonicalFields,
+            new MobileLogbookFileExportRequest(
+                MobileLogbookFileExportFormat.Xlsx,
+                Layout: MobileLogbookFileExportLayout.Full),
+            ExportedAt);
+
+        using var stream = new MemoryStream(result.Bytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var worksheet = ReadXml(archive, "xl/worksheets/sheet1.xml");
+        var styles = ReadXml(archive, "xl/styles.xml");
+        var table = ReadXml(archive, "xl/tables/table1.xml");
+        var cellFormats = styles.Root!
+            .Element(spreadsheet + "cellXfs")!
+            .Elements(spreadsheet + "xf")
+            .ToArray();
+        var tableColumns = table.Root!
+            .Element(spreadsheet + "tableColumns")!
+            .Elements(spreadsheet + "tableColumn")
+            .Select(column => column.Attribute("name")!.Value)
+            .ToArray();
+        var (startColumn, headerRow, _, totalsRow) = ParseRange(table.Root.Attribute("ref")!.Value);
+        var viaColumn = ColumnName(ColumnNumber(startColumn) + Array.IndexOf(tableColumns, "Via"));
+        var viaCells = worksheet.Descendants(spreadsheet + "row")
+            .Where(row => (int)row.Attribute("r")! > headerRow && (int)row.Attribute("r")! < totalsRow)
+            .Select(row => row.Elements(spreadsheet + "c")
+                .Single(cell => cell.Attribute("r")!.Value.StartsWith(viaColumn, StringComparison.Ordinal)));
+
+        Assert.DoesNotContain(
+            viaCells,
+            cell => cellFormats[(int?)cell.Attribute("s") ?? 0]
+                .Element(spreadsheet + "alignment")?
+                .Attribute("horizontal")?
+                .Value != "center");
+    }
+
+    [Theory]
+    [InlineData(MobileLogbookFileExportLayout.Full)]
+    [InlineData(MobileLogbookFileExportLayout.Compact)]
+    public void CreateXlsxUsesGreyNormalStyleForTheSurroundingWorksheet(
+        MobileLogbookFileExportLayout layout)
+    {
+        var result = MobileLogbookFileExportWorkflow.Create(
+            CanonicalEntries(),
+            CanonicalFields,
+            new MobileLogbookFileExportRequest(
+                MobileLogbookFileExportFormat.Xlsx,
+                Layout: layout),
+            ExportedAt);
+
+        using var stream = new MemoryStream(result.Bytes, writable: false);
+        using var archive = new ZipArchive(stream, ZipArchiveMode.Read);
+        XNamespace spreadsheet = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        var styles = ReadXml(archive, "xl/styles.xml");
+        var normalCellFormat = styles.Root!
+            .Element(spreadsheet + "cellXfs")!
+            .Elements(spreadsheet + "xf")
+            .First();
+        var fillId = (int)normalCellFormat.Attribute("fillId")!;
+        var normalFill = styles.Root
+            .Element(spreadsheet + "fills")!
+            .Elements(spreadsheet + "fill")
+            .ElementAt(fillId)
+            .Element(spreadsheet + "patternFill")!;
+
+        Assert.Equal("solid", normalFill.Attribute("patternType")?.Value);
+        Assert.Equal("FFF2F2F2", normalFill.Element(spreadsheet + "fgColor")?.Attribute("rgb")?.Value);
+    }
+
+    [Theory]
     [InlineData(MobileLogbookFileExportLayout.Full, "BL")]
     [InlineData(MobileLogbookFileExportLayout.Compact, "BF")]
     public void CreateXlsxSortsByDateThenEntryIdOmitsDeletedRowsAndWritesHiddenEntryIds(

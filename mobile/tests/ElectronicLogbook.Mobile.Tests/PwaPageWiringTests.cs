@@ -41,7 +41,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Every export is a new file", export, StringComparison.Ordinal);
         Assert.Contains("MobileLogbookFileExportWorkflow.ExportAsync", export, StringComparison.Ordinal);
         Assert.Contains("Export XLSX", export, StringComparison.Ordinal);
-        Assert.Contains("Export UTF-8 CSV", export, StringComparison.Ordinal);
+        Assert.Contains("Export CSV", export, StringComparison.Ordinal);
         Assert.Contains("Full", export, StringComparison.Ordinal);
         Assert.Contains("Compact", export, StringComparison.Ordinal);
         Assert.Contains("MobileLogbookFileExportLayout.Full", export, StringComparison.Ordinal);
@@ -1757,6 +1757,41 @@ public sealed class PwaPageWiringTests
         Assert.Contains("AndroidVersionCode", build, StringComparison.Ordinal);
         Assert.Contains("The built APK version metadata does not match versions.properties", build, StringComparison.Ordinal);
         Assert.Contains("/google-services.json", appGitIgnore, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PreviewUpgradeShowsAnAccessibleOncePerBuildChangelog()
+    {
+        var layout = ReadMobileSource(Path.Combine("Layout", "MainLayout.razor"));
+        var changelog = ReadMobileSource(Path.Combine("Layout", "PreviewChangelogDialog.razor"));
+        var css = ReadMobileWebAsset("css/app.css");
+        var javascript = ReadMobileWebAsset(Path.Combine("js", "logbookStore.js"));
+        var plugin = ReadProjectFile(
+            "mobile", "android", "app", "src", "main", "java", "com", "alphadelta",
+            "electroniclogbook", "ElectronicLogbookPreviewUpdatesPlugin.java");
+
+        Assert.Contains("<PreviewChangelogDialog />", layout, StringComparison.Ordinal);
+        Assert.Contains("MobilePreviewChangelog.Evaluate", changelog, StringComparison.Ordinal);
+        Assert.Contains("role=\"dialog\"", changelog, StringComparison.Ordinal);
+        Assert.Contains("aria-modal=\"true\"", changelog, StringComparison.Ordinal);
+        Assert.Contains("What's new in FlightLogX", changelog, StringComparison.Ordinal);
+        Assert.Contains("@onkeydown=\"HandleKeyDownAsync\"", changelog, StringComparison.Ordinal);
+        Assert.Contains("data-android-back-dismiss", changelog, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookModal.activate", changelog, StringComparison.Ordinal);
+        Assert.Contains("electronicLogbookModal.deactivate", changelog, StringComparison.Ordinal);
+        Assert.Contains("acknowledgeInstalledVersion", javascript, StringComparison.Ordinal);
+        Assert.Contains("dismissibleDialog.click()", javascript, StringComparison.Ordinal);
+        Assert.Contains("setAttribute(\"inert\", \"\")", javascript, StringComparison.Ordinal);
+        Assert.Contains("removeAttribute(\"inert\")", javascript, StringComparison.Ordinal);
+        Assert.Contains("packageInfo.lastUpdateTime > packageInfo.firstInstallTime", plugin, StringComparison.Ordinal);
+        Assert.Contains("ACKNOWLEDGED_VERSION_CODE", plugin, StringComparison.Ordinal);
+        Assert.Contains("BuildConfig.VERSION_CODE", plugin, StringComparison.Ordinal);
+        Assert.Matches(
+            @"(?s)\.preview-changelog-dialog\s*\{[^}]*max-height:\s*100%[^}]*overflow:\s*hidden",
+            css);
+        Assert.Matches(
+            @"(?s)\.preview-changelog-dialog\s*>\s*\.mud-button-root\s*\{[^}]*min-height:\s*48px",
+            css);
     }
 
     [Theory]

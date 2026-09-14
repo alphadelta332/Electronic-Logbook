@@ -1,0 +1,154 @@
+@implements IAsyncDisposable
+@inject BrowserPreviewUpdateState PreviewUpdateState
+@inject IJSRuntime JS
+
+@if (PendingChangelog is not null)
+{
+    <div class="preview-changelog-backdrop"
+         data-android-back-dismiss
+         @onclick="DismissAsync">
+        <section class="preview-changelog-dialog"
+                 role="dialog"
+                 aria-modal="true"
+                 aria-labelledby="preview-changelog-title"
+                 aria-describedby="preview-changelog-description"
+                 tabindex="-1"
+                 @ref="Dialog"
+                 @onkeydown="HandleKeyDownAsync"
+                 @onclick:stopPropagation="true">
+            <header class="preview-changelog-header">
+                <span class="preview-changelog-icon" aria-hidden="true">
+                    <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" />
+                </span>
+                <div>
+                    <h2 id="preview-changelog-title">What's new in FlightLogX</h2>
+                    <p>Preview @PendingChangelog.VersionName</p>
+                </div>
+            </header>
+
+            <div class="preview-changelog-content">
+                <p id="preview-changelog-description">
+                    FlightLogX has been updated. Here are the changes ready for you.
+                </p>
+                <ul class="preview-changelog-list">
+                    @foreach (var item in PendingChangelog.Items)
+                    {
+                        <li>
+                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" aria-hidden="true" />
+                            <div>
+                                <strong>@item.Title</strong>
+                                <span>@item.Detail</span>
+                            </div>
+                        </li>
+                    }
+                </ul>
+                <p class="preview-changelog-continuity">
+                    <MudIcon Icon="@Icons.Material.Filled.Lock" aria-hidden="true" />
+                    <span>Your logbook and settings stayed on this device during the update.</span>
+                </p>
+            </div>
+
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       OnClick="DismissAsync">
+                Got it
+            </MudButton>
+        </section>
+    </div>
+}
+
+@code {
+    private ElementReference Dialog;
+    private MobilePreviewChangelogRelease? PendingChangelog;
+    private bool focusAfterRender;
+    private bool modalActive;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusAfterRender)
+        {
+            focusAfterRender = false;
+            try
+            {
+                await JS.InvokeVoidAsync("electronicLogbookModal.activate", Dialog);
+                modalActive = true;
+            }
+            catch (JSException)
+            {
+            }
+        }
+
+        if (!firstRender)
+        {
+            return;
+        }
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var installation = await PreviewUpdateState.LoadAsync();
+            switch (MobilePreviewChangelog.Evaluate(installation))
+            {
+                case MobilePreviewChangelogDecision.AcknowledgeSilently:
+                    await PreviewUpdateState.AcknowledgeInstalledVersionAsync();
+                    break;
+                case MobilePreviewChangelogDecision.Show when installation is not null:
+                    PendingChangelog = MobilePreviewChangelog.ReleaseFor(installation);
+                    focusAfterRender = true;
+                    await InvokeAsync(StateHasChanged);
+                    break;
+            }
+        }
+        catch (JSException)
+        {
+            // The changelog must never prevent the offline logbook from opening.
+        }
+    }
+
+    private async Task DismissAsync()
+    {
+        await DeactivateModalAsync();
+        PendingChangelog = null;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await PreviewUpdateState.AcknowledgeInstalledVersionAsync();
+        }
+        catch (JSException)
+        {
+            // Keep the dialog dismissed for this session if native state is unavailable.
+        }
+    }
+
+    private async Task HandleKeyDownAsync(KeyboardEventArgs args)
+    {
+        if (string.Equals(args.Key, "Escape", StringComparison.Ordinal))
+        {
+            await DismissAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync() => await DeactivateModalAsync();
+
+    private async Task DeactivateModalAsync()
+    {
+        if (!modalActive)
+        {
+            return;
+        }
+
+        modalActive = false;
+        try
+        {
+            await JS.InvokeVoidAsync("electronicLogbookModal.deactivate");
+        }
+        catch (JSException)
+        {
+        }
+    }
+}

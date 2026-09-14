@@ -1970,6 +1970,149 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     backdrop-filter: blur(5px);
 }
 
+.preview-changelog-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: grid;
+    place-items: center;
+    padding: calc(16px + var(--native-safe-top)) 16px calc(16px + var(--native-safe-bottom));
+    background: color-mix(in srgb, #101820 68%, transparent);
+    overscroll-behavior: contain;
+}
+
+.preview-changelog-dialog {
+    display: grid;
+    gap: 18px;
+    width: min(100%, 560px);
+    max-height: 100%;
+    overflow: hidden;
+    border-radius: 16px;
+    padding: 20px;
+    background: var(--app-surface);
+    color: var(--app-text);
+    box-shadow: 0 22px 64px rgba(0, 0, 0, 0.34);
+}
+
+.preview-changelog-dialog:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 58%, transparent);
+    outline-offset: 3px;
+}
+
+.preview-changelog-header {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+}
+
+.preview-changelog-header h2,
+.preview-changelog-header p,
+.preview-changelog-content p {
+    margin: 0;
+}
+
+.preview-changelog-header h2 {
+    font-size: 22px;
+    line-height: 1.2;
+}
+
+.preview-changelog-header p {
+    margin-top: 4px;
+    color: var(--app-text-muted);
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.preview-changelog-icon {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--app-primary) 16%, var(--app-surface));
+    color: var(--app-primary);
+}
+
+.preview-changelog-content {
+    display: grid;
+    gap: 16px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 2px;
+}
+
+#preview-changelog-description {
+    max-width: 68ch;
+    color: var(--app-text-muted);
+    line-height: 1.5;
+}
+
+.preview-changelog-list {
+    display: grid;
+    gap: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.preview-changelog-list li {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: start;
+    gap: 10px;
+}
+
+.preview-changelog-list li > .mud-icon-root {
+    margin-top: 1px;
+    color: var(--app-primary);
+}
+
+.preview-changelog-list li div {
+    display: grid;
+    gap: 3px;
+}
+
+.preview-changelog-list strong {
+    line-height: 1.35;
+}
+
+.preview-changelog-list span {
+    color: var(--app-text-muted);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.preview-changelog-continuity {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    align-items: start;
+    gap: 9px;
+    border-radius: 12px;
+    padding: 12px;
+    background: color-mix(in srgb, var(--app-primary) 9%, var(--app-surface));
+    color: var(--app-text);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.preview-changelog-continuity .mud-icon-root {
+    color: var(--app-primary);
+    font-size: 20px;
+}
+
+.preview-changelog-dialog > .mud-button-root {
+    width: 100%;
+    min-height: 48px;
+}
+
+@media (max-width: 420px) {
+    .preview-changelog-dialog {
+        padding: 18px;
+    }
+}
+
 .entry-action-dialog {
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;

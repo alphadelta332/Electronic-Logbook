@@ -213,6 +213,10 @@ function Convert-DisposableWorkbook {
         }
 
         if ($Layout -eq "Compact") {
+            $sheet.Activate()
+            $Excel.ActiveWindow.FreezePanes = $false
+            $Excel.ActiveWindow.SplitRow = 0
+            $Excel.ActiveWindow.SplitColumn = 0
             [void]$sheet.Range("M:R").EntireColumn.Delete()
             $table.ListColumns.Item("From").Name = "Details"
             $sheet.Columns.Item("L").ColumnWidth = 35
@@ -225,10 +229,39 @@ function Convert-DisposableWorkbook {
         [void]$sheet.Range("B9:BV104").Clear()
         [void]$sheet.Range("A1:A104").Clear()
         [void]$sheet.Range("BM1:BV104").Clear()
+        $sheet.Range("1:104").EntireRow.Hidden = $false
+        $sheet.Range("B6:${lastColumn}8").WrapText = $false
+
+        if ($Layout -eq "Full") {
+            $viaColumn = $table.ListColumns.Item("Via")
+            $viaData = $viaColumn.DataBodyRange
+            try {
+                $viaData.HorizontalAlignment = -4108 # xlCenter
+            } finally {
+                Release-ComObject $viaData
+                Release-ComObject $viaColumn
+            }
+        }
+
+        $normalStyle = $workbook.Styles.Item("Normal")
+        $normalInterior = $normalStyle.Interior
+        try {
+            $normalInterior.Pattern = 1 # xlSolid
+            $normalInterior.Color = 0xF2F2F2
+        } finally {
+            Release-ComObject $normalInterior
+            Release-ComObject $normalStyle
+        }
 
         $sheet.Activate()
         $Excel.ActiveWindow.FreezePanes = $false
+        $Excel.ActiveWindow.SplitRow = 0
+        $Excel.ActiveWindow.SplitColumn = 0
+        $Excel.ActiveWindow.ScrollRow = 1
+        $Excel.ActiveWindow.ScrollColumn = 1
         [void]$sheet.Range("C6").Select()
+        $Excel.ActiveWindow.ScrollRow = 1
+        $Excel.ActiveWindow.ScrollColumn = 1
         $Excel.ActiveWindow.FreezePanes = $true
         $Excel.ActiveWindow.DisplayGridlines = $false
         $Excel.ActiveWindow.Zoom = 85

@@ -254,7 +254,9 @@ must never make Android see an older build.
 Before distributing an update:
 
 1. Increment `android_version_code` in the root `versions.properties`. Change
-   `app_version` only when the user-visible semantic version should change.
+   `app_version` only when the user-visible semantic version should change. Update
+   `MobilePreviewChangelog.Current` with the same values and the user-facing changes;
+   the mobile tests deliberately reject a version manifest without matching notes.
 2. Build the signed Preview APK from `mobile/`:
 
    ```powershell

@@ -209,6 +209,12 @@
             main.scrollLeft = 0;
         },
         handleAndroidBack: () => {
+            const dismissibleDialog = document.querySelector("[data-android-back-dismiss]");
+            if (dismissibleDialog instanceof HTMLElement) {
+                dismissibleDialog.click();
+                return true;
+            }
+
             const path = location.pathname.replace(/\/+$/, "") || "/";
             if (path === "/") {
                 return false;
@@ -232,6 +238,24 @@
         }
     };
 
+    let modalRestoreFocus = null;
+    window.electronicLogbookModal = {
+        activate: (dialog) => {
+            modalRestoreFocus = document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : null;
+            document.querySelector(".app-shell")?.setAttribute("inert", "");
+            dialog?.focus?.({ preventScroll: true });
+        },
+        deactivate: () => {
+            document.querySelector(".app-shell")?.removeAttribute("inert");
+            if (modalRestoreFocus?.isConnected) {
+                modalRestoreFocus.focus({ preventScroll: true });
+            }
+            modalRestoreFocus = null;
+        }
+    };
+
     window.electronicLogbookPreviewUpdates = {
         isAvailable: async () => {
             const plugin = nativePreviewUpdatesPlugin();
@@ -245,6 +269,26 @@
 
             const result = await plugin.checkAndInstall();
             return result?.outcome ?? "current";
+        },
+        getInstallationInfo: async () => {
+            const plugin = nativePreviewUpdatesPlugin();
+            if (!plugin?.getInstallationInfo) {
+                return {
+                    enabled: false,
+                    versionName: "",
+                    versionCode: 0,
+                    wasUpdated: false,
+                    acknowledgedVersionCode: 0
+                };
+            }
+
+            return await plugin.getInstallationInfo();
+        },
+        acknowledgeInstalledVersion: async () => {
+            const plugin = nativePreviewUpdatesPlugin();
+            if (plugin?.acknowledgeInstalledVersion) {
+                await plugin.acknowledgeInstalledVersion();
+            }
         }
     };
 
