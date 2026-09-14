@@ -100,6 +100,31 @@ public sealed class MobileCustomFieldSettingsTests
     }
 
     [Fact]
+    public void NonZeroValueCountCountsFlightsWithNumericValuesRatherThanSummingTheirTime()
+    {
+        var entries = new[]
+        {
+            Entry((Used.Id, "1.5")),
+            Entry((Used.Id, "-1.5")),
+            Entry((Used.Id, "0")),
+            Entry((Used.Id, "not numeric")),
+            Entry()
+        };
+
+        Assert.Equal(2, MobileCustomFieldSettings.NonZeroValueCount(entries, Used.Id));
+    }
+
+    [Fact]
+    public void HasNonZeroValueMatchesOnlyFlightsWithAValidPositiveOrNegativeValue()
+    {
+        Assert.True(MobileCustomFieldSettings.HasNonZeroValue(Entry((Used.Id, "1.5")), Used.Id));
+        Assert.True(MobileCustomFieldSettings.HasNonZeroValue(Entry((Used.Id, "-1.5")), Used.Id));
+        Assert.False(MobileCustomFieldSettings.HasNonZeroValue(Entry((Used.Id, "0")), Used.Id));
+        Assert.False(MobileCustomFieldSettings.HasNonZeroValue(Entry((Used.Id, "not numeric")), Used.Id));
+        Assert.False(MobileCustomFieldSettings.HasNonZeroValue(Entry(), Used.Id));
+    }
+
+    [Fact]
     public void AddUsesAnAvailableOrderAndANewStableIdentity()
     {
         var removed = Empty with { IsInactive = true };

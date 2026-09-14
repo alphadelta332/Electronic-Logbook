@@ -63,6 +63,26 @@ public static class MobileCustomFieldSettings
             && number != decimal.Truncate(number));
     }
 
+    public static int NonZeroValueCount(
+        IEnumerable<PortableLogbookWorkbookEntry> entries,
+        CustomFieldId fieldId)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        return entries.Count(entry => HasNonZeroValue(entry, fieldId));
+    }
+
+    public static bool HasNonZeroValue(
+        PortableLogbookWorkbookEntry entry,
+        CustomFieldId fieldId)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        return entry.CustomFields.TryGetValue(fieldId, out var value)
+            && decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var number)
+            && number != 0m;
+    }
+
     public static IReadOnlyList<CustomFieldDefinition> Remove(
         IEnumerable<CustomFieldDefinition> definitions,
         IEnumerable<PortableLogbookWorkbookEntry> entries,

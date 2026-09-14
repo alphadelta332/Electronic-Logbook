@@ -4,6 +4,8 @@
 @inject MobileUiPreferenceState UiPreferences
 @inject BrowserFileStore FileStore
 @inject IJSRuntime JsRuntime
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
 
 <PageTitle>Account and sync</PageTitle>
 
@@ -114,15 +116,20 @@ else
                     var editorId = $"custom-entry-{fieldId.Value}";
                     var removalLocked = fieldTotal.Total != 0m;
                     <article class="custom-entry-setting">
-                        <div class="custom-entry-setting-heading">
-                            <label for="@editorId">Entry @fieldTotal.Definition.Order</label>
-                            <span>Total @fieldTotal.FormattedTotal</span>
+                        <div class="custom-entry-setting-primary">
+                            <div class="custom-entry-setting-name">
+                                <label for="@editorId">Entry @fieldTotal.Definition.Order name</label>
+                                <input id="@editorId"
+                                       value="@CustomFieldLabel(fieldId)"
+                                       maxlength="@MobileCustomFieldSettings.MaximumLabelLength"
+                                       disabled="@(IsCustomFieldBusy || PendingCustomFieldRenameRequest?.FieldId == fieldId)"
+                                       @oninput="args => SetCustomFieldLabel(fieldId, args.Value?.ToString())" />
+                            </div>
+                            <div class="custom-entry-setting-hours">
+                                <span id="@($"{editorId}-hours")">Hours total</span>
+                                <output aria-labelledby="@($"{editorId}-hours")">@fieldTotal.FormattedTotal</output>
+                            </div>
                         </div>
-                        <input id="@editorId"
-                               value="@CustomFieldLabel(fieldId)"
-                               maxlength="@MobileCustomFieldSettings.MaximumLabelLength"
-                               disabled="@(IsCustomFieldBusy || PendingCustomFieldRenameRequest?.FieldId == fieldId)"
-                               @oninput="args => SetCustomFieldLabel(fieldId, args.Value?.ToString())" />
                         <div class="custom-entry-number-format">
                             <span>Number format</span>
                             <div class="segmented-control" role="group" aria-label="Number format for @fieldTotal.Definition.Label">
@@ -189,10 +196,17 @@ else
                             }
                             else
                             {
-                                <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => RequestCustomFieldRenameAsync(fieldTotal))" Disabled="@(IsCustomFieldBusy || !CustomFieldLabelChanged(fieldTotal.Definition))">
+                                <MudButton Variant="Variant.Outlined" Color="Color.Success" Class="custom-entry-default-action custom-entry-save-action" StartIcon="@Icons.Material.Filled.Save" OnClick="@(() => RequestCustomFieldRenameAsync(fieldTotal))" Disabled="@(IsCustomFieldBusy || !CustomFieldLabelChanged(fieldTotal.Definition))">
                                     Save name
                                 </MudButton>
-                                <MudButton Variant="Variant.Text" Color="Color.Error" StartIcon="@Icons.Material.Filled.DeleteOutline" OnClick="@(() => RequestCustomFieldRemoval(fieldId))" Disabled="@(IsCustomFieldBusy || removalLocked)">
+                                <MudButton Variant="Variant.Outlined"
+                                           Color="Color.Error"
+                                           Class="@CustomFieldRemoveButtonClass(removalLocked)"
+                                           StartIcon="@Icons.Material.Filled.DeleteOutline"
+                                           Ripple="@(!removalLocked)"
+                                           OnClick="@(() => HandleCustomFieldRemoval(fieldTotal))"
+                                           Disabled="@IsCustomFieldBusy"
+                                           aria-disabled="@removalLocked">
                                     Remove
                                 </MudButton>
                             }
@@ -632,6 +646,11 @@ else
         CustomFieldNumberFormat numberFormat) =>
         definition.EffectiveNumberFormat == numberFormat ? "active" : string.Empty;
 
+    private static string CustomFieldRemoveButtonClass(bool removalLocked) =>
+        removalLocked
+            ? "custom-entry-default-action custom-entry-remove-action custom-entry-action-disabled"
+            : "custom-entry-default-action custom-entry-remove-action";
+
     private void RefreshCustomFieldEditors()
     {
         foreach (var definition in Session.WorkbookCustomFields)
@@ -771,6 +790,42 @@ else
         {
             NewCustomFieldLabel = string.Empty;
         }
+    }
+
+    private void HandleCustomFieldRemoval(MobileCustomFieldTotal fieldTotal)
+    {
+        if (fieldTotal.Total == 0m)
+        {
+            RequestCustomFieldRemoval(fieldTotal.Definition.Id);
+            return;
+        }
+
+        var definition = fieldTotal.Definition;
+        var flightCount = MobileCustomFieldSettings.NonZeroValueCount(
+            Session.CurrentEntriesV2.Select(entry => entry.Entry!),
+            definition.Id);
+        var flightWord = flightCount == 1 ? "flight has" : "flights have";
+        var timeSuffix = definition.EffectiveNumberFormat == CustomFieldNumberFormat.Decimals
+            ? " time"
+            : string.Empty;
+        var message = $"Unable to remove {definition.Label} field — {flightCount} {flightWord} logged {definition.Label}{timeSuffix}.";
+        var destination = $"/flights?view=entries&customField={Uri.EscapeDataString(definition.Id.Value)}";
+
+        Snackbar.Add(message, Severity.Normal, options =>
+        {
+            options.Action = "Show me";
+            options.ActionColor = Color.Primary;
+            options.ActionVariant = Variant.Text;
+            options.CloseAfterNavigation = true;
+            options.RequireInteraction = false;
+            options.VisibleStateDuration = 8000;
+            options.SnackbarTypeClass = "custom-entry-removal-snackbar";
+            options.OnClick = _ =>
+            {
+                Navigation.NavigateTo(destination);
+                return Task.CompletedTask;
+            };
+        });
     }
 
     private void RequestCustomFieldRemoval(CustomFieldId fieldId)

@@ -2395,21 +2395,44 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     border-top: 1px solid var(--app-border);
 }
 
-.custom-entry-setting-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
+.custom-entry-setting-primary {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(104px, 1fr);
     gap: 12px;
 }
 
-.custom-entry-setting-heading label {
+.custom-entry-setting-name,
+.custom-entry-setting-hours {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    min-width: 0;
+}
+
+.custom-entry-setting-name label,
+.custom-entry-setting-hours > span {
+    color: var(--app-text);
+    font-size: 12px;
     font-weight: 800;
 }
 
-.custom-entry-setting-heading span {
-    color: var(--app-text-muted);
-    font-size: 12px;
+.custom-entry-setting-hours output {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px 12px;
+    border: 1px solid var(--app-border);
+    border-radius: 6px;
+    background: var(--app-surface-alt);
+    color: var(--app-text);
+    font-size: 16px;
+    font-weight: 800;
     font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+    text-align: right;
     white-space: nowrap;
 }
 
@@ -2492,6 +2515,60 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .custom-entry-setting-actions .mud-button-root {
     min-height: 48px;
+}
+
+.custom-entry-setting-actions .custom-entry-default-action {
+    flex: 0 1 160px;
+    min-width: 0;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    background: transparent;
+}
+
+.custom-entry-setting-actions .custom-entry-save-action:not(:disabled) {
+    border-color: var(--app-success);
+    color: var(--app-success);
+}
+
+.custom-entry-setting-actions .custom-entry-remove-action:not(:disabled) {
+    border-color: var(--app-error);
+    color: var(--app-error);
+}
+
+.custom-entry-setting-actions .custom-entry-save-action:not(:disabled):hover {
+    background: color-mix(in srgb, var(--app-success) 10%, transparent);
+}
+
+.custom-entry-setting-actions .custom-entry-remove-action:not(:disabled):hover {
+    background: color-mix(in srgb, var(--app-error) 10%, transparent);
+}
+
+.custom-entry-setting-actions .custom-entry-default-action:disabled {
+    border-color: color-mix(in srgb, var(--app-text-muted) 42%, var(--app-border));
+    background: color-mix(in srgb, var(--app-surface-alt) 72%, var(--app-surface));
+    color: color-mix(in srgb, var(--app-text-muted) 72%, var(--app-surface));
+    box-shadow: none;
+    opacity: 1;
+}
+
+.custom-entry-setting-actions .custom-entry-remove-action.custom-entry-action-disabled,
+.custom-entry-setting-actions .custom-entry-remove-action.custom-entry-action-disabled:hover {
+    border-color: color-mix(in srgb, var(--app-text-muted) 42%, var(--app-border));
+    background: color-mix(in srgb, var(--app-surface-alt) 72%, var(--app-surface));
+    color: color-mix(in srgb, var(--app-text-muted) 72%, var(--app-surface));
+    box-shadow: none;
+    cursor: not-allowed;
+    opacity: 1;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.custom-entry-setting-actions .custom-entry-remove-action.custom-entry-action-disabled:active {
+    filter: none;
+    opacity: 1;
+}
+
+.custom-entry-removal-snackbar {
+    margin-bottom: calc(72px + var(--native-safe-bottom));
 }
 
 .custom-entry-add-row {
@@ -2657,6 +2734,39 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     width: 18px;
     height: 18px;
     accent-color: var(--app-primary);
+}
+
+.entry-custom-field-filters {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    margin: 2px 0 0;
+    padding: 10px 0 0;
+    border: 0;
+    border-top: 1px solid var(--app-border);
+}
+
+.entry-custom-field-filters legend {
+    padding: 0;
+    color: var(--app-text-muted);
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.entry-custom-field-filters label span {
+    display: grid;
+    min-width: 0;
+}
+
+.entry-custom-field-filters label strong,
+.entry-custom-field-filters label small {
+    overflow-wrap: anywhere;
+}
+
+.entry-custom-field-filters label small {
+    color: var(--app-text-muted);
+    font-size: 14px;
+    font-weight: 600;
 }
 
 .detail-grid {

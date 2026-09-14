@@ -42,7 +42,7 @@ else
         else
         {
             <section class="form-section validation-summary" role="status">
-                <strong>Comparison only — app data cannot be changed here</strong>
+                <strong>Comparison only - app data cannot be changed here</strong>
                 <span>Use this only when FlightLogX support asks you to inspect a disposable workbook copy and compare it with this device.</span>
             </section>
             <section class="form-section">
@@ -76,7 +76,7 @@ else
                         <MigrationFact Label="Selected file" Value="@plan.SourceFileName" />
                         <MigrationFact Label="Workbook version" Value="@(plan.WorkbookVersion ?? "Not recorded")" />
                         <MigrationFact Label="Target app logbook" Value="@plan.TargetLogbookId.Value" />
-                        <MigrationFact Label="Workbook identity" Value="@(plan.EmbeddedWorkbookLogbookId?.Value ?? "Legacy workbook — no embedded ID")" />
+                        <MigrationFact Label="Workbook identity" Value="@(plan.EmbeddedWorkbookLogbookId?.Value ?? "Legacy workbook - no embedded ID")" />
                         <MigrationFact Label="Source fingerprint" Value="@ShortHash(plan.SourceSha256)" />
                         <MigrationFact Label="Values fingerprint" Value="@ShortHash(plan.EntryValuesSha256)" />
                     </div>
@@ -247,7 +247,7 @@ else
 
     private static string FormatHours(decimal hours) => $"{hours.ToString("0.0#", CultureInfo.InvariantCulture)} h";
 
-    private static string Text(string? value) => string.IsNullOrWhiteSpace(value) ? "—" : value.Trim();
+    private static string Text(string? value) => string.IsNullOrWhiteSpace(value) ? "-" : value.Trim();
 
     private static string ShortHash(string value) => value.Length <= 16 ? value : $"{value[..16]}…";
 
@@ -257,13 +257,13 @@ else
         MobileWorkbookMigrationPlan plan,
         MobileWorkbookMigrationComparison comparison) => comparison.EmbeddedIdentityMatches switch
         {
-            true => $"Match — {ShortIdentity(plan.TargetLogbookId)}",
-            false => $"Mismatch — {ShortIdentity(plan.EmbeddedWorkbookLogbookId)} workbook / {ShortIdentity(plan.TargetLogbookId)} app",
+            true => $"Match - {ShortIdentity(plan.TargetLogbookId)}",
+            false => $"Mismatch - {ShortIdentity(plan.EmbeddedWorkbookLogbookId)} workbook / {ShortIdentity(plan.TargetLogbookId)} app",
             null => "Not recorded in workbook"
         };
 
     private static string ComparisonLabel(bool matches, int workbookCount, int appCount) =>
-        $"{MatchLabel(matches)} — {workbookCount} workbook / {appCount} app";
+        $"{MatchLabel(matches)} - {workbookCount} workbook / {appCount} app";
 
     private static string HoursComparison(decimal workbookHours, decimal appHours) =>
         $"{FormatHours(workbookHours)} workbook / {FormatHours(appHours)} app";

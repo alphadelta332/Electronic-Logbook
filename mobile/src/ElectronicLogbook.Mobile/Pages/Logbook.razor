@@ -46,7 +46,7 @@ else
                         <h2>Current record</h2>
                     </div>
                     <MudButton class="logbook-filter-button" Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowFilters = !ShowFilters)">
-                        Filters
+                        @EntryFilterButtonLabel
                     </MudButton>
                 </div>
 
@@ -66,6 +66,24 @@ else
                             <input type="checkbox" @bind="FilterFlightsWithApproachesOnly" />
                             Approaches logged
                         </label>
+                        @if (Session.WorkbookCustomFields.Count > 0)
+                        {
+                            <fieldset class="entry-custom-field-filters">
+                                <legend>Custom entries</legend>
+                                @foreach (var definition in Session.WorkbookCustomFields)
+                                {
+                                    <label>
+                                        <input type="checkbox"
+                                               checked="@FilteredCustomFieldIds.Contains(definition.Id)"
+                                               @onchange="@(args => ToggleCustomFieldFilter(definition.Id, args))" />
+                                        <span>
+                                            <strong>@definition.Label</strong>
+                                            <small>Has a non-zero value</small>
+                                        </span>
+                                    </label>
+                                }
+                            </fieldset>
+                        }
                         <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearFilters">Clear</MudButton>
                     </section>
                 }
@@ -75,7 +93,7 @@ else
                     <section class="empty-state">
                         <MudIcon Icon="@Icons.Material.Filled.Flight" />
                         <strong>No matching flights</strong>
-                        <span>Import a package, add a flight from Dashboard, or clear search.</span>
+                        <span>Import a package, add a flight from Dashboard, or clear the search and filters.</span>
                     </section>
                 }
                 else
@@ -408,11 +426,15 @@ else
     [SupplyParameterFromQuery(Name = "view")]
     public string? View { get; set; }
 
+    [SupplyParameterFromQuery(Name = "customField")]
+    public string? CustomField { get; set; }
+
     private LogbookView ActiveView { get; set; } = LogbookView.Entries;
     private string SearchText { get; set; } = string.Empty;
     private bool ShowFilters { get; set; }
     private bool FilterRecentOnly { get; set; }
     private bool FilterFlightsWithApproachesOnly { get; set; }
+    private HashSet<CustomFieldId> FilteredCustomFieldIds { get; } = [];
     private bool ShowTotalsFilters { get; set; }
     private string SelectedTotalsFilterFieldId { get; set; } = "date";
     private string TotalsFilterValueSearchText { get; set; } = string.Empty;
@@ -421,12 +443,20 @@ else
     private Dictionary<string, HashSet<string>> TotalsFilterSelections { get; } = new(StringComparer.Ordinal);
     private IReadOnlyList<MobileLogbookTotalsFilterField> totalsFilterFields = [];
     private IReadOnlyList<PortableLogbookMaterializedEntryV2> totalsEntries = [];
+    private string? AppliedCustomFieldQuery { get; set; }
     private string EntriesTabClass => ActiveView == LogbookView.Entries ? "active" : string.Empty;
     private string TotalsTabClass => ActiveView == LogbookView.Totals ? "active" : string.Empty;
     private string DeletedTabClass => ActiveView == LogbookView.Deleted ? "active" : string.Empty;
     private string EntryCountLabel => Session.CurrentEntriesV2.Count == 1
         ? "1 active entry"
         : $"{Session.CurrentEntriesV2.Count} active entries";
+    private int EntryFilterCount =>
+        (FilterRecentOnly ? 1 : 0)
+        + (FilterFlightsWithApproachesOnly ? 1 : 0)
+        + FilteredCustomFieldIds.Count;
+    private string EntryFilterButtonLabel => EntryFilterCount == 0
+        ? "Filters"
+        : $"Filters ({EntryFilterCount})";
 
     private IReadOnlyList<PortableLogbookMaterializedEntryV2> FilteredEntries =>
         Session.CurrentEntriesV2
@@ -496,12 +526,14 @@ else
         Session.WorkbookStateChanged += OnWorkbookStateChanged;
         await Session.EnsureLoadedWorkbookAsync();
         RefreshTotalsProjection();
+        ApplyCustomFieldFilterFromQuery();
     }
 
     private void OnWorkbookStateChanged()
     {
         _ = InvokeAsync(() =>
         {
+            RemoveInactiveCustomFieldFilters();
             RefreshTotalsProjection();
             StateHasChanged();
         });
@@ -520,6 +552,35 @@ else
             "deleted" => LogbookView.Deleted,
             _ => LogbookView.Entries
         };
+
+        if (Session.IsLoaded)
+        {
+            ApplyCustomFieldFilterFromQuery();
+        }
+    }
+
+    private void ApplyCustomFieldFilterFromQuery()
+    {
+        if (string.IsNullOrWhiteSpace(CustomField)
+            || string.Equals(AppliedCustomFieldQuery, CustomField, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var definition = Session.WorkbookCustomFields.FirstOrDefault(field =>
+            string.Equals(field.Id.Value, CustomField, StringComparison.Ordinal));
+        if (definition is null)
+        {
+            return;
+        }
+
+        AppliedCustomFieldQuery = CustomField;
+        SearchText = string.Empty;
+        FilterRecentOnly = false;
+        FilterFlightsWithApproachesOnly = false;
+        FilteredCustomFieldIds.Clear();
+        FilteredCustomFieldIds.Add(definition.Id);
+        ShowFilters = true;
     }
 
     private void SelectView(LogbookView view)
@@ -563,13 +624,39 @@ else
             return false;
         }
 
-        return !FilterFlightsWithApproachesOnly || CountApproaches(materialized.Entry) > 0;
+        if (FilterFlightsWithApproachesOnly && CountApproaches(materialized.Entry) == 0)
+        {
+            return false;
+        }
+
+        return FilteredCustomFieldIds.All(fieldId =>
+            MobileCustomFieldSettings.HasNonZeroValue(materialized.Entry, fieldId));
     }
 
     private void ClearFilters()
     {
         FilterRecentOnly = false;
         FilterFlightsWithApproachesOnly = false;
+        FilteredCustomFieldIds.Clear();
+    }
+
+    private void ToggleCustomFieldFilter(CustomFieldId fieldId, ChangeEventArgs args)
+    {
+        if (args.Value is true)
+        {
+            FilteredCustomFieldIds.Add(fieldId);
+            return;
+        }
+
+        FilteredCustomFieldIds.Remove(fieldId);
+    }
+
+    private void RemoveInactiveCustomFieldFilters()
+    {
+        var activeFieldIds = Session.WorkbookCustomFields
+            .Select(definition => definition.Id)
+            .ToHashSet();
+        FilteredCustomFieldIds.RemoveWhere(fieldId => !activeFieldIds.Contains(fieldId));
     }
 
     private void OnTotalsFilterFieldChanged(ChangeEventArgs args)

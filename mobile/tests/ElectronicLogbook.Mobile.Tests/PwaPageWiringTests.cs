@@ -22,7 +22,7 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("@page \"/migrate\"", migration, StringComparison.Ordinal);
         Assert.Contains("<PageTitle>Advanced workbook verification</PageTitle>", migration, StringComparison.Ordinal);
         Assert.Contains("Support-only comparison", migration, StringComparison.Ordinal);
-        Assert.Contains("Comparison only — app data cannot be changed here", migration, StringComparison.Ordinal);
+        Assert.Contains("Comparison only - app data cannot be changed here", migration, StringComparison.Ordinal);
         Assert.Contains("Select workbook copy", migration, StringComparison.Ordinal);
         Assert.Contains("MobileWorkbookMigrationReader.Inspect", migration, StringComparison.Ordinal);
         Assert.Contains("MobileWorkbookMigrationWorkflow.CompareWithApp", migration, StringComparison.Ordinal);
@@ -536,9 +536,14 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("Renaming requires confirmation because this field contains values", settings, StringComparison.Ordinal);
         Assert.Contains("Session.WorkbookCustomFieldTotals", settings, StringComparison.Ordinal);
         Assert.Contains("removalLocked = fieldTotal.Total != 0m", settings, StringComparison.Ordinal);
+        Assert.Contains("<div class=\"custom-entry-setting-primary\">", settings, StringComparison.Ordinal);
+        Assert.Contains("<label for=\"@editorId\">Entry @fieldTotal.Definition.Order name</label>", settings, StringComparison.Ordinal);
+        Assert.Contains("<span id=\"@($\"{editorId}-hours\")\">Hours total</span>", settings, StringComparison.Ordinal);
+        Assert.Contains("<output aria-labelledby=\"@($\"{editorId}-hours\")\">@fieldTotal.FormattedTotal</output>", settings, StringComparison.Ordinal);
         Assert.Contains("disabled=\"@(IsCustomFieldBusy || PendingCustomFieldRenameRequest?.FieldId == fieldId)\"", settings, StringComparison.Ordinal);
         Assert.Contains("Disabled=\"@(IsCustomFieldBusy || !CustomFieldLabelChanged(fieldTotal.Definition))\"", settings, StringComparison.Ordinal);
-        Assert.Contains("Disabled=\"@(IsCustomFieldBusy || removalLocked)\"", settings, StringComparison.Ordinal);
+        Assert.Contains("aria-disabled=\"@removalLocked\"", settings, StringComparison.Ordinal);
+        Assert.Contains("OnClick=\"@(() => HandleCustomFieldRemoval(fieldTotal))\"", settings, StringComparison.Ordinal);
         Assert.Contains("MobileCustomFieldSettings.RenameRequiresConfirmation(fieldTotal.Total)", settings, StringComparison.Ordinal);
         Assert.Contains("Check this name describes the existing values.", settings, StringComparison.Ordinal);
         Assert.Contains("The total and all recorded values will stay unchanged.", settings, StringComparison.Ordinal);
@@ -550,10 +555,41 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Confirm remove", settings, StringComparison.Ordinal);
         Assert.Contains("Its encrypted history is retained.", settings, StringComparison.Ordinal);
         Assert.Contains("maxlength=\"@MobileCustomFieldSettings.MaximumLabelLength\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Variant=\"Variant.Outlined\" Color=\"Color.Success\" Class=\"custom-entry-default-action custom-entry-save-action\"", settings, StringComparison.Ordinal);
+        Assert.Contains("CustomFieldRemoveButtonClass(removalLocked)", settings, StringComparison.Ordinal);
+        Assert.Contains("MobileCustomFieldSettings.NonZeroValueCount", settings, StringComparison.Ordinal);
+        Assert.Contains("flightCount == 1 ? \"flight has\" : \"flights have\"", settings, StringComparison.Ordinal);
+        Assert.Contains("CustomFieldNumberFormat.Decimals", settings, StringComparison.Ordinal);
+        Assert.Contains("options.Action = \"Show me\"", settings, StringComparison.Ordinal);
+        Assert.Contains("/flights?view=entries&customField=", settings, StringComparison.Ordinal);
         Assert.Contains("public IReadOnlyList<MobileCustomFieldTotal> WorkbookCustomFieldTotals", session, StringComparison.Ordinal);
         Assert.Contains("PendingConfigurationRevisionId", session, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.custom-entry-setting-primary\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2fr\) minmax\(104px, 1fr\);[^}]*gap:\s*12px", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-name label,\s*\.custom-entry-setting-hours > span\s*\{[^}]*font-size:\s*12px;[^}]*font-weight:\s*800", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-hours output\s*\{[^}]*min-height:\s*48px;[^}]*border:\s*1px solid var\(--app-border\);[^}]*font-size:\s*16px;[^}]*font-weight:\s*800;[^}]*font-variant-numeric:\s*tabular-nums", css);
         Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.mud-button-root\s*\{[^}]*min-height:\s*48px", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-default-action\s*\{[^}]*flex:\s*0 1 160px;[^}]*border:\s*1px solid currentColor;[^}]*border-radius:\s*8px", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-save-action:not\(:disabled\)\s*\{[^}]*border-color:\s*var\(--app-success\);[^}]*color:\s*var\(--app-success\)", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-remove-action:not\(:disabled\)\s*\{[^}]*border-color:\s*var\(--app-error\);[^}]*color:\s*var\(--app-error\)", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-default-action:disabled\s*\{[^}]*border-color:\s*color-mix\([^}]*background:\s*color-mix\([^}]*color:\s*color-mix\([^}]*opacity:\s*1", css);
+        Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-remove-action\.custom-entry-action-disabled,[^{]*\{[^}]*cursor:\s*not-allowed;[^}]*opacity:\s*1", css);
+        Assert.Matches(@"(?s)\.custom-entry-removal-snackbar\s*\{[^}]*margin-bottom:\s*calc\(72px \+ var\(--native-safe-bottom\)\)", css);
         Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Gate5LockedCustomEntryRemovalShowsOnlySnackbarFeedbackWhenPressed()
+    {
+        var settings = ReadMobilePage("Settings.razor");
+        var css = ReadMobileWebAsset("css/app.css");
+
+        Assert.Contains("Ripple=\"@(!removalLocked)\"", settings, StringComparison.Ordinal);
+        Assert.Matches(
+            @"(?s)\.custom-entry-setting-actions\s*\.custom-entry-remove-action\.custom-entry-action-disabled[^{]*\{[^}]*-webkit-tap-highlight-color:\s*transparent;",
+            css);
+        Assert.Matches(
+            @"(?s)\.custom-entry-setting-actions\s*\.custom-entry-remove-action\.custom-entry-action-disabled:active\s*\{[^}]*filter:\s*none;[^}]*opacity:\s*1;",
+            css);
     }
 
     [Fact]
@@ -766,6 +802,7 @@ public sealed class PwaPageWiringTests
     {
         var page = ReadMobilePage("Logbook.razor");
         var filters = ReadMobileSource("MobileLogbookTotalsFilters.cs");
+        var program = ReadMobileSource("Program.cs");
         var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("Filter totals", page, StringComparison.Ordinal);
@@ -777,10 +814,16 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Select none", page, StringComparison.Ordinal);
         Assert.Contains("(Blanks)", filters, StringComparison.Ordinal);
         Assert.Contains("Aircraft type", filters, StringComparison.Ordinal);
-        Assert.Contains("Single engine command — day", filters, StringComparison.Ordinal);
+        Assert.Contains("Single engine command - day", filters, StringComparison.Ordinal);
         Assert.Contains("Circling approaches", filters, StringComparison.Ordinal);
         Assert.Contains("Non-zero", filters, StringComparison.Ordinal);
         Assert.Contains("Zero or blank", filters, StringComparison.Ordinal);
+        Assert.Contains("[SupplyParameterFromQuery(Name = \"customField\")]", page, StringComparison.Ordinal);
+        Assert.Contains("FilteredCustomFieldIds.Add(definition.Id)", page, StringComparison.Ordinal);
+        Assert.Contains("MobileCustomFieldSettings.HasNonZeroValue", page, StringComparison.Ordinal);
+        Assert.Contains("Has a non-zero value", page, StringComparison.Ordinal);
+        Assert.Contains("ShowFilters = true", page, StringComparison.Ordinal);
+        Assert.Contains("Defaults.Classes.Position.BottomCenter", program, StringComparison.Ordinal);
         Assert.Contains(".totals-filter-values", css, StringComparison.Ordinal);
         Assert.Contains("min-height: 48px;", css, StringComparison.Ordinal);
     }

@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Components.Web;
 using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
 using ElectronicLogbook.Mobile;
 using ElectronicLogbook.Portable;
+using MudBlazor;
 using MudBlazor.Services;
 
 var builder = WebAssemblyHostBuilder.CreateDefault(args);
@@ -32,6 +33,9 @@ builder.Services.AddScoped<MobileReplacementRecoveryWorkflow>();
 builder.Services.AddScoped<IMobileReplacementRecoveryWorkflow>(sp => sp.GetRequiredService<MobileReplacementRecoveryWorkflow>());
 builder.Services.AddScoped<MobileConnectionRecoveryWorkflow>();
 builder.Services.AddScoped<MobileLogbookSession>();
-builder.Services.AddMudServices();
+builder.Services.AddMudServices(configuration =>
+{
+    configuration.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomCenter;
+});
 
 await builder.Build().RunAsync();
