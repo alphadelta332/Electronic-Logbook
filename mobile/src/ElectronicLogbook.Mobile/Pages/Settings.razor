@@ -4,8 +4,6 @@
 @inject MobileUiPreferenceState UiPreferences
 @inject BrowserFileStore FileStore
 @inject IJSRuntime JsRuntime
-@inject ISnackbar Snackbar
-@inject NavigationManager Navigation
 
 <PageTitle>Account and sync</PageTitle>
 
@@ -132,18 +130,41 @@ else
                         </div>
                         <div class="custom-entry-number-format">
                             <span>Number format</span>
-                            <div class="segmented-control" role="group" aria-label="Number format for @fieldTotal.Definition.Label">
-                                <button type="button"
-                                        class="@CustomFieldNumberFormatButtonClass(fieldTotal.Definition, CustomFieldNumberFormat.Decimals)"
-                                        aria-pressed="@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.Decimals)"
-                                        disabled="@IsCustomFieldBusy"
-                                        @onclick="() => RequestCustomFieldNumberFormatAsync(fieldTotal.Definition, CustomFieldNumberFormat.Decimals)">Decimals</button>
-                                <button type="button"
-                                        class="@CustomFieldNumberFormatButtonClass(fieldTotal.Definition, CustomFieldNumberFormat.WholeNumbers)"
-                                        aria-pressed="@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.WholeNumbers)"
-                                        disabled="@IsCustomFieldBusy"
-                                        @onclick="() => RequestCustomFieldNumberFormatAsync(fieldTotal.Definition, CustomFieldNumberFormat.WholeNumbers)">Whole numbers</button>
-                            </div>
+                            @if (UseNumberFormatPillPreview)
+                            {
+                                <MudToggleGroup T="CustomFieldNumberFormat"
+                                                Value="@fieldTotal.Definition.EffectiveNumberFormat"
+                                                ValueChanged="@(value => RequestCustomFieldNumberFormatAsync(fieldTotal.Definition, value))"
+                                                SelectionMode="SelectionMode.SingleSelection"
+                                                Size="Size.Small"
+                                                Color="Color.Primary"
+                                                Disabled="@IsCustomFieldBusy"
+                                                inert="@IsCustomFieldActionRunning"
+                                                Class="custom-entry-number-format-toggle rounded-pill"
+                                                aria-label="@($"Number format for {fieldTotal.Definition.Label}")">
+                                    <MudToggleItem Value="@CustomFieldNumberFormat.WholeNumbers"
+                                                   Text="0"
+                                                   aria-label="Whole numbers" />
+                                    <MudToggleItem Value="@CustomFieldNumberFormat.Decimals"
+                                                   Text="0.0"
+                                                   aria-label="Decimals" />
+                                </MudToggleGroup>
+                            }
+                            else
+                            {
+                                <MudSwitch T="bool"
+                                           Value="@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.WholeNumbers)"
+                                           ValueChanged="@(value => RequestCustomFieldNumberFormatAsync(
+                                               fieldTotal.Definition,
+                                               value ? CustomFieldNumberFormat.WholeNumbers : CustomFieldNumberFormat.Decimals))"
+                                           Label="@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.WholeNumbers ? "Whole numbers" : "Decimals")"
+                                           LabelPlacement="Placement.Start"
+                                           Size="Size.Small"
+                                           Color="Color.Primary"
+                                           UncheckedColor="Color.Default"
+                                           Disabled="@IsCustomFieldBusy"
+                                           AriaLabel="@($"Use whole numbers for {fieldTotal.Definition.Label}")" />
+                            }
                         </div>
                         @if (PendingCustomFieldNumberFormatRequest is { } numberFormatRequest && numberFormatRequest.FieldId == fieldId)
                         {
@@ -566,6 +587,7 @@ else
 }
 
 @code {
+    private static readonly bool UseNumberFormatPillPreview = true;
     private bool IsSupportSummaryBusy { get; set; }
     private bool IsDeviceStateExportBusy { get; set; }
     private bool IsSyncBusy { get; set; }
@@ -575,6 +597,7 @@ else
     private bool IsPreviewUpdateAvailable { get; set; }
     private bool IsPreviewUpdateBusy { get; set; }
     private bool IsCustomFieldBusy { get; set; }
+    private bool IsCustomFieldActionRunning { get; set; }
     private string HostedEmail { get; set; } = string.Empty;
     private string HostedVerificationCode { get; set; } = string.Empty;
     private string AccountRecoveryCode { get; set; } = string.Empty;
@@ -625,7 +648,7 @@ else
 
     private void OnHostedSyncChanged() => _ = InvokeAsync(() =>
     {
-        if (!IsCustomFieldBusy)
+        if (!IsCustomFieldActionRunning)
         {
             RefreshCustomFieldEditors();
         }
@@ -640,11 +663,6 @@ else
 
     private bool CustomFieldLabelChanged(CustomFieldDefinition definition) =>
         !string.Equals(CustomFieldLabel(definition.Id).Trim(), definition.Label, StringComparison.Ordinal);
-
-    private static string CustomFieldNumberFormatButtonClass(
-        CustomFieldDefinition definition,
-        CustomFieldNumberFormat numberFormat) =>
-        definition.EffectiveNumberFormat == numberFormat ? "active" : string.Empty;
 
     private static string CustomFieldRemoveButtonClass(bool removalLocked) =>
         removalLocked
@@ -661,7 +679,7 @@ else
 
     private async Task RequestCustomFieldRenameAsync(MobileCustomFieldTotal fieldTotal)
     {
-        if (IsCustomFieldBusy)
+        if (IsCustomFieldActionRunning)
         {
             return;
         }
@@ -726,7 +744,7 @@ else
         CustomFieldDefinition definition,
         CustomFieldNumberFormat numberFormat)
     {
-        if (IsCustomFieldBusy || definition.EffectiveNumberFormat == numberFormat)
+        if (IsCustomFieldActionRunning || definition.EffectiveNumberFormat == numberFormat)
         {
             return;
         }
@@ -775,7 +793,8 @@ else
             numberFormat == CustomFieldNumberFormat.WholeNumbers
                 ? "Custom entry now displays whole numbers."
                 : "Custom entry now displays decimals.",
-            refreshEditors: false);
+            refreshEditors: false,
+            showBusyState: false);
 
     private static string FractionalValueWarning(int count) =>
         $"{count} recorded {(count == 1 ? "value has" : "values have")} a decimal.";
@@ -811,21 +830,7 @@ else
         var message = $"Unable to remove {definition.Label} field — {flightCount} {flightWord} logged {definition.Label}{timeSuffix}.";
         var destination = $"/flights?view=entries&customField={Uri.EscapeDataString(definition.Id.Value)}";
 
-        Snackbar.Add(message, Severity.Normal, options =>
-        {
-            options.Action = "Show me";
-            options.ActionColor = Color.Primary;
-            options.ActionVariant = Variant.Text;
-            options.CloseAfterNavigation = true;
-            options.RequireInteraction = false;
-            options.VisibleStateDuration = 8000;
-            options.SnackbarTypeClass = "custom-entry-removal-snackbar";
-            options.OnClick = _ =>
-            {
-                Navigation.NavigateTo(destination);
-                return Task.CompletedTask;
-            };
-        });
+        Session.ShowActionFeedback(message, "Show me", destination);
     }
 
     private void RequestCustomFieldRemoval(CustomFieldId fieldId)
@@ -851,14 +856,16 @@ else
     private async Task RunCustomFieldActionAsync(
         Func<Task> action,
         string successMessage,
-        bool refreshEditors = true)
+        bool refreshEditors = true,
+        bool showBusyState = true)
     {
-        if (IsCustomFieldBusy)
+        if (IsCustomFieldActionRunning)
         {
             return;
         }
 
-        IsCustomFieldBusy = true;
+        IsCustomFieldActionRunning = true;
+        IsCustomFieldBusy = showBusyState;
         CustomFieldMessage = null;
         CustomFieldError = null;
         try
@@ -879,6 +886,7 @@ else
         finally
         {
             IsCustomFieldBusy = false;
+            IsCustomFieldActionRunning = false;
         }
     }
 

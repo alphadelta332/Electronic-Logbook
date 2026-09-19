@@ -30,7 +30,7 @@ public sealed class MobileLogbookSession(
     private readonly HashSet<(LogbookId LogbookId, DeviceId DeviceId)> verifiedRecoveryCodeConfigurations = [];
     private readonly SemaphoreSlim hostedSyncGate = new(1, 1);
     private MobileRecoveryCodeSetup? pendingRecoveryCodeSetup;
-    private PendingWorkbookActionFeedback? pendingWorkbookActionFeedback;
+    private PendingActionFeedback? pendingActionFeedback;
 
     public static readonly CustomFieldDefinition[] CustomFields =
     [
@@ -169,18 +169,22 @@ public sealed class MobileLogbookSession(
 
     public string? LastActionMessage { get; private set; }
 
-    public string? ActionFeedbackMessage => pendingWorkbookActionFeedback?.Message;
+    public string? ActionFeedbackMessage => pendingActionFeedback?.Message;
 
-    public TimeSpan? ActionFeedbackRemaining => pendingWorkbookActionFeedback is null
+    public string? ActionFeedbackActionLabel => pendingActionFeedback?.ActionLabel;
+
+    public string? ActionFeedbackActionDestination => pendingActionFeedback?.ActionDestination;
+
+    public TimeSpan? ActionFeedbackRemaining => pendingActionFeedback is null
         ? null
-        : pendingWorkbookActionFeedback.ExpiresAt - syncClock.UtcNow;
+        : pendingActionFeedback.ExpiresAt - syncClock.UtcNow;
 
-    public bool HasPendingActionFeedback => pendingWorkbookActionFeedback is not null;
+    public bool HasPendingActionFeedback => pendingActionFeedback is not null;
 
-    public bool ShouldCelebrateActionFeedback => pendingWorkbookActionFeedback?.Celebrate == true;
+    public bool ShouldCelebrateActionFeedback => pendingActionFeedback?.Celebrate == true;
 
     public bool CanUndoLastWorkbookAction =>
-        pendingWorkbookActionFeedback is { UndoKind: not WorkbookActionUndoKind.None } pending &&
+        pendingActionFeedback is { UndoKind: not WorkbookActionUndoKind.None } pending &&
         syncClock.UtcNow < pending.ExpiresAt;
 
     public bool CanPreviewWorkbookMigration =>
@@ -665,47 +669,49 @@ public sealed class MobileLogbookSession(
 
     public async Task<bool> UndoLastWorkbookActionAsync()
     {
-        ExpireLastWorkbookActionFeedback();
-        if (IsStorageBlocked || pendingWorkbookActionFeedback is not { } pending ||
+        ExpireActionFeedback();
+        if (IsStorageBlocked || pendingActionFeedback is not { } pending ||
             pending.UndoKind == WorkbookActionUndoKind.None ||
+            pending.EntryId is not { } entryId ||
+            pending.ActionRevisionId is not { } actionRevisionId ||
             (pending.UndoKind is WorkbookActionUndoKind.RestoreDeletedEntry or WorkbookActionUndoKind.RestoreModifiedEntry &&
              pending.PreviousEntry is null))
         {
             return false;
         }
 
-        var currentEntry = FindCurrentEntryV2(pending.EntryId.Value);
+        var currentEntry = FindCurrentEntryV2(entryId.Value);
         var currentStateMatches = pending.UndoKind switch
         {
             WorkbookActionUndoKind.RestoreDeletedEntry => currentEntry is { IsDeleted: true } &&
-                currentEntry.CurrentRevisionId == pending.ActionRevisionId,
+                currentEntry.CurrentRevisionId == actionRevisionId,
             WorkbookActionUndoKind.RestoreModifiedEntry => currentEntry is { IsDeleted: false, Entry: not null } &&
-                currentEntry.CurrentRevisionId == pending.ActionRevisionId,
+                currentEntry.CurrentRevisionId == actionRevisionId,
             WorkbookActionUndoKind.DeleteRestoredEntry => currentEntry is { IsDeleted: false, Entry: not null } &&
-                currentEntry.CurrentRevisionId == pending.ActionRevisionId,
+                currentEntry.CurrentRevisionId == actionRevisionId,
             _ => false
         };
         if (!currentStateMatches)
         {
-            ClearWorkbookActionFeedback(pending);
+            ClearActionFeedback(pending);
             return false;
         }
 
-        pendingWorkbookActionFeedback = null;
+        pendingActionFeedback = null;
         var operation = pending.UndoKind == WorkbookActionUndoKind.DeleteRestoredEntry
             ? PortableLogbookOperationV2.Delete(
                 DocumentV2.LogbookId,
-                pending.EntryId,
+                entryId,
                 RevisionId.New(),
-                [pending.ActionRevisionId],
+                [actionRevisionId],
                 deviceId,
                 DateTimeOffset.UtcNow,
                 "Restoration undone.")
             : PortableLogbookOperationV2.Correct(
                 DocumentV2.LogbookId,
-                pending.EntryId,
+                entryId,
                 RevisionId.New(),
-                [pending.ActionRevisionId],
+                [actionRevisionId],
                 deviceId,
                 DateTimeOffset.UtcNow,
                 pending.PreviousEntry!);
@@ -724,14 +730,45 @@ public sealed class MobileLogbookSession(
         return true;
     }
 
-    public void ExpireLastWorkbookActionFeedback()
+    public void ExpireActionFeedback()
     {
-        if (pendingWorkbookActionFeedback is null || syncClock.UtcNow < pendingWorkbookActionFeedback.ExpiresAt)
+        if (pendingActionFeedback is null || syncClock.UtcNow < pendingActionFeedback.ExpiresAt)
         {
             return;
         }
 
-        ClearWorkbookActionFeedback(pendingWorkbookActionFeedback);
+        ClearActionFeedback(pendingActionFeedback);
+    }
+
+    public void DismissActionFeedback()
+    {
+        if (pendingActionFeedback is null)
+        {
+            return;
+        }
+
+        ClearActionFeedback(pendingActionFeedback);
+        ActionFeedbackChanged?.Invoke();
+    }
+
+    public void ShowActionFeedback(string message, string actionLabel, string actionDestination)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(message);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actionLabel);
+        ArgumentException.ThrowIfNullOrWhiteSpace(actionDestination);
+
+        pendingActionFeedback = new(
+            message,
+            WorkbookActionUndoKind.None,
+            Celebrate: false,
+            EntryId: null,
+            ActionRevisionId: null,
+            PreviousEntry: null,
+            syncClock.UtcNow.Add(ActionFeedbackWindow),
+            actionLabel,
+            actionDestination);
+        SetLastActionMessage(message);
+        ActionFeedbackChanged?.Invoke();
     }
 
     public async Task ResolveConflictAsync(PortableLogbookConflict conflict, RevisionId selectedRevisionId)
@@ -1315,40 +1352,44 @@ public sealed class MobileLogbookSession(
         PortableLogbookOperationV2 operation,
         PortableLogbookWorkbookEntry? previousEntry)
     {
-        pendingWorkbookActionFeedback = new(
+        pendingActionFeedback = new(
             message,
             undoKind,
             celebrate,
             operation.EntryId,
             operation.RevisionId,
             previousEntry,
-            syncClock.UtcNow.Add(ActionFeedbackWindow));
+            syncClock.UtcNow.Add(ActionFeedbackWindow),
+            ActionLabel: null,
+            ActionDestination: null);
         SetLastActionMessage(message);
         ActionFeedbackChanged?.Invoke();
     }
 
-    private void ClearWorkbookActionFeedback(PendingWorkbookActionFeedback feedback)
+    private void ClearActionFeedback(PendingActionFeedback feedback)
     {
-        if (!ReferenceEquals(pendingWorkbookActionFeedback, feedback))
+        if (!ReferenceEquals(pendingActionFeedback, feedback))
         {
             return;
         }
 
-        pendingWorkbookActionFeedback = null;
+        pendingActionFeedback = null;
         if (string.Equals(LastActionMessage, feedback.Message, StringComparison.Ordinal))
         {
             ClearLastActionMessage();
         }
     }
 
-    private sealed record PendingWorkbookActionFeedback(
+    private sealed record PendingActionFeedback(
         string Message,
         WorkbookActionUndoKind UndoKind,
         bool Celebrate,
-        EntryId EntryId,
-        RevisionId ActionRevisionId,
+        EntryId? EntryId,
+        RevisionId? ActionRevisionId,
         PortableLogbookWorkbookEntry? PreviousEntry,
-        DateTimeOffset ExpiresAt);
+        DateTimeOffset ExpiresAt,
+        string? ActionLabel,
+        string? ActionDestination);
 
     private enum WorkbookActionUndoKind
     {

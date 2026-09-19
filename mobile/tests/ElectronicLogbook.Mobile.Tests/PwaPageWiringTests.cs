@@ -560,8 +560,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("MobileCustomFieldSettings.NonZeroValueCount", settings, StringComparison.Ordinal);
         Assert.Contains("flightCount == 1 ? \"flight has\" : \"flights have\"", settings, StringComparison.Ordinal);
         Assert.Contains("CustomFieldNumberFormat.Decimals", settings, StringComparison.Ordinal);
-        Assert.Contains("options.Action = \"Show me\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Session.ShowActionFeedback(message, \"Show me\", destination)", settings, StringComparison.Ordinal);
         Assert.Contains("/flights?view=entries&customField=", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("@inject ISnackbar Snackbar", settings, StringComparison.Ordinal);
         Assert.Contains("public IReadOnlyList<MobileCustomFieldTotal> WorkbookCustomFieldTotals", session, StringComparison.Ordinal);
         Assert.Contains("PendingConfigurationRevisionId", session, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.custom-entry-setting-primary\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2fr\) minmax\(104px, 1fr\);[^}]*gap:\s*12px", css);
@@ -573,7 +574,6 @@ public sealed class PwaPageWiringTests
         Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-remove-action:not\(:disabled\)\s*\{[^}]*border-color:\s*var\(--app-error\);[^}]*color:\s*var\(--app-error\)", css);
         Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-default-action:disabled\s*\{[^}]*border-color:\s*color-mix\([^}]*background:\s*color-mix\([^}]*color:\s*color-mix\([^}]*opacity:\s*1", css);
         Assert.Matches(@"(?s)\.custom-entry-setting-actions\s*\.custom-entry-remove-action\.custom-entry-action-disabled,[^{]*\{[^}]*cursor:\s*not-allowed;[^}]*opacity:\s*1", css);
-        Assert.Matches(@"(?s)\.custom-entry-removal-snackbar\s*\{[^}]*margin-bottom:\s*calc\(72px \+ var\(--native-safe-bottom\)\)", css);
         Assert.Contains("overflow-wrap: anywhere;", css, StringComparison.Ordinal);
     }
 
@@ -593,15 +593,29 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate5SettingsLetsEachCustomEntryChooseDecimalsOrWholeNumbersWithFractionalValueConfirmation()
+    public void Gate5SettingsUsesReversibleCompactNumberFormatPillWithFractionalValueConfirmation()
     {
         var settings = ReadMobilePage("Settings.razor");
         var session = ReadMobileSource("MobileLogbookSession.cs");
         var css = ReadMobileWebAsset("css/app.css");
 
-        Assert.Contains("aria-label=\"Number format for @fieldTotal.Definition.Label\"", settings, StringComparison.Ordinal);
-        Assert.Contains(">Decimals</button>", settings, StringComparison.Ordinal);
-        Assert.Contains(">Whole numbers</button>", settings, StringComparison.Ordinal);
+        Assert.Contains("private static readonly bool UseNumberFormatPillPreview = true;", settings, StringComparison.Ordinal);
+        Assert.Contains("<MudToggleGroup T=\"CustomFieldNumberFormat\"", settings, StringComparison.Ordinal);
+        Assert.Contains("SelectionMode=\"SelectionMode.SingleSelection\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Text=\"0\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Text=\"0.0\"", settings, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Whole numbers\"", settings, StringComparison.Ordinal);
+        Assert.Contains("aria-label=\"Decimals\"", settings, StringComparison.Ordinal);
+        Assert.Contains("inert=\"@IsCustomFieldActionRunning\"", settings, StringComparison.Ordinal);
+        Assert.Contains("showBusyState: false", settings, StringComparison.Ordinal);
+        Assert.Contains("IsCustomFieldBusy = showBusyState;", settings, StringComparison.Ordinal);
+        Assert.Contains("<MudSwitch T=\"bool\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Value=\"@(fieldTotal.Definition.EffectiveNumberFormat == CustomFieldNumberFormat.WholeNumbers)\"", settings, StringComparison.Ordinal);
+        Assert.Contains("ValueChanged=\"@(value => RequestCustomFieldNumberFormatAsync(", settings, StringComparison.Ordinal);
+        Assert.Contains("LabelPlacement=\"Placement.Start\"", settings, StringComparison.Ordinal);
+        Assert.Contains("Size=\"Size.Small\"", settings, StringComparison.Ordinal);
+        Assert.Contains("AriaLabel=\"@($\"Use whole numbers for {fieldTotal.Definition.Label}\")\"", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("<div class=\"segmented-control\" role=\"group\" aria-label=\"Number format", settings, StringComparison.Ordinal);
         Assert.Contains("MobileCustomFieldSettings.FractionalValueCount", settings, StringComparison.Ordinal);
         Assert.Contains("Some recorded values have decimals.", settings, StringComparison.Ordinal);
         Assert.Contains("Exact values will stay saved.", settings, StringComparison.Ordinal);
@@ -609,7 +623,16 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Keep decimals", settings, StringComparison.Ordinal);
         Assert.Contains("SetWorkbookCustomFieldNumberFormatAsync", settings, StringComparison.Ordinal);
         Assert.Contains("public Task SetWorkbookCustomFieldNumberFormatAsync", session, StringComparison.Ordinal);
-        Assert.Matches(@"(?s)\.custom-entry-number-format\s+\.segmented-control\s+button\s*\{[^}]*min-height:\s*48px", css);
+        Assert.DoesNotContain(".custom-entry-number-format-switch", css, StringComparison.Ordinal);
+        Assert.DoesNotContain("[aria-checked=\"true\"]", css, StringComparison.Ordinal);
+        Assert.DoesNotContain(".custom-entry-setting input,", css, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.custom-entry-setting-name\s+input,\s*\.custom-entry-add-row\s+input\s*\{[^}]*min-height:\s*48px", css);
+        Assert.Matches(@"(?s)\.custom-entry-number-format\s+\.mud-switch\s*\{[^}]*min-height:\s*48px", css);
+        Assert.Matches(@"(?s)\.custom-entry-number-format-toggle\s*\{[^}]*width:\s*104px;[^}]*min-height:\s*48px", css);
+        Assert.Matches(@"(?s)\.custom-entry-number-format-toggle\s+\.mud-toggle-item\s*\{[^}]*min-width:\s*52px;[^}]*min-height:\s*48px", css);
+        Assert.Contains("input:where(:not(.mud-switch-input)),", css, StringComparison.Ordinal);
+        Assert.Contains(".mud-button-root:not(.mud-switch-base)", css, StringComparison.Ordinal);
+        Assert.Contains("label:where(:not(.mud-switch))", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -709,9 +732,8 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("EntryMeta", row, StringComparison.Ordinal);
         Assert.DoesNotContain("ldg |", row, StringComparison.Ordinal);
         Assert.Contains("Flying totals", page, StringComparison.Ordinal);
-        Assert.Contains("filter-sheet", page, StringComparison.Ordinal);
-        Assert.Contains("FilterRecentOnly", page, StringComparison.Ordinal);
-        Assert.Contains("FilterFlightsWithApproachesOnly", page, StringComparison.Ordinal);
+        Assert.Contains("@FilterPanel(\"Entry filters\"", page, StringComparison.Ordinal);
+        Assert.Contains(".Where(MatchesLogbookFilters)", page, StringComparison.Ordinal);
         Assert.Contains("Deleted", page, StringComparison.Ordinal);
         Assert.Contains("LogbookView.Deleted", page, StringComparison.Ordinal);
         Assert.Contains("Deletion history", page, StringComparison.Ordinal);
@@ -798,7 +820,7 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void LogbookTotalsCanFilterEveryDisplayedTotalUsingExcelStyleColumnSelections()
+    public void LogbookEntriesAndTotalsShareExcelStyleColumnSelections()
     {
         var page = ReadMobilePage("Logbook.razor");
         var filters = ReadMobileSource("MobileLogbookTotalsFilters.cs");
@@ -806,12 +828,16 @@ public sealed class PwaPageWiringTests
         var css = ReadMobileAsset("css", "app.css");
 
         Assert.Contains("Filter totals", page, StringComparison.Ordinal);
-        Assert.Contains("Values in one column use “or”; different columns use “and”.", page, StringComparison.Ordinal);
+        Assert.Contains("@FilterPanel(\"Entry filters\"", page, StringComparison.Ordinal);
+        Assert.Contains("@FilterPanel(\"Totals filters\"", page, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(page, "Values in one column use “or”; different columns use “and”\\."));
+        Assert.Single(Regex.Matches(page, "Logbook column"));
         Assert.Contains("MobileLogbookTotalsFilters.Matches", page, StringComparison.Ordinal);
+        Assert.Contains(".Where(MatchesLogbookFilters)", page, StringComparison.Ordinal);
         Assert.Contains("TotalsEntries.Select(entry => entry.Entry!)", page, StringComparison.Ordinal);
         Assert.Contains("TotalsEntries.Sum", page, StringComparison.Ordinal);
-        Assert.Contains("Select all", page, StringComparison.Ordinal);
-        Assert.Contains("Select none", page, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(page, "Select all"));
+        Assert.Single(Regex.Matches(page, "Select none"));
         Assert.Contains("(Blanks)", filters, StringComparison.Ordinal);
         Assert.Contains("Aircraft type", filters, StringComparison.Ordinal);
         Assert.Contains("Single engine command - day", filters, StringComparison.Ordinal);
@@ -819,9 +845,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Non-zero", filters, StringComparison.Ordinal);
         Assert.Contains("Zero or blank", filters, StringComparison.Ordinal);
         Assert.Contains("[SupplyParameterFromQuery(Name = \"customField\")]", page, StringComparison.Ordinal);
-        Assert.Contains("FilteredCustomFieldIds.Add(definition.Id)", page, StringComparison.Ordinal);
+        Assert.Contains("TotalsFilterSelections[fieldId] = MobileLogbookTotalsFilters.Values", page, StringComparison.Ordinal);
         Assert.Contains("MobileCustomFieldSettings.HasNonZeroValue", page, StringComparison.Ordinal);
-        Assert.Contains("Has a non-zero value", page, StringComparison.Ordinal);
         Assert.Contains("ShowFilters = true", page, StringComparison.Ordinal);
         Assert.Contains("Defaults.Classes.Position.BottomCenter", program, StringComparison.Ordinal);
         Assert.Contains(".totals-filter-values", css, StringComparison.Ordinal);
@@ -1351,6 +1376,9 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Session.WorkbookStateChanged -= OnWorkbookStateChanged", logbook, StringComparison.Ordinal);
         Assert.Contains("class=\"action-feedback-message @AnimationClass @(ShowCelebration", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ActionFeedbackMessage", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.ActionFeedbackActionLabel", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.ActionFeedbackActionDestination", feedback, StringComparison.Ordinal);
+        Assert.Contains("Session.DismissActionFeedback()", feedback, StringComparison.Ordinal);
         Assert.Contains("Session.ShouldCelebrateActionFeedback", feedback, StringComparison.Ordinal);
         Assert.Contains("class=\"action-feedback-confirmation\" aria-hidden=\"true\"", feedback, StringComparison.Ordinal);
         Assert.Contains("action-feedback-confirmation-check", feedback, StringComparison.Ordinal);

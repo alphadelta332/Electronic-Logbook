@@ -34,6 +34,12 @@
                 Undo
             </MudButton>
         }
+        else if (!string.IsNullOrWhiteSpace(DisplayedActionLabel) && !string.IsNullOrWhiteSpace(DisplayedActionDestination))
+        {
+            <MudButton Variant="Variant.Text" Color="Color.Primary" OnClick="FollowAction">
+                @DisplayedActionLabel
+            </MudButton>
+        }
     </section>
 }
 
@@ -43,6 +49,8 @@
     private string? DisplayedMessage { get; set; }
     private bool ShowUndo { get; set; }
     private bool ShowCelebration { get; set; }
+    private string? DisplayedActionLabel { get; set; }
+    private string? DisplayedActionDestination { get; set; }
     private bool IsUndoPending { get; set; }
     private int FeedbackVersion { get; set; }
     private string AnimationClass => AnimationState == ActionFeedbackAnimation.Exiting
@@ -52,7 +60,7 @@
     protected override void OnInitialized()
     {
         Session.ActionFeedbackChanged += OnActionFeedbackChanged;
-        Session.ExpireLastWorkbookActionFeedback();
+        Session.ExpireActionFeedback();
         ShowLatestFeedback();
     }
 
@@ -77,12 +85,16 @@
             DisplayedMessage = null;
             ShowUndo = false;
             ShowCelebration = false;
+            DisplayedActionLabel = null;
+            DisplayedActionDestination = null;
             return;
         }
 
         DisplayedMessage = Session.ActionFeedbackMessage;
         ShowUndo = Session.CanUndoLastWorkbookAction;
         ShowCelebration = Session.ShouldCelebrateActionFeedback;
+        DisplayedActionLabel = Session.ActionFeedbackActionLabel;
+        DisplayedActionDestination = Session.ActionFeedbackActionDestination;
         AnimationState = ActionFeedbackAnimation.Shown;
         FeedbackVersion++;
         feedbackCancellation = new CancellationTokenSource();
@@ -110,6 +122,19 @@
         {
             IsUndoPending = false;
         }
+    }
+
+    private void FollowAction()
+    {
+        if (string.IsNullOrWhiteSpace(DisplayedActionDestination))
+        {
+            return;
+        }
+
+        feedbackCancellation?.Cancel();
+        var destination = DisplayedActionDestination;
+        Session.DismissActionFeedback();
+        Navigation.NavigateTo(destination);
     }
 
     private async Task ExpireFeedbackAsync(CancellationToken cancellationToken)
@@ -156,13 +181,15 @@
         {
             if (expireFeedback)
             {
-                Session.ExpireLastWorkbookActionFeedback();
+                Session.ExpireActionFeedback();
             }
 
             AnimationState = ActionFeedbackAnimation.Hidden;
             DisplayedMessage = null;
             ShowUndo = false;
             ShowCelebration = false;
+            DisplayedActionLabel = null;
+            DisplayedActionDestination = null;
             StateHasChanged();
         });
     }

@@ -1626,6 +1626,27 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
+    public void ActionFeedbackCanReuseTheSharedSurfaceForNavigation()
+    {
+        var clock = new MutableSyncClock(DateTimeOffset.Parse("2026-09-19T00:00:00Z"));
+        var session = CreateSession(new JourneyJsRuntime(), syncClock: clock);
+
+        session.ShowActionFeedback("Unable to remove field.", "Show me", "/flights?view=entries");
+
+        Assert.Equal("Unable to remove field.", session.ActionFeedbackMessage);
+        Assert.Equal("Show me", session.ActionFeedbackActionLabel);
+        Assert.Equal("/flights?view=entries", session.ActionFeedbackActionDestination);
+        Assert.False(session.ShouldCelebrateActionFeedback);
+        Assert.False(session.CanUndoLastWorkbookAction);
+        Assert.Equal(MobileLogbookSession.ActionFeedbackWindow, session.ActionFeedbackRemaining);
+
+        session.DismissActionFeedback();
+
+        Assert.False(session.HasPendingActionFeedback);
+        Assert.Null(session.LastActionMessage);
+    }
+
+    [Fact]
     public async Task WorkbookModificationCanBeUndoneWithoutRemovingAuditHistory()
     {
         var jsRuntime = new JourneyJsRuntime();

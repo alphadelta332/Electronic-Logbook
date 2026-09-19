@@ -211,6 +211,21 @@ try {
                                     height: Math.round(bounds.height)
                                 };
                             });
+                        const switchGeometry = [...document.querySelectorAll(".custom-entry-number-format .mud-switch")]
+                            .map(element => {
+                                const span = element.querySelector(".mud-switch-span")?.getBoundingClientRect();
+                                const input = element.querySelector(".mud-switch-input")?.getBoundingClientRect();
+                                const thumb = element.querySelector('[class*="mud-switch-thumb"]')?.getBoundingClientRect();
+                                const track = element.querySelector(".mud-switch-track")?.getBoundingClientRect();
+                                return {
+                                    controlHeight: Math.round(element.getBoundingClientRect().height),
+                                    spanHeight: Math.round(span?.height ?? -1),
+                                    inputHeight: Math.round(input?.height ?? -1),
+                                    thumbTrackOffset: Math.round(Math.abs(
+                                        ((thumb?.top ?? 0) + (thumb?.height ?? 0) / 2) -
+                                        ((track?.top ?? 0) + (track?.height ?? 0) / 2)))
+                                };
+                            });
 
                         return {
                             mainHorizontalOverflow: main ? main.scrollWidth > main.clientWidth + 1 : true,
@@ -231,7 +246,8 @@ try {
                                 .map(link => link.getAttribute("aria-label")),
                             headingCount: document.querySelectorAll("main h1").length,
                             unnamedControls,
-                            smallControlTargets
+                            smallControlTargets,
+                            switchGeometry
                         };
                     });
 
@@ -244,7 +260,10 @@ try {
                         shellLayout.smallNavigationTargets.length > 0 ||
                         shellLayout.headingCount !== 1 ||
                         shellLayout.unnamedControls.length > 0 ||
-                        shellLayout.smallControlTargets.length > 0) {
+                        shellLayout.smallControlTargets.length > 0 ||
+                        shellLayout.switchGeometry.some(switchLayout =>
+                            switchLayout.inputHeight > switchLayout.spanHeight + 1 ||
+                            switchLayout.thumbTrackOffset > 1)) {
                         throw new Error(`Shell accessibility/layout audit failed for ${route.name} ${profile.name} ${colorScheme}: ${JSON.stringify(shellLayout)}`);
                     }
 
@@ -371,6 +390,68 @@ try {
                         }
 
                         await assertAccessible(page, `currency interaction ${profile.name} ${colorScheme}`);
+                    } else if (route.name === "settings") {
+                        const firstCustomEntry = page.locator(".custom-entry-setting").first();
+                        await firstCustomEntry.scrollIntoViewIfNeeded();
+                        const numberFormatPill = firstCustomEntry.locator(".custom-entry-number-format-toggle");
+
+                        if (await numberFormatPill.count() > 0) {
+                            const wholeNumbers = numberFormatPill.getByRole("checkbox", { name: "Whole numbers" });
+                            const decimals = numberFormatPill.getByRole("checkbox", { name: "Decimals" });
+                            const target = await wholeNumbers.getAttribute("aria-checked") === "true" ? decimals : wholeNumbers;
+                            await page.evaluate(() => {
+                                const groups = [...document.querySelectorAll(".custom-entry-number-format-toggle")];
+                                window.__numberFormatFrames = [];
+                                const deadline = performance.now() + 500;
+                                const capture = () => {
+                                    window.__numberFormatFrames.push(groups.map(group => [...group.querySelectorAll("button")]
+                                        .map(button => {
+                                            const style = getComputedStyle(button);
+                                            return {
+                                                disabled: button.disabled,
+                                                backgroundColor: style.backgroundColor,
+                                                color: style.color,
+                                                opacity: style.opacity
+                                            };
+                                        })));
+                                    if (performance.now() < deadline) {
+                                        requestAnimationFrame(capture);
+                                    }
+                                };
+                                capture();
+                            });
+                            await target.click();
+                            await page.waitForTimeout(550);
+                            const numberFormatFrames = await page.evaluate(() => window.__numberFormatFrames);
+                            const initialUnchangedGroups = JSON.stringify(numberFormatFrames[0].slice(1));
+                            const controlsFlashed = numberFormatFrames.some(frame =>
+                                frame.some(group => group.some(control => control.disabled)) ||
+                                JSON.stringify(frame.slice(1)) !== initialUnchangedGroups);
+                            if (await target.getAttribute("aria-checked") !== "true") {
+                                throw new Error(`Settings number-format pill did not change selection for ${profile.name} ${colorScheme}`);
+                            }
+                            if (controlsFlashed) {
+                                throw new Error(`Settings number-format pills flashed or unrelated pills changed for ${profile.name} ${colorScheme}`);
+                            }
+                        } else {
+                            const numberFormatSwitch = firstCustomEntry.locator(".mud-switch");
+                            const thumb = numberFormatSwitch.locator('[class*="mud-switch-thumb"]');
+                            const thumbBefore = await thumb.boundingBox();
+                            await numberFormatSwitch.click();
+                            await page.waitForTimeout(200);
+                            const thumbAfter = await thumb.boundingBox();
+
+                            if (await numberFormatSwitch.locator("input").getAttribute("aria-checked") !== "true" ||
+                                !thumbBefore ||
+                                !thumbAfter ||
+                                thumbAfter.x <= thumbBefore.x + 10) {
+                                throw new Error(`Settings number-format switch did not toggle for ${profile.name} ${colorScheme}`);
+                            }
+                        }
+
+                        await firstCustomEntry.screenshot({
+                            path: join(outputDirectory, `${profile.name}-${colorScheme}-settings-custom-entry-toggled.png`)
+                        });
                     }
 
                     await page.waitForTimeout(50);
