@@ -3,18 +3,18 @@ namespace ElectronicLogbook.Mobile;
 public static class MobilePreviewChangelog
 {
     public static MobilePreviewChangelogRelease Current { get; } = new(
-        "0.2.0",
-        300000018,
+        "0.2.1",
+        300000019,
         [
             new(
-                "More advanced Filtering",
-                "Filter Logbook Totals by dates, aircraft, airports, crew and numeric flight values. The included-flight count and totals update to match."),
+                "Matching filters everywhere",
+                "Logbook Entries and Totals now use the same filters, including dates, aircraft, airports, crew and numeric flight values."),
             new(
-                "Improved Custom Entry management",
-                "Rename populated fields safely and choose Whole numbers or Decimals for each custom entry."),
+                "Clearer Custom Entry settings",
+                "Rename fields, see their logged hours, choose whole numbers or decimals, and jump straight to flights that prevent removal."),
             new(
-                "Better Excel Export Formatting",
-                "Choose Full or Compact Excel and CSV exports. Excel now follows the original Spreadsheet logbook layout.")
+                "Save exports to your device",
+                "Choose Download to device from Android's share options to save Excel and CSV exports where you want them.")
         ]);
 
     public static MobilePreviewChangelogDecision Evaluate(MobilePreviewInstallationInfo? installation)
