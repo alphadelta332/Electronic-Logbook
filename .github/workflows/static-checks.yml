@@ -6,7 +6,6 @@ on:
     branches:
       - dev
       - hotfix
-      - pilot # Legacy external Preview branch until the owner-controlled migration.
       - main
 
 permissions:

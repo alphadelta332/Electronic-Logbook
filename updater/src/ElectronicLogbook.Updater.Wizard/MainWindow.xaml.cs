@@ -2349,20 +2349,8 @@ public partial class MainWindow : Window
         channel ??= string.IsNullOrWhiteSpace(master)
             ? UpdateChannel.Stable
             : UpdateChannel.LocalMaster;
-        if (channel == UpdateChannel.Development &&
-            master is not null &&
-            !File.Exists(source))
-        {
-            source = LegacyPreviewSourceResolver.Resolve(source, master);
-        }
         output ??= WorkbookOutputNamer.BuildDefaultOutputPath(source);
         output = Path.GetFullPath(output);
-        if (channel == UpdateChannel.Development &&
-            master is not null &&
-            LegacyPreviewMigrationBridge.MatchesWorkbookPackages(source, master))
-        {
-            channel = UpdateChannel.Preview;
-        }
         var updatePathPlan = WorkbookUpdatePathPlanner.Resolve(
             source,
             output,
@@ -2391,7 +2379,6 @@ public partial class MainWindow : Window
             "dev" => UpdateChannel.Development,
             "hotfix" => UpdateChannel.Hotfix,
             "preview" => UpdateChannel.Preview,
-            "pilot" => UpdateChannel.Preview,
             "local-master" => UpdateChannel.LocalMaster,
             "localmaster" => UpdateChannel.LocalMaster,
             "local" => UpdateChannel.LocalMaster,

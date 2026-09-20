@@ -2181,10 +2181,9 @@ public sealed class ExcelWorkbookMigrator
     internal static string? CanonicalPreviewUpdateChannel(string? sourceUpdateChannel)
     {
         var normalized = sourceUpdateChannel?.Trim();
-        return string.Equals(normalized, "preview", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(normalized, "pilot", StringComparison.OrdinalIgnoreCase)
-                ? "preview"
-                : null;
+        return string.Equals(normalized, "preview", StringComparison.OrdinalIgnoreCase)
+            ? "preview"
+            : null;
     }
 
     private static bool LogbookFingerprintColumnIsPreserved(string name)

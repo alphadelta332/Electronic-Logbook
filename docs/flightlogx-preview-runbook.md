@@ -2,7 +2,7 @@
 
 Status: controlled-cohort operating procedure
 
-Last checked: 2026-09-09
+Last checked: 2026-09-20
 
 This runbook defines the private, invitation-only Android-first Preview. It excludes
 public signup, billing, public uptime promises, app-store distribution, and public release
@@ -21,7 +21,7 @@ copies.
 
 The ordinary journey uses:
 
-- the coached `2.0.3` Preview-channel switch;
+- the already-migrated `3.0.0` Preview workbook;
 - the normal updater wizard and Google sign-in;
 - the Firebase App Distribution invitation and signed permanent Android package;
 - Google sign-in in FlightLogX; and
@@ -33,55 +33,24 @@ and Package Exchange remain Advanced/support only.
 
 ## Controlled Channel
 
-The canonical controlled workbook channel is `preview`. Ordinary `main` workbooks remain
-on `2.0.3` while the controlled Preview tests `3.0.0`.
+The controlled workbook channel is `preview`. The owner and external canary completed the
+coached migration, so the temporary compatibility branch, marker, and input aliases were
+removed. Ordinary `main` workbooks remain on `2.0.3` while the controlled Preview tests
+`3.0.0`. Do not invite another workbook user until the post-Preview staged migration offer
+exists.
 
-A pinned `pilot` branch and bridge marker remain only because the `2.0.3` launcher treats
-its channel as a GitHub branch name. The first hop therefore uses `pilot`; the `3.0.0`
-launcher canonicalizes it to `preview`. Do not develop or publish from `pilot`.
-
-Preview prerelease files are publicly downloadable because the public repository and the
-`2.0.3` bootstrap use unauthenticated GitHub Release URLs. They are not advertised,
-linked from `main`, or offered unless a coach intentionally changes one workbook to the
-legacy bridge.
-
-Before coaching a workbook, verify:
+Before publishing a Preview workbook update, verify:
 
 1. Remote `preview` points to the exact approved commit.
 2. The GitHub `preview` environment requires owner approval and contains the approved
    Preview Supabase URL variable and anonymous-key secret.
 3. `Publish FlightLogX Preview wizard` passed for that exact commit after approval.
-4. The prerelease tag is `dev-wizard-<first 12 commit characters>` and contains both
-   `preview-wizard-channel.txt` and `pilot-wizard-channel.txt`.
-5. Remote `pilot` points to the same commit as `preview`.
-6. `origin/main:version.txt` and the public latest release remain `2.0.3` and `v2.0.3`.
+4. The prerelease tag is `dev-wizard-<first 12 commit characters>` and contains
+   `preview-wizard-channel.txt`.
+5. `origin/main:version.txt` and the public latest release remain `2.0.3` and `v2.0.3`.
 
 Stop if any check fails. Do not substitute a development build or another Supabase
 project.
-
-### Coached `2.0.3` switch
-
-These are private owner/coach instructions, not public documentation:
-
-1. Open the participant's existing `2.0.3` workbook and save it normally.
-2. Press `Alt+F11`.
-3. Press `Ctrl+G` to open the Immediate window.
-4. Paste the following exact line and press Enter:
-
-   ```text
-   ThisWorkbook.Names("GitHubBranch").RefersToRange.Value2 = "pilot"
-   ```
-
-5. Close the Visual Basic window and save the workbook.
-6. Use the workbook's normal update check and accept `3.0.0`.
-7. Confirm the one `Development Updater Warning` shown by `2.0.3` only after the coach
-   matches the approved commit and prerelease above.
-8. Do not accept a second development warning after the workbook reaches `3.0.0`. Stop
-   and investigate if one appears.
-
-The installed workbook must contain `preview`, never `pilot`, `dev`, `hotfix`, an
-arbitrary branch, or blank. Remove the external `pilot` aliases only after the owner and
-canary workbooks and devices use canonical Preview resources.
 
 ## Cohort And Private Records
 

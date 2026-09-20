@@ -21,7 +21,6 @@ Private Const WIZARD_ZIP_NAME As String = "ElectronicLogbook.Updater.Wizard.win-
 Private Const DEV_WIZARD_TAG_PREFIX As String = "dev-wizard-"
 Private Const DEV_WIZARD_COMMIT_NAME As String = "dev-wizard-commit.txt"
 Private Const PREVIEW_MIGRATION_VERSION As String = "3.0.0"
-Private Const LEGACY_PREVIEW_GITHUB_BRANCH As String = "pilot"
 ' -------------------------------------------------------------
 
 ' ==============================================================
@@ -2028,7 +2027,7 @@ Private Function ResolveGitHubRef() As String
     Dim branchName As String
     Dim sha        As String
 
-    branchName = GitHubSourceBranch(GetGitHubBranch())
+    branchName = LCase$(Trim$(GetGitHubBranch()))
     sha = GetBranchCommitSha(branchName)
     If sha <> "" Then
         ResolveGitHubRef = sha
@@ -2056,14 +2055,7 @@ Private Function IsStableUpdateBranch(ByVal branchName As String) As Boolean
 End Function
 
 Private Function IsPreviewUpdateBranch(ByVal branchName As String) As Boolean
-    branchName = LCase$(Trim$(branchName))
-    IsPreviewUpdateBranch = (branchName = "preview" Or branchName = LEGACY_PREVIEW_GITHUB_BRANCH)
-End Function
-
-Private Function GitHubSourceBranch(ByVal workbookChannel As String) As String
-    workbookChannel = LCase$(Trim$(workbookChannel))
-    If workbookChannel = LEGACY_PREVIEW_GITHUB_BRANCH Then workbookChannel = "preview"
-    GitHubSourceBranch = workbookChannel
+    IsPreviewUpdateBranch = (LCase$(Trim$(branchName)) = "preview")
 End Function
 
 Private Function WorkbookUpdateChannelArgument() As String

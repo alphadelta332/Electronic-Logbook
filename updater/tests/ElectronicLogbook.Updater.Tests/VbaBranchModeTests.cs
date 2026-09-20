@@ -28,24 +28,20 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void PreviewAndLegacyPreviewAliasBranchesUsePreviewRuntimeWithoutRepeatingDevelopmentWarning()
+    public void PreviewBranchUsesPreviewRuntimeWithoutDevelopmentWarning()
     {
         var bootSource = ReadVbaSource("modBoot.bas");
         var updateSource = ReadVbaSource("modUpdate.bas");
 
-        Assert.Contains("Private Const LEGACY_PREVIEW_GITHUB_BRANCH As String = \"pilot\"", bootSource, StringComparison.Ordinal);
-        Assert.Contains("IsPreviewUpdateBranch = (branchName = \"preview\" Or branchName = LEGACY_PREVIEW_GITHUB_BRANCH)", bootSource, StringComparison.Ordinal);
-        Assert.Contains("If workbookChannel = LEGACY_PREVIEW_GITHUB_BRANCH Then workbookChannel = \"preview\"", bootSource, StringComparison.Ordinal);
-        Assert.Contains("GitHubSourceBranch = workbookChannel", bootSource, StringComparison.Ordinal);
+        Assert.Contains("IsPreviewUpdateBranch = (LCase$(Trim$(branchName)) = \"preview\")", bootSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("LEGACY_PREVIEW_GITHUB_BRANCH", bootSource, StringComparison.Ordinal);
         Assert.Contains("RequiresDevelopmentWizardWarning = Not IsStableUpdateBranch(branchName) And", bootSource, StringComparison.Ordinal);
         Assert.Contains("Not IsPreviewUpdateBranch(branchName)", bootSource, StringComparison.Ordinal);
         Assert.Contains("WorkbookUpdateChannelArgument = \"preview\"", bootSource, StringComparison.Ordinal);
         Assert.Contains("ElectronicLogbookUpdaterPreview", bootSource, StringComparison.Ordinal);
 
-        Assert.Contains("Private Const LEGACY_PREVIEW_GITHUB_BRANCH As String = \"pilot\"", updateSource, StringComparison.Ordinal);
-        Assert.Contains("IsPreviewUpdateBranch = (branchName = \"preview\" Or branchName = LEGACY_PREVIEW_GITHUB_BRANCH)", updateSource, StringComparison.Ordinal);
-        Assert.Contains("If workbookChannel = LEGACY_PREVIEW_GITHUB_BRANCH Then workbookChannel = \"preview\"", updateSource, StringComparison.Ordinal);
-        Assert.Contains("GitHubSourceBranch = workbookChannel", updateSource, StringComparison.Ordinal);
+        Assert.Contains("IsPreviewUpdateBranch = (LCase$(Trim$(branchName)) = \"preview\")", updateSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("LEGACY_PREVIEW_GITHUB_BRANCH", updateSource, StringComparison.Ordinal);
         Assert.Contains("WorkbookUpdateChannelArgument = \"preview\"", updateSource, StringComparison.Ordinal);
         Assert.Contains("ElectronicLogbookUpdaterPreview", updateSource, StringComparison.Ordinal);
     }
@@ -120,13 +116,12 @@ public sealed class VbaBranchModeTests
     [Theory]
     [InlineData("preview", "preview")]
     [InlineData(" PREVIEW ", "preview")]
-    [InlineData("pilot", "preview")]
-    [InlineData(" PILOT ", "preview")]
+    [InlineData("pilot", null)]
     [InlineData("main", null)]
     [InlineData("dev", null)]
     [InlineData("hotfix", null)]
     [InlineData("", null)]
-    public void WorkbookMigrationCanonicalisesPreviewAndAcceptsLegacyPreviewAlias(
+    public void WorkbookMigrationRetainsOnlyThePreviewChannel(
         string sourceChannel,
         string? expected)
     {
@@ -134,7 +129,7 @@ public sealed class VbaBranchModeTests
     }
 
     [Fact]
-    public void WizardUsesPreviewChannelAndAcceptsLegacyPreviewAliasInput()
+    public void WizardUsesOnlyThePreviewChannel()
     {
         var source = ReadRepoSource(Path.Combine(
             "updater",
@@ -143,35 +138,16 @@ public sealed class VbaBranchModeTests
             "MainWindow.xaml.cs"));
 
         Assert.Contains("\"preview\" => UpdateChannel.Preview", source, StringComparison.Ordinal);
-        Assert.Contains("\"pilot\" => UpdateChannel.Preview", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"pilot\" => UpdateChannel.Preview", source, StringComparison.Ordinal);
         Assert.Contains("UpdateChannel.Preview => \"Preview\"", source, StringComparison.Ordinal);
         Assert.Contains("private const string PreviewGitHubBranch = \"preview\"", source, StringComparison.Ordinal);
         Assert.Contains("UpdateChannel.Preview => PreviewGitHubBranch", source, StringComparison.Ordinal);
         Assert.Contains("Preview version:", source, StringComparison.Ordinal);
-        Assert.Contains("LegacyPreviewSourceResolver.Resolve(", source, StringComparison.Ordinal);
-        Assert.Contains("LegacyPreviewMigrationBridge.MatchesWorkbookPackages(", source, StringComparison.Ordinal);
-    }
-
-    [Theory]
-    [InlineData("2.0.3", "pilot", "3.0.0", true)]
-    [InlineData("2.0.3", " PILOT ", "3.0.0", true)]
-    [InlineData("2.0.3", "preview", "3.0.0", false)]
-    [InlineData("2.0.3", "dev", "3.0.0", false)]
-    [InlineData("2.0.2", "pilot", "3.0.0", false)]
-    [InlineData("2.0.3", "pilot", "3.0.1", false)]
-    public void LegacyPreviewBridgeOnlyPromotesTheExactReleased203Path(
-        string sourceVersion,
-        string sourceBranch,
-        string masterVersion,
-        bool expected)
-    {
-        Assert.Equal(
-            expected,
-            LegacyPreviewMigrationBridge.Matches(sourceVersion, sourceBranch, masterVersion));
+        Assert.DoesNotContain("LegacyPreview", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void PreviewWizardPublicationIsProtectedAndKeepsThe203BridgeAliases()
+    public void PreviewWizardPublicationUsesOnlyTheCanonicalChannel()
     {
         var previewWorkflow = ReadRepoSource(Path.Combine(
             ".github",
@@ -188,17 +164,12 @@ public sealed class VbaBranchModeTests
         Assert.Contains("ELECTRONIC_LOGBOOK_PREVIEW_SUPABASE_ANON_KEY", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("$tag = \"dev-wizard-$shortSha\"", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("preview-wizard-channel.txt", previewWorkflow, StringComparison.Ordinal);
-        Assert.Contains("pilot-wizard-channel.txt", previewWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("pilot-wizard-channel.txt", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("--clobber", previewWorkflow, StringComparison.Ordinal);
         Assert.Contains("protected Preview wizard assets", previewWorkflow, StringComparison.Ordinal);
-        Assert.Contains("git/refs/heads/pilot", previewWorkflow, StringComparison.Ordinal);
-        Assert.Contains("-F force=false", previewWorkflow, StringComparison.Ordinal);
-        Assert.Contains("verifiedPilotSha", previewWorkflow, StringComparison.Ordinal);
-        Assert.Contains("Preserving Preview-channel bridge release", developmentWorkflow, StringComparison.Ordinal);
-        Assert.True(
-            previewWorkflow.IndexOf("Publish Preview bridge release", StringComparison.Ordinal) <
-            previewWorkflow.IndexOf("Align legacy pilot branch after protected publication", StringComparison.Ordinal),
-            "The legacy pilot ref must move only after protected Preview assets are published.");
+        Assert.DoesNotContain("refs/heads/pilot", previewWorkflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("pilot-wizard-channel.txt", developmentWorkflow, StringComparison.Ordinal);
+        Assert.Contains("Preserving Preview-channel release", developmentWorkflow, StringComparison.Ordinal);
     }
 
     private static string ReadVbaSource(string fileName)
