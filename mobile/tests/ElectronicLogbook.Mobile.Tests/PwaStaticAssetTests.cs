@@ -290,6 +290,29 @@ public sealed class PwaStaticAssetTests
     }
 
     [Fact]
+    public void AndroidLogbookShareOffersDownloadToDeviceThroughTheDocumentPicker()
+    {
+        var plugin = ReadRepositoryFile(
+            "android", "app", "src", "main", "java", "com", "alphadelta", "electroniclogbook",
+            "ElectronicLogbookNativeFilesPlugin.java");
+        var downloadActivity = ReadRepositoryFile(
+            "android", "app", "src", "main", "java", "com", "alphadelta", "electroniclogbook",
+            "ElectronicLogbookExportDownloadActivity.java");
+        var manifest = ReadRepositoryFile("android", "app", "src", "main", "AndroidManifest.xml");
+
+        Assert.Contains("Build.VERSION_CODES.UPSIDE_DOWN_CAKE", plugin, StringComparison.Ordinal);
+        Assert.Contains("isLogbookExportFileName(fileName)", plugin, StringComparison.Ordinal);
+        Assert.Contains("\"Download to device\"", plugin, StringComparison.Ordinal);
+        Assert.Contains("Intent.EXTRA_CHOOSER_CUSTOM_ACTIONS", plugin, StringComparison.Ordinal);
+        Assert.Contains("ElectronicLogbookExportDownloadActivity.class", plugin, StringComparison.Ordinal);
+        Assert.Contains("Intent.ACTION_CREATE_DOCUMENT", downloadActivity, StringComparison.Ordinal);
+        Assert.Contains("output.write(buffer, 0, read)", downloadActivity, StringComparison.Ordinal);
+        Assert.Contains("getContentResolver().delete(destination, null, null)", downloadActivity, StringComparison.Ordinal);
+        Assert.Contains("android:name=\".ElectronicLogbookExportDownloadActivity\"", manifest, StringComparison.Ordinal);
+        Assert.Contains("android:exported=\"false\"", manifest, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void IndexedDbBridgeResolvesWritesOnlyAfterTransactionCompletes()
     {
         var bridge = ReadMobileAsset(Path.Combine("js", "logbookStore.js"));

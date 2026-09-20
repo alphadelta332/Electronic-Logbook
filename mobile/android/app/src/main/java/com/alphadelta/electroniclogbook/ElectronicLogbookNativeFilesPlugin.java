@@ -1,12 +1,15 @@
 package com.alphadelta.electroniclogbook;
 
 import android.app.Activity;
+import android.app.PendingIntent;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Icon;
 import android.net.Uri;
 import android.os.Build;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
+import android.service.chooser.ChooserAction;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
@@ -106,7 +109,24 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             shareIntent.putExtra(Intent.EXTRA_STREAM, uri);
             shareIntent.putExtra(Intent.EXTRA_TITLE, fileName);
             shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            getActivity().startActivity(Intent.createChooser(shareIntent, "Export file"));
+            Intent chooserIntent = Intent.createChooser(shareIntent, "Export file");
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && isLogbookExportFileName(fileName)) {
+                Intent downloadIntent = new Intent(getContext(), ElectronicLogbookExportDownloadActivity.class);
+                downloadIntent.setDataAndType(uri, contentType);
+                downloadIntent.putExtra(Intent.EXTRA_TITLE, fileName);
+                downloadIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                PendingIntent downloadAction = PendingIntent.getActivity(
+                    getContext(),
+                    fileName.hashCode(),
+                    downloadIntent,
+                    PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                ChooserAction chooserAction = new ChooserAction.Builder(
+                    Icon.createWithResource(getContext(), android.R.drawable.stat_sys_download_done),
+                    "Download to device",
+                    downloadAction).build();
+                chooserIntent.putExtra(Intent.EXTRA_CHOOSER_CUSTOM_ACTIONS, new ChooserAction[] { chooserAction });
+            }
+            getActivity().startActivity(chooserIntent);
 
             JSObject result = new JSObject();
             result.put("fileName", fileName);
@@ -187,7 +207,7 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
         }
     }
 
-    private static boolean isSupportedExportFileName(String fileName) {
+    static boolean isSupportedExportFileName(String fileName) {
         if (fileName == null || fileName.isBlank() || fileName.contains("/") || fileName.contains("\\")) {
             return false;
         }
@@ -197,6 +217,11 @@ public class ElectronicLogbookNativeFilesPlugin extends Plugin {
             lowerName.endsWith(".json") ||
             lowerName.endsWith(".xlsx") ||
             lowerName.endsWith(".csv");
+    }
+
+    private static boolean isLogbookExportFileName(String fileName) {
+        String lowerName = fileName.toLowerCase(java.util.Locale.ROOT);
+        return lowerName.endsWith(".xlsx") || lowerName.endsWith(".csv");
     }
 
     @PluginMethod
