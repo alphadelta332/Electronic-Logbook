@@ -34,27 +34,19 @@
             <MudIcon Icon="@Icons.Material.Filled.ListAlt" />
             <span>Logbook</span>
         </PathOnlyNavLink>
-        <NavLink href="/currency" aria-label="Currency" class="@NavPendingClass(CurrencyNavigationLabel)" @onclick="ShowCurrencyNavigationPending">
-            <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
-            <span>Currency</span>
-        </NavLink>
         <NavLink href="/flights/new" class="@NavPendingClass(NewFlightNavigationLabel, AddNavigationClass)" aria-label="New flight" @onclick="ShowNewFlightNavigationPending">
             <span class="bottom-nav-add-icon" aria-hidden="true">
                 <MudIcon Icon="@Icons.Material.Filled.Add" />
             </span>
-            <span>New flight</span>
+            <span>New</span>
         </NavLink>
-        <NavLink href="/charts" aria-label="Charts" class="@NavPendingClass(ChartsNavigationLabel)" @onclick="ShowChartsNavigationPending">
-            <MudIcon Icon="@Icons.Material.Filled.BarChart" />
-            <span>Charts</span>
+        <NavLink href="/currency" aria-label="Currency" class="@NavPendingClass(CurrencyNavigationLabel)" @onclick="ShowCurrencyNavigationPending">
+            <MudIcon Icon="@Icons.Material.Filled.FactCheck" />
+            <span>Currency</span>
         </NavLink>
-        <NavLink href="/routes" aria-label="Route Map" class="@NavPendingClass(RoutesNavigationLabel)" @onclick="ShowRoutesNavigationPending">
-            <MudIcon Icon="@Icons.Material.Filled.Route" />
-            <span>Route Map</span>
-        </NavLink>
-        <NavLink href="/settings" aria-label="Settings" class="@NavPendingClass(SettingsNavigationLabel)" @onclick="ShowSettingsNavigationPending">
-            <MudIcon Icon="@Icons.Material.Filled.Settings" />
-            <span>Settings</span>
+        <NavLink href="/more" aria-label="More" aria-current="@(IsMoreSelected ? "page" : null)" class="@NavPendingClass(MoreNavigationLabel, IsMoreSelected ? "active" : null)" @onclick="ShowMoreNavigationPending">
+            <MudIcon Icon="@Icons.Material.Filled.MoreHoriz" />
+            <span>More</span>
         </NavLink>
         @if (IsNavigationPending)
         {
@@ -66,12 +58,12 @@
 @code {
     private const string DashboardNavigationLabel = "Dashboard";
     private const string LogbookNavigationLabel = "Logbook";
-    private const string RoutesNavigationLabel = "Route Map";
     private const string NewFlightNavigationLabel = "New flight";
-    private const string ChartsNavigationLabel = "Charts";
     private const string CurrencyNavigationLabel = "Currency";
-    private const string SettingsNavigationLabel = "Settings";
+    private const string MoreNavigationLabel = "More";
     private const string AddNavigationClass = "bottom-nav-add";
+
+    private static readonly string[] MoreNavigationPaths = ["/more", "/settings", "/charts", "/routes"];
 
     private readonly MudTheme Theme = MobileTheme.Create();
     private CancellationTokenSource? navigationFeedbackCancellation;
@@ -171,15 +163,15 @@
 
     private void ShowLogbookNavigationPending() => ShowNavigationPending(LogbookNavigationLabel, "/flights");
 
-    private void ShowRoutesNavigationPending() => ShowNavigationPending(RoutesNavigationLabel, "/routes");
-
     private void ShowNewFlightNavigationPending() => ShowNavigationPending(NewFlightNavigationLabel, "/flights/new");
-
-    private void ShowChartsNavigationPending() => ShowNavigationPending(ChartsNavigationLabel, "/charts");
 
     private void ShowCurrencyNavigationPending() => ShowNavigationPending(CurrencyNavigationLabel, "/currency");
 
-    private void ShowSettingsNavigationPending() => ShowNavigationPending(SettingsNavigationLabel, "/settings");
+    private void ShowMoreNavigationPending() => ShowNavigationPending(MoreNavigationLabel, "/more");
+
+    private bool IsMoreSelected => MoreNavigationPaths.Contains(
+        Navigation.ToAbsoluteUri(Navigation.Uri).AbsolutePath.TrimEnd('/'),
+        StringComparer.OrdinalIgnoreCase);
 
     private string? NavPendingClass(string label, string? baseClass = null)
     {

@@ -171,7 +171,7 @@ textarea {
     left: 0;
     z-index: 30;
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 0;
     min-height: calc(66px + var(--native-safe-bottom));
     padding: 6px 4px calc(8px + var(--native-safe-bottom));
@@ -245,10 +245,9 @@ textarea {
 .bottom-nav a > span:last-child {
     width: 100%;
     max-width: 100%;
-    overflow: hidden;
+    overflow-wrap: anywhere;
     text-align: center;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .visually-hidden {
