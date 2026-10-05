@@ -348,6 +348,117 @@ values (
     now()
 );
 
+-- Snapshot every application table, including row versions, before anonymous calls.
+create table elb_rls_test.probe_baseline (
+    table_name text primary key,
+    rows jsonb not null
+);
+
+do $$
+declare
+    t record;
+begin
+    for t in select tablename from pg_catalog.pg_tables where schemaname = 'public' loop
+        execute format(
+            'insert into elb_rls_test.probe_baseline select %L, '
+            || 'coalesce(jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text), ''[]''::jsonb) '
+            || 'from (select *, xmin::text as test_row_version from public.%I) r',
+            t.tablename, t.tablename
+        );
+    end loop;
+end;
+$$;
+
+grant usage on schema elb_rls_test to anon;
+grant execute on function elb_rls_test.assert_true(text, boolean) to anon;
+grant execute on function elb_rls_test.expect_error(text, text, text) to anon;
+
+set local role anon;
+
+do $$
+declare
+    response jsonb;
+    t record;
+begin
+    for i in 1..6 loop
+        response := public.preview_activity_probe();
+        perform elb_rls_test.assert_true(
+            'anonymous probe returns only ok and the database time',
+            response = jsonb_build_object('status', 'ok', 'database_time', now())
+        );
+    end loop;
+
+    perform elb_rls_test.assert_true(
+        'probe has no arguments, is read-only, and uses invoker privileges with an empty search path',
+        (select pronargs = 0 and not prosecdef and provolatile = 's'
+                and proconfig = array['search_path=""']
+         from pg_catalog.pg_proc where oid = 'public.preview_activity_probe()'::regprocedure)
+    );
+
+    for t in select tablename from pg_catalog.pg_tables where schemaname = 'public' loop
+        perform elb_rls_test.assert_true(
+            'anonymous probe caller has no table privileges: ' || t.tablename,
+            not has_table_privilege('anon', format('public.%I', t.tablename),
+                'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+        );
+        perform elb_rls_test.expect_error(
+            'anonymous caller cannot read ' || t.tablename,
+            format('select * from public.%I', t.tablename),
+            '%permission denied%'
+        );
+    end loop;
+
+    perform elb_rls_test.expect_error(
+        'anonymous caller cannot inspect account status through an existing helper',
+        'select public.elb_is_active_account(''10000000-0000-0000-0000-000000000001''::uuid)',
+        '%permission denied%'
+    );
+
+    perform elb_rls_test.assert_true(
+        'probe is the only application function executable by anonymous callers',
+        not exists (
+            select 1 from pg_catalog.pg_proc p
+            join pg_catalog.pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public'
+              and p.oid <> 'public.preview_activity_probe()'::regprocedure
+              and has_function_privilege('anon', p.oid, 'EXECUTE')
+              and not exists (
+                  select 1 from pg_catalog.pg_depend d
+                  where d.classid = 'pg_catalog.pg_proc'::regclass
+                    and d.objid = p.oid and d.deptype = 'e'
+              )
+        )
+    );
+
+    perform elb_rls_test.expect_error(
+        'probe cannot accept a participant identifier',
+        'select public.preview_activity_probe(''20000000-0000-0000-0000-000000000001''::uuid)',
+        '%does not exist%'
+    );
+end;
+$$;
+
+reset role;
+
+do $$
+declare
+    t record;
+    current_rows jsonb;
+begin
+    for t in select * from elb_rls_test.probe_baseline loop
+        execute format(
+            'select coalesce(jsonb_agg(to_jsonb(r) order by to_jsonb(r)::text), ''[]''::jsonb) '
+            || 'from (select *, xmin::text as test_row_version from public.%I) r',
+            t.table_name
+        ) into current_rows;
+        perform elb_rls_test.assert_true(
+            'anonymous probe calls create or change no rows: ' || t.table_name,
+            current_rows = t.rows
+        );
+    end loop;
+end;
+$$;
+
 set local role authenticated;
 
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000007', true);

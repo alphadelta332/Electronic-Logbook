@@ -304,6 +304,7 @@ The manifest currently covers:
 | Archive | 7-Zip |
 | Android | Temurin JDK 21, Platform Tools, SDK Platform 36, Build-Tools 35.0.0 |
 | Hosted Preview | Docker Desktop, WSL2, Supabase CLI 2.111.0, Firebase CLI 15.28.2, required PostgreSQL 17 client |
+| Supabase activity scheduler maintenance (optional) | Cloudflare Wrangler 4.147.0; no always-on computer needed after deployment |
 | Agent tooling | Codex CLI/VS Code extension, Python/uv, Graphify |
 
 The installer also installs these VS Code extensions:
@@ -320,6 +321,14 @@ entries.
 
 Some vendor installers or first launches cannot safely be automated. Complete every
 manual checkpoint printed by the command:
+
+For scheduler maintenance, run `npm.cmd install -g wrangler@4.147.0`, then
+`wrangler.cmd login` and complete the Cloudflare browser sign-in. OAuth state under
+`%APPDATA%\xdg.config\.wrangler` is fresh authentication and must never enter a
+transfer archive. The CLI's cache/logs and `supabase/activity-worker/.wrangler/`
+are regenerated outputs. Recreate ignored `wrangler.local.json` from verified
+Preview metadata rather than transferring it; it contains only the project URL and
+publishable key. See `docs/hosted-preview-supabase.md` for deployment order.
 
 1. Install/sign in to Microsoft 365 and confirm desktop Excel opens.
 2. In Excel, open **File > Options > Trust Center > Trust Center Settings**. For this

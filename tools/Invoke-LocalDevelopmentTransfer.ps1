@@ -873,6 +873,9 @@ function Invoke-VerifyAction {
     $firebaseVersionOutput = Get-NativeCommandOutput -Name 'firebase' -Arguments @('--version')
     $firebaseVersion = @($firebaseVersionOutput -split "`r?`n" | Where-Object { $_ -match '^\d+\.\d+\.\d+$' }) | Select-Object -Last 1
     Add-CheckResult $results 'Firebase CLI version' ($firebaseVersion -eq $script:TransferConfig.Expected.FirebaseCliVersion) $true $firebaseVersion
+    $wranglerVersionOutput = Get-NativeCommandOutput -Name 'wrangler.cmd' -Arguments @('--version')
+    $wranglerVersion = @($wranglerVersionOutput -split "`r?`n" | Where-Object { $_ -match '^\d+\.\d+\.\d+$' }) | Select-Object -Last 1
+    Add-CheckResult $results 'Cloudflare Wrangler version' ($wranglerVersion -eq $script:TransferConfig.Expected.WranglerVersion) $false 'optional scheduler maintenance CLI; install the manifest version and authenticate again'
     $psqlVersion = Get-NativeCommandOutput -Name 'psql' -Arguments @('--version')
     Add-CheckResult $results 'PostgreSQL client 17' ($psqlVersion -match ' 17\.') $true $(if ($psqlVersion) { $psqlVersion } else { 'not found' })
 

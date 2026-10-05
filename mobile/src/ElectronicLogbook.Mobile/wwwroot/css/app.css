@@ -155,8 +155,8 @@ textarea {
     width: min(920px, 100%);
     min-height: 0;
     margin: 0 auto;
-    padding: 16px 16px calc(92px + var(--native-safe-bottom));
-    scroll-padding-block: var(--entry-scroll-padding-top, 16px) calc(108px + var(--native-safe-bottom));
+    padding: 16px 16px 42px;
+    scroll-padding-block: var(--entry-scroll-padding-top, 16px) 42px;
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior-x: none;
@@ -165,7 +165,8 @@ textarea {
 }
 
 .bottom-nav {
-    position: fixed;
+    position: relative;
+    flex: 0 0 auto;
     right: 0;
     bottom: 0;
     left: 0;
@@ -264,12 +265,60 @@ textarea {
 .flight-entry-page,
 .logbook-page,
 .flight-detail-page,
-.settings-page {
+.settings-page,
+.more-page {
     display: grid;
     gap: 16px;
 }
 
+.more-page h1 {
+    margin: 0;
+}
+
+.more-navigation {
+    display: grid;
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    background: var(--app-surface);
+}
+
+.more-navigation-row {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) 24px;
+    align-items: center;
+    gap: 12px;
+    min-height: 48px;
+    padding: 12px 14px;
+    color: var(--app-text);
+    font-weight: 750;
+    text-decoration: none;
+}
+
+.more-navigation-row + .more-navigation-row {
+    border-top: 1px solid var(--app-border);
+}
+
+.more-navigation-row > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.more-navigation-row > .mud-icon-root:first-child {
+    color: var(--app-primary);
+}
+
+.more-navigation-row > .mud-icon-root:last-child {
+    color: var(--app-text-muted);
+}
+
+.more-navigation-row:focus-visible {
+    outline: 3px solid color-mix(in srgb, var(--app-primary) 70%, transparent);
+    outline-offset: -3px;
+}
+
 .dashboard-page {
+    grid-template-columns: minmax(0, 1fr);
     gap: 20px;
 }
 
@@ -301,6 +350,7 @@ textarea {
 }
 
 .dashboard-hours-total > h1 {
+    max-width: 100%;
     margin: 0;
     color: var(--app-text-muted);
     font-size: 18px;
@@ -311,19 +361,22 @@ textarea {
 
 .dashboard-hours-total > strong {
     max-width: 100%;
-    font-size: clamp(64px, 20vw, 96px);
+    font-size: calc(clamp(64px, 20vw, 96px) * 3 / var(--dashboard-hour-digits, 3));
     font-variant-numeric: tabular-nums;
     line-height: 1;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
 }
 
 .dashboard-hours-total > small {
+    min-width: 0;
+    max-width: 100%;
     margin-top: 6px;
     color: var(--app-text-muted);
     font-size: 16px;
 }
 
 .dashboard-hours-total > small strong {
+    white-space: nowrap;
     color: var(--app-text);
     font-size: inherit;
     font-weight: 700;
@@ -338,24 +391,20 @@ textarea {
 }
 
 .dashboard-hours-periods {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
 }
 
 .dashboard-hours-period {
+    flex: 1 1 auto;
     display: grid;
-    grid-template-columns: auto auto;
+    grid-template-columns: max-content auto;
     justify-content: start;
     align-items: center;
     gap: 3px 10px;
     min-width: 0;
-    padding-right: 16px;
-}
-
-.dashboard-hours-period + .dashboard-hours-period {
-    border-left: 1px solid var(--app-border);
-    padding-right: 0;
-    padding-left: 16px;
+    min-height: 48px;
 }
 
 .dashboard-hours-period > span {
@@ -364,6 +413,7 @@ textarea {
     font-variant-numeric: tabular-nums;
     font-weight: 850;
     line-height: 1;
+    white-space: nowrap;
 }
 
 .dashboard-hours-period > .mud-icon-root {
@@ -390,6 +440,7 @@ textarea {
 .dashboard-experience-heading,
 .dashboard-experience-group-heading {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
     gap: 12px;
@@ -412,10 +463,12 @@ textarea {
     display: inline-flex;
     align-items: center;
     gap: 2px;
+    min-height: 48px;
+    max-width: 100%;
     color: var(--app-primary);
     font-size: 13px;
     font-weight: 750;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .dashboard-experience-heading a .mud-icon-root {
@@ -498,12 +551,15 @@ textarea {
 
 .dashboard-experience-legend li {
     display: inline-flex;
+    flex-wrap: wrap;
     align-items: baseline;
     gap: 5px;
-    white-space: nowrap;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .dashboard-experience-legend strong {
+    white-space: nowrap;
     color: var(--app-text);
     font-size: 13px;
     font-variant-numeric: tabular-nums;
@@ -743,6 +799,10 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     white-space: nowrap;
 }
 
+.dashboard-last-flight-heading .relative-date {
+    color: var(--app-text);
+}
+
 .relative-date {
     color: var(--app-text-muted);
     font-size: 11px;
@@ -779,6 +839,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .dashboard-last-flight-hours strong {
+    white-space: nowrap;
     font-size: 22px;
     line-height: 1;
 }
@@ -804,7 +865,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .dashboard-currency-overview-strip {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 6em), 1fr));
     border-bottom: 1px solid var(--app-border);
     background: color-mix(in srgb, var(--app-surface) 86%, var(--app-surface-alt));
 }
@@ -1002,7 +1063,16 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .dashboard-empty-state .action-buttons {
+    flex-wrap: wrap;
     justify-content: center;
+}
+
+.dashboard-empty-state .action-buttons .mud-button-root {
+    min-height: 48px;
+}
+
+.dashboard-empty-state .mud-button-label {
+    white-space: normal;
 }
 
 .dashboard-section,
@@ -3241,6 +3311,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 @media (min-width: 720px) {
     .bottom-nav {
+        position: fixed;
         right: auto;
         top: 74px;
         bottom: auto;

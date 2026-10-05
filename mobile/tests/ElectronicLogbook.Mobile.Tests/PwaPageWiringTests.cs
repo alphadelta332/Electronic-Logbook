@@ -182,6 +182,34 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
+    public void Gate7MorePageListsScrollableChildDestinationsInOrder()
+    {
+        var page = ReadMobilePage("More.razor");
+        var css = ReadMobileAsset("css", "app.css");
+        var audit = ReadProjectFile("mobile", "scripts", "capture-pwa-visual-audit.mjs");
+
+        Assert.Contains("@page \"/more\"", page, StringComparison.Ordinal);
+        Assert.Contains("<h1 id=\"more-heading\">More</h1>", page, StringComparison.Ordinal);
+        Assert.Contains("<nav class=\"more-navigation\" aria-label=\"More destinations\">", page, StringComparison.Ordinal);
+        Assert.Equal(3, CountOccurrences(page, "class=\"more-navigation-row\""));
+        Assert.Contains("href=\"/settings\"", page, StringComparison.Ordinal);
+        Assert.Contains("href=\"/charts\"", page, StringComparison.Ordinal);
+        Assert.Contains("href=\"/routes\"", page, StringComparison.Ordinal);
+        Assert.True(
+            page.IndexOf("href=\"/settings\"", StringComparison.Ordinal)
+            < page.IndexOf("href=\"/charts\"", StringComparison.Ordinal));
+        Assert.True(
+            page.IndexOf("href=\"/charts\"", StringComparison.Ordinal)
+            < page.IndexOf("href=\"/routes\"", StringComparison.Ordinal));
+        Assert.Contains("<span>Settings</span>", page, StringComparison.Ordinal);
+        Assert.Contains("<span>Charts</span>", page, StringComparison.Ordinal);
+        Assert.Contains("<span>Route map</span>", page, StringComparison.Ordinal);
+        Assert.Matches(@"(?s)\.more-navigation-row\s*\{[^}]*min-height:\s*48px", css);
+        Assert.Matches(@"(?s)\.app-main\s*\{[^}]*overflow-y:\s*auto", css);
+        Assert.Contains("{ name: \"more\", path: \"/more\", readySelector: \"main .more-page\" }", audit, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Gate3FutureRouteAndChartDestinationsAreClearlyMarkedComingSoon()
     {
         var routes = ReadMobilePage("Routes.razor");
@@ -992,7 +1020,7 @@ public sealed class PwaPageWiringTests
         Assert.Equal(2, CountOccurrences(page, "href=\"/flights?view=entries\""));
         Assert.Contains("dashboard-hours-total", page, StringComparison.Ordinal);
         Assert.Contains("dashboard-hours-periods", page, StringComparison.Ordinal);
-        Assert.Contains("font-size: clamp(64px, 20vw, 96px);", css, StringComparison.Ordinal);
+        Assert.Contains("font-size: calc(clamp(64px, 20vw, 96px) * 3 / var(--dashboard-hour-digits, 3));", css, StringComparison.Ordinal);
         Assert.Contains("grid-template-columns: repeat(2, minmax(0, 1fr));", css, StringComparison.Ordinal);
         Assert.Contains("dashboard-empty-state", page, StringComparison.Ordinal);
     }
@@ -1796,7 +1824,7 @@ public sealed class PwaPageWiringTests
 
         foreach (var route in new[]
         {
-            "dashboard-populated", "logbook-entries-populated", "logbook-deleted", "flight-detail",
+            "dashboard-populated", "dashboard-large-totals", "logbook-entries-populated", "logbook-deleted", "flight-detail",
             "edit-flight", "deleted-flights", "deleted-flight-detail", "export", "workbook-verification"
         })
         {

@@ -1,0 +1,25 @@
+@page "/more"
+
+<PageTitle>More | FlightLogX</PageTitle>
+
+<section class="more-page" aria-labelledby="more-heading">
+    <h1 id="more-heading">More</h1>
+
+    <nav class="more-navigation" aria-label="More destinations">
+        <NavLink href="/settings" class="more-navigation-row">
+            <MudIcon Icon="@Icons.Material.Filled.Settings" aria-hidden="true" />
+            <span>Settings</span>
+            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" aria-hidden="true" />
+        </NavLink>
+        <NavLink href="/charts" class="more-navigation-row">
+            <MudIcon Icon="@Icons.Material.Filled.BarChart" aria-hidden="true" />
+            <span>Charts</span>
+            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" aria-hidden="true" />
+        </NavLink>
+        <NavLink href="/routes" class="more-navigation-row">
+            <MudIcon Icon="@Icons.Material.Filled.Route" aria-hidden="true" />
+            <span>Route map</span>
+            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" aria-hidden="true" />
+        </NavLink>
+    </nav>
+</section>

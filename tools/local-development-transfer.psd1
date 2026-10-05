@@ -52,6 +52,7 @@
     # State outside the transfer roots. These entries document security-sensitive local
     # prerequisites that must be recreated rather than archived.
     ExternalLocalStateExclusions = @(
+        @{ Path = '%APPDATA%/xdg.config/.wrangler'; Lifecycle = 'fresh-authentication'; Reason = 'Cloudflare OAuth credentials must be recreated with wrangler login, never transferred.' }
         @{ Path = '%USERPROFILE%/.android/avd'; Lifecycle = 'deliberate-exclusion'; Reason = 'Android virtual devices and snapshots can contain live Google sessions; recreate and authenticate the recovery AVD once on each trusted development machine.' }
     )
 
@@ -106,6 +107,7 @@
     )
 
     NpmGlobalPackages = @(
+        @{ Package = 'wrangler@4.147.0'; Command = 'wrangler'; Required = $false }
         @{ Package = 'supabase@2.111.0'; Command = 'supabase'; Required = $true }
         @{ Package = 'firebase-tools@15.28.2'; Command = 'firebase'; Required = $true }
         @{ Package = '@openai/codex'; Command = 'codex'; Required = $false }
@@ -149,6 +151,7 @@
         AndroidRecoveryResetScript = 'tools/Reset-FlightLogXAndroidRecoveryEmulator.ps1'
         SupabaseVersion = '2.111.0'
         FirebaseCliVersion = '15.28.2'
+        WranglerVersion = '4.147.0'
         FirebaseProjectId = 'flightlogx-private-pilot'
         FirebaseAndroidPackageName = 'com.alphadelta.electroniclogbook'
         FirebaseAndroidBuildVariant = 'preview'
@@ -172,6 +175,7 @@
         'Launch Docker Desktop once, accept its terms, and allow WSL2 setup or a restart if requested.'
         'Run gh auth login on the new device; GitHub authentication is never transferred.'
         'Run firebase login on the new device; Firebase authentication is never transferred.'
+        'For Supabase Free-plan scheduler maintenance, install wrangler@4.147.0 and run wrangler login; Cloudflare authentication is never transferred. Regenerate ignored Worker configuration from the verified Preview project metadata.'
         'Open the Codex VS Code extension and sign in; Codex authentication and session databases are never transferred.'
         'Confirm Windows has a default HTTPS browser; updater Google sign-in returns through a temporary 127.0.0.1 loopback callback and needs no local Google client secret.'
         'Confirm the Google OAuth project that owns the Web client also has separate Android clients for every active package/signing-certificate pair; preserve existing clients when adding the permanent Preview identity.'

@@ -66,6 +66,96 @@ policies, and bounded routines for:
 - encrypted configuration revisions;
 - redacted security events.
 
+## Free-Plan Activity Probe
+
+Migration `20261005000000_preview_activity_probe.sql` adds the no-argument
+`public.preview_activity_probe()` RPC. A POST to `/rest/v1/rpc/preview_activity_probe`
+with the project's publishable key and `{}` body returns HTTP 200 and exactly:
+
+```json
+{"status":"ok","database_time":"<PostgreSQL timestamptz>"}
+```
+
+The function is stable, uses invoker permissions and an empty search path, and reads no
+tables. Only `anon` receives its client execute grant. The migration also removes twelve
+legacy PUBLIC execute grants from application routines, explicitly preserving access for
+`authenticated` and `service_role`. The RLS harness verifies anonymous isolation, the
+response contract, and unchanged seeded rows across six probe calls.
+
+Use this endpoint for the external Cloudflare schedule; it needs no participant login or
+privileged credential. It supplies database activity, not a backup or a guarantee against
+Free-plan pausing. Deployment and seven-day scheduled-run evidence are separate checks.
+
+Sources: [Supabase function permissions](https://supabase.com/docs/guides/database/functions#function-privileges)
+and [Free project pausing](https://supabase.com/docs/guides/platform/free-project-pausing).
+
+### External scheduler deployment
+
+The tracked Worker is `supabase/activity-worker/worker.mjs`; its only entry point is
+`scheduled`. Run `node supabase/activity-worker/worker.test.mjs` before deployment.
+It makes one HTTPS POST with `redirect: "manual"`, rejects every non-200 response
+(including redirects), times out after 20 seconds, validates the
+exact response fields and timestamp, and throws sanitized errors without retries.
+Only successful status and database time enter application logs.
+
+Use Wrangler 4.147.0 on a Cloudflare Workers Free account. Complete `wrangler.cmd login`
+once on each maintenance machine. Before any database change, verify each project reference
+against the ignored local metadata and Management API, its Sydney region and healthy status,
+and the exact pending migration list. Resume a paused development project first.
+Apply only the reviewed probe migration to development, verify the publishable-key RPC
+and anonymous isolation, then repeat for Preview. Never run the seeded RLS harness against
+a hosted project containing participant data; that harness is for disposable local databases.
+
+Regenerate ignored `supabase/activity-worker/wrangler.local.json` from the tracked
+configuration, adding the verified Cloudflare account ID and exactly two variable bindings:
+`SUPABASE_URL` (the intended Preview HTTPS origin) and `SUPABASE_PUBLISHABLE_KEY`
+(an `sb_publishable_` key). Never add privileged credentials. Keep configuration and
+captured Wrangler output private; Wrangler can display variable values. Deployment must
+capture and redact those values before displaying or saving evidence.
+Confirm the account uses Workers Free before deploying:
+`wrangler.cmd deploy --config supabase/activity-worker/wrangler.local.json`.
+
+The UTC cron is `17 */4 * * *` (six invocations daily). The Worker has no HTTP handler,
+public workers.dev endpoint, or preview URL. Explicitly set `crons = []` when disabling
+the timer; removing the configuration key leaves the deployed timer unchanged.
+Observability is enabled with full sampling so failures appear as failed executions.
+This schedule needs no running PC, mobile app change, or workbook change.
+
+Cloudflare documents manual scheduled-event tests for local development, not a manual
+trigger for the deployed production handler. Observe an actual production Cron execution
+without changing its timer. Read Cron Events through the GraphQL Analytics API with the
+existing account-read permission (`workersInvocationsScheduled`, filtered to the exact
+Worker and deployment start time). Real-time tails use the existing tail-read permission;
+the stored telemetry query API returns 403 with this login. Cron history reports execution
+status, not the response body; capture a production tail or dashboard log to retain the
+exact `ok` and database-time response before starting acceptance.
+
+`worker.deployment-test.mjs` is a disposable test entry point, never a production entry
+point. Deploy it separately with an empty cron list, full observability and only a random
+`TEST_TOKEN` binding. Its HTTP wrapper calls the unchanged probe using synthetic responses
+for success, transport, status, project, body and JSON cases. `invalid-target` makes one
+real request to a fictitious project with a fake publishable key. Invoke sequentially with
+the token in the Authorization header; expect a successful execution for the success case
+and failed executions with sanitized errors for every failure case. Retain only outcome,
+time, sanitized logs and call count. Delete the disposable Worker and generated private
+configuration, and verify production settings, bindings, cron, deployment and endpoints
+are unchanged. The wrapper's HTTP execution is not production Cron evidence.
+
+Collect scheduled execution evidence at least every two days during the seven-day
+acceptance window: Workers Free currently retains logs for only three days. Require at
+least 42 successful scheduled invocations across seven consecutive days, a fresh
+`ACTIVE_HEALTHY` project snapshot, and verification that the probe touched no application
+rows before completing the continuity task.
+
+If Supabase still pauses the project, sign in to its dashboard, select the existing
+Preview project and choose **Resume project**. Wait for healthy status, then verify the
+probe and schedule. Do not create a replacement logbook or project. Free-plan activity is
+a practical prevention measure with no contractual guarantee and supplies no backup.
+
+Sources: [Cloudflare Cron Triggers](https://developers.cloudflare.com/workers/configuration/cron-triggers/),
+[scheduled handler](https://developers.cloudflare.com/workers/runtime-apis/handlers/scheduled/),
+and [Workers Logs retention](https://developers.cloudflare.com/workers/observability/logs/workers-logs/).
+
 ## Auth Configuration
 
 Configure Auth in the Supabase dashboard for each project:

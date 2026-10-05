@@ -43,6 +43,7 @@ const colorSchemes = ["light", "dark"];
 const routes = [
     { name: "dashboard", path: "/", readySelector: "main .dashboard-page" },
     { name: "dashboard-populated", path: "/", readySelector: "main .dashboard-page", state: "populated" },
+    { name: "dashboard-large-totals", path: "/", readySelector: "main .dashboard-page", state: "large-totals" },
     { name: "currency", path: "/currency", readySelector: "main .currency-page" },
     { name: "logbook-entries", path: "/flights?view=entries", readySelector: "main .logbook-page" },
     { name: "logbook-entries-populated", path: "/flights?view=entries", readySelector: "main .flight-row-list", state: "populated" },
@@ -53,6 +54,7 @@ const routes = [
     { name: "edit-flight", path: ({ entryId }) => `/flights/${entryId}/edit`, readySelector: "main .flight-entry-page", state: "populated" },
     { name: "deleted-flights", path: "/flights?view=deleted", readySelector: "main .deleted-entry-row", state: "deleted" },
     { name: "deleted-flight-detail", path: ({ entryId }) => `/flights/${entryId}`, readySelector: "main .deleted-detail-hero", state: "deleted" },
+    { name: "more", path: "/more", readySelector: "main .more-page" },
     { name: "charts", path: "/charts", readySelector: "main [aria-labelledby=\"charts-heading\"]" },
     { name: "routes", path: "/routes", readySelector: "main [aria-labelledby=\"routes-heading\"]" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" },
@@ -153,6 +155,32 @@ async function prepareRouteState(page, baseUrl, state) {
     }
 
     const entryId = await createDashboardFlight(page, baseUrl);
+    if (state === "large-totals") {
+        // Synthetic migrated history, isolated in this audit's disposable browser context.
+        await page.evaluate(async () => {
+            const stored = JSON.parse(await window.electronicLogbookStore.load("portable-document"));
+            const document = JSON.parse(stored.documentJson);
+            const template = document.operations.find(operation => operation.entry);
+            const today = new Date();
+            const hourFields = ["seCommandDay", "meDualDay", "seIcusDay", "copilotDay"];
+            document.operations = Array.from({ length: 1493 }, (_, index) => {
+                const operation = structuredClone(template);
+                operation.entryId = `ent_audit_${index}`;
+                operation.revisionId = `rev_audit_${index}`;
+                const date = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+                date.setDate(date.getDate() - (index < 1100 ? 366 + index : index < 1465 ? 29 + (index - 1100) % 336 : index - 1465));
+                Object.assign(operation.entry, {
+                    year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(),
+                    seCommandDay: null,
+                    [hourFields[index % hourFields.length]]: index < 1100 ? (index === 0 ? 11 : 10) : index < 1465 ? 3.4 : 3.7,
+                    ifrSim: index === 0 ? 1.2 : null
+                });
+                return operation;
+            });
+            stored.documentJson = JSON.stringify(document);
+            await window.electronicLogbookStore.save("portable-document", JSON.stringify(stored));
+        });
+    }
     if (state === "deleted") {
         await page.goto(`${baseUrl}/flights/${entryId}`, { waitUntil: "domcontentloaded" });
         await page.locator("main .flight-detail-page").waitFor({ state: "visible", timeout: 30000 });
@@ -239,7 +267,13 @@ try {
                     const routeState = await prepareRouteState(page, baseUrl, route.state);
                     const routePath = typeof route.path === "function" ? route.path(routeState) : route.path;
                     await page.goto(`${baseUrl}${routePath}`, { waitUntil: "domcontentloaded" });
-                    await page.locator(route.readySelector).waitFor({ state: "visible", timeout: 30000 });
+                    await page.locator(route.readySelector).waitFor({ state: "visible", timeout: route.state === "large-totals" ? 90000 : 30000 });
+                    if (route.state === "large-totals") {
+                        const totals = await page.locator(".dashboard-hours-total > strong, .dashboard-hours-total > small strong, .dashboard-hours-period > span").allTextContents();
+                        if (JSON.stringify(totals) !== JSON.stringify(["12345.6", "12346.8", "103.6", "1344.6"])) {
+                            throw new Error(`Large migrated totals fixture did not materialize correctly: ${JSON.stringify(totals)}`);
+                        }
+                    }
                     await applyTextScale(page, profile.fontScale);
                     await page.waitForTimeout(50);
                     await page.evaluate(() => {
@@ -378,6 +412,21 @@ try {
                                 };
                             });
 
+                        const dashboardHourLayout = [...document.querySelectorAll(
+                            ".dashboard-hours-total > strong, .dashboard-hours-total > small strong, .dashboard-hours-period > span, .dashboard-experience-legend strong, .dashboard-last-flight-hours strong")]
+                            .filter(isVisible)
+                            .flatMap(element => {
+                                const range = document.createRange();
+                                range.selectNodeContents(element);
+                                const lines = [...range.getClientRects()];
+                                const bounds = range.getBoundingClientRect();
+                                const container = element.closest("a, li")?.getBoundingClientRect();
+                                const icon = element.parentElement.querySelector(":scope > .mud-icon-root")?.getBoundingClientRect();
+                                return lines.length > 1 ||
+                                    (container && (bounds.left < container.left - 1 || bounds.right > container.right + 1)) ||
+                                    (icon && overlaps(bounds, icon))
+                                    ? [describe(element)] : [];
+                            });
                         return {
                             documentHorizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1 ||
                                 document.body.scrollWidth > document.body.clientWidth + 1 ||
@@ -404,6 +453,7 @@ try {
                             clippedEssentialText,
                             overlappingLabels,
                             shellOccludedContent,
+                            dashboardHourLayout,
                             switchGeometry
                         };
                     });
@@ -423,6 +473,7 @@ try {
                         shellLayout.clippedEssentialText.length > 0 ||
                         shellLayout.overlappingLabels.length > 0 ||
                         shellLayout.shellOccludedContent.length > 0 ||
+                        shellLayout.dashboardHourLayout.length > 0 ||
                         shellLayout.switchGeometry.some(switchLayout =>
                             switchLayout.inputHeight > switchLayout.spanHeight + 1 ||
                             switchLayout.thumbTrackOffset > 1)) {

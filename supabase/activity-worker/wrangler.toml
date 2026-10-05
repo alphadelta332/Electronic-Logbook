@@ -1,0 +1,14 @@
+name = "flightlogx-preview-activity"
+main = "worker.mjs"
+compatibility_date = "2026-10-05"
+workers_dev = false
+preview_urls = false
+
+# Deployment supplies only SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY privately.
+# Enable this schedule only after the development and Preview migration checks.
+[triggers]
+crons = ["17 */4 * * *"]
+
+[observability]
+enabled = true
+head_sampling_rate = 1
