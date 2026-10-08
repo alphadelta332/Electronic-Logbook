@@ -238,6 +238,28 @@
         }
     };
 
+    window.electronicLogbookCurrencyOverview = {
+        observe: (overview) => {
+            const items = [...overview.querySelectorAll(".currency-overview-item")];
+            // Android text autosizing enlarges glyphs without moving em-based breakpoints.
+            const update = () => {
+                const minimumWidths = items.map(item => {
+                    const style = getComputedStyle(item);
+                    return [...item.children].reduce((width, child) => width + child.getBoundingClientRect().width, 0)
+                        + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+                        + parseFloat(style.columnGap) * (item.children.length - 1) + 1;
+                });
+                overview.classList.toggle("currency-overview-inline",
+                    Math.max(...minimumWidths) * items.length <= overview.clientWidth);
+            };
+            const observer = new ResizeObserver(update);
+            overview.currencyOverviewObserver = observer;
+            [overview, ...items.flatMap(item => [...item.children])].forEach(element => observer.observe(element));
+            update();
+        },
+        disconnect: (overview) => overview?.currencyOverviewObserver?.disconnect()
+    };
+
     let modalRestoreFocus = null;
     window.electronicLogbookModal = {
         activate: (dialog) => {

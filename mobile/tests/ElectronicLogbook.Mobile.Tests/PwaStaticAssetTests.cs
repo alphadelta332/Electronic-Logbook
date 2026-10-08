@@ -511,6 +511,7 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("position: relative", bottomNav, StringComparison.Ordinal);
         Assert.Contains("flex: 0 0 auto", bottomNav, StringComparison.Ordinal);
         Assert.Contains("bottom: 0", bottomNav, StringComparison.Ordinal);
+        Assert.DoesNotContain("--native-safe-bottom", ExtractCssRule(css, "html.capacitor-native"), StringComparison.Ordinal);
     }
 
     [Fact]

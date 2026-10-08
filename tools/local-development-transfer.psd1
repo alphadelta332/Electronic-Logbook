@@ -43,6 +43,7 @@
         @{ Path = 'ElectronicLogbook/AnalysisTools'; Lifecycle = 'regenerated-dependency'; Reason = 'Installed analysis packages and source caches are reproducible and machine-specific.' }
         @{ Path = 'ElectronicLogbook/AndroidDeviceBridge'; Lifecycle = 'deliberate-exclusion'; Reason = 'Device-specific IndexedDB backups remain on the source machine.' }
         @{ Path = 'ElectronicLogbook/Evidence'; Lifecycle = 'regenerated-output'; Reason = 'Generated local evidence is not an operational prerequisite.' }
+        @{ Path = 'ElectronicLogbook/Temp'; Lifecycle = 'regenerated-output'; Reason = 'Temporary APK copies and extracted receipt-verification sources are reproducible diagnostic outputs, not development configuration.' }
         @{ Path = 'ElectronicLogbook/Gate1RetainedState'; Lifecycle = 'deliberate-exclusion'; Reason = 'Retained-device recovery snapshots must not be copied as configuration.' }
         @{ Path = 'ElectronicLogbook/Google Auth/client_secret_*.json'; Lifecycle = 'deliberate-exclusion'; Reason = 'Google client-secret downloads are not consumed by the updater or Android build.' }
         @{ Path = 'ElectronicLogbook/Google Auth/webclientsecret.txt'; Lifecycle = 'deliberate-exclusion'; Reason = 'The updater uses browser sign-in without a local Google client secret.' }

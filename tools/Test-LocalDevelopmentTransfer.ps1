@@ -144,6 +144,7 @@ try {
     Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.ContainsKey('RequirementGroup') -and $_['RequirementGroup'] -eq 'hosted-project-metadata' }).Count -eq 2) 'canonical and legacy hosted metadata must form one required alternative group'
     Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/AndroidDeviceBridge' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'device bridge backups must be deliberately excluded'
     Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/AnalysisTools' -and $_.Lifecycle -eq 'regenerated-dependency' }).Count -eq 1) 'analysis tools must be classified as regenerated dependencies'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/Temp' -and $_.Lifecycle -eq 'regenerated-output' }).Count -eq 1) 'temporary diagnostic outputs must be classified as regenerated output'
     Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/Recovery Codes' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'user recovery artifacts must be deliberately excluded'
     Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/Google Auth/client_secret_*.json' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'unused Google client-secret downloads must be deliberately excluded'
     Assert-True (@($config.ExternalLocalStateExclusions | Where-Object { $_.Path -eq '%USERPROFILE%/.android/avd' -and $_.Lifecycle -eq 'deliberate-exclusion' }).Count -eq 1) 'authenticated Android virtual devices must be deliberately excluded from transfer'
@@ -213,6 +214,9 @@ try {
     $excludedLocalState = Join-Path $syntheticLocal 'ElectronicLogbook\Gate1RetainedState\must-not-transfer.json'
     New-Item -ItemType Directory -Path (Split-Path $excludedLocalState -Parent) -Force | Out-Null
     Set-Content -LiteralPath $excludedLocalState -Value '{"generated":true}' -Encoding UTF8
+    $excludedTempState = Join-Path $syntheticLocal 'ElectronicLogbook\Temp\receipt-verify-test\source.zip'
+    New-Item -ItemType Directory -Path (Split-Path $excludedTempState -Parent) -Force | Out-Null
+    Set-Content -LiteralPath $excludedTempState -Value 'temporary diagnostic source archive' -Encoding UTF8
     $unclassifiedLocalState = Join-Path $syntheticLocal 'ElectronicLogbook\unclassified.tmp'
     Set-Content -LiteralPath $unclassifiedLocalState -Value 'must be classified' -Encoding UTF8
     $unclassifiedRun = Invoke-TransferProcess -Arguments @('-Action', 'Export', '-RepoRoot', $syntheticRepo, '-LocalAppDataRoot', $syntheticLocal, '-CodexHome', $syntheticCodex, '-WhatIf')
@@ -241,6 +245,7 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) 'main exporter archive must pass 7-Zip integrity testing'
     $mainListing = (& $script:sevenZip l $mainExportArchive -bb0 -bd | Out-String)
     Assert-True ($mainListing -notmatch 'must-not-transfer\.json') 'unlisted retained-device state must stay outside the transfer archive'
+    Assert-True ($mainListing -notmatch 'source\.zip') 'temporary diagnostic files must stay outside the transfer archive'
     Assert-True ($mainListing -match 'electronic-logbook-development\.keystore') 'explicitly allowlisted signing identity must be present in the transfer archive'
 
     $bundleSource = Join-Path $temporaryRoot 'valid-source'

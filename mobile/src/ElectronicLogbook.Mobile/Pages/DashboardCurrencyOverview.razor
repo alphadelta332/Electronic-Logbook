@@ -1,4 +1,7 @@
-<section class="currency-overview dashboard-currency-overview" aria-label="Currency status overview">
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<section @ref="overview" class="currency-overview dashboard-currency-overview" aria-label="Currency status overview">
     <div class="currency-overview-item currency-overview-current">
         <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" aria-hidden="true" />
         <strong>@Summary.CurrentCount</strong>
@@ -17,6 +20,27 @@
 </section>
 
 @code {
+    private ElementReference overview;
+
     [Parameter, EditorRequired]
     public MobileCurrencyRecencySummary Summary { get; set; } = default!;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JS.InvokeVoidAsync("electronicLogbookCurrencyOverview.observe", overview);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("electronicLogbookCurrencyOverview.disconnect", overview);
+        }
+        catch (JSException)
+        {
+        }
+    }
 }

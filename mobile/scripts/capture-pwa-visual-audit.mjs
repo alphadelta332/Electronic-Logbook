@@ -415,6 +415,17 @@ try {
                                         .map(other => ({ first: describe(element), second: describe(other.element) }))
                                 ]);
                             });
+                        const dashboardCurrencyRows = [...document.querySelectorAll(".dashboard-currency-overview")]
+                            .flatMap(overview => {
+                                const items = [...overview.querySelectorAll(".currency-overview-item")];
+                                const rows = Object.values(Object.groupBy(items,
+                                    item => Math.round(item.getBoundingClientRect().top)));
+                                const splitItem = items.some(item => {
+                                    const bounds = [...item.children].map(child => child.getBoundingClientRect());
+                                    return Math.max(...bounds.map(rect => rect.top)) >= Math.min(...bounds.map(rect => rect.bottom));
+                                });
+                                return rows.some(row => row.length === 2) || splitItem ? [describe(overview)] : [];
+                            });
                         const shellContent = () => main
                             ? [...main.querySelectorAll("h1, h2, h3, p, label, legend, button, a[href], summary, output")].filter(isVisible)
                             : [];
@@ -506,6 +517,7 @@ try {
                             overlappingEntryHeader,
                             overlappingSectionTitles,
                             currencyTextLayout,
+                            dashboardCurrencyRows,
                             shellOccludedContent,
                             dashboardHourLayout,
                             switchGeometry
@@ -529,6 +541,7 @@ try {
                         shellLayout.overlappingEntryHeader.length > 0 ||
                         shellLayout.overlappingSectionTitles.length > 0 ||
                         shellLayout.currencyTextLayout.length > 0 ||
+                        shellLayout.dashboardCurrencyRows.length > 0 ||
                         shellLayout.shellOccludedContent.length > 0 ||
                         shellLayout.dashboardHourLayout.length > 0 ||
                         shellLayout.switchGeometry.some(switchLayout =>

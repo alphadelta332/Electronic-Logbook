@@ -29,7 +29,6 @@
 
 html.capacitor-native {
     --native-safe-top: 26px;
-    --native-safe-bottom: 18px;
 }
 
 html[data-elb-theme="dark"] {
@@ -855,12 +854,44 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     text-decoration: none;
 }
 
-.dashboard-currency-overview {
+.currency-overview.dashboard-currency-overview {
     display: grid;
+    grid-template-columns: 1fr;
     overflow: hidden;
     border: 1px solid var(--app-border);
     border-radius: 12px;
     background: var(--app-surface);
+}
+
+.currency-overview.dashboard-currency-overview.currency-overview-inline {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-currency-overview .currency-overview-item {
+    display: flex;
+    gap: 8px;
+}
+
+.dashboard-currency-overview .currency-overview-item > * {
+    flex-shrink: 0;
+}
+
+.dashboard-currency-overview .currency-overview-item span {
+    margin-top: 0;
+}
+
+.dashboard-currency-overview .currency-overview-item + .currency-overview-item {
+    border-top: 1px solid var(--app-border);
+    border-left: 0;
+}
+
+.dashboard-currency-overview.currency-overview-inline .currency-overview-item {
+    justify-content: center;
+}
+
+.dashboard-currency-overview.currency-overview-inline .currency-overview-item + .currency-overview-item {
+    border-top: 0;
+    border-left: 1px solid var(--app-border);
 }
 
 .dashboard-currency-overview-strip {
