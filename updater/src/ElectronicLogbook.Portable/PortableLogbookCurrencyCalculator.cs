@@ -304,19 +304,29 @@ public static class PortableLogbookCurrencyCalculator
     }
 
     /// <summary>
-    /// Applies <c>CirclingExpirySEA</c>: an IPC with at least one circling approach
-    /// on a SEA-qualified entry renews for one year to month-end. A renewal during
-    /// the preceding three months preserves the previous expiry anniversary.
+    /// Applies <c>CirclingExpirySEA</c>: an IPC or IFR OPC including circling renews
+    /// SEA-qualified credit. An actual IPC without circling resets prior credit;
+    /// an OPC without circling does not (CASA enquiry CS0025064).
     /// </summary>
     public static DateOnly? CalculateCirclingApproachRecencyExpiry(
         IEnumerable<PortableLogbookWorkbookEntry> entries)
     {
+        ArgumentNullException.ThrowIfNull(entries);
+
+        var entryArray = entries.ToArray();
+        var resetDate = CalculateLatestDate(
+            entryArray,
+            null,
+            entry => entry.InstrumentProficiencyCheck is true &&
+                entry.Circling.GetValueOrDefault() == 0 &&
+                QualifiesFor(entry, PortableLogbookEngineCategory.SingleEngine));
+
         return CalculateRenewalExpiry(
-            entries,
+            entryArray.Where(entry => resetDate is null || entry.Date >= resetDate),
             null,
             PortableLogbookEngineCategory.SingleEngine,
             entry =>
-                entry.InstrumentProficiencyCheck.GetValueOrDefault() &&
+                (entry.InstrumentProficiencyCheck is true || entry.OperatorProficiencyCheck is true) &&
                 entry.Circling.GetValueOrDefault() > 0,
             renewalMonths: 12);
     }

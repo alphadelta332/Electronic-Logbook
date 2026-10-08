@@ -1094,6 +1094,14 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     font-size: 18px;
 }
 
+.section-title-row {
+    flex-wrap: wrap;
+}
+
+.section-title-row button.mud-button-root {
+    min-height: 48px;
+}
+
 .settings-connection-summary {
     display: flex;
     align-items: flex-start;
@@ -1114,6 +1122,20 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .settings-advanced[open] {
     display: grid;
     gap: 12px;
+}
+
+.settings-page .mud-button-root:not(.mud-switch-base),
+.settings-page .accent-option {
+    min-height: 48px;
+}
+
+.settings-page .mud-input-control > .mud-input-control-input-container > label.mud-input-label.mud-input-label-inputcontrol {
+    position: static;
+    order: -1;
+    transform: none;
+    max-width: 100%;
+    white-space: normal;
+    overflow: visible;
 }
 
 .settings-advanced > summary {
@@ -1615,9 +1637,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .entry-header {
     padding: 2px 0;
+    flex-wrap: wrap;
 }
 
 .entry-action-header {
+    flex-wrap: wrap;
     position: sticky;
     top: -16px;
     z-index: 25;
@@ -1638,14 +1662,16 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .entry-action-context {
+    flex: 1 1 140px;
+    flex-wrap: wrap;
     gap: 10px;
 }
 
 .entry-action-header h1 {
-    flex: 0 0 auto;
+    min-width: 0;
     font-size: 20px;
     line-height: 1.2;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
 }
 
 .entry-draft-status {
@@ -1676,13 +1702,14 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     width: clamp(176px, 46vw, 190px);
 }
 
-.entry-header-actions .mud-button-root {
+.entry-header-actions button.mud-button-root {
     width: 100%;
     min-width: 0;
-    min-height: 44px;
+    min-height: 48px;
     padding-inline: 11px;
     font-weight: 800;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .entry-header-actions .entry-clear-action {
@@ -1745,7 +1772,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .field-wide textarea,
 .recent-select {
     width: 100%;
-    min-height: 44px;
+    min-height: 48px;
     border: 1px solid var(--app-border);
     border-radius: 8px;
     padding: 10px 12px;
@@ -1770,7 +1797,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     display: flex;
     align-items: center;
     gap: 10px;
-    min-height: 44px;
+    min-height: 48px;
     padding: 10px 12px;
     border: 1px solid var(--app-border);
     border-radius: 8px;
@@ -2333,9 +2360,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     gap: 8px;
 }
 
-.entry-action-dialog-actions .mud-button-root {
+.entry-action-dialog-actions button.mud-button-root {
     width: 100%;
-    min-height: 44px;
+    min-height: 48px;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .mud-button-root:not(.mud-switch-base) {
@@ -2377,6 +2406,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .segmented-control {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     border: 1px solid var(--app-border);
     border-radius: 10px;
@@ -2385,9 +2415,9 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .segmented-control button {
-    flex: 1 1 0;
-    min-width: 0;
-    min-height: 44px;
+    flex: 1 1 auto;
+    min-width: 48px;
+    min-height: 48px;
     border: 0;
     border-radius: 8px;
     background: transparent;
@@ -2779,7 +2809,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .search-field input {
     width: 100%;
-    min-height: 44px;
+    min-height: 48px;
     border: 1px solid var(--app-border);
     border-radius: 8px;
     padding: 10px 12px;
@@ -2865,7 +2895,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     align-items: center;
     justify-self: start;
     gap: 6px;
-    min-height: 40px;
+    min-height: 48px;
     margin: -4px 0 -6px;
     padding: 6px 8px 6px 2px;
     border-radius: 8px;
@@ -3429,6 +3459,10 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
     .entry-action-header h1 {
         font-size: 18px;
+    }
+
+    .entry-header-actions {
+        width: 100%;
     }
 
     .entry-header-actions .mud-button-root {

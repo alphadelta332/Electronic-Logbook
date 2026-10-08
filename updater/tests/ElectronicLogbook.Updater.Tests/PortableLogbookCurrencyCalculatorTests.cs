@@ -593,6 +593,40 @@ public sealed class PortableLogbookCurrencyCalculatorTests
         Assert.Null(expiry);
     }
 
+    [Fact]
+    public void CalculateCirclingApproachRecencyExpiry_QualifyingOpcEstablishesCurrency()
+    {
+        var expiry = PortableLogbookCurrencyCalculator.CalculateCirclingApproachRecencyExpiry(
+            [Entry(new DateOnly(2026, 5, 1), operatorProficiencyCheck: true, circling: 1, ifrSim: 1m)]);
+
+        Assert.Equal(new DateOnly(2027, 5, 31), expiry);
+    }
+
+    [Fact]
+    public void CalculateCirclingApproachRecencyExpiry_LaterCheckWithCirclingRestoresCurrencyWithoutOldRenewalCredit()
+    {
+        var expiry = PortableLogbookCurrencyCalculator.CalculateCirclingApproachRecencyExpiry(
+            [
+                Entry(new DateOnly(2025, 6, 1), instrumentProficiencyCheck: true, circling: 1),
+                Entry(new DateOnly(2026, 3, 1), instrumentProficiencyCheck: true),
+                Entry(new DateOnly(2026, 4, 1), operatorProficiencyCheck: true, circling: 1, ifrIf: 1m)
+            ]);
+
+        Assert.Equal(new DateOnly(2027, 4, 30), expiry);
+    }
+
+    [Fact]
+    public void CalculateCirclingApproachRecencyExpiry_LaterIpcWithoutCirclingRemovesOpcCredit()
+    {
+        var expiry = PortableLogbookCurrencyCalculator.CalculateCirclingApproachRecencyExpiry(
+            [
+                Entry(new DateOnly(2026, 5, 1), operatorProficiencyCheck: true, circling: 1, ifrIf: 1m),
+                Entry(new DateOnly(2026, 6, 1), instrumentProficiencyCheck: true)
+            ]);
+
+        Assert.Null(expiry);
+    }
+
     private static PortableLogbookWorkbookEntry Entry(
         DateOnly date,
         bool flightReview = true,

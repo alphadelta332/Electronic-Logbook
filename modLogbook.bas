@@ -298,7 +298,7 @@ Sub AddToLogbook(Optional ByVal showSuccessMessage As Boolean = True)
             If NewEntryBooleanValue("neIPC") And NewEntryNumericValue("neCircling") = 0 Then
                 If Not ConfirmNewEntryValidationWarning(Array("neIPC", "neCircling"), _
                                                         "NEWENTRY-W003", _
-                                                        "No circling approach was recorded on this IPC. You will not be recent for circling approaches until your next IPC.", _
+                                                        "No circling approach was recorded on this IPC. You will not be recent for circling approaches until a later IPC or IFR OPC includes circling.", _
                                                         "IPC Without Circling Approach") Then
                     GoTo Cleanup
                 End If

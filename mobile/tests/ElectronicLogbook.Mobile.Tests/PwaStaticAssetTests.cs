@@ -435,12 +435,14 @@ public sealed class PwaStaticAssetTests
     {
         var css = ReadMobileAsset(Path.Combine("css", "app.css"));
         var segmentedControl = ExtractCssRule(css, ".segmented-control");
+        var segmentedButton = ExtractCssRule(css, ".segmented-control button");
 
         Assert.Contains("display: flex", segmentedControl, StringComparison.Ordinal);
+        Assert.Contains("flex-wrap: wrap", segmentedControl, StringComparison.Ordinal);
         Assert.DoesNotContain("grid-template-columns", segmentedControl, StringComparison.Ordinal);
-        Assert.Matches(
-            new Regex(@"\.segmented-control button\s*\{[\s\S]*flex:\s*1 1 0", RegexOptions.Singleline),
-            css);
+        Assert.Contains("flex: 1 1 auto", segmentedButton, StringComparison.Ordinal);
+        Assert.Contains("min-width: 48px", segmentedButton, StringComparison.Ordinal);
+        Assert.Contains("min-height: 48px", segmentedButton, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -498,6 +500,7 @@ public sealed class PwaStaticAssetTests
         Assert.Matches(new Regex(@"html,\s*body,\s*#app\s*\{[\s\S]*height:\s*100%", RegexOptions.Singleline), css);
         Assert.Matches(new Regex(@"html,\s*body,\s*#app\s*\{[\s\S]*overflow:\s*hidden", RegexOptions.Singleline), css);
         Assert.Contains("display: flex", appShell, StringComparison.Ordinal);
+        Assert.Contains("flex-direction: column", appShell, StringComparison.Ordinal);
         Assert.Contains("height: 100dvh", appShell, StringComparison.Ordinal);
         Assert.Contains("overflow: hidden", appShell, StringComparison.Ordinal);
         Assert.Contains("flex: 1 1 auto", appMain, StringComparison.Ordinal);
@@ -505,7 +508,8 @@ public sealed class PwaStaticAssetTests
         Assert.Contains("overflow-x: hidden", appMain, StringComparison.Ordinal);
         Assert.Contains("overflow-y: auto", appMain, StringComparison.Ordinal);
         Assert.Contains("overscroll-behavior-y: contain", appMain, StringComparison.Ordinal);
-        Assert.Contains("position: fixed", bottomNav, StringComparison.Ordinal);
+        Assert.Contains("position: relative", bottomNav, StringComparison.Ordinal);
+        Assert.Contains("flex: 0 0 auto", bottomNav, StringComparison.Ordinal);
         Assert.Contains("bottom: 0", bottomNav, StringComparison.Ordinal);
     }
 
@@ -516,7 +520,7 @@ public sealed class PwaStaticAssetTests
 
         Assert.Matches(
             new Regex(
-                @"(?s)@media \(min-width: 720px\)\s*\{.*?\.bottom-nav\s*\{.*?top:\s*74px.*?width:\s*88px.*?grid-template-columns:\s*1fr.*?\.app-main\s*\{.*?padding-left:\s*116px",
+                @"(?s)@media \(min-width: 720px\)\s*\{.*?\.bottom-nav\s*\{.*?position:\s*fixed.*?top:\s*74px.*?width:\s*88px.*?grid-template-columns:\s*1fr.*?\.app-main\s*\{.*?padding-left:\s*116px",
                 RegexOptions.Singleline),
             css);
         Assert.Matches(

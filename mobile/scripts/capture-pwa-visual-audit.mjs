@@ -59,6 +59,7 @@ const routes = [
     { name: "routes", path: "/routes", readySelector: "main [aria-labelledby=\"routes-heading\"]" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" },
     { name: "settings", path: "/settings", readySelector: "main .settings-page" },
+    { name: "settings-expanded", path: "/settings", readySelector: "main .settings-page", expanded: true },
     { name: "export", path: "/export", readySelector: "main .workbook-migration-page" },
     { name: "workbook-verification", path: "/advanced/workbook-verification", readySelector: "main .workbook-migration-page" }
 ];
@@ -268,6 +269,9 @@ try {
                     const routePath = typeof route.path === "function" ? route.path(routeState) : route.path;
                     await page.goto(`${baseUrl}${routePath}`, { waitUntil: "domcontentloaded" });
                     await page.locator(route.readySelector).waitFor({ state: "visible", timeout: route.state === "large-totals" ? 90000 : 30000 });
+                    if (route.expanded) {
+                        await page.locator("main details").evaluateAll(panels => panels.forEach(panel => panel.open = true));
+                    }
                     if (route.state === "large-totals") {
                         const totals = await page.locator(".dashboard-hours-total > strong, .dashboard-hours-total > small strong, .dashboard-hours-period > span").allTextContents();
                         if (JSON.stringify(totals) !== JSON.stringify(["12345.6", "12346.8", "103.6", "1344.6"])) {
@@ -289,7 +293,8 @@ try {
                         const isVisible = element => {
                             const bounds = element.getBoundingClientRect();
                             const style = getComputedStyle(element);
-                            return element.getClientRects().length > 0 &&
+                            return element.checkVisibility() &&
+                                element.getClientRects().length > 0 &&
                                 bounds.width > 1 &&
                                 bounds.height > 1 &&
                                 style.visibility !== "hidden";
@@ -373,6 +378,20 @@ try {
                                             .map(() => describe(label));
                                     });
                             });
+                        const entryHeaderContent = [...document.querySelectorAll(
+                            ".entry-action-header h1, .entry-action-header .entry-draft-status, .entry-action-header button")]
+                            .filter(isVisible);
+                        const overlappingEntryHeader = entryHeaderContent.flatMap((element, index) =>
+                            entryHeaderContent.slice(index + 1)
+                                .filter(other => overlaps(element.getBoundingClientRect(), other.getBoundingClientRect()))
+                                .map(other => ({ first: describe(element), second: describe(other) })));
+                        const overlappingSectionTitles = [...document.querySelectorAll(".section-title-row")]
+                            .flatMap(row => {
+                                const children = [...row.children].filter(isVisible);
+                                return children.flatMap((element, index) => children.slice(index + 1)
+                                    .filter(other => overlaps(element.getBoundingClientRect(), other.getBoundingClientRect()))
+                                    .map(other => ({ first: describe(element), second: describe(other) })));
+                            });
                         const shellContent = () => main
                             ? [...main.querySelectorAll("h1, h2, h3, p, label, legend, button, a[href], summary, output")].filter(isVisible)
                             : [];
@@ -432,6 +451,15 @@ try {
                                 document.body.scrollWidth > document.body.clientWidth + 1 ||
                                 window.scrollX !== 0,
                             mainHorizontalOverflow: main ? main.scrollWidth > main.clientWidth + 1 : true,
+                            mainOverflowElements: main && main.scrollWidth > main.clientWidth + 1
+                                ? [...main.querySelectorAll("*")].filter(isVisible)
+                                    .filter(element => element.scrollWidth > element.clientWidth + 1)
+                                    .slice(0, 16).map(element => ({
+                                        ...describe(element),
+                                        className: element.getAttribute("class"),
+                                        width: element.clientWidth,
+                                        scrollWidth: element.scrollWidth
+                                    })) : [],
                             mainScrollTop: main?.scrollTop ?? -1,
                             windowScrollY: window.scrollY,
                             headingTop: heading?.getBoundingClientRect().top ?? -1,
@@ -452,6 +480,8 @@ try {
                             smallControlTargets,
                             clippedEssentialText,
                             overlappingLabels,
+                            overlappingEntryHeader,
+                            overlappingSectionTitles,
                             shellOccludedContent,
                             dashboardHourLayout,
                             switchGeometry
@@ -472,6 +502,8 @@ try {
                         shellLayout.smallControlTargets.length > 0 ||
                         shellLayout.clippedEssentialText.length > 0 ||
                         shellLayout.overlappingLabels.length > 0 ||
+                        shellLayout.overlappingEntryHeader.length > 0 ||
+                        shellLayout.overlappingSectionTitles.length > 0 ||
                         shellLayout.shellOccludedContent.length > 0 ||
                         shellLayout.dashboardHourLayout.length > 0 ||
                         shellLayout.switchGeometry.some(switchLayout =>
@@ -607,7 +639,26 @@ try {
                         }
 
                         await assertAccessible(page, `currency interaction ${profile.name} ${colorScheme}`);
-                    } else if (route.name === "settings") {
+                    } else if (route.path === "/settings") {
+                        if (route.expanded) {
+                            for (const [name, value] of [["Invited account email", "audit@example.invalid"], ["Six-digit sign-in code", "123456"]]) {
+                                const input = page.getByLabel(name, { exact: true });
+                                await input.fill(value);
+                                const labelLayout = await input.evaluate(control => {
+                                    const label = control.labels[0];
+                                    return {
+                                        clipped: label.scrollWidth > label.clientWidth + 1 || label.scrollHeight > label.clientHeight + 1,
+                                        overlapsInput: label.getBoundingClientRect().bottom > control.getBoundingClientRect().top + 1
+                                    };
+                                });
+                                if (labelLayout.clipped || labelLayout.overlapsInput) {
+                                    throw new Error(`Focused Settings label failed: ${name} ${JSON.stringify(labelLayout)}`);
+                                }
+                                await input.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${name.startsWith("Invited") ? "email" : "code"}-input.png`) });
+                            }
+                            await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-settings-fallback.png`) });
+                            await assertAccessible(page, `expanded settings ${profile.name} ${colorScheme}`);
+                        }
                         const firstCustomEntry = page.locator(".custom-entry-setting").first();
                         await firstCustomEntry.scrollIntoViewIfNeeded();
                         const numberFormatPill = firstCustomEntry.locator(".custom-entry-number-format-toggle");

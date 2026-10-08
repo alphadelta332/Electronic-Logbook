@@ -33,7 +33,7 @@ public static class PortableLogbookEntryMessages
 
     public const string OpcWithoutIpc = "OPC is ticked and instrument time is logged, but IPC is not ticked.";
     public const string IpcWithoutFlightReview = "IPC is ticked, but Flight Review is not ticked.";
-    public const string IpcWithoutCircling = "No circling approach was recorded on this IPC. You will not be recent for circling approaches until your next IPC.";
+    public const string IpcWithoutCircling = "No circling approach was recorded on this IPC. You will not be recent for circling approaches until a later IPC or IFR OPC includes circling.";
     public const string WorkbookFlightWithoutLanding = "No landings are recorded for this non-simulator entry.";
     public const string WorkbookDayTimeWithoutLanding = "Day hours are recorded, but no day landings are recorded.";
     public const string WorkbookDayLandingWithoutTime = "Day landings are recorded, but no day hours are recorded.";

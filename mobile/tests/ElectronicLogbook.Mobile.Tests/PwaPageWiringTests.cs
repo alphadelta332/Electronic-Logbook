@@ -1384,8 +1384,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Class=\"entry-delete-action\" Variant=\"Variant.Filled\" Color=\"Color.Error\" OnClick=\"RequestDeleteEntry\"", flightDetail, StringComparison.Ordinal);
         Assert.Contains("Class=\"entry-save-action\" Variant=\"Variant.Filled\" Color=\"Color.Primary\" OnClick=\"CloneEntry\"", flightDetail, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.entry-header-actions\s*\{(?=[^}]*display:\s*grid)(?=[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\))(?=[^}]*width:\s*clamp\(176px, 46vw, 190px\))", css);
-        Assert.Matches(@"(?s)\.entry-header-actions \.mud-button-root\s*\{(?=[^}]*width:\s*100%)(?=[^}]*min-height:\s*44px)(?=[^}]*font-weight:\s*800)", css);
-        Assert.DoesNotMatch(@"(?s)\.entry-header-actions \.mud-button-root\s*\{[^}]*width:\s*auto", css);
+        Assert.Matches(@"(?s)\.entry-header-actions button\.mud-button-root\s*\{(?=[^}]*width:\s*100%)(?=[^}]*min-height:\s*48px)(?=[^}]*font-weight:\s*800)", css);
+        Assert.DoesNotMatch(@"(?s)\.entry-header-actions button\.mud-button-root\s*\{[^}]*width:\s*auto", css);
         Assert.Matches(@"(?s)\.entry-header-actions \.entry-clear-action\s*\{[^}]*background-color:\s*var\(--app-text-muted\)", css);
         Assert.Matches(@"(?s)\.entry-header-actions \.entry-delete-action\s*\{[^}]*background-color:\s*var\(--app-error\)", css);
         Assert.DoesNotContain("<div class=\"row-actions\">", flightDetail, StringComparison.Ordinal);
@@ -1783,7 +1783,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("wcag22aa", audit, StringComparison.Ordinal);
         Assert.Contains("smallControlTargets", audit, StringComparison.Ordinal);
         Assert.Contains("bounds.width < 48 || bounds.height < 48", audit, StringComparison.Ordinal);
-        Assert.Equal(3, CountOccurrences(audit, "await assertAccessible(page"));
+        Assert.Equal(4, CountOccurrences(audit, "await assertAccessible(page"));
         Assert.Contains("role=\"group\" aria-label=\"Logbook view\"", logbook, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(logbook, "aria-pressed="));
         Assert.DoesNotContain("role=\"tablist\"", logbook, StringComparison.Ordinal);
@@ -1825,7 +1825,7 @@ public sealed class PwaPageWiringTests
         foreach (var route in new[]
         {
             "dashboard-populated", "dashboard-large-totals", "logbook-entries-populated", "logbook-deleted", "flight-detail",
-            "edit-flight", "deleted-flights", "deleted-flight-detail", "export", "workbook-verification"
+            "edit-flight", "deleted-flights", "deleted-flight-detail", "settings-expanded", "export", "workbook-verification"
         })
         {
             Assert.Contains($"name: \"{route}\"", audit, StringComparison.Ordinal);

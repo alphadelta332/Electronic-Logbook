@@ -112,6 +112,35 @@ public sealed class MobileCurrencyRecencySummaryTests
         Assert.Contains("IPC is not current", panel.ActionSentence, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(true, false, 1, 6)]
+    [InlineData(false, true, 1, 6)]
+    [InlineData(true, false, 0, 0)]
+    [InlineData(false, true, 0, 5)]
+    public void CirclingDistinguishesLaterIpcFromOpc(
+        bool ipc, bool opc, int circling, int expectedExpiryMonth)
+    {
+        var earlier = PortableLogbookWorkbookEntry.Empty with
+        {
+            Year = 2026, Month = 5, Day = 1,
+            InstrumentProficiencyCheck = true, Circling = 1, SeCommandDay = 1m
+        };
+        var later = earlier with
+        {
+            Month = 6, InstrumentProficiencyCheck = ipc,
+            OperatorProficiencyCheck = opc, Circling = circling, IfrIf = 1m
+        };
+
+        var summary = MobileCurrencyRecencySummary.Create([earlier, later], new DateOnly(2026, 6, 2));
+        var row = Assert.Single(summary.SingleEngineRows, row => row.Requirement == "Circling");
+        DateOnly? expectedExpiry = expectedExpiryMonth == 0
+            ? null
+            : new DateOnly(2027, expectedExpiryMonth, expectedExpiryMonth == 5 ? 31 : 30);
+
+        Assert.Equal(expectedExpiry, row.CurrentOrRecentUntil);
+        Assert.Equal(expectedExpiry is null ? "Not Current" : "Current", row.Status);
+    }
+
     private static PortableLogbookCurrencyRow Row(
         string category,
         string requirement,
