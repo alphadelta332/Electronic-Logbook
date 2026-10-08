@@ -1789,7 +1789,8 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("role=\"tablist\"", logbook, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.mud-button-root\s*\{[^}]*min-height:\s*44px", css);
         Assert.Matches(@"(?s)\.accent-option\s*\{[^}]*min-height:\s*44px", css);
-        Assert.Matches(@"(?s)\.currency-licence-engine-switch \.currency-engine-tab\s*\{[^}]*min-height:\s*44px", css);
+        Assert.Matches(@"(?s)\.currency-engine-tab\s*\{[^}]*min-height:\s*48px", css);
+        Assert.DoesNotContain(".currency-licence-engine-switch .currency-engine-tab", css, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1809,7 +1810,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("{ name: \"320x712\", width: 320, height: 712 }", audit, StringComparison.Ordinal);
         Assert.Contains("{ name: \"360x800\", width: 360, height: 800 }", audit, StringComparison.Ordinal);
         Assert.Contains("{ name: \"412x915\", width: 412, height: 915 }", audit, StringComparison.Ordinal);
-        Assert.Contains("const phoneTextScales = [1.25, 1.5, 1.75, 2];", audit, StringComparison.Ordinal);
+        Assert.Contains("const phoneTextScales = [1, 1.25, 1.5, 1.75, 2];", audit, StringComparison.Ordinal);
         Assert.Contains("document.documentElement.style.webkitTextSizeAdjust", audit, StringComparison.Ordinal);
         Assert.DoesNotContain("document.documentElement.style.fontSize =", audit, StringComparison.Ordinal);
         Assert.Contains("isMobile: profile.width < 600", audit, StringComparison.Ordinal);

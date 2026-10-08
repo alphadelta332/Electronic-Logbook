@@ -3,18 +3,15 @@ namespace ElectronicLogbook.Mobile;
 public static class MobilePreviewChangelog
 {
     public static MobilePreviewChangelogRelease Current { get; } = new(
-        "0.2.1",
-        300000019,
+        "0.2.2",
+        300000020,
         [
             new(
-                "Matching filters everywhere",
-                "Logbook Entries and Totals now use the same filters, including dates, aircraft, airports, crew and numeric flight values."),
+                "Improved Readability",
+                "Ensured consistent UI items across devices, and display settings."),
             new(
-                "Clearer Custom Entry settings",
-                "Rename fields, see their logged hours, choose whole numbers or decimals, and jump straight to flights that prevent removal."),
-            new(
-                "Save exports to your device",
-                "Choose Download to device from Android's share options to save Excel and CSV exports where you want them.")
+                "Circling currency fixes",
+                "Corrected how IPC and IFR OPC entries affect circling currency, and clarified the warning when an IPC has no circling approach.")
         ]);
 
     public static MobilePreviewChangelogDecision Evaluate(MobilePreviewInstallationInfo? installation)

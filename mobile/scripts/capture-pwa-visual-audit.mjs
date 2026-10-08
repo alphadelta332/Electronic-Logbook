@@ -27,7 +27,7 @@ const phoneWidths = [
     { name: "360x800", width: 360, height: 800 },
     { name: "412x915", width: 412, height: 915 }
 ];
-const phoneTextScales = [1.25, 1.5, 1.75, 2];
+const phoneTextScales = [1, 1.25, 1.5, 1.75, 2];
 const profiles = [
     ...phoneWidths.flatMap(phone => phoneTextScales.map(fontScale => ({
         name: `phone-${phone.name}-font${fontScale * 100}`,
@@ -190,6 +190,8 @@ async function prepareRouteState(page, baseUrl, state) {
         await deleteDialog.waitFor({ state: "visible", timeout: 30000 });
         await deleteDialog.getByRole("button", { name: "Delete flight", exact: true }).click();
         await page.locator("main .logbook-page").waitFor({ state: "visible", timeout: 30000 });
+        // Deletion feedback appears after saving; navigation alone can precede persistence.
+        await page.getByText("Entry deleted.", { exact: true }).waitFor({ state: "visible" });
     }
 
     return { entryId };
@@ -392,6 +394,27 @@ try {
                                     .filter(other => overlaps(element.getBoundingClientRect(), other.getBoundingClientRect()))
                                     .map(other => ({ first: describe(element), second: describe(other) })));
                             });
+                        const currencyTextLayout = [...document.querySelectorAll(
+                            ".currency-overview-item, .currency-category-panel > summary")]
+                            .filter(isVisible)
+                            .flatMap(container => {
+                                const bounds = container.getBoundingClientRect();
+                                const text = [...container.querySelectorAll(":scope > strong, :scope > span")]
+                                    .filter(isVisible)
+                                    .map(element => {
+                                        const range = document.createRange();
+                                        range.selectNodeContents(element);
+                                        return { element, rects: [...range.getClientRects()] };
+                                    });
+                                return text.flatMap(({ element, rects }, index) => [
+                                    ...rects.filter(rect => rect.left < bounds.left - 1 || rect.right > bounds.right + 1 ||
+                                        rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)
+                                        .map(() => ({ clipped: describe(element) })),
+                                    ...text.slice(index + 1)
+                                        .filter(other => rects.some(rect => other.rects.some(otherRect => overlaps(rect, otherRect))))
+                                        .map(other => ({ first: describe(element), second: describe(other.element) }))
+                                ]);
+                            });
                         const shellContent = () => main
                             ? [...main.querySelectorAll("h1, h2, h3, p, label, legend, button, a[href], summary, output")].filter(isVisible)
                             : [];
@@ -482,6 +505,7 @@ try {
                             overlappingLabels,
                             overlappingEntryHeader,
                             overlappingSectionTitles,
+                            currencyTextLayout,
                             shellOccludedContent,
                             dashboardHourLayout,
                             switchGeometry
@@ -504,6 +528,7 @@ try {
                         shellLayout.overlappingLabels.length > 0 ||
                         shellLayout.overlappingEntryHeader.length > 0 ||
                         shellLayout.overlappingSectionTitles.length > 0 ||
+                        shellLayout.currencyTextLayout.length > 0 ||
                         shellLayout.shellOccludedContent.length > 0 ||
                         shellLayout.dashboardHourLayout.length > 0 ||
                         shellLayout.switchGeometry.some(switchLayout =>
