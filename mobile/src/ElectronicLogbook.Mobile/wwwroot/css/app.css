@@ -728,6 +728,8 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .dashboard-last-flight-link {
     grid-template-columns: 44px minmax(0, 1fr) auto;
+    /* Include the card's right inset in the centred hours pane. */
+    padding-right: 0;
     color: var(--app-text);
     text-decoration: none;
 }
@@ -781,6 +783,8 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .dashboard-last-flight-heading .date-with-relative {
     margin-left: auto;
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
 .date-with-relative {
@@ -795,11 +799,12 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-text);
     font-size: 12px;
     font-weight: 750;
-    white-space: nowrap;
+    white-space: normal;
 }
 
 .dashboard-last-flight-heading .relative-date {
     color: var(--app-text);
+    white-space: normal;
 }
 
 .relative-date {
@@ -830,11 +835,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     display: grid;
     align-self: stretch;
     align-content: center;
-    justify-items: end;
+    justify-items: center;
     min-width: 58px;
     border-left: 1px solid color-mix(in srgb, var(--app-primary) 28%, var(--app-border));
-    padding-left: 14px;
-    text-align: right;
+    padding-inline: 22px;
+    text-align: center;
 }
 
 .dashboard-last-flight-hours strong {

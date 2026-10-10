@@ -594,14 +594,32 @@ try {
                             const populatedLastFlight = page.locator(".dashboard-last-flight-link");
                             const lastFlightLayout = await populatedLastFlight.evaluate((card) => {
                                 const body = card.querySelector(".dashboard-last-flight-body").getBoundingClientRect();
-                                const hours = card.querySelector(".dashboard-last-flight-hours").getBoundingClientRect();
+                                const bodyTextOverflow = [...card.querySelectorAll(
+                                    ".dashboard-last-flight-label, time, .relative-date, .dashboard-last-flight-route, .dashboard-last-flight-aircraft")]
+                                    .some(element => {
+                                        const range = document.createRange();
+                                        range.selectNodeContents(element);
+                                        return [...range.getClientRects()].some(bounds => bounds.left < body.left - 1 || bounds.right > body.right + 1);
+                                    });
+                                const hoursElement = card.querySelector(".dashboard-last-flight-hours");
+                                const hours = hoursElement.getBoundingClientRect();
                                 const style = getComputedStyle(card);
+                                const cardBounds = card.getBoundingClientRect();
+                                const hoursCenter = (hours.left + parseFloat(getComputedStyle(hoursElement).borderLeftWidth) +
+                                    cardBounds.right - parseFloat(style.borderRightWidth)) / 2;
+                                const hoursCenterOffsets = [...hoursElement.children].map(element => {
+                                    const bounds = element.getBoundingClientRect();
+                                    return (bounds.left + bounds.right) / 2 - hoursCenter;
+                                });
                                 return {
                                     nestedLogbookRow: card.querySelector(".logbook-entry-row") !== null,
                                     cardOverflow: card.scrollWidth > card.clientWidth + 1,
                                     pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
                                     fieldsOverlap: body.right > hours.left + 1,
-                                    paddingInline: Math.min(parseFloat(style.paddingLeft), parseFloat(style.paddingRight))
+                                    bodyTextOverflow,
+                                    hoursCenterOffsets,
+                                    paddingInline: Math.min(parseFloat(style.paddingLeft),
+                                        parseFloat(style.paddingRight) + parseFloat(getComputedStyle(hoursElement).paddingRight))
                                 };
                             });
 
@@ -609,10 +627,15 @@ try {
                                 lastFlightLayout.cardOverflow ||
                                 lastFlightLayout.pageOverflow ||
                                 lastFlightLayout.fieldsOverlap ||
+                                lastFlightLayout.bodyTextOverflow ||
+                                lastFlightLayout.hoursCenterOffsets.some(offset => Math.abs(offset) > 1) ||
                                 lastFlightLayout.paddingInline < 16) {
                                 throw new Error(`Populated Dashboard Last Flight layout failed for ${profile.name} ${colorScheme}: ${JSON.stringify(lastFlightLayout)}`);
                             }
 
+                            await populatedLastFlight.screenshot({
+                                path: join(outputDirectory, `${profile.name}-${colorScheme}-last-flight-card.png`)
+                            });
                             await assertAccessible(page, `dashboard populated ${profile.name} ${colorScheme}`);
                         }
                     } else if (route.name === "currency") {

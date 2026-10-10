@@ -373,15 +373,16 @@ public static class MobileWorkbookEntryValidation
             return;
         }
 
-        foreach (var token in text.Replace("|", string.Empty, StringComparison.Ordinal)
-                     .Split(AirportTokenDelimiters, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var token in AirportTokens(text))
         {
-            if (!AirportTokenIsIgnored(token))
-            {
-                AddVisitedAirport(token, catalog, visited);
-            }
+            AddVisitedAirport(token, catalog, visited);
         }
     }
+
+    internal static IEnumerable<string> AirportTokens(string? text) =>
+        (text ?? string.Empty).Replace("|", string.Empty, StringComparison.Ordinal)
+            .Split(AirportTokenDelimiters, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(token => !AirportTokenIsIgnored(token));
 
     private static bool AirportTokenIsIgnored(string token)
     {
