@@ -1,0 +1,7 @@
+.analytics-statistics { margin-block: 24px; padding-block: 12px; border-top: 1px solid var(--app-border); min-width: 0; }
+.analytics-statistics h2 { font-size: 1.25rem; margin-bottom: 8px; }
+.analytics-statistics p { max-width: 70ch; }
+.analytics-statistic { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: 8px 16px; padding-block: 12px; border-bottom: 1px solid var(--app-border); overflow-wrap: anywhere; }
+.analytics-statistic dt { font-weight: 600; }
+.analytics-statistic dd { margin: 0; font-variant-numeric: tabular-nums; }
+.analytics-statistic dd span { display: block; margin-top: 4px; }

@@ -1,0 +1,87 @@
+@foreach (var group in groups)
+{
+    <section class="analytics-statistics" aria-label="@group.Heading">
+        <h2>@group.Heading</h2>
+        <p>@group.Explanation</p>
+        <dl>
+            @foreach (var row in group.Rows)
+            {
+                <div class="analytics-statistic">
+                    <dt>@row.Label</dt>
+                    <dd><strong>@row.Value</strong>
+                        @if (!string.IsNullOrEmpty(row.Detail)) { <span>@row.Detail</span> }
+                    </dd>
+                </div>
+            }
+        </dl>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public MobileLogbookAnalytics Analytics { get; set; } = default!;
+    [Parameter] public string PeriodLabel { get; set; } = "All time";
+    [Parameter] public bool BasesAvailable { get; set; } = true;
+    private (string Heading, string Explanation, (string Label, string Value, string? Detail)[] Rows)[] groups = [];
+    private const string Unavailable = "Unavailable for this selection";
+
+    protected override void OnParametersSet()
+    {
+        var stats = Analytics.Statistics;
+        groups =
+        [
+            ("Records", "Aircraft flying time excludes simulator time. Seven days means any seven consecutive dates. Approach totals include simulator approaches; Circling is not added again.",
+            [
+                ("Most hours in a day", Hours(stats.MostHoursInDay?.Value), Dates(stats.MostHoursInDay)),
+                ("Most hours in seven consecutive days", Hours(stats.MostHoursInSevenDays?.Value), Dates(stats.MostHoursInSevenDays)),
+                ("Most hours in a month", Hours(stats.MostHoursInMonth?.Value), Dates(stats.MostHoursInMonth, "MMMM yyyy")),
+                ("Most hours in a year", Hours(stats.MostHoursInYear?.Value), Dates(stats.MostHoursInYear, "yyyy")),
+                ("Most landings in a day", Number(stats.MostLandingsInDay?.Value), Dates(stats.MostLandingsInDay)),
+                ("Most approaches in a day", Number(stats.MostApproachesInDay?.Value), Dates(stats.MostApproachesInDay)),
+                ("Most flying days in a month", Number(stats.MostFlyingDaysInMonth?.Value), Dates(stats.MostFlyingDaysInMonth, "MMMM yyyy")),
+                ("Longest flight", Hours(stats.LongestFlight?.Hours), Flight(stats.LongestFlight)),
+                ("Shortest flight", Hours(stats.ShortestFlight?.Hours), Flight(stats.ShortestFlight))
+            ]),
+            ("Averages and IFR", "Active months contain at least one flying day; quiet months are excluded. Recent results use the last 365 days within your filters. IFR is instrument flight time divided by aircraft flying time, excluding simulator time.",
+            [
+                ("Average hours per flight", Hours(stats.AverageHoursPerFlight), null),
+                ("Average flying days per active month · Last 365 days", Decimal(stats.AverageFlyingDaysPerActiveMonthRecent), null),
+                ($"Average flying days per active month · {PeriodLabel}", Decimal(stats.AverageFlyingDaysPerActiveMonth), null),
+                ("IFR percentage · Last 365 days", Percent(stats.IfrPercentageRecent), null),
+                ($"IFR percentage · {PeriodLabel}", Percent(stats.IfrPercentage), null)
+            ]),
+            ("Crew", "PIC hours use the PIC field only. Distinct crew combines PIC and Other pilot / crew. Blank names and Self are excluded; names ignore case and surrounding spaces.",
+            [
+                ("Most hours with another PIC", Hours(stats.MostHoursWithAnotherPic?.Value), stats.MostHoursWithAnotherPic?.Name),
+                ("Distinct crew flown with", stats.DistinctCrew.ToString("N0"), null)
+            ]),
+            ("Airports and routes", "Each resolved airport counts once per flight, including Via and legacy Remarks. Newly visited means its first visit within this selection. Legs follow the recorded route; unresolved stops break the route.",
+            [
+                ("Most visited airport", Airport(stats.MostVisitedAirport), Visits(stats.MostVisitedAirport)),
+                ("Most visited airport excluding bases", !BasesAvailable ? "Base airports unavailable" : !Analytics.BasesConfigured ? "Choose base airports" : Airport(stats.MostVisitedAirportExcludingBases), Visits(stats.MostVisitedAirportExcludingBases)),
+                ("Most recent newly visited airport", Airport(stats.MostRecentNewAirport), stats.MostRecentNewAirport?.FirstVisit.ToString("d MMM yyyy")),
+                ("Number of airports visited", stats.AirportsVisited.ToString("N0"), null),
+                ("Longest leg", Distance(stats.LongestLeg?.NauticalMiles), Leg(stats.LongestLeg)),
+                ("Shortest leg", Distance(stats.ShortestLeg?.NauticalMiles), Leg(stats.ShortestLeg))
+            ]),
+            ("Estimates", "Distance is flying hours × 120 knots, not measured route distance. The Moon comparison uses 207,600 nautical miles.",
+            [
+                ("Approximate distance flown", $"{stats.ApproximateNauticalMiles:N1} nm", null),
+                ("Percentage of the distance to the Moon", Percent(stats.PercentageOfDistanceToMoon), null)
+            ])
+        ];
+    }
+
+    private static string Hours(decimal? value) => value is null ? Unavailable : $"{MobileLogbookSession.FormatHours(value.Value)} h";
+    private static string Number(decimal? value) => value?.ToString("N0") ?? Unavailable;
+    private static string Decimal(decimal? value) => value is null ? Unavailable : MobileLogbookSession.FormatHours(value.Value);
+    private static string Percent(decimal? value) => value is null ? Unavailable : $"{value.Value:N1}%";
+    private static string Distance(double? value) => value is null ? Unavailable : $"{value.Value:N1} nm";
+    private static string? Dates(MobileAnalyticsRecord? value, string format = "d MMM yyyy") => value is null ? null :
+        value.From.ToString(format) == value.To.ToString(format) ? value.From.ToString(format) : $"{value.From.ToString(format)} – {value.To.ToString(format)}";
+    private static string? Flight(MobileAnalyticsFlight? value) => value is null ? null :
+        string.Join(" · ", new[] { value.Date.ToString("d MMM yyyy"), string.IsNullOrWhiteSpace(value.Route) ? "Route unavailable" : value.Route, value.Type, value.Registration }.Where(part => !string.IsNullOrWhiteSpace(part)));
+    private static string Airport(MobileAnalyticsAirport? value) => value is null ? Unavailable : $"{value.Airport.Icao} · {value.Airport.Name}";
+    private static string? Visits(MobileAnalyticsAirport? value) => value is null ? null : $"{value.Visits:N0} visits";
+    private static string? Leg(MobileAnalyticsLeg? value) => value is null ? null :
+        $"{value.From.Icao} · {value.From.Name} → {value.To.Icao} · {value.To.Name} · {value.Date:d MMM yyyy}";
+}

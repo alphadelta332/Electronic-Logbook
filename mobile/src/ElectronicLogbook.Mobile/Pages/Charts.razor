@@ -1,8 +1,343 @@
 @page "/charts"
+@inject MobileLogbookSession Session
+@inject BrowserLogbookStore Store
+@inject TimeProvider Clock
+@implements IDisposable
 
-<PageTitle>Charts | FlightLogX</PageTitle>
+<PageTitle>Charts &amp; Stats | FlightLogX</PageTitle>
 
-<section aria-labelledby="charts-heading">
-    <h1 id="charts-heading">Charts</h1>
-    <p>Coming soon!</p>
+<section class="analytics-page" aria-labelledby="charts-heading">
+    <h1 id="charts-heading">Charts &amp; Stats</h1>
+    @if (!Session.IsLoaded)
+    {
+        <section class="ui-state" role="status">
+            <MudProgressCircular Indeterminate="true" Color="Color.Primary" />
+            <span>Loading Charts &amp; Stats</span>
+        </section>
+    }
+    else if (Session.IsStorageBlocked)
+    {
+        <MudAlert Severity="Severity.Error">@Session.StorageError</MudAlert>
+    }
+    else
+    {
+        <div class="analytics-filters" aria-label="Charts and statistics filters">
+            <label class="totals-filter-field">From date
+                <input id="analytics-from" type="date" @bind="from" @bind:after="Recalculate" />
+            </label>
+            <label class="totals-filter-field">To date
+                <input id="analytics-to" type="date" @bind="to" @bind:after="Recalculate" />
+            </label>
+            <label class="totals-filter-field">Aircraft type
+                <select id="analytics-type" @bind="aircraftType" @bind:after="Recalculate">
+                    <option value="">All types</option>
+                    @foreach (var value in types) { <option value="@value">@value</option> }
+                </select>
+            </label>
+            <label class="totals-filter-field">Registration
+                <select id="analytics-registration" @bind="registration" @bind:after="Recalculate">
+                    <option value="">All registrations</option>
+                    @foreach (var value in registrations) { <option value="@value">@value</option> }
+                </select>
+            </label>
+        </div>
+        <div class="analytics-filter-summary" role="status">
+            <span>@PeriodLabel · @(string.IsNullOrEmpty(aircraftType) ? "All types" : aircraftType) · @(string.IsNullOrEmpty(registration) ? "All registrations" : registration)
+                @if (from is not null) { <span> · From @from.Value.ToString("d MMM yyyy")</span> }
+                @if (to is not null) { <span> · To @to.Value.ToString("d MMM yyyy")</span> }
+            </span>
+            <MudButton OnClick="ClearFilters" Disabled="@(!HasFilters)">Clear filters</MudButton>
+        </div>
+        @if (filterError is not null)
+        {
+            <MudAlert Severity="Severity.Error" role="alert">@filterError</MudAlert>
+        }
+        <MudTabs Class="analytics-tabs" KeepPanelsAlive="true">
+            <MudTabPanel Text="Charts">
+                @if (analytics is not null)
+                {
+                    <p>@MobileLogbookSession.FormatHours(analytics.FlyingHours) flying hours · @analytics.FlightCount flights. Simulator time is excluded.</p>
+                    @if (analytics.MissingDateEntries > 0)
+                    {
+                        <MudAlert Severity="Severity.Warning">@analytics.MissingDateEntries entries have no valid date and are excluded.</MudAlert>
+                    }
+                    @if (analytics.UnresolvedAirportCodes.Count > 0)
+                    {
+                        <MudAlert Severity="Severity.Warning">Unresolved airports are excluded: @string.Join(", ", analytics.UnresolvedAirportCodes).</MudAlert>
+                    }
+                    @if (analytics.FlightCount == 0)
+                    {
+                        <section class="ui-state" role="status">No flying entries in this selection. Change or clear filters to see your flying history.</section>
+                    }
+                    else
+                    {
+                        <section class="analytics-chart" aria-labelledby="hours-year-heading">
+                            <h2 id="hours-year-heading">Hours by year</h2>
+                            <p>Flying hours, stacked by the 14 workbook categories.</p>
+                            <MudChart T="decimal" ChartType="ChartType.StackedBar" ChartSeries="yearSeries" ChartLabels="yearLabels"
+                                      ChartOptions="yearOptions" Width="100%" Height="320px" />
+                            <details><summary>Show values for hours by year</summary>
+                                <table><caption>Hours by year and category</caption><thead><tr><th scope="col">Year / category</th><th scope="col">Hours</th></tr></thead><tbody>
+                                    @foreach (var year in analytics.HoursByYear)
+                                    {
+                                        <tr><th scope="row">@year.Year total</th><td>@MobileLogbookSession.FormatHours(year.Categories.Sum(value => value.Value))</td></tr>
+                                        @foreach (var category in year.Categories)
+                                        {
+                                            <tr><th scope="row">@year.Year · @category.Name</th><td>@MobileLogbookSession.FormatHours(category.Value)</td></tr>
+                                        }
+                                    }
+                                </tbody></table>
+                            </details>
+                        </section>
+                        <AnalyticsRankingChart Title="Top five registrations" Values="analytics.TopRegistrations" />
+                        <AnalyticsRankingChart Title="Top five aircraft types" Values="analytics.TopTypes" />
+                        <section class="analytics-chart" aria-labelledby="hours-total-heading">
+                            <h2 id="hours-total-heading">Total hours over time</h2>
+                            <p>Cumulative flying hours within this selection, starting at zero.</p>
+                            <MudChart T="decimal" ChartType="ChartType.Timeseries" ChartSeries="cumulativeSeries" ChartOptions="timeOptions" Width="100%" Height="300px" />
+                            <details><summary>Show values for total hours over time</summary>
+                                <table><caption>Cumulative flying hours</caption><thead><tr><th scope="col">Date</th><th scope="col">Hours</th></tr></thead><tbody>
+                                    @foreach (var point in analytics.CumulativeHours)
+                                    {
+                                        <tr><th scope="row">@point.Date.ToString("d MMM yyyy")</th><td>@MobileLogbookSession.FormatHours(point.Hours)</td></tr>
+                                    }
+                                </tbody></table>
+                            </details>
+                        </section>
+                        <section class="analytics-chart" aria-labelledby="hours-category-heading">
+                            <h2 id="hours-category-heading">Hours by category</h2>
+                            <MudChart T="decimal" ChartType="ChartType.Pie" ChartSeries="categorySeries" ChartLabels="categoryLabels" ChartOptions="pieOptions" Width="100%" Height="300px" />
+                            <ul class="analytics-legend" aria-label="Category and hours legend">
+                                @for (var index = 0; index < categoryLabels.Length; index++)
+                                {
+                                    <li><span><span class="analytics-swatch" style="background: @pieOptions.ChartPalette[index]" aria-hidden="true"></span>@categoryLabels[index]</span><strong>@MobileLogbookSession.FormatHours(categorySeries[0].Data.GetValue(index)) h</strong></li>
+                                }
+                            </ul>
+                            <details><summary>Show values for hours by category</summary>
+                                <table><caption>Flying hours by category</caption><thead><tr><th scope="col">Category</th><th scope="col">Hours</th></tr></thead><tbody>
+                                    @foreach (var category in analytics.HoursByCategory)
+                                    {
+                                        <tr><th scope="row">@category.Name</th><td>@MobileLogbookSession.FormatHours(category.Value)</td></tr>
+                                    }
+                                </tbody></table>
+                            </details>
+                        </section>
+                        <AnalyticsRankingChart Title="Top ten airports" Values="airportValues" Counts="true" />
+                    }
+                }
+            </MudTabPanel>
+            <MudTabPanel Text="Stats">
+                <section class="analytics-bases" aria-labelledby="analytics-bases-heading">
+                    <h2 id="analytics-bases-heading">Base airports</h2>
+                    <p>Choose airports to exclude from the non-base visit record. Saved for this logbook on this device only.</p>
+                    @if (basesError is not null)
+                    {
+                        <MudAlert Severity="Severity.Error" role="alert">@basesError</MudAlert>
+                        @if (!basesAvailable) { <MudButton OnClick="LoadBasesAsync">Retry loading base airports</MudButton> }
+                    }
+                    <div class="analytics-base-controls">
+                        <label class="totals-filter-field">Airport code
+                            <input id="analytics-base-code" type="text" @bind="baseCode" list="analytics-base-suggestions" disabled="@(!basesAvailable || savingBases)" />
+                        </label>
+                        <datalist id="analytics-base-suggestions">
+                            @foreach (var code in MobileAirportSuggestions.Create(Session.CurrentEntriesV2))
+                            {
+                                @if (MobileAirportCatalog.Default.TryFind(code, out var airport)) { <option value="@airport.Icao">@airport.Name</option> }
+                            }
+                        </datalist>
+                        <MudButton OnClick="AddBaseAsync" Disabled="@(!basesAvailable || savingBases || string.IsNullOrWhiteSpace(baseCode))">Add base airport</MudButton>
+                    </div>
+                    <p>Enter a catalogue airport code, such as YSSY or SY. You can add more than one airport.</p>
+                    <ul class="analytics-base-list" aria-label="Saved base airports">
+                        @foreach (var code in baseAirports)
+                        {
+                            <li><span>@BaseLabel(code)</span><MudButton OnClick="@(() => SaveBasesAsync(baseAirports.Where(value => value != code).ToArray()))" Disabled="@savingBases" aria-label="@($"Remove base airport {code}")">Remove</MudButton></li>
+                        }
+                    </ul>
+                </section>
+                @if (analytics is not null)
+                {
+                    <p>@PeriodLabel · @MobileLogbookSession.FormatHours(analytics.FlyingHours) flying hours · @analytics.FlightCount flights. Simulator time is excluded.</p>
+                    @if (analytics.MissingDateEntries > 0) { <MudAlert Severity="Severity.Warning">@analytics.MissingDateEntries entries have no valid date and are excluded.</MudAlert> }
+                    @if (analytics.UnresolvedAirportCodes.Count > 0) { <MudAlert Severity="Severity.Warning">Unresolved airports are excluded: @string.Join(", ", analytics.UnresolvedAirportCodes).</MudAlert> }
+                    <AnalyticsStatistics Analytics="analytics" PeriodLabel="@PeriodLabel" BasesAvailable="basesAvailable" />
+                }
+            </MudTabPanel>
+        </MudTabs>
+    }
 </section>
+
+@code {
+    private DateOnly? from;
+    private DateOnly? to;
+    private string aircraftType = "";
+    private string registration = "";
+    private string[] types = [];
+    private string[] registrations = [];
+    private string? filterError;
+    private MobileLogbookAnalytics? analytics;
+    private string[] baseAirports = [];
+    private string baseCode = "";
+    private string? basesError;
+    private bool basesAvailable;
+    private bool savingBases;
+    private LogbookId? basesLogbookId;
+    private ITimer? dateTimer;
+    private DateOnly calculatedDate;
+    private bool disposed;
+    private List<ChartSeries<decimal>> yearSeries = [];
+    private string[] yearLabels = [];
+    private List<ChartSeries<decimal>> cumulativeSeries = [];
+    private List<ChartSeries<decimal>> categorySeries = [];
+    private string[] categoryLabels = [];
+    private MobileAnalyticsValue[] airportValues = [];
+    private readonly StackedBarChartOptions yearOptions = new() { YAxisFormat = "0.0", MaxNumYAxisTicks = 5, XAxisLabelRotation = 45 };
+    private readonly TimeSeriesChartOptions timeOptions = new() { ShowLegend = false, YAxisFormat = "0.0", MaxNumYAxisTicks = 5, TimeLabelFormat = "dd MMM yy", TooltipTimeLabelFormat = "d MMM yyyy", YAxisRequireZeroPoint = true };
+    private readonly PieChartOptions pieOptions = new() { ShowLegend = false };
+    private bool HasFilters => from is not null || to is not null || aircraftType.Length > 0 || registration.Length > 0;
+    private string PeriodLabel => from is not null || to is not null ? "Selected period" : "All time";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Session.EnsureLoadedWorkbookAsync();
+        if (disposed) return;
+        Session.WorkbookStateChanged += OnWorkbookStateChanged;
+        await LoadBasesAsync();
+        if (disposed) return;
+        RefreshChoices();
+        dateTimer = Clock.CreateTimer(_ => OnDateTick(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    private async Task LoadBasesAsync()
+    {
+        if (Session.IsStorageBlocked) return;
+        var logbookId = Session.DocumentV2.LogbookId;
+        basesLogbookId = logbookId;
+        baseAirports = [];
+        basesAvailable = false;
+        basesError = null;
+        Recalculate();
+        StateHasChanged();
+        try
+        {
+            var codes = await Store.LoadBaseAirportsAsync(logbookId);
+            if (disposed || Session.DocumentV2.LogbookId != logbookId) return;
+            baseAirports = codes;
+            basesAvailable = true;
+        }
+        catch (Exception ex) when (ex is Microsoft.JSInterop.JSException or System.Text.Json.JsonException or FormatException)
+        {
+            if (disposed || Session.DocumentV2.LogbookId != logbookId) return;
+            basesAvailable = false;
+            basesError = "Saved base airports could not be loaded. Retry to use or change them.";
+        }
+        Recalculate();
+    }
+
+    private async Task AddBaseAsync()
+    {
+        if (!MobileAirportCatalog.Default.TryFind(baseCode, out var airport))
+        {
+            basesError = "Airport code not found. Choose a code from the airport catalogue.";
+            return;
+        }
+        if (await SaveBasesAsync(baseAirports.Append(airport.Icao).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray()))
+            baseCode = "";
+    }
+
+    private async Task<bool> SaveBasesAsync(string[] codes)
+    {
+        if (!basesAvailable || savingBases) return false;
+        savingBases = true;
+        basesError = null;
+        var logbookId = Session.DocumentV2.LogbookId;
+        try
+        {
+            await Store.SaveBaseAirportsAsync(logbookId, codes);
+            if (disposed || Session.DocumentV2.LogbookId != logbookId) return false;
+            baseAirports = codes;
+            Recalculate();
+            return true;
+        }
+        catch (Microsoft.JSInterop.JSException)
+        {
+            if (disposed || Session.DocumentV2.LogbookId != logbookId) return false;
+            basesError = "Base airports could not be saved. Your previous selections are kept; try again.";
+            return false;
+        }
+        finally { savingBases = false; }
+    }
+
+    private static string BaseLabel(string code) => MobileAirportCatalog.Default.TryFind(code, out var airport) ? $"{airport.Icao} · {airport.Name}" : code;
+
+    private void RefreshChoices()
+    {
+        types = Choices(entry => entry.Type, aircraftType);
+        registrations = Choices(entry => entry.Reg, registration);
+    }
+
+    private void OnWorkbookStateChanged() => _ = InvokeAsync(async () =>
+    {
+        if (disposed) return;
+        RefreshChoices();
+        if (basesLogbookId != Session.DocumentV2.LogbookId)
+            await LoadBasesAsync();
+        else
+            Recalculate();
+        if (!disposed) StateHasChanged();
+    });
+
+    private void OnDateTick() => _ = InvokeAsync(() =>
+    {
+        if (disposed || calculatedDate == LocalToday) return;
+        Recalculate();
+        StateHasChanged();
+    });
+
+    private DateOnly LocalToday => DateOnly.FromDateTime(Clock.GetLocalNow().DateTime);
+
+    public void Dispose()
+    {
+        disposed = true;
+        Session.WorkbookStateChanged -= OnWorkbookStateChanged;
+        dateTimer?.Dispose();
+    }
+
+    private string[] Choices(Func<PortableLogbookWorkbookEntry, string?> select, string selected) => Session.CurrentEntriesV2
+        .Select(item => select(item.Entry!)).Append(selected).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim())
+        .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private void Recalculate()
+    {
+        analytics = null;
+        filterError = null;
+        calculatedDate = LocalToday;
+        if (Session.IsStorageBlocked) return;
+        if (from > to)
+        {
+            filterError = "Choose a From date on or before the To date.";
+            return;
+        }
+        analytics = MobileLogbookAnalytics.Create(Session.CurrentEntriesV2, new(from, to, aircraftType, registration),
+            calculatedDate, baseAirports, MobileAirportCatalog.Default);
+        yearLabels = analytics.HoursByYear.Select(year => year.Year.ToString()).ToArray();
+        yearSeries = analytics.HoursByCategory.Select((category, index) => new ChartSeries<decimal>
+        {
+            Name = category.Name, Data = analytics.HoursByYear.Select(year => year.Categories[index].Value).ToArray()
+        }).ToList();
+        cumulativeSeries = [new() { Name = "Flying hours", Data = analytics.CumulativeHours.Select(point => (point.Date.ToDateTime(TimeOnly.MinValue), point.Hours)).ToArray() }];
+        var span = analytics.CumulativeHours.Count < 2 ? 1 : analytics.CumulativeHours[^1].Date.DayNumber - analytics.CumulativeHours[0].Date.DayNumber;
+        timeOptions.TimeLabelSpacing = TimeSpan.FromDays(Math.Max(1, Math.Ceiling(span / 3d)));
+        var categories = analytics.HoursByCategory.Where(value => value.Value > 0).ToArray();
+        categoryLabels = categories.Select(value => value.Name).ToArray();
+        categorySeries = [new() { Name = "Flying hours", Data = categories.Select(value => value.Value).ToArray() }];
+        airportValues = analytics.TopAirports.Select(value => new MobileAnalyticsValue($"{value.Airport.Icao} · {value.Airport.Name}", value.Visits)).ToArray();
+    }
+
+    private void ClearFilters()
+    {
+        from = to = null;
+        aircraftType = registration = "";
+        Recalculate();
+    }
+}

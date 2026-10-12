@@ -202,7 +202,7 @@ public sealed class PwaPageWiringTests
             page.IndexOf("href=\"/charts\"", StringComparison.Ordinal)
             < page.IndexOf("href=\"/routes\"", StringComparison.Ordinal));
         Assert.Contains("<span>Settings</span>", page, StringComparison.Ordinal);
-        Assert.Contains("<span>Charts</span>", page, StringComparison.Ordinal);
+        Assert.Contains("<span>Charts &amp; Stats</span>", page, StringComparison.Ordinal);
         Assert.Contains("<span>Route map</span>", page, StringComparison.Ordinal);
         Assert.Matches(@"(?s)\.more-navigation-row\s*\{[^}]*min-height:\s*48px", css);
         Assert.Matches(@"(?s)\.app-main\s*\{[^}]*overflow-y:\s*auto", css);
@@ -210,7 +210,7 @@ public sealed class PwaPageWiringTests
     }
 
     [Fact]
-    public void Gate3FutureRouteAndChartDestinationsAreClearlyMarkedComingSoon()
+    public void RouteMapRemainsComingSoonAndChartsUsesAnalytics()
     {
         var routes = ReadMobilePage("Routes.razor");
         var charts = ReadMobilePage("Charts.razor");
@@ -221,8 +221,10 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("future-feature", routes, StringComparison.Ordinal);
         Assert.DoesNotContain("Planned after the first release", routes, StringComparison.Ordinal);
         Assert.Contains("@page \"/charts\"", charts, StringComparison.Ordinal);
-        Assert.Contains("<h1 id=\"charts-heading\">Charts</h1>", charts, StringComparison.Ordinal);
-        Assert.Contains("<p>Coming soon!</p>", charts, StringComparison.Ordinal);
+        Assert.Contains("<h1 id=\"charts-heading\">Charts &amp; Stats</h1>", charts, StringComparison.Ordinal);
+        Assert.Contains("Session.CurrentEntriesV2", charts, StringComparison.Ordinal);
+        Assert.Contains("MobileLogbookAnalytics.Create", charts, StringComparison.Ordinal);
+        Assert.DoesNotContain("<p>Coming soon!</p>", charts, StringComparison.Ordinal);
         Assert.DoesNotContain("future-feature", charts, StringComparison.Ordinal);
         Assert.DoesNotContain("Planned after the first release", charts, StringComparison.Ordinal);
     }

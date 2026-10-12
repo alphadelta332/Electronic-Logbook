@@ -1518,7 +1518,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableOperationKind.Correction, restoration.Kind);
         Assert.Equal(deletion.RevisionId, Assert.Single(restoration.ParentRevisionIds));
         Assert.Equal(3, jsRuntime.SaveCount);
-        Assert.Equal(2, workbookStateChangedCount);
+        Assert.Equal(3, workbookStateChangedCount); // One notification for add, delete and undo.
     }
 
     [Fact]
@@ -1577,7 +1577,7 @@ public sealed class MobileLogbookSessionJourneyTests
         Assert.Equal(PortableOperationKind.Correction, restoration.Kind);
         Assert.Equal(tombstone.RevisionId, Assert.Single(restoration.ParentRevisionIds));
         Assert.Equal(3, restored.RevisionHistory.Count);
-        Assert.Equal(1, workbookStateChangedCount);
+        Assert.Equal(3, workbookStateChangedCount); // One notification for add, delete and restore.
 
         var reloaded = CreateSession(jsRuntime);
         await reloaded.EnsureLoadedWorkbookAsync();

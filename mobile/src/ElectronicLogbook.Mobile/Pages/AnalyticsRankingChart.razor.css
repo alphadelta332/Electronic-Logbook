@@ -1,0 +1,15 @@
+.analytics-chart { min-width: 0; margin-block: 24px; padding-block: 12px; border-top: 1px solid var(--app-border); }
+h2 { font-size: 1.25rem; }
+.analytics-bars { list-style: none; padding: 0; }
+.analytics-bars li { margin-block: 16px; }
+.analytics-bars li > div:first-child { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; }
+.analytics-bar-track { height: 12px; margin-top: 6px; background: var(--app-border); border-radius: 3px; }
+.analytics-bar-track > div { height: 100%; background: var(--app-primary); border-radius: inherit; }
+strong, td { font-variant-numeric: tabular-nums; }
+summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; color: var(--app-primary); }
+summary:focus-visible { outline: 3px solid var(--app-primary); outline-offset: 2px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 10px 4px; border-bottom: 1px solid var(--app-border); text-align: start; overflow-wrap: anywhere; }
+td:last-child { text-align: end; }
+th { font-weight: 600; }
+caption { text-align: start; padding-block: 8px; }

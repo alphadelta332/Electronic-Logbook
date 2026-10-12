@@ -278,6 +278,25 @@ public sealed class MobileLogbookAnalyticsTests
         MobileAnalyticsFilters? filters = null, IReadOnlyCollection<string>? bases = null) =>
         MobileLogbookAnalytics.Create(entries.Select(Materialized), filters ?? new(), Today, bases ?? [], Catalog);
 
+    [Fact]
+    public void TenThousandFlightsReconcileAcrossChartsAndRecords()
+    {
+        var start = new DateOnly(2000, 1, 1);
+        var entries = Enumerable.Range(0, 10_000).Select(index => Materialized(
+            Flight(start.AddDays(index / 10), 1) with { IfrIf = .5m })).ToArray();
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var result = MobileLogbookAnalytics.Create(entries, new(), start.AddDays(999), ["AAA"], Catalog);
+        watch.Stop();
+        Assert.Equal(10_000m, result.FlyingHours);
+        Assert.Equal(10_000, result.FlightCount);
+        Assert.Equal(10_000m, result.CumulativeHours[^1].Hours);
+        Assert.Equal(10_000m, result.HoursByYear.Sum(year => year.Categories.Sum(category => category.Value)));
+        Assert.Equal(70m, result.Statistics.MostHoursInSevenDays!.Value);
+        Assert.Equal(50m, result.Statistics.IfrPercentageRecent);
+        Assert.Equal(10_000, result.TopAirports[0].Visits);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(5), $"10,000-entry analytics took {watch.Elapsed.TotalMilliseconds:N0} ms (desktop ceiling: 5 seconds).");
+    }
+
     private static PortableLogbookWorkbookEntry Flight(DateOnly date, decimal hours) =>
         PortableLogbookWorkbookEntry.Empty with { Year = date.Year, Month = date.Month, Day = date.Day,
             SeCommandDay = hours, Type = "TYPE", Reg = "REG", From = "AAA", To = "BBB" };

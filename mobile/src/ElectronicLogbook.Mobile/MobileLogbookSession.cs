@@ -63,6 +63,7 @@ public sealed class MobileLogbookSession(
         {
             documentV2 = value;
             InvalidateWorkbookProjectionCache();
+            WorkbookStateChanged?.Invoke();
         }
     }
 
@@ -655,7 +656,6 @@ public sealed class MobileLogbookSession(
             previousEntry);
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
-        WorkbookStateChanged?.Invoke();
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         SetWorkbookActionFeedback(
@@ -717,7 +717,6 @@ public sealed class MobileLogbookSession(
                 pending.PreviousEntry!);
 
         DocumentV2 = MobileLogbookDocument.AppendOperation(DocumentV2, CustomFields, operation);
-        WorkbookStateChanged?.Invoke();
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
         SetLastActionMessage(pending.UndoKind switch
@@ -726,7 +725,6 @@ public sealed class MobileLogbookSession(
             WorkbookActionUndoKind.DeleteRestoredEntry => "Restoration undone.",
             _ => "Modification undone."
         });
-        WorkbookStateChanged?.Invoke();
         return true;
     }
 
@@ -1726,7 +1724,6 @@ public sealed class MobileLogbookSession(
         {
             WorkbookDraft.CustomValues.TryAdd(definition.Id, string.Empty);
         }
-        WorkbookStateChanged?.Invoke();
         await SaveStateV2Async();
         await TrySyncHostedAsync(BackgroundSyncReason.LocalEdit);
     }

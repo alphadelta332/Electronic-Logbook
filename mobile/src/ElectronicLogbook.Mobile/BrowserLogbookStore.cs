@@ -11,6 +11,23 @@ public sealed class BrowserLogbookStore(IJSRuntime jsRuntime)
     private const string ConnectionDiagnosticsKey = "connection-diagnostics";
     private const string DiagnosticProbeKeyPrefix = "diagnostic-probe:";
 
+    public async ValueTask<string[]> LoadBaseAirportsAsync(LogbookId logbookId)
+    {
+        var json = await jsRuntime.InvokeAsync<string?>("electronicLogbookStore.load", $"analytics-bases:{logbookId.Value}");
+        if (json is null) return [];
+        return CanonicalBaseAirports(JsonSerializer.Deserialize<string[]>(json)
+            ?? throw new JsonException("Saved base airports are invalid."));
+    }
+
+    public ValueTask SaveBaseAirportsAsync(LogbookId logbookId, IEnumerable<string> codes) =>
+        jsRuntime.InvokeVoidAsync("electronicLogbookStore.save", $"analytics-bases:{logbookId.Value}",
+            JsonSerializer.Serialize(CanonicalBaseAirports(codes)));
+
+    private static string[] CanonicalBaseAirports(IEnumerable<string> codes) => codes.Select(code =>
+        MobileAirportCatalog.Default.TryFind(code, out var airport) ? airport.Icao :
+            throw new FormatException("A saved base airport is not in the airport catalogue."))
+        .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+
     public async ValueTask<PortableLogbookDocument?> LoadDocumentAsync()
     {
         var state = await LoadStateAsync();
