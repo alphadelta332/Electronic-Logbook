@@ -26,16 +26,46 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
     async Task IAsyncLifetime.DisposeAsync() => await base.DisposeAsync();
 
     [Fact]
+    public void ChartHeadingsHaveNoSubtitlesAndRankingsStayTogether()
+    {
+        Load(Flight(1, 2));
+        var page = Render<Charts>();
+        Assert.Equal(new[] { "Hours by year", "Total hours over time", "Hours by category",
+            "Top five registrations", "Top five aircraft types", "Top ten airports" },
+            page.FindAll(".analytics-chart h2").Select(heading => heading.TextContent));
+        Assert.Empty(page.FindAll(".analytics-chart h2 + p"));
+        page.FindAll(".mud-tab")[1].Click();
+        Assert.Empty(page.FindAll(".analytics-statistics h2 + p"));
+    }
+
+    [Fact]
+    public void PieTooltipFormatsImportedPrecisionWithoutChangingHours()
+    {
+        const decimal importedHours = 566.400000000000020m;
+        Load(Flight(1, importedHours));
+        var page = Render<Charts>();
+        var pie = page.FindComponents<MudChart<decimal>>().Single(chart => chart.Instance.ChartType == ChartType.Pie);
+        Assert.Equal(importedHours, pie.Instance.ChartSeries.Single().Data.Values.Single());
+        pie.Find(".mud-chart-serie").MouseOver();
+        pie.WaitForAssertion(() => Assert.Equal("SE Day Command · 566.4 h", pie.Find(".svg-tooltip text").TextContent.Trim()));
+        Assert.All(page.FindComponents<MudChart<decimal>>().Where(chart => chart.Instance.ChartType != ChartType.Pie),
+            chart => Assert.All(chart.Instance.ChartSeries, series => Assert.Equal("0.0", series.TooltipYValueFormat)));
+    }
+
+    [Fact]
     public void SixChartsReconcileToFlightTotalsAndKeepRealDates()
     {
         Load(Flight(1, 2), Flight(10, 3) with { MeDualDay = 4, IfrSim = 9 });
         var page = Render<Charts>();
         Assert.Equal(6, page.FindAll(".analytics-chart").Count);
-        Assert.Equal(6, page.FindAll("details").Count);
+        Assert.Equal(6, page.FindAll(".analytics-chart details").Count);
         Assert.Contains("9.0 flying hours", page.Markup);
         var charts = page.FindComponents<MudChart<decimal>>();
         var year = charts.Single(chart => chart.Instance.ChartType == ChartType.StackedBar).Instance;
-        Assert.Equal(14, year.ChartSeries.Count);
+        Assert.Equal(2, year.ChartSeries.Count);
+        Assert.False(Assert.IsType<StackedBarChartOptions>(year.ChartOptions).ShowLegend);
+        Assert.Equal(2, page.FindAll(".analytics-year-legend li").Count);
+        Assert.Equal(15, page.Find(".analytics-chart table tbody").Children.Length);
         Assert.Equal(9m, year.ChartSeries.Sum(series => series.Data.Values.Sum()));
         var line = charts.Single(chart => chart.Instance.ChartType == ChartType.Timeseries).Instance;
         Assert.Equal(new[] { 0m, 2m, 9m }, line.ChartSeries.Single().Data.Values);
@@ -131,9 +161,13 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Load(Flight(1, 2) with { From = "UNKNOWN", To = "UNKNOWN" }, Flight(1, 4) with { Year = null });
         var page = Render<Charts>();
         Assert.Contains("1 entries have no valid date", page.Markup);
-        Assert.Contains("Unresolved airports are excluded: UNKNOWN", page.Markup);
+        Assert.Contains("Unmatched route text", page.Markup);
+        var warning = page.Find(".analytics-data-quality");
+        Assert.False(warning.HasAttribute("open"));
+        Assert.Contains("UNKNOWN", warning.TextContent);
+        Assert.Contains("flying hours are unaffected", warning.TextContent);
         Assert.Contains("No resolved airports", page.Markup);
-        Assert.Equal(6, page.FindAll("details").Count);
+        Assert.Equal(6, page.FindAll(".analytics-chart details").Count);
         Assert.Contains("2.0 flying hours", page.Markup);
     }
 

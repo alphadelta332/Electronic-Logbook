@@ -6,6 +6,13 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class PwaStaticAssetTests
 {
     [Fact]
+    public void ApplicationShellLoadsComponentStylesOutsideComments()
+    {
+        var html = Regex.Replace(ReadMobileAsset("index.html"), @"<!--[\s\S]*?-->", "");
+        Assert.Matches(@"<link\s+[^>]*href=""ElectronicLogbook.Mobile.styles.css""[^>]*rel=""stylesheet""", html);
+    }
+
+    [Fact]
     public void PublishedServiceWorkerUsesVersionedOfflineCacheAndDeletesOldCaches()
     {
         var worker = ReadMobileAsset("service-worker.published.js");

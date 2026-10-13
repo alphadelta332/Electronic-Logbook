@@ -1,8 +1,11 @@
 .analytics-chart { min-width: 0; margin-block: 24px; padding-block: 12px; border-top: 1px solid var(--app-border); }
-h2 { font-size: 1.25rem; }
+h2 { font-size: 1.25rem; margin-bottom: 8px; }
+p { color: var(--app-text-muted); font-size: .875rem; margin-block: 8px 16px; }
 .analytics-bars { list-style: none; padding: 0; }
 .analytics-bars li { margin-block: 16px; }
-.analytics-bars li > div:first-child { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; overflow-wrap: anywhere; }
+.analytics-bars li > div:first-child { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; overflow-wrap: anywhere; }
+.analytics-bars li > div:first-child span { flex: 1 1 8rem; }
+.analytics-bars strong { white-space: nowrap; }
 .analytics-bar-track { height: 12px; margin-top: 6px; background: var(--app-border); border-radius: 3px; }
 .analytics-bar-track > div { height: 100%; background: var(--app-primary); border-radius: inherit; }
 strong, td { font-variant-numeric: tabular-nums; }

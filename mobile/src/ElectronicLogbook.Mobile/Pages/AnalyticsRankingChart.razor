@@ -1,6 +1,5 @@
 <section class="analytics-chart" aria-label="@Title">
     <h2>@Title</h2>
-    <p>@(Counts ? "Visits: each airport counts once per flying entry." : "Flying hours")</p>
     @if (Values.Count == 0)
     {
         <p>No resolved airports in this selection.</p>
@@ -12,7 +11,7 @@
             @foreach (var value in Values)
             {
                 <li>
-                    <div><span>@value.Name</span><strong>@Format(value.Value)</strong></div>
+                    <div><span>@value.Name</span><strong>@Format(value.Value) @(Counts ? "visits" : "h")</strong></div>
                     <div class="analytics-bar-track" aria-hidden="true"><div style="width: @((value.Value / Values[0].Value * 100m).ToString("0.###", CultureInfo.InvariantCulture))%"></div></div>
                 </li>
             }

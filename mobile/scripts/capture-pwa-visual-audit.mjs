@@ -56,6 +56,8 @@ const routes = [
     { name: "deleted-flight-detail", path: ({ entryId }) => `/flights/${entryId}`, readySelector: "main .deleted-detail-hero", state: "deleted" },
     { name: "more", path: "/more", readySelector: "main .more-page" },
     { name: "charts", path: "/charts", readySelector: "main [aria-labelledby=\"charts-heading\"]" },
+    { name: "charts-populated", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics" },
+    { name: "stats-populated", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics", stats: true },
     { name: "routes", path: "/routes", readySelector: "main [aria-labelledby=\"routes-heading\"]" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" },
     { name: "settings", path: "/settings", readySelector: "main .settings-page" },
@@ -156,31 +158,38 @@ async function prepareRouteState(page, baseUrl, state) {
     }
 
     const entryId = await createDashboardFlight(page, baseUrl);
-    if (state === "large-totals") {
+    if (state === "large-totals" || state === "analytics") {
         // Synthetic migrated history, isolated in this audit's disposable browser context.
-        await page.evaluate(async () => {
+        await page.evaluate(async (analytics) => {
             const stored = JSON.parse(await window.electronicLogbookStore.load("portable-document"));
             const document = JSON.parse(stored.documentJson);
             const template = document.operations.find(operation => operation.entry);
             const today = new Date();
             const hourFields = ["seCommandDay", "meDualDay", "seIcusDay", "copilotDay"];
-            document.operations = Array.from({ length: 1493 }, (_, index) => {
+            document.operations = Array.from({ length: analytics ? 303 : 1493 }, (_, index) => {
                 const operation = structuredClone(template);
                 operation.entryId = `ent_audit_${index}`;
                 operation.revisionId = `rev_audit_${index}`;
                 const date = new Date(today.getFullYear(), today.getMonth(), today.getDate());
                 date.setDate(date.getDate() - (index < 1100 ? 366 + index : index < 1465 ? 29 + (index - 1100) % 336 : index - 1465));
+                if (analytics) date.setTime(new Date(2011, 0, 1 + index * 14).getTime());
                 Object.assign(operation.entry, {
                     year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(),
                     seCommandDay: null,
-                    [hourFields[index % hourFields.length]]: index < 1100 ? (index === 0 ? 11 : 10) : index < 1465 ? 3.4 : 3.7,
+                    [hourFields[index % hourFields.length]]: analytics ? (index === 0 ? 7.6 : 2.5) : index < 1100 ? (index === 0 ? 11 : 10) : index < 1465 ? 3.4 : 3.7,
                     ifrSim: index === 0 ? 1.2 : null
+                });
+                if (analytics) Object.assign(operation.entry, {
+                    reg: ["VH-UMV", "VH-NMV", "VH-HAM", "VH-YBA", "VH-ZMV"][index % 5],
+                    type: ["C208", "C172", "GA8"][index % 3],
+                    remarks: "GENERAL HANDLING AEROS STALLS TURNS CLIMBING DESCENDING YSSY YCBR",
+                    from: "YSSY", to: "YCBR"
                 });
                 return operation;
             });
             stored.documentJson = JSON.stringify(document);
             await window.electronicLogbookStore.save("portable-document", JSON.stringify(stored));
-        });
+        }, state === "analytics");
     }
     if (state === "deleted") {
         await page.goto(`${baseUrl}/flights/${entryId}`, { waitUntil: "domcontentloaded" });
@@ -271,6 +280,10 @@ try {
                     const routePath = typeof route.path === "function" ? route.path(routeState) : route.path;
                     await page.goto(`${baseUrl}${routePath}`, { waitUntil: "domcontentloaded" });
                     await page.locator(route.readySelector).waitFor({ state: "visible", timeout: route.state === "large-totals" ? 90000 : 30000 });
+                    if (route.stats) {
+                        await page.getByRole("tab", { name: "Stats", exact: true }).click();
+                        await page.locator("main .analytics-statistics").first().waitFor({ state: "visible" });
+                    }
                     if (route.expanded) {
                         await page.locator("main details").evaluateAll(panels => panels.forEach(panel => panel.open = true));
                     }
@@ -568,6 +581,45 @@ try {
                     await page.screenshot({
                         path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}.png`)
                     });
+                    if (route.state === "analytics") {
+                        const tabLayout = await page.locator(".analytics-tabs [role=tablist]").evaluate(element => {
+                            const tabs = [...element.querySelectorAll("[role=tab]")].map(tab => tab.getBoundingClientRect());
+                            const bar = element.closest(".mud-tabs-tabbar-content").getBoundingClientRect();
+                            return { count: tabs.length, gap: bar.right - tabs.at(-1).right,
+                                firstGap: tabs[0].left - bar.left, widths: tabs.map(tab => tab.width), barWidth: bar.width };
+                        });
+                        if (tabLayout.count !== 2 || Math.abs(tabLayout.gap) > 1 || Math.abs(tabLayout.firstGap) > 1 ||
+                            tabLayout.widths.some(width => Math.abs(width - tabLayout.barWidth / 2) > 1)) {
+                            throw new Error(`Charts/Stats tabs do not evenly fill the bar: ${JSON.stringify(tabLayout)}`);
+                        }
+                        const sections = page.locator(route.stats ? ".analytics-statistics" : ".analytics-chart");
+                        for (let index = 0; index < await sections.count(); index++) {
+                            await sections.nth(index).scrollIntoViewIfNeeded();
+                            await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-section${index + 1}.png`) });
+                        }
+                        if (!route.stats) {
+                            const pie = page.locator("[aria-labelledby=hours-category-heading]");
+                            await pie.scrollIntoViewIfNeeded();
+                            await pie.locator(".mud-chart-serie").first().dispatchEvent("mouseover");
+                            const tooltip = pie.locator(".svg-tooltip text");
+                            await tooltip.waitFor({ state: "visible" });
+                            if (!/^.+ · \d+\.\d h$/.test((await tooltip.textContent()).trim())) {
+                                throw new Error(`Pie tooltip exposes unformatted hours: ${await tooltip.textContent()}`);
+                            }
+                            await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-tooltip.png`) });
+                            await pie.locator(".mud-chart-serie").first().dispatchEvent("mouseout");
+                        }
+                        const filters = page.locator(".analytics-filter-panel");
+                        await filters.locator("summary").click();
+                        await filters.scrollIntoViewIfNeeded();
+                        const fieldStyle = await page.locator("#analytics-from").evaluate(element => getComputedStyle(element).backgroundColor);
+                        const barHeight = await page.locator(".analytics-bar-track").first().evaluate(element => getComputedStyle(element).height);
+                        if (fieldStyle === "rgb(255, 255, 255)" && colorScheme === "dark" || barHeight !== "12px") {
+                            throw new Error(`Analytics component stylesheet did not apply: date=${fieldStyle}, bar=${barHeight}`);
+                        }
+                        await assertAccessible(page, `analytics expanded filters ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-filters.png`) });
+                    }
 
                     if (route.name.startsWith("dashboard")) {
                         const dashboardOverview = page.locator(".dashboard-currency-overview");
