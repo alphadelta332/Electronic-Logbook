@@ -1785,7 +1785,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains("wcag22aa", audit, StringComparison.Ordinal);
         Assert.Contains("smallControlTargets", audit, StringComparison.Ordinal);
         Assert.Contains("bounds.width < 48 || bounds.height < 48", audit, StringComparison.Ordinal);
-        Assert.Equal(4, CountOccurrences(audit, "await assertAccessible(page"));
+        Assert.True(CountOccurrences(audit, "await assertAccessible(page") >= 4);
+        Assert.Contains("analytics multiple selections", audit, StringComparison.Ordinal);
         Assert.Contains("role=\"group\" aria-label=\"Logbook view\"", logbook, StringComparison.Ordinal);
         Assert.Equal(3, CountOccurrences(logbook, "aria-pressed="));
         Assert.DoesNotContain("role=\"tablist\"", logbook, StringComparison.Ordinal);

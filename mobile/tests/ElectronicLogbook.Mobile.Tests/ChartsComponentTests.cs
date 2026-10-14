@@ -5,6 +5,7 @@ using ElectronicLogbook.Portable;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using MudBlazor;
+using MudBlazor.Extensions;
 using MudBlazor.Services;
 
 namespace ElectronicLogbook.Mobile.Tests;
@@ -33,7 +34,8 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal(new[] { "Hours by year", "Total hours over time", "Hours by category",
             "Top five registrations", "Top five aircraft types", "Top ten airports" },
             page.FindAll(".analytics-chart h2").Select(heading => heading.TextContent));
-        Assert.Empty(page.FindAll(".analytics-chart h2 + p"));
+        Assert.Equal(new[] { "2.0 flying hours · 1 flights.", "2.0 total flying hours." },
+            page.FindAll(".analytics-chart h2 + p").Select(paragraph => paragraph.TextContent));
         page.FindAll(".mud-tab")[1].Click();
         Assert.Empty(page.FindAll(".analytics-statistics h2 + p"));
     }
@@ -44,12 +46,9 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         const decimal importedHours = 566.400000000000020m;
         Load(Flight(1, importedHours));
         var page = Render<Charts>();
-        var pie = page.FindComponents<MudChart<decimal>>().Single(chart => chart.Instance.ChartType == ChartType.Pie);
-        Assert.Equal(importedHours, pie.Instance.ChartSeries.Single().Data.Values.Single());
-        pie.Find(".mud-chart-serie").MouseOver();
-        pie.WaitForAssertion(() => Assert.Equal("SE Day Command · 566.4 h", pie.Find(".svg-tooltip text").TextContent.Trim()));
-        Assert.All(page.FindComponents<MudChart<decimal>>().Where(chart => chart.Instance.ChartType != ChartType.Pie),
-            chart => Assert.All(chart.Instance.ChartSeries, series => Assert.Equal("0.0", series.TooltipYValueFormat)));
+        var pie = page.FindComponents<AnalyticsPlot>().Single(chart => chart.Instance.Data.Kind == "pie");
+        Assert.Equal(importedHours, pie.Instance.Data.Series.Single().Values.Single());
+        Assert.Equal("566.4", page.Find(".analytics-legend strong").TextContent);
     }
 
     [Fact]
@@ -58,27 +57,59 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Load(Flight(1, 2), Flight(10, 3) with { MeDualDay = 4, IfrSim = 9 });
         var page = Render<Charts>();
         Assert.Equal(6, page.FindAll(".analytics-chart").Count);
-        Assert.Equal(6, page.FindAll(".analytics-chart details").Count);
+        Assert.Empty(page.FindAll(".analytics-chart details"));
+        Assert.DoesNotContain("Show values for", page.Markup);
+        Assert.Equal(3, page.FindAll(".analytics-chart .visually-hidden table").Count);
         Assert.Contains("9.0 flying hours", page.Markup);
-        var charts = page.FindComponents<MudChart<decimal>>();
-        var year = charts.Single(chart => chart.Instance.ChartType == ChartType.StackedBar).Instance;
-        Assert.Equal(2, year.ChartSeries.Count);
-        Assert.False(Assert.IsType<StackedBarChartOptions>(year.ChartOptions).ShowLegend);
+        var charts = page.FindComponents<AnalyticsPlot>();
+        Assert.Equal(6, charts.Count);
+        var year = charts.Single(chart => chart.Instance.Data.Kind == "year").Instance.Data;
+        Assert.Equal(2, year.Series.Length);
         Assert.Equal(2, page.FindAll(".analytics-year-legend li").Count);
         Assert.Equal(15, page.Find(".analytics-chart table tbody").Children.Length);
-        Assert.Equal(9m, year.ChartSeries.Sum(series => series.Data.Values.Sum()));
-        var line = charts.Single(chart => chart.Instance.ChartType == ChartType.Timeseries).Instance;
-        Assert.Equal(new[] { 0m, 2m, 9m }, line.ChartSeries.Single().Data.Values);
-        Assert.Equal(new[] { new DateTime(2023, 12, 31), new DateTime(2024, 1, 1), new DateTime(2024, 1, 10) },
-            line.ChartSeries.Single().Data.Points.Select(point => Assert.IsType<DateTime>(point.X)));
-        var pie = charts.Single(chart => chart.Instance.ChartType == ChartType.Pie).Instance;
-        Assert.Equal(9m, pie.ChartSeries.Single().Data.Values.Sum());
+        Assert.Equal(9m, year.Series.Sum(series => series.Values.Sum()));
+        var line = charts.Single(chart => chart.Instance.Data.Kind == "time").Instance.Data;
+        Assert.Equal(new[] { 0m, 2m, 9m }, line.Series.Single().Values);
+        Assert.Equal(new[] { "2023-12-31", "2024-01-01", "2024-01-10" }, line.Labels);
+        var pie = charts.Single(chart => chart.Instance.Data.Kind == "pie").Instance.Data;
+        Assert.Equal(9m, pie.Series.Sum(series => series.Values.Sum()));
         var rankings = page.FindComponents<AnalyticsRankingChart>();
         Assert.Equal(9m, rankings[0].Instance.Values.Single().Value);
         Assert.Equal(9m, rankings[1].Instance.Values.Single().Value);
         Assert.Equal(2m, rankings[2].Instance.Values.Single(value => value.Name.StartsWith("YSSY")).Value);
         Assert.Contains("YSSY", rankings[2].Markup);
         Assert.Contains("Sydney", rankings[2].Markup, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void FailedRendererShowsExactValuesAndRetriesOnChangedData()
+    {
+        var draw = JSInterop.SetupVoid("electronicLogbookCharts.update", _ => true);
+        draw.SetException(new JSException("renderer unavailable"));
+        var data = new MobileAnalyticsPlotData("pie", ["Command", "Dual"],
+            [new("Command", [7m], "#397e63"), new("Dual", [2m], "#63b9bb")]);
+        var plot = Render<AnalyticsPlot>(parameters => parameters.Add(component => component.Title, "Hours by category")
+            .Add(component => component.Data, data));
+        Assert.Contains("Chart could not be drawn", plot.Markup);
+        Assert.Equal(2, plot.FindAll("tbody tr").Count);
+        Assert.Contains("7.0", plot.Find("table").TextContent);
+        draw.SetVoidResult();
+        plot.Render(parameters => parameters.Add(component => component.Data, data with { Labels = ["Command", "Dual"] }));
+        Assert.Empty(plot.FindAll("table"));
+        Assert.DoesNotContain("Chart could not be drawn", plot.Markup);
+    }
+
+    [Fact]
+    public async Task UnchangedRendersDoNotRedrawAndDisposalDisconnectsTheChart()
+    {
+        var data = new MobileAnalyticsPlotData("time", ["2024-01-01"], [new("Flying hours", [2m], "")]);
+        var plot = Render<AnalyticsPlot>(parameters => parameters.Add(component => component.Title, "Total hours over time")
+            .Add(component => component.Data, data));
+        var draws = JSInterop.Invocations.Count(invocation => invocation.Identifier == "electronicLogbookCharts.update");
+        plot.Render();
+        Assert.Equal(draws, JSInterop.Invocations.Count(invocation => invocation.Identifier == "electronicLogbookCharts.update"));
+        await plot.Instance.DisposeAsync();
+        Assert.Contains(JSInterop.Invocations, invocation => invocation.Identifier == "electronicLogbookCharts.dispose");
     }
 
     [Fact]
@@ -89,8 +120,8 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         var page = Render<Charts>();
         page.Find("#analytics-from").Change("2024-01-10");
         page.Find("#analytics-to").Change("2024-01-10");
-        page.Find("#analytics-type").Change("TYPE");
-        page.Find("#analytics-registration").Change("VH-TEST");
+        SetFilter(page, "Aircraft type", "TYPE");
+        SetFilter(page, "Registration", "VH-TEST");
         Assert.Contains("2.0 flying hours", page.Markup);
         Assert.Contains("Selected period", page.Find(".analytics-filter-summary").TextContent);
         Assert.Equal("Charts", page.Find(".mud-tab-active").TextContent);
@@ -105,7 +136,8 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Assert.Contains("2.0 flying hours", page.Markup);
         page.Find(".analytics-filter-summary button").Click();
         Assert.Contains("15.0 flying hours", page.Markup);
-        Assert.Contains("All time", page.Find(".analytics-filter-summary").TextContent);
+        Assert.Empty(page.FindAll(".analytics-filter-summary"));
+        Assert.Contains("All time", page.Find(".analytics-filter-panel summary").TextContent);
         Assert.True(string.IsNullOrEmpty(page.Find("#analytics-from").GetAttribute("value")));
     }
 
@@ -129,7 +161,7 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Load(Flight(1, 0) with { IfrSim = 3 });
         var page = Render<Charts>();
         Assert.Contains("No flying entries in this selection", page.Markup);
-        Assert.Empty(page.FindComponents<MudChart<decimal>>());
+        Assert.Empty(page.FindComponents<AnalyticsPlot>());
         page.Find("#analytics-from").Change("2025-01-01");
         Assert.Contains("No flying entries in this selection", page.Markup);
     }
@@ -156,18 +188,15 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
-    public void MissingDatesAndUnresolvedAirportsAreExplained()
+    public void MissingDatesAreExplainedAndUnresolvedAirportsAreSilentlyOmitted()
     {
         Load(Flight(1, 2) with { From = "UNKNOWN", To = "UNKNOWN" }, Flight(1, 4) with { Year = null });
         var page = Render<Charts>();
         Assert.Contains("1 entries have no valid date", page.Markup);
-        Assert.Contains("Unmatched route text", page.Markup);
-        var warning = page.Find(".analytics-data-quality");
-        Assert.False(warning.HasAttribute("open"));
-        Assert.Contains("UNKNOWN", warning.TextContent);
-        Assert.Contains("flying hours are unaffected", warning.TextContent);
+        Assert.Empty(page.FindAll(".analytics-data-quality"));
+        Assert.DoesNotContain("Unmatched", page.Markup);
         Assert.Contains("No resolved airports", page.Markup);
-        Assert.Equal(6, page.FindAll(".analytics-chart details").Count);
+        Assert.Empty(page.FindAll(".analytics-chart details"));
         Assert.Contains("2.0 flying hours", page.Markup);
     }
 
@@ -289,7 +318,7 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Load(Flight(1, 2));
         JSInterop.Setup<string?>("electronicLogbookStore.load", "analytics-bases:log_charts_test").SetResult("[\"YSSY\"]");
         var page = Render<Charts>();
-        page.Find("#analytics-type").Change("TYPE");
+        SetFilter(page, "Aircraft type", "TYPE");
         page.FindAll(".mud-tab")[1].Click();
         var session = Services.GetRequiredService<MobileLogbookSession>();
         await page.InvokeAsync(async () =>
@@ -304,7 +333,7 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         page.WaitForAssertion(() => Assert.Equal("Unavailable for this selection", Statistic(page.FindComponent<AnalyticsStatistics>(), "Average hours per flight")));
         await page.InvokeAsync(() => session.RestoreWorkbookEntryAsync(Assert.Single(session.DeletedEntriesV2)));
         page.WaitForAssertion(() => Assert.Equal("5.0 h", Statistic(page.FindComponent<AnalyticsStatistics>(), "Average hours per flight")));
-        Assert.Equal("TYPE", page.Find("#analytics-type").GetAttribute("value"));
+        Assert.Equal(new[] { "TYPE" }, Select(page, "Aircraft type").Instance.GetState(select => select.SelectedValues));
         Assert.Single(page.FindAll(".analytics-base-list li"));
         Assert.Equal("Stats", page.Find(".mud-tab-active").TextContent);
     }
@@ -331,8 +360,8 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Load(OnDate(cutoff, 2) with { IfrIf = 1 }, OnDate(today, 2),
             OnDate(today.AddDays(1), 2) with { IfrIf = 2 }, OnDate(today, 8) with { Type = "OTHER" });
         var page = Render<Charts>();
-        page.Find("#analytics-type").Change("TYPE");
-        page.Find("#analytics-registration").Change("VH-TEST");
+        SetFilter(page, "Aircraft type", "TYPE");
+        SetFilter(page, "Registration", "VH-TEST");
         page.Find("#analytics-from").Change(cutoff.ToString("yyyy-MM-dd"));
         page.Find("#analytics-to").Change(today.AddDays(1).ToString("yyyy-MM-dd"));
         page.FindAll(".mud-tab")[1].Click();
@@ -375,12 +404,12 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
             await session.SaveWorkbookEntryAsync();
         });
         page.WaitForAssertion(() => Assert.Contains("5.0 flying hours", page.Markup));
-        Assert.Contains(page.FindAll("#analytics-type option"), option => option.TextContent == "NEW TYPE");
-        Assert.Contains(page.FindAll("#analytics-registration option"), option => option.TextContent == "VH-NEW");
-        page.Find("#analytics-type").Change("NEW TYPE");
+        Assert.Contains(Select(page, "Aircraft type").FindComponents<MudSelectItem<string>>(), item => item.Instance.Value == "NEW TYPE");
+        Assert.Contains(Select(page, "Registration").FindComponents<MudSelectItem<string>>(), item => item.Instance.Value == "VH-NEW");
+        SetFilter(page, "Aircraft type", "NEW TYPE");
         await page.InvokeAsync(() => session.DeleteWorkbookEntryAsync(session.CurrentEntriesV2.Single(entry => entry.Entry!.Type == "NEW TYPE")));
         page.WaitForAssertion(() => Assert.Contains("No flying entries in this selection", page.Markup));
-        Assert.Contains(page.FindAll("#analytics-type option"), option => option.TextContent == "NEW TYPE");
+        Assert.Contains(Select(page, "Aircraft type").FindComponents<MudSelectItem<string>>(), item => item.Instance.Value == "NEW TYPE");
     }
 
     [Fact]
@@ -401,6 +430,35 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Assert.DoesNotContain("YSSY", page.Find(".analytics-base-list").TextContent);
     }
 
+    private static IRenderedComponent<MudSelect<string>> Select(IRenderedComponent<Charts> page, string label) =>
+        page.FindComponents<MudSelect<string>>().Single(select => select.Instance.Label == label);
+
+    private static void SetFilter(IRenderedComponent<Charts> page, string label, params string[] values) =>
+        page.InvokeAsync(() => Select(page, label).Instance.SelectedValuesChanged.InvokeAsync(values)).GetAwaiter().GetResult();
+
+    [Fact]
+    public void MultipleAircraftAndRegistrationsApplyAcrossBothTabsAndClearTogether()
+    {
+        Load(Flight(1, 1), Flight(2, 2) with { Type = "OTHER", Reg = "VH-OTHER" },
+            Flight(3, 4) with { Type = "THIRD" }, Flight(4, 8) with { Reg = "VH-THIRD" });
+        var page = Render<Charts>();
+        Assert.All(page.FindComponents<MudSelect<string>>(), select =>
+        {
+            Assert.True(select.Instance.MultiSelection);
+            Assert.True(select.Instance.SelectAll);
+            Assert.True(select.Instance.Clearable);
+        });
+        SetFilter(page, "Aircraft type", "TYPE", "OTHER");
+        SetFilter(page, "Registration", "VH-TEST", "VH-OTHER");
+        Assert.Contains("3.0 flying hours", page.Markup);
+        Assert.Contains("TYPE, OTHER", page.Find(".analytics-filter-summary").TextContent);
+        page.FindAll(".mud-tab")[1].Click();
+        Assert.Equal("1.5 h", Statistic(page.FindComponent<AnalyticsStatistics>(), "Average hours per flight"));
+        page.Find(".analytics-filter-summary button").Click();
+        Assert.Equal("3.8 h", Statistic(page.FindComponent<AnalyticsStatistics>(), "Average hours per flight"));
+        Assert.All(page.FindComponents<MudSelect<string>>(), select => Assert.Empty(select.Instance.GetState(component => component.SelectedValues)!));
+    }
+
     private static PortableLogbookWorkbookEntry OnDate(DateOnly date, decimal hours) =>
         Flight(date.Day, hours) with { Year = date.Year, Month = date.Month };
 
@@ -413,8 +471,9 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.CreateCustomTimeZone("test-local", TimeSpan.FromHours(11), "test-local", "test-local");
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            Assert.Equal(TimeSpan.FromMinutes(1), dueTime);
-            Assert.Equal(dueTime, period);
+            // MudSelect also uses the injected clock for its own UI timers.
+            if (dueTime != TimeSpan.FromMinutes(1) || period != dueTime)
+                return base.CreateTimer(callback, state, dueTime, period);
             this.callback = callback;
             this.state = state;
             return this;

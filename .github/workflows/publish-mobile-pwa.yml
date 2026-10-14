@@ -37,6 +37,8 @@ jobs:
       - name: Publish Blazor WebAssembly app
         shell: pwsh
         run: |
+          npm.cmd ci --prefix mobile
+          if ($LASTEXITCODE -ne 0) { throw "Mobile dependency restore failed." }
           dotnet publish mobile/src/ElectronicLogbook.Mobile/ElectronicLogbook.Mobile.csproj `
             --configuration Release `
             --output mobile/artifacts/pages

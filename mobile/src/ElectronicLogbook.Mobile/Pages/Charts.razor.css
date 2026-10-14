@@ -1,34 +1,33 @@
 .analytics-page { min-width: 0; }
-.analytics-page h1 { margin-bottom: 16px; }
-.analytics-filter-panel { border-block: 1px solid var(--app-border); }
-.analytics-filter-panel > summary { min-height: 48px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-block: 12px; cursor: pointer; font-weight: 600; }
-.analytics-filter-panel > summary span:last-child { color: var(--app-text-muted); font-size: .875rem; font-weight: 400; }
-.analytics-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 16px; padding-block: 8px 16px; }
+.analytics-heading { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-block: 8px 20px; }
+.analytics-page h1 { margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -.025em; }
+.analytics-filter-panel { max-width: 100%; }
+.analytics-filter-panel[open] { flex-basis: 100%; }
+.analytics-filter-panel > summary { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 24px; background: var(--app-surface-alt); cursor: pointer; font-size: .8125rem; }
+.analytics-filter-panel > summary span { overflow-wrap: anywhere; }
+.analytics-filters { display: grid; grid-template-columns: 1fr; gap: 16px; padding-block: 8px 16px; }
+@media (min-width: 600px) { .analytics-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); } }
 .analytics-filters label { min-width: 0; font-size: .875rem; font-weight: 500; }
-.analytics-filters select { font-size: 1rem; font-weight: 400; }
 .analytics-filters input { width: 100%; min-height: 48px; padding: 10px 12px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface); color: var(--app-text); font: inherit; }
 .analytics-filter-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 12px 0; overflow-wrap: anywhere; }
 .analytics-filter-panel > summary span:last-child { display: inline-flex; align-items: center; gap: 8px; }
 .analytics-filter-panel ::deep .mud-icon-root, .analytics-bases ::deep .mud-icon-root { flex-shrink: 0; }
 .analytics-filter-summary { font-size: .875rem; color: var(--app-text-muted); }
-.analytics-selection { margin-block: 16px; font-variant-numeric: tabular-nums; }
-.analytics-data-quality { padding: 4px 12px; margin-block: 16px; border: 1px solid var(--app-border); border-radius: 8px; background: var(--app-surface-alt); overflow-wrap: anywhere; }
-.analytics-data-quality summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; color: var(--app-text); }
-.analytics-data-quality p { font-size: .875rem; line-height: 1.5; margin-block: 8px 12px; }
-.analytics-year-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr)); gap: 8px 16px; margin-block: 12px; padding: 0; list-style: none; }
+.analytics-selection { font-variant-numeric: tabular-nums; }
+.analytics-year-legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 12px 16px; margin-block: 14px 4px; padding: 0; list-style: none; }
 .analytics-year-legend li { display: flex; align-items: center; font-size: .875rem; min-width: 0; }
 .analytics-filter-summary ::deep button, .analytics-page ::deep .analytics-tabs .mud-tab { min-height: 48px; }
 .analytics-page ::deep .analytics-tabs .mud-tabs-tabbar-wrapper { width: 100%; }
 .analytics-page ::deep .analytics-tabs .mud-tabs-tabbar-wrapper > .mud-tooltip-root { flex: 1 1 0; min-width: 0; }
-.analytics-chart { min-width: 0; margin-block: 24px; padding-block: 12px; border-top: 1px solid var(--app-border); }
-.analytics-chart h2 { font-size: 1.25rem; margin-bottom: 8px; }
-.analytics-chart p { font-size: .875rem; color: var(--app-text-muted); margin-block: 8px 16px; }
-.analytics-chart ::deep .mud-chart { max-width: 100%; }
-.analytics-chart ::deep svg text { fill: var(--app-text); }
-.analytics-chart ::deep .mud-chart-legend { flex-wrap: wrap; }
-.analytics-chart ::deep .mud-chart-legend-item { min-height: 48px; }
-.analytics-chart details { margin-top: 12px; }
-.analytics-chart summary { min-height: 48px; display: flex; align-items: center; cursor: pointer; color: var(--app-primary); }
+.analytics-page ::deep .analytics-chart { min-width: 0; margin-block: 28px; padding-top: 24px; border-top: 1px solid var(--app-border); }
+.analytics-chart[aria-labelledby="hours-year-heading"] { border-top: 0; padding-top: 0; margin-top: 24px; }
+.analytics-page ::deep .analytics-chart h2 { font-size: 1.35rem; margin-bottom: 8px; font-weight: 700; letter-spacing: -.02em; }
+.analytics-chart p { font-size: .9375rem; color: var(--app-text-muted); margin-block: 0 12px; }
+.analytics-page ::deep .analytics-plot { width: 100%; min-width: 0; font-size: .8125rem; }
+.analytics-page ::deep .analytics-plot svg { max-width: 100%; }
+.analytics-page ::deep .analytics-tooltip { display: grid; gap: 6px; font-variant-numeric: tabular-nums; white-space: normal; overflow-wrap: anywhere; }
+.analytics-page ::deep .analytics-tooltip strong { font-size: 1.125em; }
+.analytics-page ::deep .analytics-tooltip > div { font-size: .875em; }
 .analytics-chart table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .analytics-chart th, .analytics-chart td { padding: 10px 4px; border-bottom: 1px solid var(--app-border); text-align: start; overflow-wrap: anywhere; }
 .analytics-chart td:last-child { text-align: end; }
@@ -37,7 +36,7 @@
 .analytics-legend { list-style: none; padding: 0; }
 .analytics-legend li { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-block: 6px; }
 .analytics-legend strong { font-variant-numeric: tabular-nums; }
-.analytics-swatch { display: inline-block; width: .75rem; height: .75rem; flex: 0 0 .75rem; margin-inline-end: 8px; border: 1px solid var(--app-text); vertical-align: middle; border-radius: 2px; }
+.analytics-swatch { display: inline-block; width: .75rem; height: .75rem; flex: 0 0 .75rem; margin-inline-end: 8px; vertical-align: middle; border-radius: 50%; }
 input:focus-visible, summary:focus-visible { outline: 3px solid var(--app-primary); outline-offset: 2px; }
 .analytics-bases { margin-block: 24px; min-width: 0; }
 .analytics-bases > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 48px; cursor: pointer; font-weight: 600; }

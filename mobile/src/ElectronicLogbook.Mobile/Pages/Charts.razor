@@ -7,7 +7,33 @@
 <PageTitle>Charts &amp; Stats | FlightLogX</PageTitle>
 
 <section class="analytics-page" aria-labelledby="charts-heading">
+    <div class="analytics-heading">
     <h1 id="charts-heading">Charts &amp; Stats</h1>
+    @if (Session.IsLoaded && !Session.IsStorageBlocked)
+    {
+        <details class="analytics-filter-panel">
+            <summary aria-label="@($"Filters: {PeriodLabel}, {(HasFilters ? "selection applied" : "all aircraft")}")"><MudIcon Icon="@Icons.Material.Outlined.FilterAlt" Size="Size.Small" aria-hidden="true" /><span>@PeriodLabel</span><MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" aria-hidden="true" /></summary>
+        <div class="analytics-filters" aria-label="Charts and statistics filters">
+            <label class="totals-filter-field">From date
+                <input id="analytics-from" type="date" @bind="from" @bind:after="Recalculate" />
+            </label>
+            <label class="totals-filter-field">To date
+                <input id="analytics-to" type="date" @bind="to" @bind:after="Recalculate" />
+            </label>
+            <MudSelect T="string" Label="Aircraft type" Placeholder="All types" MultiSelection="true" SelectAll="true"
+                       Clearable="true" Variant="Variant.Outlined" SelectedValues="aircraftTypes" SelectedValuesChanged="SetAircraftTypes"
+                       Comparer="StringComparer.OrdinalIgnoreCase" Class="analytics-type-filter">
+                @foreach (var value in types) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+            </MudSelect>
+            <MudSelect T="string" Label="Registration" Placeholder="All registrations" MultiSelection="true" SelectAll="true"
+                       Clearable="true" Variant="Variant.Outlined" SelectedValues="selectedRegistrations" SelectedValuesChanged="SetRegistrations"
+                       Comparer="StringComparer.OrdinalIgnoreCase" Class="analytics-registration-filter">
+                @foreach (var value in registrations) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
+            </MudSelect>
+        </div>
+        </details>
+    }
+    </div>
     @if (!Session.IsLoaded)
     {
         <section class="ui-state" role="status">
@@ -21,36 +47,16 @@
     }
     else
     {
-        <details class="analytics-filter-panel">
-            <summary><span>Filters</span><span>@PeriodLabel · @(HasFilters ? "Selection applied" : "All aircraft") <MudIcon Icon="@Icons.Material.Filled.ExpandMore" aria-hidden="true" /></span></summary>
-        <div class="analytics-filters" aria-label="Charts and statistics filters">
-            <label class="totals-filter-field">From date
-                <input id="analytics-from" type="date" @bind="from" @bind:after="Recalculate" />
-            </label>
-            <label class="totals-filter-field">To date
-                <input id="analytics-to" type="date" @bind="to" @bind:after="Recalculate" />
-            </label>
-            <label class="totals-filter-field">Aircraft type
-                <select id="analytics-type" @bind="aircraftType" @bind:after="Recalculate">
-                    <option value="">All types</option>
-                    @foreach (var value in types) { <option value="@value">@value</option> }
-                </select>
-            </label>
-            <label class="totals-filter-field">Registration
-                <select id="analytics-registration" @bind="registration" @bind:after="Recalculate">
-                    <option value="">All registrations</option>
-                    @foreach (var value in registrations) { <option value="@value">@value</option> }
-                </select>
-            </label>
-        </div>
-        </details>
+        @if (HasFilters)
+        {
         <div class="analytics-filter-summary" role="status">
-            <span>@PeriodLabel · @(string.IsNullOrEmpty(aircraftType) ? "All types" : aircraftType) · @(string.IsNullOrEmpty(registration) ? "All registrations" : registration)
+            <span>@PeriodLabel · @(aircraftTypes.Length == 0 ? "All types" : string.Join(", ", aircraftTypes)) · @(selectedRegistrations.Length == 0 ? "All registrations" : string.Join(", ", selectedRegistrations))
                 @if (from is not null) { <span> · From @from.Value.ToString("d MMM yyyy")</span> }
                 @if (to is not null) { <span> · To @to.Value.ToString("d MMM yyyy")</span> }
             </span>
             @if (HasFilters) { <MudButton OnClick="ClearFilters" Variant="Variant.Text" Color="Color.Primary">Clear filters</MudButton> }
         </div>
+        }
         @if (filterError is not null)
         {
             <MudAlert Severity="Severity.Error" role="alert">@filterError</MudAlert>
@@ -59,17 +65,9 @@
             <MudTabPanel Text="Charts">
                 @if (analytics is not null)
                 {
-                    <p class="analytics-selection">@MobileLogbookSession.FormatHours(analytics.FlyingHours) flying hours · @analytics.FlightCount flights.</p>
                     @if (analytics.MissingDateEntries > 0)
                     {
                         <MudAlert Severity="Severity.Warning">@analytics.MissingDateEntries entries have no valid date and are excluded.</MudAlert>
-                    }
-                    @if (analytics.UnresolvedAirportCodes.Count > 0)
-                    {
-                        <details class="analytics-data-quality"><summary>Unmatched route text · @analytics.UnresolvedAirportCodes.Count references</summary>
-                            <p>These references could not be matched to the airport catalogue. Airport visits and route distances may be incomplete; flying hours are unaffected. Remarks may include words that are not airport codes.</p>
-                            <p>@string.Join(", ", analytics.UnresolvedAirportCodes)</p>
-                        </details>
                     }
                     @if (analytics.FlightCount == 0)
                     {
@@ -79,15 +77,15 @@
                     {
                         <section class="analytics-chart" aria-labelledby="hours-year-heading">
                             <h2 id="hours-year-heading">Hours by year</h2>
-                            <MudChart T="decimal" ChartType="ChartType.StackedBar" ChartSeries="yearSeries" ChartLabels="yearLabels"
-                                      ChartOptions="yearOptions" Width="100%" Height="260px" MatchBoundsToSize="true" />
+                            <p class="analytics-selection">@MobileLogbookSession.FormatHours(analytics.FlyingHours) flying hours · @analytics.FlightCount flights.</p>
+                            <AnalyticsPlot Title="Hours by year" Data="yearPlot" Height="205" />
                             <ul class="analytics-year-legend" aria-label="Year chart categories">
-                                @for (var index = 0; index < yearSeries.Count; index++)
+                                @foreach (var series in yearPlot.Series)
                                 {
-                                    <li><span class="analytics-swatch" style="background: @yearOptions.ChartPalette[index]" aria-hidden="true"></span>@yearSeries[index].Name</li>
+                                    <li><span class="analytics-swatch" style="background: @series.Color" aria-hidden="true"></span>@series.Name</li>
                                 }
                             </ul>
-                            <details><summary>Show values for hours by year</summary>
+                            <div class="visually-hidden">
                                 <table><caption>Hours by year and category</caption><thead><tr><th scope="col">Year / category</th><th scope="col">Hours</th></tr></thead><tbody>
                                     @foreach (var year in analytics.HoursByYear)
                                     {
@@ -98,41 +96,38 @@
                                         }
                                     }
                                 </tbody></table>
-                            </details>
+                            </div>
                         </section>
                         <section class="analytics-chart" aria-labelledby="hours-total-heading">
                             <h2 id="hours-total-heading">Total hours over time</h2>
-                            <MudChart T="decimal" ChartType="ChartType.Timeseries" ChartSeries="cumulativeSeries" ChartOptions="timeOptions" Width="100%" Height="260px" MatchBoundsToSize="true" />
-                            <details><summary>Show values for total hours over time</summary>
+                            <p class="analytics-selection">@MobileLogbookSession.FormatHours(analytics.FlyingHours) total flying hours.</p>
+                            <AnalyticsPlot Title="Total hours over time" Data="timePlot" Height="210" />
+                            <div class="visually-hidden">
                                 <table><caption>Cumulative flying hours</caption><thead><tr><th scope="col">Date</th><th scope="col">Hours</th></tr></thead><tbody>
                                     @foreach (var point in analytics.CumulativeHours)
                                     {
                                         <tr><th scope="row">@point.Date.ToString("d MMM yyyy")</th><td>@MobileLogbookSession.FormatHours(point.Hours)</td></tr>
                                     }
                                 </tbody></table>
-                            </details>
+                            </div>
                         </section>
                         <section class="analytics-chart" aria-labelledby="hours-category-heading">
                             <h2 id="hours-category-heading">Hours by category</h2>
-                            <MudChart T="decimal" ChartType="ChartType.Pie" ChartSeries="categorySeries" ChartLabels="categoryLabels" ChartOptions="pieOptions" Width="100%" Height="300px">
-                                <TooltipTemplate Context="tooltip">
-                                    <MudBlazor.Charts.ChartTooltip Title="@($"{tooltip.Segment.LabelYValue} · {MobileLogbookSession.FormatHours(categorySeries[0].Data.GetValue(tooltip.Segment.Index))} h")" Color="@tooltip.Color" X="0" Y="0" />
-                                </TooltipTemplate>
-                            </MudChart>
+                            <AnalyticsPlot Title="Hours by category" Data="categoryPlot" Height="240" />
                             <ul class="analytics-legend" aria-label="Category and hours legend">
-                                @for (var index = 0; index < categoryLabels.Length; index++)
+                                @foreach (var series in categoryPlot.Series)
                                 {
-                                    <li><span><span class="analytics-swatch" style="background: @pieOptions.ChartPalette[index]" aria-hidden="true"></span>@categoryLabels[index]</span><strong>@MobileLogbookSession.FormatHours(categorySeries[0].Data.GetValue(index)) h</strong></li>
+                                    <li><span><span class="analytics-swatch" style="background: @series.Color" aria-hidden="true"></span>@series.Name</span><strong>@MobileLogbookSession.FormatHours(series.Values[0])</strong></li>
                                 }
                             </ul>
-                            <details><summary>Show values for hours by category</summary>
+                            <div class="visually-hidden">
                                 <table><caption>Flying hours by category</caption><thead><tr><th scope="col">Category</th><th scope="col">Hours</th></tr></thead><tbody>
                                     @foreach (var category in analytics.HoursByCategory)
                                     {
                                         <tr><th scope="row">@category.Name</th><td>@MobileLogbookSession.FormatHours(category.Value)</td></tr>
                                     }
                                 </tbody></table>
-                            </details>
+                            </div>
                         </section>
                         <AnalyticsRankingChart Title="Top five registrations" Values="analytics.TopRegistrations" />
                         <AnalyticsRankingChart Title="Top five aircraft types" Values="analytics.TopTypes" />
@@ -173,13 +168,6 @@
                 {
                     <p class="analytics-selection">@PeriodLabel · @MobileLogbookSession.FormatHours(analytics.FlyingHours) flying hours · @analytics.FlightCount flights.</p>
                     @if (analytics.MissingDateEntries > 0) { <MudAlert Severity="Severity.Warning">@analytics.MissingDateEntries entries have no valid date and are excluded.</MudAlert> }
-                    @if (analytics.UnresolvedAirportCodes.Count > 0)
-                    {
-                        <details class="analytics-data-quality"><summary>Unmatched route text · @analytics.UnresolvedAirportCodes.Count references</summary>
-                            <p>These references could not be matched to the airport catalogue. Airport visits and route distances may be incomplete; flying hours are unaffected. Remarks may include words that are not airport codes.</p>
-                            <p>@string.Join(", ", analytics.UnresolvedAirportCodes)</p>
-                        </details>
-                    }
                     <AnalyticsStatistics Analytics="analytics" PeriodLabel="@PeriodLabel" BasesAvailable="basesAvailable" />
                 }
             </MudTabPanel>
@@ -190,8 +178,8 @@
 @code {
     private DateOnly? from;
     private DateOnly? to;
-    private string aircraftType = "";
-    private string registration = "";
+    private string[] aircraftTypes = [];
+    private string[] selectedRegistrations = [];
     private string[] types = [];
     private string[] registrations = [];
     private string? filterError;
@@ -205,17 +193,12 @@
     private ITimer? dateTimer;
     private DateOnly calculatedDate;
     private bool disposed;
-    private List<ChartSeries<decimal>> yearSeries = [];
-    private string[] yearLabels = [];
-    private List<ChartSeries<decimal>> cumulativeSeries = [];
-    private List<ChartSeries<decimal>> categorySeries = [];
-    private string[] categoryLabels = [];
+    private MobileAnalyticsPlotData yearPlot = new("year", [], []);
+    private MobileAnalyticsPlotData timePlot = new("time", [], []);
+    private MobileAnalyticsPlotData categoryPlot = new("pie", [], []);
     private MobileAnalyticsValue[] airportValues = [];
-    private readonly string[] categoryPalette = new PieChartOptions().ChartPalette;
-    private readonly StackedBarChartOptions yearOptions = new() { ShowLegend = false, YAxisFormat = "0", MaxNumYAxisTicks = 5, XAxisLabelRotation = 45 };
-    private readonly TimeSeriesChartOptions timeOptions = new() { ShowLegend = false, YAxisFormat = "0.0", MaxNumYAxisTicks = 5, TimeLabelFormat = "dd MMM yy", TooltipTimeLabelFormat = "d MMM yyyy", YAxisRequireZeroPoint = true };
-    private readonly PieChartOptions pieOptions = new() { ShowLegend = false };
-    private bool HasFilters => from is not null || to is not null || aircraftType.Length > 0 || registration.Length > 0;
+    private readonly string[] categoryPalette = ["#7b9ccb", "#a7b9d3", "#63b9bb", "#a29bc7", "#397e63", "#a4b98e", "#7897a8", "#aec2ca", "#e4b363", "#bb8fa4", "#6a9272", "#a7c3ad", "#ba8e80", "#d7b3a7"];
+    private bool HasFilters => from is not null || to is not null || aircraftTypes.Length > 0 || selectedRegistrations.Length > 0;
     private string PeriodLabel => from is not null || to is not null ? "Selected period" : "All time";
 
     protected override async Task OnInitializedAsync()
@@ -293,8 +276,8 @@
 
     private void RefreshChoices()
     {
-        types = Choices(entry => entry.Type, aircraftType);
-        registrations = Choices(entry => entry.Reg, registration);
+        types = Choices(entry => entry.Type, aircraftTypes);
+        registrations = Choices(entry => entry.Reg, selectedRegistrations);
     }
 
     private void OnWorkbookStateChanged() => _ = InvokeAsync(async () =>
@@ -324,9 +307,12 @@
         dateTimer?.Dispose();
     }
 
-    private string[] Choices(Func<PortableLogbookWorkbookEntry, string?> select, string selected) => Session.CurrentEntriesV2
-        .Select(item => select(item.Entry!)).Append(selected).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim())
+    private string[] Choices(Func<PortableLogbookWorkbookEntry, string?> select, string[] selected) => Session.CurrentEntriesV2
+        .Select(item => select(item.Entry!)).Concat(selected).Where(value => !string.IsNullOrWhiteSpace(value)).Select(value => value!.Trim())
         .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.OrdinalIgnoreCase).ToArray();
+
+    private void SetAircraftTypes(IEnumerable<string> values) { aircraftTypes = values.ToArray(); Recalculate(); }
+    private void SetRegistrations(IEnumerable<string> values) { selectedRegistrations = values.ToArray(); Recalculate(); }
 
     private void Recalculate()
     {
@@ -339,30 +325,24 @@
             filterError = "Choose a From date on or before the To date.";
             return;
         }
-        analytics = MobileLogbookAnalytics.Create(Session.CurrentEntriesV2, new(from, to, aircraftType, registration),
+        analytics = MobileLogbookAnalytics.Create(Session.CurrentEntriesV2, new(from, to, aircraftTypes, selectedRegistrations),
             calculatedDate, baseAirports, MobileAirportCatalog.Default);
-        yearLabels = analytics.HoursByYear.Select(year => year.Year.ToString()).ToArray();
         var activeCategories = analytics.HoursByCategory.Select((category, index) => (category, index))
             .Where(item => item.category.Value > 0).ToArray();
-        yearOptions.ChartPalette = activeCategories.Select(item => categoryPalette[item.index % categoryPalette.Length]).ToArray();
-        pieOptions.ChartPalette = yearOptions.ChartPalette;
-        yearSeries = activeCategories.Select(item => new ChartSeries<decimal>
-        {
-            Name = item.category.Name, Data = analytics.HoursByYear.Select(year => year.Categories[item.index].Value).ToArray(), TooltipYValueFormat = "0.0"
-        }).ToList();
-        cumulativeSeries = [new() { Name = "Flying hours", Data = analytics.CumulativeHours.Select(point => (point.Date.ToDateTime(TimeOnly.MinValue), point.Hours)).ToArray(), TooltipYValueFormat = "0.0" }];
-        var span = analytics.CumulativeHours.Count < 2 ? 1 : analytics.CumulativeHours[^1].Date.DayNumber - analytics.CumulativeHours[0].Date.DayNumber;
-        timeOptions.TimeLabelSpacing = TimeSpan.FromDays(Math.Max(1, Math.Ceiling(span / 3d)));
-        var categories = analytics.HoursByCategory.Where(value => value.Value > 0).ToArray();
-        categoryLabels = categories.Select(value => value.Name).ToArray();
-        categorySeries = [new() { Name = "Flying hours", Data = categories.Select(value => value.Value).ToArray() }];
+        yearPlot = new("year", analytics.HoursByYear.Select(year => year.Year.ToString()).ToArray(),
+            activeCategories.Select(item => new MobileAnalyticsPlotSeries(item.category.Name,
+                analytics.HoursByYear.Select(year => year.Categories[item.index].Value).ToArray(), categoryPalette[item.index])).ToArray());
+        timePlot = new("time", analytics.CumulativeHours.Select(point => point.Date.ToString("yyyy-MM-dd")).ToArray(),
+            [new("Flying hours", analytics.CumulativeHours.Select(point => point.Hours).ToArray(), "")]);
+        categoryPlot = new("pie", activeCategories.Select(item => item.category.Name).ToArray(),
+            activeCategories.Select(item => new MobileAnalyticsPlotSeries(item.category.Name, [item.category.Value], categoryPalette[item.index])).ToArray());
         airportValues = analytics.TopAirports.Select(value => new MobileAnalyticsValue($"{value.Airport.Icao} · {value.Airport.Name}", value.Visits)).ToArray();
     }
 
     private void ClearFilters()
     {
         from = to = null;
-        aircraftType = registration = "";
+        aircraftTypes = selectedRegistrations = [];
         Recalculate();
     }
 }

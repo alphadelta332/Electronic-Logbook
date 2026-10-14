@@ -6,6 +6,15 @@ namespace ElectronicLogbook.Mobile.Tests;
 public sealed class PwaStaticAssetTests
 {
     [Fact]
+    public void ChartEngineLoadsLocallyBeforeItsBridgeAndBlazor()
+    {
+        var html = ReadMobileAsset("index.html");
+        Assert.Contains("src=\"js/vendor/echarts.min.js\"", html);
+        Assert.True(html.IndexOf("js/vendor/echarts.min.js", StringComparison.Ordinal) < html.IndexOf("js/analyticsCharts.js", StringComparison.Ordinal));
+        Assert.True(html.IndexOf("js/analyticsCharts.js", StringComparison.Ordinal) < html.IndexOf("_framework/blazor.webassembly.js", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ApplicationShellLoadsComponentStylesOutsideComments()
     {
         var html = Regex.Replace(ReadMobileAsset("index.html"), @"<!--[\s\S]*?-->", "");

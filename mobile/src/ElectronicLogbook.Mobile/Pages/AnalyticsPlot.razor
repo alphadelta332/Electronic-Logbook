@@ -1,0 +1,51 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div @ref="element" class="analytics-plot" style="height: @(Height)px" role="img" aria-label="@Title"></div>
+@if (error)
+{
+    <MudAlert Severity="Severity.Warning">Chart could not be drawn. Reopen this screen to retry.</MudAlert>
+    <table><caption>@Title</caption><thead><tr><th scope="col">Period / category</th><th scope="col">Value</th></tr></thead><tbody>
+        @foreach (var series in Data.Series)
+        {
+            @for (var index = 0; index < series.Values.Length; index++)
+            {
+                <tr><th scope="row">@(Data.Kind == "pie" ? series.Name : $"{Data.Labels[index]} · {series.Name}")</th><td>@(Data.Counts ? series.Values[index].ToString("N0") : MobileLogbookSession.FormatHours(series.Values[index]))</td></tr>
+            }
+        }
+    </tbody></table>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public MobileAnalyticsPlotData Data { get; set; } = default!;
+    [Parameter] public int Height { get; set; } = 240;
+    private ElementReference element;
+    private MobileAnalyticsPlotData? renderedData;
+    private bool disposed;
+    private bool error;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (disposed || ReferenceEquals(Data, renderedData)) return;
+        renderedData = Data;
+        try
+        {
+            await JS.InvokeVoidAsync("electronicLogbookCharts.update", element, Data);
+            if (error) { error = false; StateHasChanged(); }
+        }
+        catch (JSException)
+        {
+            if (disposed) return;
+            error = true;
+            StateHasChanged();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        try { await JS.InvokeVoidAsync("electronicLogbookCharts.dispose", element); }
+        catch (JSException) { }
+    }
+}

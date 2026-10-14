@@ -3,7 +3,7 @@ using ElectronicLogbook.Portable;
 namespace ElectronicLogbook.Mobile;
 
 public sealed record MobileAnalyticsFilters(
-    DateOnly? From = null, DateOnly? To = null, string? AircraftType = null, string? Registration = null);
+    DateOnly? From = null, DateOnly? To = null, IReadOnlyCollection<string>? AircraftTypes = null, IReadOnlyCollection<string>? Registrations = null);
 
 public sealed record MobileAnalyticsValue(string Name, decimal Value);
 public sealed record MobileAnalyticsYear(int Year, IReadOnlyList<MobileAnalyticsValue> Categories);
@@ -50,7 +50,6 @@ public sealed record MobileLogbookAnalytics(
     decimal FlyingHours,
     int FlightCount,
     int MissingDateEntries,
-    IReadOnlyList<string> UnresolvedAirportCodes,
     bool BasesConfigured)
 {
     private static readonly string[] CategoryNames =
@@ -79,7 +78,7 @@ public sealed record MobileLogbookAnalytics(
 
         var active = entries.Where(item => !item.IsDeleted && item.Entry is not null)
             .Select(item => item.Entry!)
-            .Where(entry => Matches(entry.Type, filters.AircraftType) && Matches(entry.Reg, filters.Registration))
+            .Where(entry => Matches(entry.Type, filters.AircraftTypes) && Matches(entry.Reg, filters.Registrations))
             .ToArray();
         var selected = active.Where(entry => entry.Date is { } date && date <= today &&
                 (filters.From is null || date >= filters.From) && (filters.To is null || date <= filters.To))
@@ -104,15 +103,13 @@ public sealed record MobileLogbookAnalytics(
         }
 
         var airports = new Dictionary<string, MobileAnalyticsAirport>(StringComparer.OrdinalIgnoreCase);
-        var unresolved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var legs = new List<MobileAnalyticsLeg>();
         foreach (var entry in flights)
         {
             var visited = new Dictionary<string, MobileAirport>(StringComparer.OrdinalIgnoreCase);
             foreach (var token in EndpointTokens(entry.From)
                          .Concat(MobileWorkbookEntryValidation.AirportTokens(entry.Via))
-                         .Concat(EndpointTokens(entry.To))
-                         .Concat(MobileWorkbookEntryValidation.AirportTokens(entry.Remarks)))
+                         .Concat(EndpointTokens(entry.To)))
             {
                 var airport = Resolve(token);
                 if (airport is not null) visited.TryAdd(airport.Icao, airport);
@@ -125,11 +122,8 @@ public sealed record MobileLogbookAnalytics(
                     : new(airport, 1, entry.Date!.Value);
             }
 
-            var route = string.IsNullOrWhiteSpace(entry.From) && string.IsNullOrWhiteSpace(entry.Via) &&
-                        string.IsNullOrWhiteSpace(entry.To)
-                ? MobileWorkbookEntryValidation.AirportTokens(entry.Remarks)
-                : EndpointTokens(entry.From).Concat(MobileWorkbookEntryValidation.AirportTokens(entry.Via))
-                    .Concat(EndpointTokens(entry.To));
+            var route = EndpointTokens(entry.From).Concat(MobileWorkbookEntryValidation.AirportTokens(entry.Via))
+                .Concat(EndpointTokens(entry.To));
             MobileAirport? previous = null;
             foreach (var token in route)
             {
@@ -193,18 +187,13 @@ public sealed record MobileLogbookAnalytics(
             Rankings(flights, entry => entry.Reg).Take(5).ToArray(),
             Rankings(flights, entry => entry.Type).Take(5).ToArray(), cumulative, Categories(flights),
             rankedAirports.Take(10).ToArray(), statistics, total, flights.Length,
-            active.Count(entry => entry.Date is null), unresolved.Order(StringComparer.OrdinalIgnoreCase).ToArray(), bases.Count > 0);
+            active.Count(entry => entry.Date is null), bases.Count > 0);
 
-        MobileAirport? Resolve(string token)
-        {
-            if (catalog.TryFind(token, out var airport)) return airport;
-            unresolved.Add(token.Trim().ToUpperInvariant());
-            return null;
-        }
+        MobileAirport? Resolve(string token) => catalog.TryFind(token, out var airport) ? airport : null;
     }
 
-    private static bool Matches(string? value, string? filter) => string.IsNullOrWhiteSpace(filter) ||
-        string.Equals(value?.Trim(), filter.Trim(), StringComparison.OrdinalIgnoreCase);
+    private static bool Matches(string? value, IReadOnlyCollection<string>? filters) => filters is null || filters.Count == 0 ||
+        filters.Any(filter => string.Equals(value?.Trim(), filter.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private static bool IsOtherPerson(string? name) => !string.IsNullOrWhiteSpace(name) &&
         !string.Equals(name.Trim(), "Self", StringComparison.OrdinalIgnoreCase);
@@ -213,9 +202,7 @@ public sealed record MobileLogbookAnalytics(
         string.IsNullOrWhiteSpace(code) ? [] : new[] { code.Trim() };
 
     private static string RouteLabel(PortableLogbookWorkbookEntry entry) =>
-        string.IsNullOrWhiteSpace(entry.From) && string.IsNullOrWhiteSpace(entry.Via) && string.IsNullOrWhiteSpace(entry.To)
-            ? entry.Remarks?.Trim() ?? string.Empty
-            : string.Join(" → ", new[] { entry.From, entry.Via, entry.To }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        string.Join(" → ", new[] { entry.From, entry.Via, entry.To }.Where(value => !string.IsNullOrWhiteSpace(value)));
 
     private static IReadOnlyList<MobileAnalyticsValue> Rankings(
         IEnumerable<PortableLogbookWorkbookEntry> entries, Func<PortableLogbookWorkbookEntry, string?> name) =>

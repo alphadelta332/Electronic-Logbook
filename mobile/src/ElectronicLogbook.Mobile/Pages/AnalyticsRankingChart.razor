@@ -6,30 +6,24 @@
     }
     else
     {
-        @* MudBlazor 9.8 has vertical bars only; use labelled horizontal bars for phone rankings. *@
-        <ol class="analytics-bars" aria-label="@Title">
+        <AnalyticsPlot Title="@Title" Data="plot" Height="@(Math.Max(120, Values.Count * 48 + 20))" />
+        <ol class="visually-hidden" aria-label="@Title">
             @foreach (var value in Values)
             {
                 <li>
-                    <div><span>@value.Name</span><strong>@Format(value.Value) @(Counts ? "visits" : "h")</strong></div>
-                    <div class="analytics-bar-track" aria-hidden="true"><div style="width: @((value.Value / Values[0].Value * 100m).ToString("0.###", CultureInfo.InvariantCulture))%"></div></div>
+                    <div><span>@value.Name</span><strong>@Format(value.Value)@(Counts ? " visits" : "")</strong></div>
                 </li>
             }
         </ol>
     }
-    <details><summary>Show values for @Title.ToLowerInvariant()</summary>
-        <table><caption>@Title</caption><thead><tr><th scope="col">@(Counts ? "Airport" : "Aircraft")</th><th scope="col">@(Counts ? "Visits" : "Hours")</th></tr></thead><tbody>
-            @foreach (var value in Values)
-            {
-                <tr><th scope="row">@value.Name</th><td>@Format(value.Value)</td></tr>
-            }
-        </tbody></table>
-    </details>
 </section>
 
 @code {
     [Parameter, EditorRequired] public string Title { get; set; } = "";
     [Parameter, EditorRequired] public IReadOnlyList<MobileAnalyticsValue> Values { get; set; } = [];
     [Parameter] public bool Counts { get; set; }
+    private MobileAnalyticsPlotData plot = new("ranking", [], []);
+    protected override void OnParametersSet() => plot = new("ranking", Values.Select(value => value.Name).ToArray(),
+        [new(Title, Values.Select(value => value.Value).ToArray(), "")], Counts);
     private string Format(decimal value) => Counts ? value.ToString("0") : MobileLogbookSession.FormatHours(value);
 }

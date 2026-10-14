@@ -16,6 +16,11 @@
            Text="versions.properties must contain app_version in numeric major.minor.patch form." />
   </Target>
 
+  <Target Name="ValidateChartDependency" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\..\..\node_modules\echarts\dist\echarts.common.min.js')"
+           Text="Mobile chart assets are missing. Run npm.cmd ci from mobile/ before building." />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.10" PrivateAssets="all" />
@@ -28,6 +33,10 @@
 
   <ItemGroup>
     <ServiceWorker Include="wwwroot\service-worker.js" PublishedContent="wwwroot\service-worker.published.js" />
+    <Content Include="..\..\node_modules\echarts\dist\echarts.common.min.js" Link="wwwroot\js\vendor\echarts.min.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\node_modules\echarts\LICENSE" Link="wwwroot\js\vendor\echarts-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\node_modules\echarts\NOTICE" Link="wwwroot\js\vendor\echarts-NOTICE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\node_modules\zrender\LICENSE" Link="wwwroot\js\vendor\zrender-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

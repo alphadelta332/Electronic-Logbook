@@ -64,7 +64,13 @@ jobs:
         run: pwsh -NoProfile -ExecutionPolicy Bypass -File mobile/scripts/Generate-AppIcons.ps1
 
       - name: Build solution
-        run: dotnet build ElectronicLogbook.Updater.sln --configuration Release
+        shell: pwsh
+        run: |
+          npm.cmd ci --prefix mobile
+          if ($LASTEXITCODE -ne 0) { throw "Mobile dependency restore failed." }
+          npm.cmd run test:charts --prefix mobile
+          if ($LASTEXITCODE -ne 0) { throw "Chart renderer checks failed." }
+          dotnet build ElectronicLogbook.Updater.sln --configuration Release
 
       - name: Test solution
         shell: pwsh

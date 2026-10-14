@@ -19,7 +19,7 @@ public sealed class AnalyticsStatisticsComponentTests : BunitContext
             10.1m, 11.1m, 12.1m, 13.1m, 14.1m, new("Another PIC", 15.1m), 16,
             new(sydney, 17, date), new(melbourne, 18, date), new(melbourne, 19, date.AddDays(2)), 20,
             new(sydney, melbourne, date, 21.1), new(melbourne, sydney, date.AddDays(1), 22.2), 23.3m, 24.4m);
-        var analytics = new MobileLogbookAnalytics([], [], [], [], [], [], stats, 0, 0, 0, [], true);
+        var analytics = new MobileLogbookAnalytics([], [], [], [], [], [], stats, 0, 0, 0, true);
         var page = Render<AnalyticsStatistics>(parameters => parameters.Add(component => component.Analytics, analytics));
 
         Assert.Equal(new[]

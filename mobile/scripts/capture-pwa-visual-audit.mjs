@@ -23,6 +23,7 @@ const mimeTypes = new Map([
 ]);
 
 const phoneWidths = [
+    { name: "390x844", width: 390, height: 844 },
     { name: "320x712", width: 320, height: 712 },
     { name: "360x800", width: 360, height: 800 },
     { name: "412x915", width: 412, height: 915 }
@@ -57,6 +58,7 @@ const routes = [
     { name: "more", path: "/more", readySelector: "main .more-page" },
     { name: "charts", path: "/charts", readySelector: "main [aria-labelledby=\"charts-heading\"]" },
     { name: "charts-populated", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics" },
+    { name: "charts-design", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics-design" },
     { name: "stats-populated", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics", stats: true },
     { name: "routes", path: "/routes", readySelector: "main [aria-labelledby=\"routes-heading\"]" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" },
@@ -158,21 +160,27 @@ async function prepareRouteState(page, baseUrl, state) {
     }
 
     const entryId = await createDashboardFlight(page, baseUrl);
-    if (state === "large-totals" || state === "analytics") {
+    if (state === "large-totals" || state === "analytics" || state === "analytics-design") {
         // Synthetic migrated history, isolated in this audit's disposable browser context.
-        await page.evaluate(async (analytics) => {
+        await page.evaluate(async (fixture) => {
+            const analytics = fixture !== "large-totals";
+            const design = fixture === "analytics-design";
+            const annualHours = [1, 1, 5, 10, 12, 85, 53, 45, 331, 125, 105, 5];
+            const designFields = ["seIcusDay", "seDualDay", "seDualNight", "seCommandDay", "seCommandNight", "meDualDay", "meDualNight"];
+            const shares = [.08, .07, .04, .7, .05, .04, .02];
             const stored = JSON.parse(await window.electronicLogbookStore.load("portable-document"));
             const document = JSON.parse(stored.documentJson);
             const template = document.operations.find(operation => operation.entry);
             const today = new Date();
             const hourFields = ["seCommandDay", "meDualDay", "seIcusDay", "copilotDay"];
-            document.operations = Array.from({ length: analytics ? 303 : 1493 }, (_, index) => {
+            document.operations = Array.from({ length: design ? 84 : analytics ? 303 : 1493 }, (_, index) => {
                 const operation = structuredClone(template);
                 operation.entryId = `ent_audit_${index}`;
                 operation.revisionId = `rev_audit_${index}`;
                 const date = new Date(today.getFullYear(), today.getMonth(), today.getDate());
                 date.setDate(date.getDate() - (index < 1100 ? 366 + index : index < 1465 ? 29 + (index - 1100) % 336 : index - 1465));
                 if (analytics) date.setTime(new Date(2011, 0, 1 + index * 14).getTime());
+                if (design) date.setTime(new Date(2011 + Math.floor(index / 7), index % 7, 1).getTime());
                 Object.assign(operation.entry, {
                     year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(),
                     seCommandDay: null,
@@ -185,11 +193,19 @@ async function prepareRouteState(page, baseUrl, state) {
                     remarks: "GENERAL HANDLING AEROS STALLS TURNS CLIMBING DESCENDING YSSY YCBR",
                     from: "YSSY", to: "YCBR"
                 });
+                if (design) {
+                    for (const field of hourFields) operation.entry[field] = null;
+                    const total = annualHours[Math.floor(index / 7)];
+                    const portion = index % 7;
+                    operation.entry[designFields[portion]] = portion === 6
+                        ? Math.round((total - shares.slice(0, 6).reduce((sum, share) => sum + Math.round(total * share * 100) / 100, 0)) * 100) / 100
+                        : Math.round(total * shares[portion] * 100) / 100;
+                }
                 return operation;
             });
             stored.documentJson = JSON.stringify(document);
             await window.electronicLogbookStore.save("portable-document", JSON.stringify(stored));
-        }, state === "analytics");
+        }, state);
     }
     if (state === "deleted") {
         await page.goto(`${baseUrl}/flights/${entryId}`, { waitUntil: "domcontentloaded" });
@@ -581,7 +597,10 @@ try {
                     await page.screenshot({
                         path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}.png`)
                     });
-                    if (route.state === "analytics") {
+                    if (route.state === "analytics" || route.state === "analytics-design") {
+                        if (!route.stats) {
+                            await page.locator(".analytics-plot[data-chart-ready=true]").first().waitFor({ state: "visible" });
+                        }
                         const tabLayout = await page.locator(".analytics-tabs [role=tablist]").evaluate(element => {
                             const tabs = [...element.querySelectorAll("[role=tab]")].map(tab => tab.getBoundingClientRect());
                             const bar = element.closest(".mud-tabs-tabbar-content").getBoundingClientRect();
@@ -598,27 +617,65 @@ try {
                             await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-section${index + 1}.png`) });
                         }
                         if (!route.stats) {
+                            if (route.state === "analytics-design") {
+                                const year = page.locator("[aria-labelledby=hours-year-heading] .analytics-plot");
+                                await year.scrollIntoViewIfNeeded();
+                                await year.evaluate(element => {
+                                    const chart = window.echarts.getInstanceByDom(element);
+                                    const index = chart.getOption().xAxis[0].data.indexOf("2019");
+                                    chart.dispatchAction({ type: "showTip", seriesIndex: chart.getOption().series.length - 1, dataIndex: index });
+                                });
+                                await page.locator("[aria-labelledby=hours-year-heading] .analytics-tooltip strong").waitFor({ state: "visible" });
+                                await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-year-tooltip.png`) });
+                                await year.evaluate(element => window.echarts.getInstanceByDom(element).dispatchAction({ type: "hideTip" }));
+                                await page.evaluate(async () => {
+                                    await navigator.serviceWorker.ready;
+                                    const cached = await caches.match(new URL("js/vendor/echarts.min.js", document.baseURI));
+                                    if (!cached) throw new Error("Chart engine is missing from the offline cache.");
+                                });
+                                await context.setOffline(true);
+                            }
                             const pie = page.locator("[aria-labelledby=hours-category-heading]");
                             await pie.scrollIntoViewIfNeeded();
-                            await pie.locator(".mud-chart-serie").first().dispatchEvent("mouseover");
-                            const tooltip = pie.locator(".svg-tooltip text");
+                            await pie.locator(".analytics-plot").evaluate(element => {
+                                window.echarts.getInstanceByDom(element).dispatchAction({ type: "showTip", seriesIndex: 0, dataIndex: 0 });
+                            });
+                            const tooltip = pie.locator(".analytics-tooltip strong");
                             await tooltip.waitFor({ state: "visible" });
-                            if (!/^.+ · \d+\.\d h$/.test((await tooltip.textContent()).trim())) {
+                            if (!/^\d+\.\d$/.test((await tooltip.textContent()).trim())) {
                                 throw new Error(`Pie tooltip exposes unformatted hours: ${await tooltip.textContent()}`);
                             }
                             await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-tooltip.png`) });
-                            await pie.locator(".mud-chart-serie").first().dispatchEvent("mouseout");
+                            await pie.locator(".analytics-plot").evaluate(element => window.echarts.getInstanceByDom(element).dispatchAction({ type: "hideTip" }));
                         }
                         const filters = page.locator(".analytics-filter-panel");
                         await filters.locator("summary").click();
                         await filters.scrollIntoViewIfNeeded();
                         const fieldStyle = await page.locator("#analytics-from").evaluate(element => getComputedStyle(element).backgroundColor);
-                        const barHeight = await page.locator(".analytics-bar-track").first().evaluate(element => getComputedStyle(element).height);
-                        if (fieldStyle === "rgb(255, 255, 255)" && colorScheme === "dark" || barHeight !== "12px") {
-                            throw new Error(`Analytics component stylesheet did not apply: date=${fieldStyle}, bar=${barHeight}`);
+                        const plotCount = await page.locator(".analytics-plot[data-chart-ready=true]").count();
+                        if (fieldStyle === "rgb(255, 255, 255)" && colorScheme === "dark" || plotCount !== 6) {
+                            throw new Error(`Analytics charts did not render: date=${fieldStyle}, plots=${plotCount}`);
                         }
                         await assertAccessible(page, `analytics expanded filters ${profile.name} ${colorScheme}`);
                         await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-filters.png`) });
+                        for (const [selector, values] of [
+                            [".analytics-type-filter", ["C172", "C208"]],
+                            [".analytics-registration-filter", ["VH-UMV", "VH-NMV"]]
+                        ]) {
+                            await page.locator(`${selector} .mud-input-control-input-container`).click();
+                            for (const value of values) {
+                                await page.locator(".mud-popover-open").getByText(value, { exact: true }).click();
+                            }
+                            await page.locator("#charts-heading").click();
+                            const summary = await page.locator(".analytics-filter-summary").innerText();
+                            if (values.some(value => !summary.includes(value))) {
+                                throw new Error(`Multiple selections missing from analytics summary: ${summary}`);
+                            }
+                        }
+                        await assertAccessible(page, `analytics multiple selections ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-multiple-filters.png`) });
+                        await page.locator(".analytics-filter-summary button").click();
+                        if (route.state === "analytics-design") await context.setOffline(false);
                     }
 
                     if (route.name.startsWith("dashboard")) {

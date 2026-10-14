@@ -76,7 +76,6 @@ public sealed class MobileLogbookAnalyticsTests
         Assert.Equal(new DateOnly(2022, 12, 31), result.CumulativeHours[0].Date);
         Assert.Equal(new[] { 6, 4, 3 }, result.TopAirports.Select(airport => airport.Visits));
         Assert.True(result.BasesConfigured);
-        Assert.Empty(result.UnresolvedAirportCodes);
     }
 
     [Fact]
@@ -98,17 +97,30 @@ public sealed class MobileLogbookAnalyticsTests
             Flight(Today, 3), Flight(Today.AddDays(1), 64),
             Flight(Today, 16) with { Type = "OTHER" }, Flight(Today, 32) with { Reg = "OTHER" }
         };
-        var all = Create(entries, new(AircraftType: " type ", Registration: "reg"));
+        var all = Create(entries, new(AircraftTypes: [" type "], Registrations: ["reg"]));
         Assert.Equal(13m, all.FlyingHours);
         Assert.Equal(20m, all.Statistics.IfrPercentageRecent);
         Assert.Equal(1m, all.Statistics.AverageFlyingDaysPerActiveMonthRecent);
-        var selected = Create(entries, new(Today, Today, "TYPE", "REG"));
+        var selected = Create(entries, new(Today, Today, ["TYPE"], ["REG"]));
         Assert.Equal(3m, selected.FlyingHours);
         Assert.Equal(0m, selected.Statistics.IfrPercentageRecent);
         Assert.Single(selected.TopTypes);
         Assert.Single(selected.TopRegistrations);
         Assert.Equal(2, selected.CumulativeHours.Count);
         Assert.Throws<ArgumentException>(() => Create(entries, new(Today, cutoff)));
+    }
+
+    [Fact]
+    public void MultipleFiltersMatchAnyValueWithinEachFieldAndBothFieldsTogether()
+    {
+        var entries = new[]
+        {
+            Flight(Today, 1), Flight(Today, 2) with { Type = "OTHER", Reg = "SECOND" },
+            Flight(Today, 4) with { Type = "THIRD" }, Flight(Today, 8) with { Reg = "THIRD" }
+        };
+        Assert.Equal(3m, Create(entries, new(AircraftTypes: [" type ", "other"], Registrations: ["reg", " second "])).FlyingHours);
+        Assert.Equal(7m, Create(entries, new(AircraftTypes: [], Registrations: ["REG", "SECOND"])).FlyingHours);
+        Assert.Equal(15m, Create(entries, new(AircraftTypes: [], Registrations: [])).FlyingHours);
     }
 
     [Fact]
@@ -177,20 +189,24 @@ public sealed class MobileLogbookAnalyticsTests
     }
 
     [Fact]
-    public void AliasesRemarksIgnoredTokensAndUnresolvedStopsPreserveRouteMeaning()
+    public void RemarksDoNotCreateAirportsLegsOrWarningsAndUnresolvedViaBreaksLegs()
     {
         var result = Create([
             Flight(new(2024, 1, 1), 1) with { From = "AA", Via = "BBB UNKNOWN CCC", To = "AAAA", Remarks = "(AAA)-BBB, IPC OPC FR IR IFR VFR TEST CHECK CIRCLING SIM" },
             Flight(new(2024, 1, 2), 1) with { From = null, Via = null, To = null, Remarks = "AAA-BBB-CCC" },
             Flight(new(2024, 1, 3), 1) with { Via = "AAA", To = "AAAA" }
         ], bases: ["AAA", "BBBB", "CC"]);
-        Assert.Equal(new[] { "UNKNOWN" }, result.UnresolvedAirportCodes);
-        Assert.Equal(new[] { 3, 2, 2 }, result.TopAirports.Select(item => item.Visits));
+        Assert.Equal(new[] { 2, 1, 1 }, result.TopAirports.Select(item => item.Visits));
         Assert.Null(result.Statistics.MostVisitedAirportExcludingBases);
         Assert.True(result.BasesConfigured);
         Assert.InRange(result.Statistics.ShortestLeg!.NauticalMiles, 60.03, 60.05);
         Assert.Equal("CCCC", result.Statistics.LongestLeg!.From.Icao);
         Assert.Equal("AAAA", result.Statistics.LongestLeg.To.Icao);
+        var remarksOnly = Create([Flight(Today, 1) with { From = null, Via = null, To = null, Remarks = "AAA-BBB-CCC OTHER WORDS" }]);
+        Assert.Empty(remarksOnly.TopAirports);
+        Assert.Null(remarksOnly.Statistics.LongestLeg);
+        Assert.Equal(string.Empty, remarksOnly.Statistics.LongestFlight!.Route);
+        Assert.Equal(120m, remarksOnly.Statistics.ApproximateNauticalMiles);
         var broken = Create([Flight(Today, 1) with { Via = "UNKNOWN" }]);
         Assert.Null(broken.Statistics.LongestLeg);
         Assert.Null(broken.Statistics.ShortestLeg);

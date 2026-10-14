@@ -13,6 +13,8 @@ public sealed class PublishMobilePwaWorkflowTests
         Assert.Contains("mobile/artifacts/pages/wwwroot", workflow, StringComparison.Ordinal);
         Assert.Contains("actions/upload-pages-artifact", workflow, StringComparison.Ordinal);
         Assert.Contains("path: mobile/artifacts/pages/wwwroot", workflow, StringComparison.Ordinal);
+        Assert.Contains("npm.cmd ci --prefix mobile", workflow, StringComparison.Ordinal);
+        Assert.True(workflow.IndexOf("npm.cmd ci --prefix mobile", StringComparison.Ordinal) < workflow.IndexOf("dotnet publish", StringComparison.Ordinal));
     }
 
     [Fact]
