@@ -604,11 +604,15 @@ try {
                         const tabLayout = await page.locator(".analytics-tabs [role=tablist]").evaluate(element => {
                             const tabs = [...element.querySelectorAll("[role=tab]")].map(tab => tab.getBoundingClientRect());
                             const bar = element.closest(".mud-tabs-tabbar-content").getBoundingClientRect();
+                            const outer = element.closest(".mud-tabs-tabbar");
+                            const style = getComputedStyle(outer);
+                            const availableWidth = outer.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
                             return { count: tabs.length, gap: bar.right - tabs.at(-1).right,
-                                firstGap: tabs[0].left - bar.left, widths: tabs.map(tab => tab.width), barWidth: bar.width };
+                                firstGap: tabs[0].left - bar.left, between: tabs[1].left - tabs[0].right,
+                                widths: tabs.map(tab => tab.width), barWidth: bar.width, availableWidth };
                         });
-                        if (tabLayout.count !== 2 || Math.abs(tabLayout.gap) > 1 || Math.abs(tabLayout.firstGap) > 1 ||
-                            tabLayout.widths.some(width => Math.abs(width - tabLayout.barWidth / 2) > 1)) {
+                        if (tabLayout.count !== 2 || Math.abs(tabLayout.barWidth - tabLayout.availableWidth) > 1 || Math.abs(tabLayout.gap) > 1 || Math.abs(tabLayout.firstGap) > 1 ||
+                            tabLayout.widths.some(width => Math.abs(width - (tabLayout.barWidth - tabLayout.between) / 2) > 1)) {
                             throw new Error(`Charts/Stats tabs do not evenly fill the bar: ${JSON.stringify(tabLayout)}`);
                         }
                         const sections = page.locator(route.stats ? ".analytics-statistics" : ".analytics-chart");
@@ -649,7 +653,7 @@ try {
                             await pie.locator(".analytics-plot").evaluate(element => window.echarts.getInstanceByDom(element).dispatchAction({ type: "hideTip" }));
                         }
                         const filters = page.locator(".analytics-filter-panel");
-                        await filters.locator("summary").click();
+                        await page.getByRole("button", { name: "Filters", exact: true }).click();
                         await filters.scrollIntoViewIfNeeded();
                         const fieldStyle = await page.locator("#analytics-from").evaluate(element => getComputedStyle(element).backgroundColor);
                         const plotCount = await page.locator(".analytics-plot[data-chart-ready=true]").count();
@@ -809,7 +813,22 @@ try {
                         }
 
                         await assertAccessible(page, `currency interaction ${profile.name} ${colorScheme}`);
+                    } else if (route.name === "logbook-totals") {
+                        await page.getByRole("button", { name: "Filters", exact: true }).click();
+                        await page.locator(".date-range-fields").waitFor({ state: "visible" });
+                        await assertAccessible(page, `totals expanded filters ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-filters.png`) });
                     } else if (route.path === "/settings") {
+                        const appearance = page.getByRole("group", { name: "Appearance", exact: true });
+                        const originalTheme = await appearance.locator("button[aria-pressed=true]").innerText();
+                        for (const theme of ["Light", "Dark", "System"]) {
+                            await appearance.getByRole("button", { name: theme, exact: true }).click();
+                            await page.waitForFunction(expected => {
+                                const selected = document.querySelectorAll('[aria-label="Appearance"] button[aria-pressed=true]');
+                                return selected.length === 1 && selected[0].textContent.trim() === expected;
+                            }, theme);
+                        }
+                        await appearance.getByRole("button", { name: originalTheme.trim(), exact: true }).click();
                         if (route.expanded) {
                             for (const [name, value] of [["Invited account email", "audit@example.invalid"], ["Six-digit sign-in code", "123456"]]) {
                                 const input = page.getByLabel(name, { exact: true });

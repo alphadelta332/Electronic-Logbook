@@ -38,9 +38,9 @@ else
                     <h2>Choose entries</h2>
                 </div>
             </div>
-            <div class="field-grid">
-                <label>Start date <input type="date" value="@StartDateText" @onchange="args => StartDateText = args.Value?.ToString()" /></label>
-                <label>End date <input type="date" value="@EndDateText" @onchange="args => EndDateText = args.Value?.ToString()" /></label>
+            <div class="date-range-fields">
+                <label>Start date <input type="date" value="@StartDateText" max="@EndDateText" @onchange="args => StartDateText = args.Value?.ToString()" /></label>
+                <label>End date <input type="date" value="@EndDateText" min="@StartDateText" @onchange="args => EndDateText = args.Value?.ToString()" /></label>
             </div>
             <div class="segmented-control" role="group" aria-label="Export layout">
                 <button type="button" class="@LayoutButtonClass(MobileLogbookFileExportLayout.Full)" aria-pressed="@(Layout == MobileLogbookFileExportLayout.Full)" @onclick="() => Layout = MobileLogbookFileExportLayout.Full">Full</button>

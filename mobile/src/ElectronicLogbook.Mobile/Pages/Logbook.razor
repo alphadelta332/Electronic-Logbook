@@ -45,9 +45,7 @@ else
                         <span class="eyebrow">Entries</span>
                         <h2>Current record</h2>
                     </div>
-                    <MudButton class="logbook-filter-button" Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowFilters = !ShowFilters)">
-                        @EntryFilterButtonLabel
-                    </MudButton>
+                    <FilterToggleButton Count="@TotalsFilterCount" @bind-Expanded="ShowFilters" />
                 </div>
 
                 <label class="search-field">
@@ -87,9 +85,7 @@ else
                         <span class="eyebrow">Totals</span>
                         <h2>Flying totals</h2>
                     </div>
-                    <MudButton class="logbook-filter-button" Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.FilterList" OnClick="@(() => ShowTotalsFilters = !ShowTotalsFilters)">
-                        @TotalsFilterButtonLabel
-                    </MudButton>
+                    <FilterToggleButton Count="@TotalsFilterCount" @bind-Expanded="ShowTotalsFilters" />
                 </div>
 
                 <p class="totals-filter-count" role="status">@TotalsEntryCountLabel</p>
@@ -337,9 +333,6 @@ else
     private string EntryCountLabel => Session.CurrentEntriesV2.Count == 1
         ? "1 active entry"
         : $"{Session.CurrentEntriesV2.Count} active entries";
-    private string EntryFilterButtonLabel => TotalsFilterCount == 0
-        ? "Filters"
-        : $"Filters ({TotalsFilterCount})";
 
     private IReadOnlyList<PortableLogbookMaterializedEntryV2> FilteredEntries =>
         Session.CurrentEntriesV2
@@ -377,9 +370,6 @@ else
     private bool HasTotalsDateRange => TotalsStartDate is not null || TotalsEndDate is not null;
     private int TotalsFilterCount => ActiveTotalsFilterSelections.Count + (HasTotalsDateRange ? 1 : 0);
 
-    private string TotalsFilterButtonLabel => TotalsFilterCount == 0
-        ? "Filter totals"
-        : $"Filters ({TotalsFilterCount})";
 
     private string TotalsEntryCountLabel => TotalsFilterCount == 0
         ? EntryCountLabel
@@ -696,7 +686,7 @@ else
 
         @if (SelectedTotalsFilterField.Kind == MobileLogbookTotalsFilterFieldKind.Date)
         {
-            <div class="totals-filter-date-range">
+            <div class="date-range-fields">
                 <label>Start date <input type="date" value="@TotalsStartDateText" max="@TotalsEndDateText" @onchange="OnTotalsStartDateChanged" /></label>
                 <label>End date <input type="date" value="@TotalsEndDateText" min="@TotalsStartDateText" @onchange="OnTotalsEndDateChanged" /></label>
             </div>

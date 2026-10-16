@@ -80,10 +80,10 @@ else
                 <h2>Theme</h2>
                 <span class="draft-pill">@UiPreferences.ThemeMode</span>
             </div>
-            <div class="segmented-control" aria-label="Appearance">
-                <button type="button" class="@ThemeButtonClass("System")" @onclick="SetSystemThemeModeAsync">System</button>
-                <button type="button" class="@ThemeButtonClass("Light")" @onclick="SetLightThemeModeAsync">Light</button>
-                <button type="button" class="@ThemeButtonClass("Dark")" @onclick="SetDarkThemeModeAsync">Dark</button>
+            <div class="segmented-control" role="group" aria-label="Appearance">
+                <button type="button" class="@ThemeButtonClass("System")" aria-pressed="@(UiPreferences.ThemeMode == "System" ? "true" : "false")" @onclick="SetSystemThemeModeAsync">System</button>
+                <button type="button" class="@ThemeButtonClass("Light")" aria-pressed="@(UiPreferences.ThemeMode == "Light" ? "true" : "false")" @onclick="SetLightThemeModeAsync">Light</button>
+                <button type="button" class="@ThemeButtonClass("Dark")" aria-pressed="@(UiPreferences.ThemeMode == "Dark" ? "true" : "false")" @onclick="SetDarkThemeModeAsync">Dark</button>
             </div>
             <div class="accent-picker" aria-label="Accent colour">
                 @foreach (var accent in MobileUiPreferences.AccentOptions)

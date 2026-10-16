@@ -2,6 +2,7 @@ using System.Text.Json;
 using Bunit;
 using ElectronicLogbook.Mobile.Pages;
 using ElectronicLogbook.Portable;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.JSInterop;
 using MudBlazor;
@@ -25,6 +26,53 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
 
     public Task InitializeAsync() => Task.CompletedTask;
     async Task IAsyncLifetime.DisposeAsync() => await base.DisposeAsync();
+
+    [Theory]
+    [InlineData("entries")]
+    [InlineData("totals")]
+    public void FilterButtonMatchesLogbookAndTogglesWithoutLosingSelection(string view)
+    {
+        Load(Flight(1, 2));
+        Services.GetRequiredService<NavigationManager>().NavigateTo($"/flights?view={view}");
+        var logbook = Render<Logbook>();
+        Assert.Single(logbook.FindComponents<FilterToggleButton>());
+        logbook.Find(".logbook-filter-button").Click();
+        Assert.Equal("true", logbook.Find(".logbook-filter-button").GetAttribute("aria-expanded"));
+        Assert.Single(logbook.FindAll(".totals-filter-sheet"));
+        logbook.Find(".logbook-filter-button").Click();
+        Assert.Empty(logbook.FindAll(".totals-filter-sheet"));
+        var expected = logbook.FindComponents<MudButton>().Single(button => button.Instance.Class == "logbook-filter-button").Instance;
+        var page = Render<Charts>();
+        Assert.Single(page.FindComponents<FilterToggleButton>());
+        var actual = page.FindComponents<MudButton>().Single(button => button.Instance.Class == "logbook-filter-button").Instance;
+        Assert.Equal(expected.Variant, actual.Variant);
+        Assert.Equal(expected.Size, actual.Size);
+        Assert.Equal(expected.StartIcon, actual.StartIcon);
+        Assert.Equal("Filters", page.Find(".logbook-filter-button").TextContent.Trim());
+        Assert.Equal("false", page.Find(".logbook-filter-button").GetAttribute("aria-expanded"));
+        Assert.True(page.Find(".analytics-filter-panel").HasAttribute("hidden"));
+        page.Find(".logbook-filter-button").Click();
+        Assert.Equal("true", page.Find(".logbook-filter-button").GetAttribute("aria-expanded"));
+        Assert.False(page.Find(".analytics-filter-panel").HasAttribute("hidden"));
+        page.Find("#analytics-from").Change("2024-01-01");
+        page.Find("#analytics-to").Change("2024-01-31");
+        Assert.Equal("2024-01-31", page.Find("#analytics-from").GetAttribute("max"));
+        Assert.Equal("2024-01-01", page.Find("#analytics-to").GetAttribute("min"));
+        Assert.Equal(new[] { "Start date", "End date" }, page.FindAll(".date-range-fields label").Select(label => label.TextContent.Trim()));
+        Assert.Equal("Filters (1)", page.Find(".logbook-filter-button").TextContent.Trim());
+        SetFilter(page, "Aircraft type", "TYPE");
+        Assert.Equal("Filters (2)", page.Find(".logbook-filter-button").TextContent.Trim());
+        SetFilter(page, "Registration", "VH-TEST");
+        Assert.Equal("Filters (3)", page.Find(".logbook-filter-button").TextContent.Trim());
+        page.Find(".logbook-filter-button").Click();
+        page.Find(".logbook-filter-button").Click();
+        Assert.Equal("2024-01-01", page.Find("#analytics-from").GetAttribute("value"));
+        Assert.Contains("2.0 flying hours", page.Markup);
+        page.Find(".analytics-filter-summary button").Click();
+        Assert.Equal("Filters", page.Find(".logbook-filter-button").TextContent.Trim());
+        Assert.Null(page.Find("#analytics-from").GetAttribute("max"));
+        Assert.Null(page.Find("#analytics-to").GetAttribute("min"));
+    }
 
     [Fact]
     public void ChartHeadingsHaveNoSubtitlesAndRankingsStayTogether()
@@ -137,7 +185,7 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         page.Find(".analytics-filter-summary button").Click();
         Assert.Contains("15.0 flying hours", page.Markup);
         Assert.Empty(page.FindAll(".analytics-filter-summary"));
-        Assert.Contains("All time", page.Find(".analytics-filter-panel summary").TextContent);
+        Assert.Equal("Filters", page.Find(".logbook-filter-button").TextContent.Trim());
         Assert.True(string.IsNullOrEmpty(page.Find("#analytics-from").GetAttribute("value")));
     }
 
@@ -148,7 +196,7 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         var page = Render<Charts>();
         page.Find("#analytics-from").Change("2024-02-01");
         page.Find("#analytics-to").Change("2024-01-01");
-        Assert.Contains("Choose a From date", page.Markup);
+        Assert.Contains("Choose a Start date", page.Markup);
         Assert.Empty(page.FindAll(".analytics-chart"));
         Assert.Empty(page.FindComponents<AnalyticsStatistics>());
         page.Find(".analytics-filter-summary button").Click();

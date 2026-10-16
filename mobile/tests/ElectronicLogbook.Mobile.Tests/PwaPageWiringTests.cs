@@ -861,7 +861,7 @@ public sealed class PwaPageWiringTests
         var program = ReadMobileSource("Program.cs");
         var css = ReadMobileAsset("css", "app.css");
 
-        Assert.Contains("Filter totals", page, StringComparison.Ordinal);
+        Assert.Contains("<FilterToggleButton Count=\"@TotalsFilterCount\"", page, StringComparison.Ordinal);
         Assert.Contains("@FilterPanel(\"Entry filters\"", page, StringComparison.Ordinal);
         Assert.Contains("@FilterPanel(\"Totals filters\"", page, StringComparison.Ordinal);
         Assert.Single(Regex.Matches(page, "Values in one column use “or”; different columns use “and”\\."));
@@ -898,6 +898,22 @@ public sealed class PwaPageWiringTests
         Assert.Contains("The date range includes both selected dates.", page, StringComparison.Ordinal);
         Assert.Contains("TotalsStartDate", page, StringComparison.Ordinal);
         Assert.Contains("TotalsEndDate", page, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DateRangesAndViewSelectorsUseTheSharedProductStyles()
+    {
+        foreach (var name in new[] { "Charts.razor", "Logbook.razor", "LogbookExport.razor" })
+        {
+            var page = ReadMobilePage(name);
+            Assert.Contains("class=\"date-range-fields\"", page, StringComparison.Ordinal);
+            Assert.Contains("Start date", page, StringComparison.Ordinal);
+            Assert.Contains("End date", page, StringComparison.Ordinal);
+        }
+        Assert.Contains("analytics-tabs segmented-tabs", ReadMobilePage("Charts.razor"), StringComparison.Ordinal);
+        var settings = ReadMobilePage("Settings.razor");
+        foreach (var theme in new[] { "System", "Light", "Dark" })
+            Assert.Contains($"aria-pressed=\"@(UiPreferences.ThemeMode == \"{theme}\" ? \"true\" : \"false\")\"", settings, StringComparison.Ordinal);
     }
 
     [Fact]

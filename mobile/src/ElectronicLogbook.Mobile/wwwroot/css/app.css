@@ -2439,6 +2439,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     }
 }
 
+.segmented-tabs .mud-tabs-tabbar,
 .segmented-control {
     display: flex;
     flex-wrap: wrap;
@@ -2449,6 +2450,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     background: var(--app-surface);
 }
 
+.segmented-tabs .mud-tab,
 .segmented-control button {
     flex: 1 1 auto;
     min-width: 48px;
@@ -2458,12 +2460,20 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     background: transparent;
     color: var(--app-text-muted);
     font-weight: 800;
+    text-transform: none;
 }
 
+.segmented-tabs .mud-tab.mud-tab-active,
 .segmented-control button.active {
     background: var(--app-primary);
     color: var(--app-primary-text);
 }
+
+.segmented-tabs .mud-tabs-tabbar-wrapper { width: 100%; gap: 4px; }
+.segmented-tabs .mud-tabs-tabbar-inner { width: 100%; }
+.segmented-tabs .mud-tabs-tabbar-wrapper > .mud-tooltip-root { flex: 1 1 0; min-width: 0; }
+.segmented-tabs .mud-tab { width: 100%; }
+.segmented-tabs .mud-tab-slider { display: none; }
 
 .accent-picker {
     display: grid;
@@ -2852,8 +2862,8 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     color: var(--app-text);
 }
 
-.logbook-filter-button {
-    min-height: 44px;
+.mud-button-root.logbook-filter-button {
+    min-height: 48px;
 }
 
 .filter-sheet {
@@ -3084,7 +3094,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .totals-filter-field,
 .totals-filter-search,
-.totals-filter-date-range label {
+.date-range-fields label {
     display: grid;
     gap: 6px;
     color: var(--app-text-muted);
@@ -3094,7 +3104,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .totals-filter-field select,
 .totals-filter-search input,
-.totals-filter-date-range input {
+.date-range-fields input {
     width: 100%;
     min-height: 48px;
     border: 1px solid var(--app-border);
@@ -3109,17 +3119,20 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .totals-filter-field select:focus-visible,
 .totals-filter-search input:focus-visible,
-.totals-filter-date-range input:focus-visible,
+.date-range-fields input:focus-visible,
 .totals-filter-values input:focus-visible {
     outline: 3px solid color-mix(in srgb, var(--app-primary) 48%, transparent);
     outline-offset: 2px;
 }
 
-.totals-filter-date-range {
+.date-range-fields {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
     gap: 10px;
 }
+
+.date-range-fields label, .date-range-fields input { min-width: 0; }
 
 .totals-filter-hint {
     margin-top: -8px;

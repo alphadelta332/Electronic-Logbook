@@ -11,15 +11,21 @@
     <h1 id="charts-heading">Charts &amp; Stats</h1>
     @if (Session.IsLoaded && !Session.IsStorageBlocked)
     {
-        <details class="analytics-filter-panel">
-            <summary aria-label="@($"Filters: {PeriodLabel}, {(HasFilters ? "selection applied" : "all aircraft")}")"><MudIcon Icon="@Icons.Material.Outlined.FilterAlt" Size="Size.Small" aria-hidden="true" /><span>@PeriodLabel</span><MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small" aria-hidden="true" /></summary>
+        <FilterToggleButton Count="@FilterCount" @bind-Expanded="showFilters" />
+    }
+    </div>
+    @if (Session.IsLoaded && !Session.IsStorageBlocked)
+    {
+        <div class="analytics-filter-panel" hidden="@(!showFilters)">
         <div class="analytics-filters" aria-label="Charts and statistics filters">
-            <label class="totals-filter-field">From date
-                <input id="analytics-from" type="date" @bind="from" @bind:after="Recalculate" />
-            </label>
-            <label class="totals-filter-field">To date
-                <input id="analytics-to" type="date" @bind="to" @bind:after="Recalculate" />
-            </label>
+            <div class="date-range-fields">
+                <label>Start date
+                    <input id="analytics-from" type="date" max="@to?.ToString("yyyy-MM-dd")" @bind="from" @bind:after="Recalculate" />
+                </label>
+                <label>End date
+                    <input id="analytics-to" type="date" min="@from?.ToString("yyyy-MM-dd")" @bind="to" @bind:after="Recalculate" />
+                </label>
+            </div>
             <MudSelect T="string" Label="Aircraft type" Placeholder="All types" MultiSelection="true" SelectAll="true"
                        Clearable="true" Variant="Variant.Outlined" SelectedValues="aircraftTypes" SelectedValuesChanged="SetAircraftTypes"
                        Comparer="StringComparer.OrdinalIgnoreCase" Class="analytics-type-filter">
@@ -31,9 +37,8 @@
                 @foreach (var value in registrations) { <MudSelectItem T="string" Value="@value">@value</MudSelectItem> }
             </MudSelect>
         </div>
-        </details>
+        </div>
     }
-    </div>
     @if (!Session.IsLoaded)
     {
         <section class="ui-state" role="status">
@@ -61,7 +66,7 @@
         {
             <MudAlert Severity="Severity.Error" role="alert">@filterError</MudAlert>
         }
-        <MudTabs Class="analytics-tabs" KeepPanelsAlive="true" MinimumTabWidth="0">
+        <MudTabs Class="analytics-tabs segmented-tabs" KeepPanelsAlive="true" MinimumTabWidth="0">
             <MudTabPanel Text="Charts">
                 @if (analytics is not null)
                 {
@@ -183,6 +188,7 @@
     private string[] types = [];
     private string[] registrations = [];
     private string? filterError;
+    private bool showFilters;
     private MobileLogbookAnalytics? analytics;
     private string[] baseAirports = [];
     private string baseCode = "";
@@ -199,6 +205,7 @@
     private MobileAnalyticsValue[] airportValues = [];
     private readonly string[] categoryPalette = ["#7b9ccb", "#a7b9d3", "#63b9bb", "#a29bc7", "#397e63", "#a4b98e", "#7897a8", "#aec2ca", "#e4b363", "#bb8fa4", "#6a9272", "#a7c3ad", "#ba8e80", "#d7b3a7"];
     private bool HasFilters => from is not null || to is not null || aircraftTypes.Length > 0 || selectedRegistrations.Length > 0;
+    private int FilterCount => (from is not null || to is not null ? 1 : 0) + (aircraftTypes.Length > 0 ? 1 : 0) + (selectedRegistrations.Length > 0 ? 1 : 0);
     private string PeriodLabel => from is not null || to is not null ? "Selected period" : "All time";
 
     protected override async Task OnInitializedAsync()
@@ -322,7 +329,7 @@
         if (Session.IsStorageBlocked) return;
         if (from > to)
         {
-            filterError = "Choose a From date on or before the To date.";
+            filterError = "Choose a Start date on or before the End date.";
             return;
         }
         analytics = MobileLogbookAnalytics.Create(Session.CurrentEntriesV2, new(from, to, aircraftTypes, selectedRegistrations),
