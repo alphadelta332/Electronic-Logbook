@@ -879,6 +879,25 @@ function Invoke-VerifyAction {
     $psqlVersion = Get-NativeCommandOutput -Name 'psql' -Arguments @('--version')
     Add-CheckResult $results 'PostgreSQL client 17' ($psqlVersion -match ' 17\.') $true $(if ($psqlVersion) { $psqlVersion } else { 'not found' })
 
+    foreach ($backupTool in $script:TransferConfig.Expected.PostgreSqlBackupTools) {
+        $backupToolVersion = Get-NativeCommandOutput -Name $backupTool -Arguments @('--version')
+        Add-CheckResult $results "PostgreSQL backup tool $backupTool" ($backupToolVersion -match " $($script:TransferConfig.Expected.PostgreSqlMajor)\.") $true 'required by the encrypted hosted backup tooling'
+    }
+    $hostedBackupScript = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupScript
+    Add-CheckResult $results 'Hosted backup command' (Test-Path -LiteralPath $hostedBackupScript -PathType Leaf) $true $script:TransferConfig.Expected.HostedBackupScript
+    $hostedBackupReplay = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupReplayProject
+    Add-CheckResult $results 'Hosted backup replay check' (Test-Path -LiteralPath $hostedBackupReplay -PathType Leaf) $true 'uses the already-required .NET 10 SDK and shared portable application code'
+    $hostedBackupRecovery = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupRecoveryScript
+    Add-CheckResult $results 'Hosted backup recovery setup' (Test-Path -LiteralPath $hostedBackupRecovery -PathType Leaf) $true 'private identity and recovery archive remain in owner-controlled offline storage'
+    foreach ($backupSetupFile in @($script:TransferConfig.Expected.HostedBackupR2AccessScript, $script:TransferConfig.Expected.HostedBackupR2Policy, $script:TransferConfig.Expected.HostedBackupR2CheckScript, $script:TransferConfig.Expected.HostedBackupSourceSetupScript)) {
+        Add-CheckResult $results 'Hosted backup storage setup' (Test-Path -LiteralPath (Join-Path $RepoRoot $backupSetupFile) -PathType Leaf) $true $backupSetupFile
+    }
+    $backupCurlHelp = Get-NativeCommandOutput -Name $script:TransferConfig.Expected.HostedBackupCurlCommand -Arguments @('--help', 'all')
+    Add-CheckResult $results 'curl for optional R2 access check' ($backupCurlHelp -match '--aws-sigv4') $false 'Windows curl with AWS Signature V4 support is needed only for the owner-run live R2 permission check'
+    $recoveryShellOutput = Get-NativeCommandOutput -Name 'pwsh' -Arguments @('--version')
+    $recoveryShellVersion = if ($recoveryShellOutput -match 'PowerShell (\d+\.\d+\.\d+)') { [version]$Matches[1] } else { [version]'0.0' }
+    Add-CheckResult $results 'PowerShell for optional recovery setup' ($recoveryShellVersion -ge [version]$script:TransferConfig.Expected.HostedBackupRecoveryPowerShellMinVersion) $false 'PowerShell 7.2+ is needed only for one-time password-protected offline recovery setup'
+
     $dockerInfo = Get-NativeCommandOutput -Name 'docker' -Arguments @('info', '--format', '{{.ServerVersion}}')
     Add-CheckResult $results 'Docker Desktop engine' ($dockerInfo -match '^\d+\.\d+') $false $(if ($dockerInfo -match '^\d+\.\d+') { $dockerInfo } else { 'not running; launch Docker Desktop when hosted tests are needed' })
     $wslStatus = (Get-NativeCommandOutput -Name 'wsl.exe' -Arguments @('--status')) -replace ([regex]::Escape([string][char]0)), ''
@@ -899,7 +918,7 @@ function Invoke-VerifyAction {
     catch { $excelDetail = $_.Exception.Message }
     Add-CheckResult $results 'Excel COM' $excelPassed $true $excelDetail
 
-    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, 'docs/flightlogx-preview-android-install.md')) {
+    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, $script:TransferConfig.Expected.AirportCatalogPublisherScript, 'docs/flightlogx-preview-android-install.md')) {
         Add-CheckResult $results $path (Test-Path -LiteralPath (Join-Path $script:RepoRoot $path) -PathType Leaf) $true 'required repository context'
     }
     $hostedConfig = Join-Path $script:RepoRoot 'mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json'

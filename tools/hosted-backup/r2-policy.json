@@ -1,0 +1,26 @@
+{
+  "bucket": "flightlogx-preview-backups",
+  "storageClass": "Standard",
+  "locationHint": "oc",
+  "lock": {
+    "rules": [
+      {
+        "id": "protect-backups-30-days",
+        "enabled": true,
+        "prefix": "",
+        "condition": { "type": "Age", "maxAgeSeconds": 2592000 }
+      }
+    ]
+  },
+  "lifecycle": {
+    "rules": [
+      {
+        "id": "expire-backups-after-30-days",
+        "enabled": true,
+        "conditions": { "prefix": "" },
+        "deleteObjectsTransition": { "condition": { "type": "Age", "maxAge": 2592000 } },
+        "abortMultipartUploadsTransition": { "condition": { "type": "Age", "maxAge": 86400 } }
+      }
+    ]
+  }
+}

@@ -331,6 +331,62 @@ are regenerated outputs. Recreate ignored `wrangler.local.json` from verified
 Preview metadata rather than transferring it; it contains only the project URL and
 publishable key. See `docs/hosted-preview-supabase.md` for deployment order.
 
+The encrypted hosted backup tools reuse Node 24 and the PostgreSQL 17 installation;
+no additional package is installed. Verify now checks `pg_dump`, `pg_dumpall`,
+`pg_restore`, `tools/hosted-backup/cli.mjs` and the backup replay-check project as well
+as `psql`. Disposable archive restoration/replay uses the already-required .NET 10 SDK
+and builds the shared portable project; it introduces no NuGet dependency. Hosted exports require
+the public Supabase CA certificate with hostname verification. That certificate is
+regenerated public input, not a secret; never disable certificate checks to make an
+export work. Connection JSON contains credentials and stays outside the checkout and
+logs. The backup private identity belongs in a separate protected offline recovery
+set and never enters the development transfer archive, GitHub or R2. CLI export and
+authenticated readback currently exist; cloud scheduling and application recovery
+acceptance are separate gates. See `docs/hosted-backup-tools.md`.
+
+One-time protected recovery setup uses the optional PowerShell 7 installation
+(version 7.2 or later); its password entry occurs in a local console. It creates the
+independent encrypted private identity and encrypted recovery capsule on owner-selected
+offline storage. The private identity is protected with PBKDF2-SHA256 (600,000
+iterations) and AES-256-CBC in standard encrypted PKCS#8 format; the capsule uses the
+authenticated backup format. Keep the password separately. Only
+`ElectronicLogbook/HostedBackup/recipient.pem` and `recovery-receipt.json` under local
+app data enter development transfer. `backup-private.encrypted.pem` and
+`recovery.elbbackup` are deliberately excluded, even if copied into an allowlisted
+tree. USB volume encryption is not assumed. A successful setup independently decrypts
+the written USB files; merely creating their folder is not acceptance.
+
+Restricted source provisioning uses the existing Node/PostgreSQL installation:
+`node tools/hosted-backup/initialize-source.mjs --ca <absolute-trusted-root.crt>`.
+The optional local-app-data `ElectronicLogbook/HostedBackup/source-connection.local.json`
+is secret local-transfer configuration; `source-root.crt` is its public TLS trust root.
+After transfer, update its absolute CA/PostgreSQL paths for the destination PC.
+Only the dedicated source password and public CA belong in backup automation;
+owner database/management credentials and
+application recovery secrets stay outside it. Exports audit grants before reading.
+
+Optional R2 backup access setup uses the same PowerShell 7 installation:
+`tools/hosted-backup/Initialize-R2Access.ps1`. It opens Cloudflare's R2 dashboard,
+guides creation of separate bucket-scoped Object Read & Write and Object Read only
+keys, and captures their S3 values through hidden local prompts. No new package is
+needed. The optional private file
+`ElectronicLogbook/HostedBackup/r2-credentials.local.json` is classified as storage
+credentials for trusted local transfer; it contains neither app recovery secrets nor
+the backup decryption identity. Keep it outside Git and logs. Saving credentials does
+not prove their permissions; live upload/readback, denied-write and lock checks must
+pass before unattended use. Bucket retention policy is in
+`tools/hosted-backup/r2-policy.json`; maintenance uses freshly authenticated Wrangler.
+
+The owner-run live permission check is `node tools/hosted-backup/check-r2-access.mjs`.
+It uses Windows' existing `curl.exe` with `--aws-sigv4` support; Verify checks this
+optional capability. No extra SDK/package is required. S3 credentials travel through
+captured stdin, never command arguments. The check uses a fresh synthetic encryption
+identity, writes a small encrypted probe retained for 30 days, and creates/removes an
+empty temporary bucket to prove both tokens are denied access outside the backup
+bucket. It never reads participant data or the offline private identity. A maximum
+of three retained synthetic probes is allowed; do not repeat after real backups arrive.
+Its JSON stdout is redacted evidence; capture it under the ignored artifacts tree.
+
 1. Install/sign in to Microsoft 365 and confirm desktop Excel opens.
 2. In Excel, open **File > Options > Trust Center > Trust Center Settings**. For this
    trusted development environment, configure macro trust and enable **Trust access to
@@ -353,9 +409,15 @@ publishable key. See `docs/hosted-preview-supabase.md` for deployment order.
    & "$env:ANDROID_HOME\cmdline-tools\latest\bin\sdkmanager.bat" --licenses
    ```
 
-9. Connect the retained Android device, unlock it, enable Developer options and USB
-   debugging, and approve the new computer's USB debugging key. Do not clear or
-   uninstall the retained debug app.
+9. Put the computer and retained Android phone on the same Wi-Fi network. On the
+   unlocked phone, open Settings > System > Developer options > Wireless debugging.
+   On a new computer, select Pair device with pairing code and run
+   `adb pair <pairing-address:port>`; enter the code when prompted. Pairing is fresh
+   authentication on each computer. Run `adb mdns services` and `adb devices -l`;
+   if needed, run `adb connect <connection-address:port>` using the discovered
+   `_adb-tls-connect._tcp` endpoint or the Wireless debugging main screen (the
+   connection port differs from the pairing port). Wi-Fi is the default; use USB
+   only when explicitly chosen. Do not clear or uninstall the retained debug app.
 
 ## Restore The Archive
 
@@ -440,7 +502,11 @@ For Excel-dependent validation, use only disposable workbook copies:
 .\tools\Invoke-Validation.ps1 -Tier Excel -SkipPublicReadinessCheck
 ```
 
-For Android, preserve the single installed development application and its data:
+For Android, use the paired Wi-Fi connection from step 9 and preserve the single
+installed development application and its data. Verify the selected wireless
+device with `adb -s <wireless-device> shell getprop ro.serialno` before installing;
+the retained Pixel's hardware serial is recorded in local `AGENTS.md`. If multiple
+devices are listed, pass `-- -DeviceSerial <wireless-device>` to the command below.
 
 ```powershell
 Set-Location mobile
@@ -451,6 +517,20 @@ The installer uses the transferred durable signing identity and `adb install -r`
 Never uninstall, clear, or replace the retained debug application as a setup shortcut.
 
 ## Maintenance Rule
+
+The shared airport catalogue uses the existing Supabase CLI and management-token
+location; no local Deno runtime or Docker launch is required for deployment.
+Run `./tools/Publish-AirportCatalog.ps1 -Environment development` to validate a change
+before deploying it with `-Environment preview`. The command applies only its own
+migration, deploys with the server-side bundler, seeds the public reference-data
+bucket and configures its hourly AIRAC-gated job. The server's current default
+secret key is fetched into process memory using Management API `reveal=true` and
+stored only in Supabase Vault (`airport_catalog_service_role`); its project origin
+uses `airport_catalog_url`. These remote secrets are deliberate exclusions from the
+transfer bundle. Reuse the transferred management token to redeploy; never add a
+service-role/secret key to the mobile configuration or save it in the repository.
+The mobile cached catalogue and verification outputs are regenerated data, not
+development prerequisites. The existing bundled catalogue remains the offline seed.
 
 The executable source of truth is `tools/local-development-transfer.psd1`. When a
 dependency, SDK, extension, local-state path, signing rule, or credential location

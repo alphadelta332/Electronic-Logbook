@@ -19,6 +19,8 @@ builder.Services.AddScoped<BrowserUiPreferencesStore>();
 builder.Services.AddScoped<MobileUiPreferenceState>();
 builder.Services.AddScoped<ISyncClock>(_ => SystemSyncClock.Instance);
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(MobileAirportCatalog.Default);
+builder.Services.AddScoped<MobileAirportUpdates>();
 builder.Services.AddScoped<BrowserNetworkStatus>();
 builder.Services.AddScoped<BrowserPreviewUpdateState>();
 builder.Services.AddScoped<INetworkStatus>(sp => sp.GetRequiredService<BrowserNetworkStatus>());
@@ -39,4 +41,6 @@ builder.Services.AddMudServices(configuration =>
     configuration.SnackbarConfiguration.PositionClass = Defaults.Classes.Position.BottomCenter;
 });
 
-await builder.Build().RunAsync();
+var host = builder.Build();
+await host.Services.GetRequiredService<MobileAirportUpdates>().LoadCachedAsync();
+await host.RunAsync();

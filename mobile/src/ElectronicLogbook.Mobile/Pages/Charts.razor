@@ -151,17 +151,23 @@
                     }
                     <div class="analytics-base-controls">
                         <label class="totals-filter-field">Airport code
-                            <input id="analytics-base-code" type="text" @bind="baseCode" list="analytics-base-suggestions" disabled="@(!basesAvailable || savingBases)" />
+                            <input id="analytics-base-code" type="text" @bind="baseCode" autocapitalize="characters" spellcheck="false" autocomplete="off" disabled="@(!basesAvailable || savingBases)" />
                         </label>
-                        <datalist id="analytics-base-suggestions">
-                            @foreach (var code in MobileAirportSuggestions.Create(Session.CurrentEntriesV2))
-                            {
-                                @if (MobileAirportCatalog.Default.TryFind(code, out var airport)) { <option value="@airport.Icao">@airport.Name</option> }
-                            }
-                        </datalist>
-                        <MudButton OnClick="AddBaseAsync" Disabled="@(!basesAvailable || savingBases || string.IsNullOrWhiteSpace(baseCode))">Add base airport</MudButton>
+                        <MudButton OnClick="@(() => AddBaseAsync(baseCode))" Disabled="@(!basesAvailable || savingBases || string.IsNullOrWhiteSpace(baseCode))">Add base airport</MudButton>
                     </div>
                     <p>Enter a catalogue airport code, such as YSSY or SY. You can add more than one airport.</p>
+                    @if (BaseSuggestions.Any())
+                    {
+                        <details class="analytics-base-suggestions">
+                            <summary>Choose from recent airports</summary>
+                            <div>
+                                @foreach (var code in BaseSuggestions)
+                                {
+                                    <MudButton OnClick="@(() => AddBaseAsync(code))" Variant="Variant.Outlined" Disabled="@(!basesAvailable || savingBases)">Add @BaseLabel(code)</MudButton>
+                                }
+                            </div>
+                        </details>
+                    }
                     <ul class="analytics-base-list" aria-label="Saved base airports">
                         @foreach (var code in baseAirports)
                         {
@@ -213,6 +219,7 @@
         await Session.EnsureLoadedWorkbookAsync();
         if (disposed) return;
         Session.WorkbookStateChanged += OnWorkbookStateChanged;
+        MobileAirportCatalog.Default.Changed += OnWorkbookStateChanged;
         await LoadBasesAsync();
         if (disposed) return;
         RefreshChoices();
@@ -245,9 +252,9 @@
         Recalculate();
     }
 
-    private async Task AddBaseAsync()
+    private async Task AddBaseAsync(string code)
     {
-        if (!MobileAirportCatalog.Default.TryFind(baseCode, out var airport))
+        if (!MobileAirportCatalog.Default.TryFind(code, out var airport))
         {
             basesError = "Airport code not found. Choose a code from the airport catalogue.";
             return;
@@ -281,6 +288,9 @@
 
     private static string BaseLabel(string code) => MobileAirportCatalog.Default.TryFind(code, out var airport) ? $"{airport.Icao} · {airport.Name}" : code;
 
+    private IEnumerable<string> BaseSuggestions => MobileAirportSuggestions.Create(Session.CurrentEntriesV2)
+        .Where(code => MobileAirportCatalog.Default.TryFind(code, out var airport) && !baseAirports.Contains(airport.Icao, StringComparer.OrdinalIgnoreCase));
+
     private void RefreshChoices()
     {
         types = Choices(entry => entry.Type, aircraftTypes);
@@ -311,6 +321,7 @@
     {
         disposed = true;
         Session.WorkbookStateChanged -= OnWorkbookStateChanged;
+        MobileAirportCatalog.Default.Changed -= OnWorkbookStateChanged;
         dateTimer?.Dispose();
     }
 

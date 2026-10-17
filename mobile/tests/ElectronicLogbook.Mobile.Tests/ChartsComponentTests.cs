@@ -267,6 +267,25 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void BaseAirportChoicesStayInThePageAndUseTheExistingSaveFlow()
+    {
+        Load(Flight(1, 2) with { To = "YMML" });
+        var page = Render<Charts>();
+        page.FindAll(".mud-tab")[1].Click();
+        var input = page.Find("#analytics-base-code");
+        Assert.False(input.HasAttribute("list"));
+        Assert.Empty(page.FindAll("datalist"));
+        Assert.Equal("characters", input.GetAttribute("autocapitalize"));
+        Assert.Equal("false", input.GetAttribute("spellcheck"));
+        Assert.Contains("YMML", page.Find(".analytics-base-suggestions").TextContent);
+        Assert.Contains("Melbourne", page.Find(".analytics-base-suggestions").TextContent);
+        page.FindAll(".analytics-base-suggestions button").Single(button => button.TextContent.Contains("YMML")).Click();
+        Assert.Single(page.FindAll(".analytics-base-list li"));
+        Assert.Contains("YMML", page.Find(".analytics-base-list").TextContent);
+        Assert.DoesNotContain("YMML", page.Find(".analytics-base-suggestions").TextContent);
+    }
+
+    [Fact]
     public void MultipleBasesUseCanonicalCodesSurviveFiltersAndReloadAndCanBeRemoved()
     {
         Load(Flight(1, 2) with { To = "YMML" }, Flight(10, 3) with { To = "YBBN" });

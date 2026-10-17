@@ -35,6 +35,11 @@
         @{ Path = 'ElectronicLogbook/Supabase/recovery-envelope/development.env'; Required = $true; Classification = 'secret-recovery-configuration'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/Supabase/recovery-envelope/private-pilot.env'; Required = $true; Classification = 'secret-recovery-configuration'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/ParticipantHandoffs'; Required = $false; Classification = 'private-participant-handoff'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/recipient.pem'; Required = $false; Classification = 'public-backup-recipient'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/recovery-receipt.json'; Required = $false; Classification = 'private-backup-verification'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/r2-credentials.local.json'; Required = $false; Classification = 'secret-backup-storage-credentials'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/source-connection.local.json'; Required = $false; Classification = 'secret-backup-source-credentials'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/source-root.crt'; Required = $false; Classification = 'public-backup-source-ca'; Lifecycle = 'local-transfer' }
     )
 
     # Known local trees that must stay outside the operational transfer archive. This is
@@ -62,6 +67,8 @@
     )
 
     ExcludedPathPatterns = @(
+        '*/backup-private.encrypted.pem'
+        '*/recovery.elbbackup'
         '*/bin/*'
         '*/obj/*'
         '*/node_modules/*'
@@ -163,8 +170,20 @@
         PreviewSigningCredentialsFile = 'flightlogx-pilot-credentials.json'
         PreviewSigningMetadataFile = 'flightlogx-pilot-signing.json'
         OwnerEnrollmentScript = 'tools/Add-FlightLogXParticipant.ps1'
+        AirportCatalogPublisherScript = 'tools/Publish-AirportCatalog.ps1'
+        AirportCatalogVaultSecretNames = @('airport_catalog_url', 'airport_catalog_service_role')
         ParticipantHandoffDirectory = 'ElectronicLogbook\ParticipantHandoffs'
         PostgreSqlMajor = 17
+        PostgreSqlBackupTools = @('pg_dump', 'pg_dumpall', 'pg_restore')
+        HostedBackupScript = 'tools/hosted-backup/cli.mjs'
+        HostedBackupReplayProject = 'tools/hosted-backup/ReplayCheck/ReplayCheck.csproj'
+        HostedBackupRecoveryScript = 'tools/hosted-backup/Initialize-Recovery.ps1'
+        HostedBackupRecoveryPowerShellMinVersion = '7.2'
+        HostedBackupR2AccessScript = 'tools/hosted-backup/Initialize-R2Access.ps1'
+        HostedBackupR2Policy = 'tools/hosted-backup/r2-policy.json'
+        HostedBackupR2CheckScript = 'tools/hosted-backup/check-r2-access.mjs'
+        HostedBackupSourceSetupScript = 'tools/hosted-backup/initialize-source.mjs'
+        HostedBackupCurlCommand = 'curl.exe'
         ResendApiKeyFiles = @('privatepilotauthdevapi.txt', 'privatepilotauthapi.txt')
         RecoveryEnvelopeSecretFiles = @('development.env', 'private-pilot.env')
         DebugPackageId = 'com.alphadelta.electroniclogbook.dev'
@@ -180,7 +199,7 @@
         'Open the Codex VS Code extension and sign in; Codex authentication and session databases are never transferred.'
         'Confirm Windows has a default HTTPS browser; updater Google sign-in returns through a temporary 127.0.0.1 loopback callback and needs no local Google client secret.'
         'Confirm the Google OAuth project that owns the Web client also has separate Android clients for every active package/signing-certificate pair; preserve existing clients when adding the permanent Preview identity.'
-        'Review and accept Android SDK licenses, then authorize USB debugging on the unlocked Android device.'
+        'Review and accept Android SDK licenses, then pair the unlocked retained Android device with this computer using Wireless debugging on the same Wi-Fi network. Discover/reconnect with adb mdns services and adb connect; use USB only when explicitly chosen. Verify the hardware serial before installing.'
         'For repeated Google recovery tests, create the documented Google Play API 35 AVD, sign in once, and capture its clean machine-local snapshot; never transfer or share that AVD.'
         'Restart Windows or the terminal when an installer or environment-variable change requires it.'
     )

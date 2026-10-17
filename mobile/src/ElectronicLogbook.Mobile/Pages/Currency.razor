@@ -20,23 +20,7 @@ else
             </div>
         </div>
 
-        <section class="currency-overview" aria-label="Currency status overview">
-            <div class="currency-overview-item currency-overview-current">
-                <MudIcon Icon="@Icons.Material.Filled.CheckCircleOutline" aria-hidden="true" />
-                <strong>@CurrentCount</strong>
-                <span>Current</span>
-            </div>
-            <div class="currency-overview-item currency-overview-warning">
-                <MudIcon Icon="@Icons.Material.Filled.Schedule" aria-hidden="true" />
-                <strong>@DueSoonCount</strong>
-                <span>Due soon</span>
-            </div>
-            <div class="currency-overview-item currency-overview-expired">
-                <MudIcon Icon="@Icons.Material.Filled.ErrorOutline" aria-hidden="true" />
-                <strong>@ExpiredCount</strong>
-                <span>Expired</span>
-            </div>
-        </section>
+        <DashboardCurrencyOverview Summary="@Summary" />
 
         <section class="currency-category-list" aria-label="Currency requirements">
             @foreach (var category in CurrencyCategories)
@@ -98,12 +82,6 @@ else
 
     private IReadOnlyList<PortableLogbookCurrencyRow> SelectedLicenceRows =>
         SelectedEngine == MultiEngine ? Summary.MultiEngineRows : Summary.SingleEngineRows;
-
-    private int CurrentCount => Summary.CurrentCount;
-
-    private int DueSoonCount => Summary.DueSoonCount;
-
-    private int ExpiredCount => Summary.ExpiredCount;
 
     protected override async Task OnInitializedAsync()
     {

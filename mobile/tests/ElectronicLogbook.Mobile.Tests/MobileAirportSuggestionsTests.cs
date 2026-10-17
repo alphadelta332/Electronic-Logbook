@@ -5,6 +5,61 @@ namespace ElectronicLogbook.Mobile.Tests;
 
 public sealed class MobileAirportSuggestionsTests
 {
+    private static readonly MobileAirportCatalog Catalog = MobileAirportCatalog.Create([
+        new("AAAA", "Alpha Airport", "AAA", null, 0, 0),
+        new("BBBB", "Bravo Airport", null, null, 0, 0),
+        new("CCCC", "Charlie Airport", null, null, 0, 0),
+        new("DDDD", "Delta Airport", null, null, 0, 0),
+        new("EEEE", "Echo Airport", null, null, 0, 0)]);
+
+    [Fact]
+    public void RankedPutsLastDestinationThenBasesThenVisitsAndDeduplicatesAliasesPerFlight()
+    {
+        var entries = new[] {
+            Flight(1, "CCCC", "CCCC", "DDDD CCCC"),
+            Flight(2, "CCCC", "AAAA", "CCCC AAA"),
+            Flight(3, "AAAA", "BBBB", "AAAA AAA AAA") };
+        Assert.Equal(new[] { "BBBB", "AAAA", "EEEE", "CCCC", "DDDD" },
+            MobileAirportSuggestions.Ranked(entries, ["aaa", "EEEE", "BBBB"], new(2026, 10, 17), Catalog));
+    }
+
+    [Fact]
+    public void RankedExcludesDeletedFutureUndatedAndSimulatorOnlyEntries()
+    {
+        var entries = new[] {
+            Flight(1, "AAAA", "BBBB", ""),
+            Flight(2, "CCCC", "DDDD", "") with { IsDeleted = true },
+            Flight(18, "EEEE", "DDDD", ""),
+            Flight(3, "CCCC", "DDDD", "") with { Entry = PortableLogbookWorkbookEntry.Empty with { From = "CCCC", To = "DDDD", IfrSim = 1 } } };
+        Assert.Equal(new[] { "BBBB", "AAAA" },
+            MobileAirportSuggestions.Ranked(entries, [], new(2026, 10, 17), Catalog));
+        Assert.Equal(new[] { "EEEE" }, MobileAirportSuggestions.Ranked([], ["EEEE"], new(2026, 10, 17), Catalog));
+    }
+
+    [Fact]
+    public void RankedKeepsAnUnrecognisedLastDestinationAndNeverReadsRemarksAsAirports()
+    {
+        var last = Flight(1, "AAAA", "PRIVATE FARM", "") with {
+            Entry = Flight(1, "AAAA", "PRIVATE FARM", "").Entry! with { Remarks = "CCCC DDDD" } };
+        Assert.Equal(new[] { "PRIVATE FARM", "AAAA" },
+            MobileAirportSuggestions.Ranked([last], [], new(2026, 10, 17), Catalog));
+    }
+
+    [Fact]
+    public void CatalogueSearchMatchesPrefixesAndNamesCaseInsensitivelyAndReturnsEachIcaoOnce()
+    {
+        Assert.Equal(new[] { "AAAA" }, Catalog.Search(" aa ", 20).Select(airport => airport.Icao));
+        Assert.Equal(new[] { "CCCC" }, Catalog.Search("harlie", 20).Select(airport => airport.Icao));
+        Assert.Equal(new[] { "AAAA", "BBBB" }, Catalog.Search("airport", 2).Select(airport => airport.Icao));
+        Assert.Empty(Catalog.Search("unrecognised", 20));
+        Assert.Empty(Catalog.Search("", 20));
+        Assert.Empty(Catalog.Search("airport", 0));
+    }
+
+    private static PortableLogbookMaterializedEntryV2 Flight(int day, string from, string to, string via) =>
+        new(EntryId.New(), RevisionId.New(), false,
+            PortableLogbookWorkbookEntry.Empty with { Year = 2026, Month = 10, Day = day, From = from, To = to, Via = via, SeCommandDay = 1 }, []);
+
     [Fact]
     public void CreateIncludesEndpointsAndAirportLikeRouteTokensInRecentOrder()
     {

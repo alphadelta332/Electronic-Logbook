@@ -4,6 +4,8 @@
 @inject IJSRuntime JS
 @inject MobileLogbookSession Session
 @inject MobileUiPreferenceState UiPreferences
+@inject MobileAirportUpdates AirportUpdates
+@inject TimeProvider Clock
 
 <MudThemeProvider Theme="@Theme" IsDarkMode="@UiPreferences.IsDarkMode" />
 <MudPopoverProvider />
@@ -69,6 +71,8 @@
     private CancellationTokenSource? navigationFeedbackCancellation;
     private DotNetObjectReference<MainLayout>? networkRestoredCallback;
     private int? networkRestoredSubscriptionId;
+    private int? airportResumeSubscriptionId;
+    private ITimer? airportTimer;
     private bool IsNavigationPending { get; set; }
     private string PendingNavigationLabel { get; set; } = "page";
 
@@ -94,16 +98,20 @@
                 "electronicLogbookNetwork.subscribe",
                 networkRestoredCallback);
         }
-        catch (JSException)
-        {
-            networkRestoredCallback.Dispose();
-            networkRestoredCallback = null;
-        }
+        catch (JSException) { }
+        try { airportResumeSubscriptionId = await JS.InvokeAsync<int>("electronicLogbookAirports.subscribe", networkRestoredCallback); }
+        catch (JSException) { }
+        airportTimer = Clock.CreateTimer(_ => _ = InvokeAsync(AirportUpdates.CheckAsync), null, TimeSpan.FromMinutes(15), TimeSpan.FromMinutes(15));
+        _ = AirportUpdates.CheckAsync();
     }
+
+    [JSInvokable]
+    public Task HandleAirportResumeAsync() => AirportUpdates.CheckAsync();
 
     [JSInvokable]
     public async Task HandleNetworkRestoredAsync()
     {
+        _ = AirportUpdates.NetworkRestoredAsync();
         if (!Session.IsLoaded)
         {
             return;
@@ -115,6 +123,7 @@
 
     public async ValueTask DisposeAsync()
     {
+        airportTimer?.Dispose();
         navigationFeedbackCancellation?.Cancel();
         navigationFeedbackCancellation?.Dispose();
         UiPreferences.Changed -= OnUiPreferencesChanged;
@@ -133,6 +142,11 @@
         }
 
         networkRestoredCallback?.Dispose();
+        if (airportResumeSubscriptionId is int airportSubscription)
+        {
+            try { await JS.InvokeVoidAsync("electronicLogbookAirports.unsubscribe", airportSubscription); }
+            catch (JSException) { }
+        }
     }
 
     private void OnUiPreferencesChanged()

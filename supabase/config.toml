@@ -388,6 +388,10 @@ deno_version = 2
 # with Supabase publishable keys that are not legacy JWTs.
 verify_jwt = false
 
+[functions.airport-catalog]
+# Publisher compares the bearer credential with its server-side service-role key.
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

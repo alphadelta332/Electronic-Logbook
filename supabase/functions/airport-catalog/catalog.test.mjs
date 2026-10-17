@@ -1,0 +1,31 @@
+import assert from 'node:assert/strict';
+import { airacCycle, normaliseName, airportFromRow, mergeAirports, validateAirport } from './catalog.mjs';
+
+assert.equal(airacCycle(new Date('2024-01-24T23:59:59Z')), '2023-12-28');
+assert.equal(airacCycle(new Date('2024-01-25T00:00:00Z')), '2024-01-25');
+assert.equal(airacCycle(new Date('2024-02-21T23:59:59Z')), '2024-01-25');
+assert.equal(airacCycle(new Date('2024-02-22T00:00:00Z')), '2024-02-22');
+for (const suffix of ['International Airport', 'Air Field', 'Air Port', 'Air Base', 'Aerodrome', 'Airfield', 'Airstrip', 'Airport', 'Runway'])
+    assert.equal(normaliseName(` Melbourne ${suffix.toUpperCase()} `), 'Melbourne');
+assert.equal(normaliseName('Airport West'), 'Airport West');
+assert.equal(normaliseName('Airport'), 'Airport');
+assert.equal(normaliseName('Test Airport Runway'), 'Test Airport');
+const row = { type: 'medium_airport', scheduled_service: 'no', icao_code: ' ymml ', gps_code: '', ident: 'TEST', name: 'Melbourne Airport', latitude_deg: '-37.67', longitude_deg: '144.84' };
+const airport = airportFromRow(row);
+assert.equal(airport.i, 'YMML');
+assert.equal(airport.n, 'Melbourne');
+assert.equal(airportFromRow({ ...row, icao_code: '', gps_code: 'YSSY' }).i, 'YSSY');
+assert.equal(airportFromRow({ ...row, type: 'heliport' }), null);
+assert.equal(airportFromRow({ ...row, type: 'small_airport' }), null);
+assert.equal(airportFromRow({ ...row, type: 'small_airport', scheduled_service: 'yes' }).i, 'YMML');
+assert.throws(() => airportFromRow({ ...row, latitude_deg: '' }));
+assert.throws(() => airportFromRow({ ...row, longitude_deg: '181' }));
+const existing = [{ ...airport, n: 'My Melbourne', a: 'MEL', b: 'ML', y: -30 }, { ...airport, i: 'YOLD', n: 'Retained airport' }];
+const merged = mergeAirports(existing, [airport, { ...airport, i: 'YNEW', n: 'New airport' }]);
+assert.equal(merged.length, 3);
+assert.deepEqual(merged[0], { ...existing[0], y: airport.y, x: airport.x });
+assert.ok(merged.some(item => item.i === 'YOLD'));
+assert.equal(existing[0].y, -30);
+assert.throws(() => validateAirport({ ...airport, y: Infinity }));
+assert.throws(() => mergeAirports(existing, [{ ...airport, n: '' }]));
+console.log('Airport AIRAC boundaries, Excel name/filter/merge rules and invalid input checks passed.');

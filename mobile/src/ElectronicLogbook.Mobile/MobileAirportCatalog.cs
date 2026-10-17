@@ -8,7 +8,9 @@ public sealed class MobileAirportCatalog
 {
     private const string EmbeddedResourceName = "ElectronicLogbook.Mobile.Data.airports.json.gz";
     private static readonly Lazy<MobileAirportCatalog> Embedded = new(LoadEmbedded);
-    private readonly IReadOnlyDictionary<string, MobileAirport> airportsByAlias;
+    private IReadOnlyDictionary<string, MobileAirport> airportsByAlias;
+    public event Action? Changed;
+    public IReadOnlyList<MobileAirport> Airports => airportsByAlias.Values.DistinctBy(airport => airport.Icao).ToArray();
 
     private MobileAirportCatalog(IEnumerable<MobileAirport> airports)
     {
@@ -31,6 +33,31 @@ public sealed class MobileAirportCatalog
         return new MobileAirportCatalog(airports);
     }
 
+    public MobileAirport[] Merge(IEnumerable<MobileAirport> updates)
+    {
+        var merged = Airports.ToDictionary(airport => airport.Icao, StringComparer.OrdinalIgnoreCase);
+        foreach (var airport in updates)
+        {
+            if (airport is null || string.IsNullOrWhiteSpace(airport.Icao) || airport.Icao.Length > 16 ||
+                string.IsNullOrWhiteSpace(airport.Name) || airport.Name.Length > 500 ||
+                !double.IsFinite(airport.Latitude) || Math.Abs(airport.Latitude) > 90 ||
+                !double.IsFinite(airport.Longitude) || Math.Abs(airport.Longitude) > 180 ||
+                airport.ThreeLetterCode?.Length > 16 || airport.TwoLetterCode?.Length > 16)
+                throw new InvalidDataException("Invalid airport catalogue record.");
+            merged[airport.Icao] = merged.TryGetValue(airport.Icao, out var prior)
+                ? prior with { Latitude = airport.Latitude, Longitude = airport.Longitude }
+                : airport;
+        }
+        return merged.Values.ToArray();
+    }
+
+    public void Replace(IEnumerable<MobileAirport> airports)
+    {
+        var next = new MobileAirportCatalog(airports);
+        airportsByAlias = next.airportsByAlias;
+        Changed?.Invoke();
+    }
+
     public bool TryFind(string? code, out MobileAirport airport)
     {
         var candidate = code?.Trim();
@@ -41,6 +68,19 @@ public sealed class MobileAirportCatalog
         }
 
         return airportsByAlias.TryGetValue(candidate, out airport!);
+    }
+
+    public IReadOnlyList<MobileAirport> Search(string query, int limit)
+    {
+        var text = query.Trim();
+        if (text.Length == 0 || limit <= 0) return [];
+        return airportsByAlias.Values.DistinctBy(airport => airport.Icao)
+            .Where(airport => airport.Icao.StartsWith(text, StringComparison.OrdinalIgnoreCase) ||
+                airport.Name.Contains(text, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(airport => airport.Icao.Equals(text, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(airport => airport.Icao.StartsWith(text, StringComparison.OrdinalIgnoreCase))
+            .ThenBy(airport => airport.Icao, StringComparer.OrdinalIgnoreCase)
+            .Take(limit).ToArray();
     }
 
     public static double GreatCircleDistanceNm(MobileAirport first, MobileAirport second)

@@ -6,6 +6,30 @@ public static class MobileAirportSuggestions
 {
     private static readonly char[] RouteSeparators = [' ', '-', ',', '/', ';'];
 
+    public static IReadOnlyList<string> Ranked(
+        IEnumerable<PortableLogbookMaterializedEntryV2> currentEntries,
+        IEnumerable<string> bases,
+        DateOnly today,
+        MobileAirportCatalog catalog)
+    {
+        var flights = currentEntries.Where(item => !item.IsDeleted && item.Entry?.Date is { } date && date <= today)
+            .Select(item => item.Entry!)
+            .Where(entry => MobileLogbookSession.WorkbookFlightTime(entry) > 0)
+            .OrderByDescending(entry => entry.Date).ToArray();
+        string Canonical(string code) => catalog.TryFind(code, out var airport) ? airport.Icao : code.Trim().ToUpperInvariant();
+        var visits = flights.SelectMany(entry => new[] { entry.From, entry.To }
+                .Concat(MobileWorkbookEntryValidation.AirportTokens(entry.Via))
+                .Where(code => code is not null && catalog.TryFind(code, out _))
+                .Select(code => Canonical(code!)).Distinct(StringComparer.OrdinalIgnoreCase))
+            .GroupBy(code => code, StringComparer.OrdinalIgnoreCase)
+            .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.Key);
+        return new[] { flights.FirstOrDefault()?.To }
+            .Concat(bases).Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => Canonical(code!)).Concat(visits)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     public static IReadOnlyList<string> Create(
         IEnumerable<PortableLogbookMaterializedEntry> currentEntries,
         int limit = 12)

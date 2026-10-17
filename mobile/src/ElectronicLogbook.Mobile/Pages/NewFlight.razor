@@ -2,6 +2,7 @@
 @page "/flights/{EntryId}/edit"
 @inject MobileLogbookSession Session
 @inject NavigationManager Navigation
+@inject BrowserLogbookStore Store
 
 <PageTitle>@(Session.EditingEntryId is null ? "New Flight" : "Edit Flight")</PageTitle>
 
@@ -204,10 +205,15 @@ else
             <div class="field-grid">
                 <label>PIC <input @bind="Session.WorkbookDraft.Pic" autocapitalize="words" /></label>
                 <label>Other pilot or crew <input @bind="Session.WorkbookDraft.OtherPilotOrCrew" autocapitalize="words" /></label>
-                <label>From <input @bind="Session.WorkbookDraft.From" autocapitalize="characters" spellcheck="false" /></label>
-                <label>To <input @bind="Session.WorkbookDraft.To" autocapitalize="characters" spellcheck="false" /></label>
+                <AirportField Label="From" @bind-Value="Session.WorkbookDraft.From" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" />
+                <AirportField Label="To" @bind-Value="Session.WorkbookDraft.To" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" />
                 <label class="field-span">Via <input @bind="Session.WorkbookDraft.Via" autocapitalize="characters" spellcheck="false" /></label>
             </div>
+            @if (AirportBasesError is not null)
+            {
+                <p role="status">@AirportBasesError</p>
+                <MudButton Variant="Variant.Text" OnClick="LoadAirportBasesAsync">Retry bases</MudButton>
+            }
             <label class="field-wide">Remarks <textarea @bind="Session.WorkbookDraft.Remarks"></textarea></label>
         </section>
 
@@ -305,6 +311,28 @@ else
     private bool ShowValidationFeedback { get; set; }
     private int ValidationFeedbackVersion { get; set; }
     private ElementReference ValidationSummary { get; set; }
+    private string? AirportBasesError { get; set; }
+    private string[] AirportBases { get; set; } = [];
+
+    private async Task LoadAirportBasesAsync()
+    {
+        var logbookId = Session.DocumentV2.LogbookId;
+        string[] bases = [];
+        AirportBasesError = null;
+        try
+        {
+            bases = await Store.LoadBaseAirportsAsync(logbookId);
+        }
+        catch (Exception ex) when (ex is JSException or System.Text.Json.JsonException or FormatException)
+        {
+            AirportBasesError = "Saved bases could not be loaded. Airport search and flight-history suggestions are still available.";
+        }
+        if (Session.DocumentV2.LogbookId == logbookId) AirportBases = bases;
+    }
+
+    private Task<IReadOnlyList<string>> LoadAirportSuggestionsAsync() => Task.FromResult(
+        MobileAirportSuggestions.Ranked(Session.CurrentEntriesV2, AirportBases,
+            DateOnly.FromDateTime(DateTime.Today), MobileAirportCatalog.Default));
     private string ReviewWarningCountLabel => $"{ReviewWarnings.Count} {(ReviewWarnings.Count == 1 ? "Warning" : "Warnings")}";
     private string ValidationFeedbackMessage => Session.WorkbookDraftErrors.Count == 1
         ? "Can't continue. 1 problem needs attention."
@@ -314,6 +342,7 @@ else
     {
         await Session.EnsureLoadedWorkbookAsync();
         LoadEditRoute();
+        await LoadAirportBasesAsync();
     }
 
     protected override void OnParametersSet()

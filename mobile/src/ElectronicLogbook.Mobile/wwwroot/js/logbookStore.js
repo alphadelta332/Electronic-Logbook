@@ -5,6 +5,8 @@
     const version = 2;
     const maxElogbookBytes = 64 * 1024 * 1024;
     const networkRestoredHandlers = new Map();
+    const airportResumeHandlers = new Map();
+    let nextAirportResumeId = 1;
     let nextNetworkRestoredHandlerId = 1;
 
     function openDatabase() {
@@ -99,6 +101,22 @@
         save: (key, value) => withStore(documentStoreName, "readwrite", (store) => store.put(value, key)),
         delete: (key) => withStore(documentStoreName, "readwrite", (store) => store.delete(key))
     };
+
+    window.electronicLogbookAirports = {
+        resumed: () => {
+            for (const callback of airportResumeHandlers.values())
+                void callback.invokeMethodAsync('HandleAirportResumeAsync').catch(() => {});
+        },
+        subscribe: callback => {
+            const id = nextAirportResumeId++;
+            airportResumeHandlers.set(id, callback);
+            return id;
+        },
+        unsubscribe: id => airportResumeHandlers.delete(id)
+    };
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') window.electronicLogbookAirports.resumed();
+    });
 
     window.electronicLogbookNetwork = {
         isOnline: async () => {
@@ -330,6 +348,15 @@
         const headerClearance = Math.ceil(actionHeader?.getBoundingClientRect().height ?? 16);
         main.style.setProperty("--entry-scroll-padding-top", `${headerClearance}px`);
         field.scrollIntoView({ behavior: "instant", block: "nearest", inline: "nearest" });
+        if (control.closest(".airport-field")) {
+            const rect = control.getBoundingClientRect();
+            const viewport = globalThis.visualViewport;
+            const top = Math.max(viewport?.offsetTop ?? 0, actionHeader?.getBoundingClientRect().bottom ?? 0);
+            const bottom = Math.min((viewport?.offsetTop ?? 0) + (viewport?.height ?? innerHeight),
+                document.querySelector(".bottom-nav")?.getBoundingClientRect().top ?? innerHeight);
+            const height = Math.max(48, Math.floor(Math.max(rect.top - top, bottom - rect.bottom) - 16));
+            document.documentElement.style.setProperty("--airport-suggestions-height", `${height}px`);
+        }
     }
 
     function scheduleFocusedFlightEntryControlVisibilityCheck() {

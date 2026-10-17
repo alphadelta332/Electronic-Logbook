@@ -1138,9 +1138,8 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("MudButton", overview, StringComparison.Ordinal);
         Assert.DoesNotContain("VfrPanel", overview, StringComparison.Ordinal);
         Assert.DoesNotContain("IfrPanel", overview, StringComparison.Ordinal);
-        Assert.Contains("CurrentCount => Summary.CurrentCount", currency, StringComparison.Ordinal);
-        Assert.Contains("DueSoonCount => Summary.DueSoonCount", currency, StringComparison.Ordinal);
-        Assert.Contains("ExpiredCount => Summary.ExpiredCount", currency, StringComparison.Ordinal);
+        Assert.Contains("<DashboardCurrencyOverview Summary=\"@Summary\" />", currency, StringComparison.Ordinal);
+        Assert.DoesNotContain("class=\"currency-overview\"", currency, StringComparison.Ordinal);
         Assert.Contains("public int CurrentCount => SingleEngineRows.Count(IsCurrent);", summary, StringComparison.Ordinal);
         Assert.Contains("public int DueSoonCount => SingleEngineRows.Count(IsDueSoon);", summary, StringComparison.Ordinal);
         Assert.Contains("public int ExpiredCount => SingleEngineRows.Count(IsExpired);", summary, StringComparison.Ordinal);
@@ -1231,9 +1230,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@page \"/currency\"", page, StringComparison.Ordinal);
         Assert.Contains("Single engine", page, StringComparison.Ordinal);
         Assert.Contains("Multi engine", page, StringComparison.Ordinal);
-        Assert.Contains("currency-overview", page, StringComparison.Ordinal);
-        Assert.Contains("Due soon", page, StringComparison.Ordinal);
-        Assert.Contains("Expired", page, StringComparison.Ordinal);
+        Assert.Contains("<DashboardCurrencyOverview Summary=\"@Summary\" />", page, StringComparison.Ordinal);
         Assert.Contains("CategoryStatusSummary", page, StringComparison.Ordinal);
         Assert.Contains("CurrencyCategories", page, StringComparison.Ordinal);
         Assert.Contains("RowsForCategory", page, StringComparison.Ordinal);
@@ -1300,9 +1297,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("SelectedLicenceRows", page, StringComparison.Ordinal);
         Assert.Contains("? SelectedLicenceRows", page, StringComparison.Ordinal);
         Assert.Contains(": Summary.SingleEngineRows", page, StringComparison.Ordinal);
-        Assert.Contains("CurrentCount => Summary.CurrentCount", page, StringComparison.Ordinal);
-        Assert.Contains("DueSoonCount => Summary.DueSoonCount", page, StringComparison.Ordinal);
-        Assert.Contains("ExpiredCount => Summary.ExpiredCount", page, StringComparison.Ordinal);
+        Assert.Contains("<DashboardCurrencyOverview Summary=\"@Summary\" />", page, StringComparison.Ordinal);
         Assert.DoesNotContain("ActiveRows", page, StringComparison.Ordinal);
         Assert.DoesNotContain("SelectedEngineHeading", page, StringComparison.Ordinal);
         Assert.Contains("currency-requirement-status-icon", row, StringComparison.Ordinal);
@@ -1576,10 +1571,12 @@ public sealed class PwaPageWiringTests
         Assert.Contains("public IReadOnlyList<CustomFieldDefinition> WorkbookCustomFields", session, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Gate3NewFlightAvoidsNativeSuggestionPopups()
+    [Theory]
+    [InlineData("NewFlight.razor")]
+    [InlineData("Charts.razor")]
+    public void AirportFieldsAvoidNativeSuggestionPopups(string pageName)
     {
-        var page = ReadMobilePage("NewFlight.razor");
+        var page = ReadMobilePage(pageName);
 
         Assert.DoesNotContain("<datalist", page, StringComparison.Ordinal);
         Assert.DoesNotContain(" list=", page, StringComparison.Ordinal);

@@ -1,0 +1,50 @@
+<div class="airport-field">
+    <label for="@id">@Label</label>
+    <MudAutocomplete T="string" InputId="@id" Value="@Value" ValueChanged="ChangedAsync"
+                     SearchFunc="SearchAsync" Variant="Variant.Outlined" Margin="Margin.Dense"
+                     MinCharacters="0" MaxItems="100" OpenOnFocus="true" DebounceInterval="0"
+                     CoerceValue="true" CoerceText="false" Immediate="true" ResetValueOnEmptyText="true"
+                     OnBlur="() => touched = true" PopoverClass="airport-suggestions"
+                     ListItemClass="airport-suggestion" autocomplete="off" autocapitalize="characters" spellcheck="false">
+        <ItemTemplate Context="airportCode">
+            <span><strong>@airportCode</strong> · @AirportName(airportCode)</span>
+        </ItemTemplate>
+        <NoItemsTemplate>
+            <MudText Class="pa-3">No matching airports.</MudText>
+        </NoItemsTemplate>
+    </MudAutocomplete>
+    @if (touched && !string.IsNullOrWhiteSpace(Value) && !MobileAirportCatalog.Default.TryFind(Value, out _))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" role="status">Airport not recognised.</MudText>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = "";
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter, EditorRequired] public Func<Task<IReadOnlyList<string>>> LoadSuggestions { get; set; } = default!;
+    [Parameter] public EventCallback Edited { get; set; }
+    private readonly string id = $"airport-{Guid.NewGuid():N}";
+    private bool touched;
+
+    private async Task<IEnumerable<string>> SearchAsync(string? text, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(text))
+            return MobileAirportCatalog.Default.Search(text, 100).Select(airport => airport.Icao);
+        var defaults = await LoadSuggestions();
+        cancellationToken.ThrowIfCancellationRequested();
+        return defaults;
+    }
+
+    private async Task ChangedAsync(string? code)
+    {
+        touched = false;
+        Value = code;
+        await ValueChanged.InvokeAsync(code);
+        await Edited.InvokeAsync();
+    }
+
+    private static string AirportName(string code) => MobileAirportCatalog.Default.TryFind(code, out var airport)
+        ? airport.Name : "Not in airport catalogue";
+}

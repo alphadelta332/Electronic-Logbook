@@ -1803,7 +1803,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     grid-column: 1 / -1;
 }
 
-.field-grid input,
+.field-grid input:not(.mud-input-slot),
 .field-wide textarea,
 .recent-select {
     width: 100%;
@@ -1819,6 +1819,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     min-height: 96px;
     resize: vertical;
 }
+
+.airport-field { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.airport-field .mud-input-control { margin-top: 0; }
+.airport-suggestions { max-height: var(--airport-suggestions-height, 300px) !important; }
+.airport-suggestion { min-height: 48px; }
 
 .numeric-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));

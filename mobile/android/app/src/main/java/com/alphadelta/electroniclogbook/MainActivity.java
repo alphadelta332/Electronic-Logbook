@@ -27,6 +27,10 @@ public class MainActivity extends BridgeActivity {
     public void onResume() {
         super.onResume();
         ElectronicLogbookPreviewUpdatesPlugin.checkAndPromptOnResume();
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            getBridge().getWebView().post(() -> getBridge().getWebView().evaluateJavascript(
+                "window.electronicLogbookAirports?.resumed?.()", null));
+        }
     }
 
     private void refreshBundledWebAssetsAfterUpdate() {

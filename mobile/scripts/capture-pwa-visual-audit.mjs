@@ -616,6 +616,33 @@ try {
                             throw new Error(`Charts/Stats tabs do not evenly fill the bar: ${JSON.stringify(tabLayout)}`);
                         }
                         const sections = page.locator(route.stats ? ".analytics-statistics" : ".analytics-chart");
+                        if (route.stats) {
+                            await page.locator(".analytics-bases > summary").click();
+                            const recent = page.locator(".analytics-base-suggestions");
+                            await recent.locator("summary").click();
+                            const input = page.locator("#analytics-base-code");
+                            if (await input.getAttribute("list") !== null || await page.locator("datalist").count() !== 0) {
+                                throw new Error("Base airports still use a native suggestion popup");
+                            }
+                            await input.focus();
+                            await recent.scrollIntoViewIfNeeded();
+                            const choices = await recent.locator("button").evaluateAll(buttons => buttons.map(button => ({
+                                height: button.getBoundingClientRect().height,
+                                position: getComputedStyle(button).position,
+                                overflow: button.scrollWidth > button.clientWidth + 1
+                            })));
+                            if (choices.length === 0 || choices.some(choice => choice.height < 48 || choice.overflow || !["static", "relative"].includes(choice.position))) {
+                                throw new Error(`Recent base airports must remain readable touch targets in the page: ${JSON.stringify(choices)}`);
+                            }
+                            await assertAccessible(page, `base airport choices ${profile.name} ${colorScheme}`);
+                            await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-base-airports.png`) });
+                            await recent.locator("button").first().click();
+                            await page.locator(".analytics-base-list li").waitFor({ state: "visible" });
+                            if (await page.locator(".analytics-base-list li").count() !== 1) throw new Error("Recent airport was not saved");
+                            await page.locator(".analytics-base-list button").click();
+                            await page.locator(".analytics-base-list li").waitFor({ state: "hidden" });
+                            await page.locator(".analytics-bases > summary").click();
+                        }
                         for (let index = 0; index < await sections.count(); index++) {
                             await sections.nth(index).scrollIntoViewIfNeeded();
                             await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-section${index + 1}.png`) });

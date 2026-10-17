@@ -275,6 +275,10 @@ acknowledgements are monotonic.
 
 ## Health, Diagnostics, And Restore
 
+Independent off-site backup inventory, the proposed unattended service, key custody
+and disposable restoration gates are in [the backup plan](hosted-preview-backup-plan.md).
+That plan does not establish an operating backup or a successful archive restoration.
+
 Use the legacy remote function `public.get_hosted_pilot_health()` for pre-Preview and
 weekly Preview checks. Its rename is deferred until the external Supabase migration. It
 returns active account, device, operation, and estimated database-size counts plus
