@@ -127,7 +127,8 @@ try {
     Assert-True ($config.Expected.PreviewSigningMetadataFile -eq 'flightlogx-pilot-signing.json') 'permanent Preview signing metadata must retain its legacy transfer filename'
     Assert-True ($config.Expected.OwnerEnrollmentScript -eq 'tools/Add-FlightLogXParticipant.ps1') 'owner enrolment command must have a stable tracked entrypoint'
     Assert-True ($config.Expected.AirportCatalogPublisherScript -eq 'tools/Publish-AirportCatalog.ps1') 'airport catalogue publisher must have a tracked deployment entrypoint'
-    Assert-True (($config.Expected.AirportCatalogVaultSecretNames -join ',') -eq 'airport_catalog_url,airport_catalog_service_role') 'airport publication credentials must remain remote Vault secrets, not transfer assets'
+    Assert-True ($config.Expected.AirportCatalogPublisherSecretName -eq 'AIRPORT_CATALOG_PUBLISH_TOKEN') 'airport publication uses a remote publisher-only token'
+    Assert-True (Test-Path (Join-Path $repoRoot $config.Expected.AirportCatalogSchedulerSource)) 'shared Cloudflare scheduler source must exist after checkout'
     Assert-True ($config.Expected.AndroidRecoverySystemImage -eq 'system-images;android-35;google_apis_playstore;x86_64') 'recovery AVD must use the Google Play API 35 system image'
     Assert-True ($config.Expected.AndroidRecoveryAvdName -eq 'ElectronicLogbook_Pixel_Play_API35') 'recovery AVD must have a stable guarded name'
     Assert-True ($config.Expected.AndroidRecoverySnapshotName -eq 'flightlogx_google_authenticated_clean_v1') 'authenticated clean snapshot must have a stable guarded name'
@@ -164,6 +165,7 @@ try {
     Assert-True ($recoveryScriptText -match 'No account identifier or authentication token was printed') 'recovery verification must not disclose Google account or token data'
 
     $entrypointText = Get-Content -LiteralPath $entrypoint -Raw -Encoding UTF8
+    Assert-True ($entrypointText -match 'Expected\.AirportCatalogSchedulerSource') 'transfer verifier must check the shared Cloudflare scheduler source'
     Assert-True ($entrypointText -match "@\('a'.*'-t7z'.*'-mx=9'.*'-bb0'") 'real export must create a 7-Zip archive'
     Assert-True ($entrypointText -notmatch "'-mhe=on'|Read-ArchivePassword|Archive password") 'workflow must not encrypt or request an archive password'
     Assert-True ($entrypointText -match 'Test-RecoveryEnvelopeSecretFile') 'verifier must validate recovery secret structure and key pairing'

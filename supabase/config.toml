@@ -389,7 +389,7 @@ deno_version = 2
 verify_jwt = false
 
 [functions.airport-catalog]
-# Publisher compares the bearer credential with its server-side service-role key.
+# Publisher accepts only its dedicated AIRPORT_CATALOG_PUBLISH_TOKEN bearer secret.
 verify_jwt = false
 
 # [edge_runtime.secrets]

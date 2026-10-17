@@ -918,7 +918,7 @@ function Invoke-VerifyAction {
     catch { $excelDetail = $_.Exception.Message }
     Add-CheckResult $results 'Excel COM' $excelPassed $true $excelDetail
 
-    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, $script:TransferConfig.Expected.AirportCatalogPublisherScript, 'docs/flightlogx-preview-android-install.md')) {
+    foreach ($path in @('AGENTS.md', 'TODO.md', 'LOCAL_DEVICE_SETUP_HANDOVER.md', $script:TransferConfig.Expected.OwnerEnrollmentScript, $script:TransferConfig.Expected.AirportCatalogPublisherScript, $script:TransferConfig.Expected.AirportCatalogSchedulerSource, 'docs/flightlogx-preview-android-install.md')) {
         Add-CheckResult $results $path (Test-Path -LiteralPath (Join-Path $script:RepoRoot $path) -PathType Leaf) $true 'required repository context'
     }
     $hostedConfig = Join-Path $script:RepoRoot 'mobile\src\ElectronicLogbook.Mobile\wwwroot\hosted-sync.local.json'

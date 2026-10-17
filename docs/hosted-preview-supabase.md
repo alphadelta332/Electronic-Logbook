@@ -115,7 +115,16 @@ capture and redact those values before displaying or saving evidence.
 Confirm the account uses Workers Free before deploying:
 `wrangler.cmd deploy --config supabase/activity-worker/wrangler.local.json`.
 
-The UTC cron is `17 */4 * * *` (six invocations daily). The Worker has no HTTP handler,
+The activity UTC cron is `17 */4 * * *` (six invocations daily). The new configuration
+adds hourly airport publication `7 * * * *`; see `airport-catalog-updates.md`.
+As of 2026-10-17 this change has been deployed/observed on development only: Preview's
+live Worker still has just the original four-hour cron, and its airport publisher
+still uses SQL/pg_net. A separate managed-schema backup-permission blocker was found
+during development validation; resolve that before the Preview cutover.
+The airport-only secret is a separate remote binding; activity probe requests still
+use only the publishable key. Development uses the same code with an airport-only
+timer. Never replace the activity cron when deploying airport changes.
+The Worker has no HTTP handler,
 public workers.dev endpoint, or preview URL. Explicitly set `crons = []` when disabling
 the timer; removing the configuration key leaves the deployed timer unchanged.
 Observability is enabled with full sampling so failures appear as failed executions.

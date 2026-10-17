@@ -21,20 +21,30 @@ function Invoke-ProjectSql([string]$Query) {
     } catch { throw "Supabase SQL request failed ($($_.Exception.Response.StatusCode.value__)); response omitted to protect server credentials." }
 }
 $version = '20261017000000'
+$cutoverVersion = '20261017010000'
 $applied = @(Invoke-ProjectSql 'select version from supabase_migrations.schema_migrations;')
 $pending = @(Get-ChildItem (Join-Path $repoRoot 'supabase/migrations') -Filter '*.sql' | Where-Object { $_.BaseName.Split('_')[0] -notin $applied.version })
-if (@($pending | Where-Object { $_.BaseName -notlike "$($version)_*" }).Count) { throw 'Unrelated pending migrations require separate review.' }
+if (@($pending | Where-Object { $_.BaseName.Split('_')[0] -notin @($version, $cutoverVersion) }).Count) { throw 'Unrelated pending migrations require separate review.' }
 if ($version -notin $applied.version) {
     $migration = Get-Content (Join-Path $repoRoot "supabase/migrations/$($version)_shared_airport_catalog.sql") -Raw
     $null = Invoke-ProjectSql $migration
     $escaped = $migration.Replace("'", "''")
     $null = Invoke-ProjectSql "insert into supabase_migrations.schema_migrations(version,name,statements) values ('$version','shared_airport_catalog',array['$escaped']);"
 }
+$workerRoot = Join-Path $repoRoot 'supabase/activity-worker'
+$existingWorker = Get-Content -LiteralPath (Join-Path $workerRoot 'wrangler.local.json') -Raw | ConvertFrom-Json
+if ($existingWorker.account_id -notmatch '^[a-f0-9]{32}$' -or $existingWorker.name -ne 'flightlogx-preview-activity') {
+    throw 'Verified Cloudflare activity-worker account configuration required.'
+}
+$publisherToken = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
+$null = Invoke-RestMethod -Method Post -Uri "https://api.supabase.com/v1/projects/$projectRef/secrets" `
+    -Headers $managementHeaders -ContentType 'application/json' `
+    -Body (ConvertTo-Json -InputObject @(@{name='AIRPORT_CATALOG_PUBLISH_TOKEN';value=$publisherToken}) -Compress)
 $previousAccessToken = $env:SUPABASE_ACCESS_TOKEN
 try {
     $env:SUPABASE_ACCESS_TOKEN = $token
     Push-Location $repoRoot
-    try { & supabase.cmd functions deploy airport-catalog --project-ref $projectRef --use-api --no-verify-jwt }
+    try { $deployOutput = & supabase.cmd functions deploy airport-catalog --project-ref $projectRef --use-api --no-verify-jwt 2>&1 | Out-String }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw 'Airport function deployment failed.' }
 } finally { $env:SUPABASE_ACCESS_TOKEN = $previousAccessToken }
@@ -47,14 +57,23 @@ $headers = @{ Authorization = "Bearer $serviceKey"; apikey = $serviceKey }
 $null = Invoke-RestMethod -Method Post -Uri "$origin/storage/v1/object/airport-catalog/seed.json.gz" `
     -Headers ($headers + @{ 'x-upsert' = 'true'; 'cache-control' = 'max-age=31536000' }) `
     -ContentType 'application/gzip' -InFile (Join-Path $repoRoot 'mobile/src/ElectronicLogbook.Mobile/Data/airports.json.gz')
-foreach ($secret in @(@{ Name = 'airport_catalog_url'; Value = $origin }, @{ Name = 'airport_catalog_service_role'; Value = $serviceKey })) {
-    $name = $secret.Name
-    $value = $secret.Value.Replace("'", "''")
-    $query = "do `$body`$ declare existing_id uuid; begin select id into existing_id from vault.secrets where name='$name'; if existing_id is null then perform vault.create_secret('$value','$name'); else perform vault.update_secret(existing_id,'$value','$name'); end if; end `$body`$;"
-    $null = Invoke-ProjectSql $query
-}
-$result = Invoke-RestMethod -Method Post -Uri "$origin/functions/v1/airport-catalog" -Headers $headers -ContentType 'application/json' -Body '{}' -TimeoutSec 120
+$result = Invoke-RestMethod -Method Post -Uri "$origin/functions/v1/airport-catalog" -Headers @{Authorization="Bearer $publisherToken"} -ContentType 'application/json' -Body '{}' -TimeoutSec 120
 if ($result.status -notin @('published', 'current')) { throw 'Airport catalogue was not published.' }
 $result | Select-Object status,cycle,count,sha256
-$null = Invoke-ProjectSql "select net.http_post(url := '$origin/functions/v1/airport-catalog', headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer ' || (select decrypted_secret from vault.decrypted_secrets where name='airport_catalog_service_role')), body := '{}'::jsonb, timeout_milliseconds := 120000);"
-Write-Host "Verified airport publisher deployed to $expectedName; scheduled job installed."
+$publishable = ($keys | Where-Object { $_.type -eq 'publishable' -and $_.name -eq 'default' } | Select-Object -First 1).api_key
+if ($publishable -notmatch '^sb_publishable_[A-Za-z0-9_-]+$') { throw 'Expected publishable activity-probe key unavailable.' }
+$workerConfig = [ordered]@{
+    name = if ($Environment -eq 'preview') { 'flightlogx-preview-activity' } else { 'flightlogx-development-airports' }
+    main = 'worker.mjs'; account_id=$existingWorker.account_id; compatibility_date='2026-10-05'
+    workers_dev=$false; preview_urls=$false
+    vars=@{SUPABASE_URL=$origin;SUPABASE_PUBLISHABLE_KEY=$publishable}
+    triggers=@{crons=@(if ($Environment -eq 'preview') { '17 */4 * * *'; '7 * * * *' } else { '7 * * * *' })}
+    observability=@{enabled=$true;head_sampling_rate=1}
+}
+$configPath = Join-Path $workerRoot $(if ($Environment -eq 'preview') {'wrangler.local.json'} else {'wrangler.development.local.json'})
+$workerConfig | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $configPath
+$workerOutput = & wrangler.cmd deploy --config $configPath 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) { throw 'Cloudflare airport scheduler deployment failed; private output suppressed.' }
+$secretOutput = $publisherToken | & wrangler.cmd secret put AIRPORT_CATALOG_PUBLISH_TOKEN --config $configPath 2>&1 | Out-String
+if ($LASTEXITCODE -ne 0) { throw 'Cloudflare publisher-only secret setup failed; private output suppressed.' }
+Write-Host "Airport publisher and Cloudflare hourly timer deployed to $expectedName. Confirm a real scheduled success before applying the external_airport_scheduler migration."

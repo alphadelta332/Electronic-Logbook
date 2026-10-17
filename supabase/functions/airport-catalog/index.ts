@@ -28,7 +28,9 @@ async function digest(data: Uint8Array) {
 Deno.serve(async request => {
     const url = Deno.env.get("SUPABASE_URL")!;
     const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    if (request.method !== "POST" || request.headers.get("authorization") !== `Bearer ${key}`)
+    const publisherToken = Deno.env.get("AIRPORT_CATALOG_PUBLISH_TOKEN");
+    if (request.method !== "POST" || !publisherToken || !/^[a-f0-9]{64}$/.test(publisherToken) ||
+        request.headers.get("authorization") !== `Bearer ${publisherToken}`)
         return new Response("Unauthorized", { status: 401 });
     const headers = { authorization: `Bearer ${key}`, apikey: key };
     const objectUrl = `${url}/storage/v1/object/${bucket}/`;

@@ -1,7 +1,8 @@
 # Encrypted hosted backup tooling
 
 Status: local export, authenticated readback, disposable SQL restoration and shared
-application replay and protected offline recovery setup implemented. R2 production backup upload,
+application replay, protected offline recovery setup and disposable-tested complete archive
+orchestration implemented. R2 production backup upload,
 scheduling and end-to-end Google/managed-service recovery acceptance are not yet complete.
 The measured design and owner decisions are in
 [the backup plan](hosted-preview-backup-plan.md).
@@ -13,6 +14,7 @@ The tools use the existing Node 24/PostgreSQL 17 installation with no npm depend
 
 ```powershell
 node tools/hosted-backup/cli.mjs export --connection <private-connection.json> --recipient <backup-public.pem> --output <new-output.elbbackup>
+node tools/hosted-backup/cli.mjs bundle --connection <private-connection.json> --recipient <backup-public.pem> --source <source-checkout> --output <new-output.elbbackup>
 node tools/hosted-backup/cli.mjs verify --archive <output.elbbackup> --identity <offline-backup-private.pem>
 ```
 
@@ -33,6 +35,17 @@ grants were removed. No source credentials were saved and no participant rows we
 exported by this batch. Do not enable this job by bypassing the audit or substituting
 owner credentials. Resolve the provider boundary or choose a different export design
 first. Catalog evidence: `artifacts/hosted-backup-plan-20261017/batch3c1.json`.
+
+The authorized Cloudflare fallback was proved on development only: a real external
+scheduled airport run succeeded, pg_net was removed without CASCADE, and catalogue
+checks passed. Provisioning then stopped before LOGIN at `unreadable_relations=145`:
+project postgres cannot delegate auth schema USAGE, all auth reads or all storage
+reads. Its SELECT grant options cover 16/27 auth and 2/8 storage tables/views.
+The temporary role/grants were removed; no source credentials or live row exports
+were created. Preview remains unchanged. A supported managed-schema grant remedy
+or a separately reviewed export design is required before continuing; broad
+`pg_read_all_data` membership does not satisfy this export boundary. Evidence:
+`artifacts/hosted-backup-plan-20261017/airport-fallback-result.md`.
 
 Run `node tools/hosted-backup/initialize-source.mjs --ca <absolute-trusted-root.crt>`
 once on the owner PC after that blocker is resolved. It uses the existing private
@@ -147,10 +160,63 @@ Version 1 uses a PostgreSQL custom-format dump of `public`, `auth`, `storage` an
 application tables, Auth users/identities and migration history must be present or
 export fails. Cluster roles are captured separately with passwords excluded.
 Additional named binary files can be included through `buildDatabaseArchive`;
-replacing required dump/roles content is rejected. The CLI currently exports the
-database and roles only: catalog file bytes, reconstruction source and service
-configuration must be packaged by the unattended orchestration stage. PostgreSQL
-Storage metadata alone does not preserve file objects.
+replacing required dump/roles content is rejected. `export` retains its database/roles
+scope. `bundle` adds the catalogue file bytes, reconstruction source and an encrypted
+verification manifest. PostgreSQL Storage metadata alone does not preserve file objects.
+
+### Complete archive orchestration (`bundle`)
+
+This command prepares a new encrypted local archive; it does not upload, schedule or
+publish backup success. Hosted use still requires resolution of the source-permission
+blocker above. It uses the same restricted connection, public recipient and existing
+toolchain, with no new dependency, stored credential or default configuration path.
+
+Before reading rows it audits the hosted export identity. A read-only REPEATABLE READ
+transaction exports a PostgreSQL snapshot and computes a manifest for every ordinary
+or partitioned root table in the four export schemas. Each entry contains the row
+count and SHA-256 over sorted per-row SHA-256 digests, including duplicates. Operations
+and configuration also retain revision identities inside the encrypted manifest. UTC
+and ISO date formatting make the row representation reproducible during restoration.
+`pg_dump --snapshot` imports that same snapshot while its transaction remains open.
+Concurrent ordinary logbook edits may continue; they cannot shift the manifest away
+from the dump. See PostgreSQL's [snapshot option](https://www.postgresql.org/docs/17/app-pgdump.html)
+and [snapshot synchronization](https://www.postgresql.org/docs/17/functions-admin.html#FUNCTIONS-SNAPSHOT-SYNCHRONIZATION).
+
+Storage inventory must contain only the known public `airport-catalog` bucket and
+its manifest, seed and content-addressed snapshots. Unexpected buckets/objects fail
+for review. The current manifest, referenced compressed catalogue and seed bytes are
+downloaded through bounded, nonredirecting HTTPS requests. Their Storage content
+ETags must match the metadata in the database snapshot. The current catalogue must
+also match its manifest SHA-256/count and pass the existing airport validator, with
+unique codes and bounded decompression. Older published snapshots are inventoried
+but their superseded public reference bytes are deliberately excluded. Missing files,
+metadata or ETags stop the job; there is no fallback to an incomplete archive.
+
+Reconstruction includes `supabase/config.toml`, all migration and Edge Function
+sources, the backup/replay tools, the shared Portable project and `versions.properties`.
+Git supplies tracked and nonignored untracked source names; generated directories,
+local configuration, unexpected extensions and symlinks are rejected. Actual working
+bytes are preserved, with the HEAD revision, dirty-state flag and per-file hashes;
+uncommitted implementation is not misrepresented as committed source. Required files,
+per-file and aggregate sizes are checked. Credentials and offline recovery files stay
+outside these source paths and are never collected from local app-data directories.
+
+Fresh schema-only exports bracket the operation; changed schema, migration history,
+Storage inventory or reconstruction bytes fail before an archive is returned. Native
+commands, response sizes and snapshot lifetime are bounded. Failure closes the held
+transaction; decrypted database buffers stay in memory and are wiped after packaging.
+The CLI writes only encrypted bytes with exclusive creation, and emits
+size/digest status only after writing. Existing output is never replaced. Upload
+readback, independent job-history authentication and freshness alerts remain later gates.
+
+`verification.json` is inside encryption. It records the snapshot/time/server version,
+table/revision manifests, Storage metadata, reconstruction hashes and coverage limits.
+The disposable integration check restores the dump and compares **every table's**
+computed manifest with this record. Roles remain separately sampled, and Vault/service
+credentials are excluded. Supabase configuration is reconstruction source, not a
+complete export of live Auth/SMTP settings or deployed secrets. Recreate service
+credentials and jobs with jobs disabled on an isolated restore target; managed-service
+and Google recovery acceptance remain outstanding.
 
 Named files and SHA-256 digests are packed as JSON/base64, compressed with gzip and
 encrypted with a fresh AES-256-GCM key/nonce. RSA-OAEP-SHA256 wraps that data key to
@@ -176,6 +242,7 @@ node --test tools/hosted-backup/r2-credentials.test.mjs
 # Requires the existing local Supabase PostgreSQL on 127.0.0.1:54322:
 node --test tools/hosted-backup/archive.integration.test.mjs
 node --test tools/hosted-backup/source-access.integration.test.mjs
+node --test tools/hosted-backup/orchestrate.integration.test.mjs
 .\tools\Test-LocalDevelopmentTransfer.ps1
 ```
 

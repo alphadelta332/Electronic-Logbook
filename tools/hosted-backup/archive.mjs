@@ -100,11 +100,13 @@ export function openArchive(archive, identity) {
   } finally { key?.fill(0); compressed?.fill(0); payload?.fill(0); }
 }
 
-export function exportDatabase(connection) {
+export function exportDatabase(connection, snapshot) {
+  requireValue(snapshot === undefined || /^[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9]+$/.test(snapshot), 'Invalid export snapshot.');
   if (connection.host !== '127.0.0.1' || connection.user === 'flightlogx_backup') inspectSourceAccess(connection);
   // pg_dump uses one REPEATABLE READ, READ ONLY transaction for the data snapshot.
   const dump = postgres(connection, 'pg_dump', ['--no-password', '--format=custom', '--compress=9',
-    '--lock-wait-timeout=10000', '--schema=public', '--schema=auth', '--schema=storage', '--schema=supabase_migrations']);
+    '--lock-wait-timeout=10000', '--schema=public', '--schema=auth', '--schema=storage', '--schema=supabase_migrations',
+    ...(snapshot ? ['--snapshot=' + snapshot] : [])]);
   try {
     const toc = postgres(connection, 'pg_restore', ['--list'], dump).toString('utf8');
     for (const table of requiredTables)

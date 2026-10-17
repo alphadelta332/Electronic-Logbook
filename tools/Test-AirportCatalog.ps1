@@ -48,15 +48,6 @@ if ($write.StatusCode -lt 400) { throw 'Unauthenticated public-bucket write was 
 function Sql([string]$Query) {
     Invoke-RestMethod -Method Post -Uri "https://api.supabase.com/v1/projects/$projectRef/database/query" -Headers $headers -ContentType 'application/json' -Body (@{query=$Query}|ConvertTo-Json -Compress)
 }
-$jobs = @(Sql "select jobid,active,schedule,command from cron.job where jobname='flightlogx-airport-catalog';")
-if ($jobs.Count -ne 1 -or -not $jobs[0].active -or $jobs[0].schedule -ne '7 * * * *') { throw 'Airport schedule missing or duplicated.' }
-$queued = Sql $jobs[0].command
-$requestId = $queued.http_post
-$result = $null
-for ($attempt=0; $attempt -lt 20; $attempt++) {
-    Start-Sleep -Milliseconds 500
-    $result = @(Sql "select status_code,content::jsonb->>'status' as status from net._http_response where id=$requestId;")
-    if ($result.Count) { break }
-}
-if ($result.Count -ne 1 -or $result[0].status_code -ne 200 -or $result[0].status -ne 'current') { throw 'Scheduled SQL path did not return a successful unchanged-cycle check.' }
-[pscustomobject]@{ Environment=$Environment; Cycle=$cycle; Airports=$airports.Count; RetainedSeed=$seed.Count; CoordinateUpdates=$coordinateUpdates; Added=$airports.Count-$seed.Count; CompressedBytes=$compressed.Length; Sha256=$hash; UnauthorizedPublisher=401; UnauthorizedWrite=$write.StatusCode; ScheduledSqlStatus=$result[0].status }
+$legacy = Sql "select (select count(*) from cron.job where jobname='flightlogx-airport-catalog') as jobs, (select count(*) from pg_extension where extname='pg_net') as extensions;"
+if ($legacy.jobs -ne 0 -or $legacy.extensions -ne 0) { throw 'Legacy airport timer or pg_net remains; external cutover is incomplete.' }
+[pscustomobject]@{ Environment=$Environment; Cycle=$cycle; Airports=$airports.Count; RetainedSeed=$seed.Count; CoordinateUpdates=$coordinateUpdates; Added=$airports.Count-$seed.Count; CompressedBytes=$compressed.Length; Sha256=$hash; UnauthorizedPublisher=401; UnauthorizedWrite=$write.StatusCode; LegacySchedulerRemoved=$true }

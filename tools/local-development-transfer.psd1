@@ -171,7 +171,8 @@
         PreviewSigningMetadataFile = 'flightlogx-pilot-signing.json'
         OwnerEnrollmentScript = 'tools/Add-FlightLogXParticipant.ps1'
         AirportCatalogPublisherScript = 'tools/Publish-AirportCatalog.ps1'
-        AirportCatalogVaultSecretNames = @('airport_catalog_url', 'airport_catalog_service_role')
+        AirportCatalogPublisherSecretName = 'AIRPORT_CATALOG_PUBLISH_TOKEN'
+        AirportCatalogSchedulerSource = 'supabase/activity-worker/worker.mjs'
         ParticipantHandoffDirectory = 'ElectronicLogbook\ParticipantHandoffs'
         PostgreSqlMajor = 17
         PostgreSqlBackupTools = @('pg_dump', 'pg_dumpall', 'pg_restore')
@@ -195,7 +196,7 @@
         'Launch Docker Desktop once, accept its terms, and allow WSL2 setup or a restart if requested.'
         'Run gh auth login on the new device; GitHub authentication is never transferred.'
         'Run firebase login on the new device; Firebase authentication is never transferred.'
-        'For Supabase Free-plan scheduler maintenance, install wrangler@4.147.0 and run wrangler login; Cloudflare authentication is never transferred. Regenerate ignored Worker configuration from the verified Preview project metadata.'
+        'For Supabase activity/airport scheduler maintenance, install wrangler@4.147.0 and run wrangler login; Cloudflare authentication is never transferred. Regenerate ignored Worker configuration from verified project metadata. Publish-AirportCatalog rotates the remote publisher-only secret in Supabase Edge secrets and Cloudflare; never transfer that secret.'
         'Open the Codex VS Code extension and sign in; Codex authentication and session databases are never transferred.'
         'Confirm Windows has a default HTTPS browser; updater Google sign-in returns through a temporary 127.0.0.1 loopback callback and needs no local Google client secret.'
         'Confirm the Google OAuth project that owns the Web client also has separate Android clients for every active package/signing-certificate pair; preserve existing clients when adding the permanent Preview identity.'

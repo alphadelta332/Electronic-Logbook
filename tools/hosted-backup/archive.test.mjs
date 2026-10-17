@@ -46,4 +46,5 @@ test('rejects mismatched hosted source identity and remote insecure connections 
   for (const changed of [{}, { user: 'postgres.' + 'a'.repeat(20), sslRootCert: '' },
     { disposable: true, host: 'remote.example.com' }, { host: '127.0.0.1', disposable: false }])
     assert.throws(() => exportDatabase({ ...connection, ...changed }), /Unexpected database export target/);
+  assert.throws(() => exportDatabase(connection, 'invalid snapshot'), /Invalid export snapshot/);
 });

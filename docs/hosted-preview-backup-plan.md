@@ -4,6 +4,24 @@ Prepared 2026-10-17 (Australia/Sydney). Status: inventory verified; owner choice
 recorded, with a conditional zero-expected-cost deployment gate. **No independent backup or successful database restoration
 has been established.** The existing keepalive is not a backup.
 
+Batch 3c2 update (2026-10-17): complete local archive orchestration is implemented
+and tested only against disposable databases/reference HTTP fixtures. `bundle` adds
+actual airport object bytes, reconstruction sources and table/revision manifests
+from the same PostgreSQL snapshot as its dump; changing or incomplete dependencies
+fail closed. Disposable restoration matches every table manifest, including during
+concurrent source-row writes. The live export-identity blocker remains open under
+SU-511674. No real backup upload, scheduler, independent alert or live recovery
+acceptance is established by this batch. Usage/limits: `hosted-backup-tools.md`.
+
+Fallback investigation (2026-10-17): development's airport timer now runs through
+Cloudflare with a publisher-only token, and pg_net removal/public catalogue checks
+passed. This cleared the first permission failure but exposed missing delegable
+managed Auth/Storage reads (`unreadable_relations=145` before LOGIN). The test identity
+was removed; Preview deployment, its SQL timer and keepalive were left unchanged.
+Timer relocation alone is therefore not an accepted backup solution. Next: prove a
+supported managed-schema read boundary or review a different constrained export
+design before further Preview changes. No owner credential fallback is authorized.
+
 ## Evidence and scope
 
 This batch covers the first subtask in the independent-backup TODO: inventory,

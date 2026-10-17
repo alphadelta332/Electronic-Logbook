@@ -1,5 +1,12 @@
 # Shared airport catalogue
 
+Deployment status (2026-10-17): the external timer/token design below is deployed
+and observed on **development only**. Preview still uses its original SQL/pg_net
+timer and deployed service-key publisher; its Cloudflare keepalive is unchanged.
+The development test removed pg_net successfully but exposed a separate inability
+to delegate all managed Auth/Storage reads to the backup account. Do not deploy or
+cut over Preview on the assumption that timer relocation alone completes backups.
+
 Android keeps an offline airport catalogue. Development and Preview each publish a
 shared copy; phones do not download or parse the upstream airport CSV independently.
 Searches use the local copy and require no network request or user maintenance.
@@ -8,7 +15,7 @@ Searches use the local copy and require no network request or user maintenance.
 
 The publisher uses OurAirports' `airports.csv` from
 `https://davidmegginson.github.io/ourairports-data/airports.csv`. Its AIRAC calculation
-uses 28-day UTC cycles anchored on 25 January 2024. A server cron job runs hourly at
+uses 28-day UTC cycles anchored on 25 January 2024. A Cloudflare timer runs hourly at
 minute seven, exits when the current cycle is published, and retries failed refreshes
 on later runs. This does not depend on an owner's computer or phone staying on.
 
@@ -57,14 +64,37 @@ Use the existing Supabase management token and project metadata described in
 node supabase/functions/airport-catalog/catalog.test.mjs
 ```
 
-The publisher tool verifies project identity, applies only the dedicated migration,
-deploys the function, uploads the embedded seed and configures the remote Vault
-secrets `airport_catalog_url` and `airport_catalog_service_role`. The latter uses the
-project's default server secret exposed to the function runtime. Neither secret
-belongs in mobile config, transfer archives or tracked files. After rotating the
-server credential, rerun deployment to refresh Vault and validate the scheduled path.
+The publisher tool verifies project identity, applies only the foundation migration,
+deploys the function, uploads the embedded seed and deploys the Cloudflare timer.
+It generates a 256-bit `AIRPORT_CATALOG_PUBLISH_TOKEN`, stores it in Supabase Edge
+secrets and the matching Worker's secret binding, and accepts only that token for
+publication. Cloudflare cannot use it to read or change logbooks. The powerful
+server credential stays in Supabase's runtime and the seeding process's memory.
+Redeployment rotates the publisher token in both services; no local token file is
+needed. Use the existing Wrangler login and verified Workers Free account. The
+ignored configurations contain account/project IDs and publishable keys, not secrets.
+
+Preview reuses `flightlogx-preview-activity`, preserving its four-hour activity probe;
+development uses the same code as `flightlogx-development-airports` with only the
+hourly timer. Both have public HTTP/preview endpoints disabled. The scheduled handler
+routes the original four-hour cron to the probe and other configured crons to airport
+publication. Each invocation makes one request, fails on redirects/errors/stale cycle
+or malformed responses, and logs only airport status, cycle and count. The last good
+catalogue remains available on failure.
+
+For first cutover, observe a successful real Cloudflare scheduled publication before
+applying `20261017010000_external_airport_scheduler.sql`. A temporary minute timer can
+exercise the same handler promptly, but restore and read back the normal hourly
+schedule afterward. The migration checks for queued requests, other HTTP jobs,
+webhooks and application routines, removes the old airport timer, drops pg_net
+without CASCADE, and deletes its two obsolete Vault secret copies. Do not use CASCADE
+or weaken the backup-account audit if an unexpected dependency stops removal.
 
 The test tool verifies public reads, snapshot integrity, preservation against the
-seed, rejected anonymous writes, rejected unauthenticated publication, and the exact
-cron SQL-to-function path. A manual execution proves that path; it does not prove a
-future scheduled AIRAC refresh has already occurred.
+seed, rejected anonymous writes/publication, and removal of the legacy SQL timer and
+pg_net. Separately retain Cloudflare scheduled-execution evidence and verify both
+production cron settings and the secret binding without saving its value. A
+current-cycle check does not prove a future AIRAC refresh has already occurred.
+Run `node supabase/activity-worker/worker.test.mjs` and
+`node supabase/activity-worker/airport.test.mjs` for probe isolation, publication,
+token rejection, transport/response failures and redaction checks.
