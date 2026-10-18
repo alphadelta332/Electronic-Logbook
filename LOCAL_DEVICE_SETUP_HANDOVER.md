@@ -52,6 +52,7 @@ or conversation. Its exact allowlist lives in
 It includes:
 
 - local `AGENTS.md`, `TODO.md`, `regulations.md`, and this guide;
+- optional Markdown research and document history in ignored `docs/local/`;
 - `release.local.json` when it exists;
 - the mobile hosted-sync local JSON when configured;
 - private `.github/*.pem` material when present;
@@ -333,8 +334,11 @@ publishable key. See `docs/hosted-preview-supabase.md` for deployment order.
 
 The encrypted hosted backup tools reuse Node 24 and the PostgreSQL 17 installation;
 no additional package is installed. Verify now checks `pg_dump`, `pg_dumpall`,
-`pg_restore`, `tools/hosted-backup/cli.mjs` and the backup replay-check project as well
-as `psql`. Disposable archive restoration/replay uses the already-required .NET 10 SDK
+`pg_restore`, `initdb`, `pg_ctl`, `tools/hosted-backup/cli.mjs` and the backup replay-check project as well
+as `psql`. The capability lifecycle test uses `initdb`/`pg_ctl` from that installation
+to start a synthetic, loopback-only temporary cluster on a free port, then stops and
+removes it. Its generated data/logs are regenerated output, never transfer inputs.
+Disposable archive restoration/replay uses the already-required .NET 10 SDK
 and builds the shared portable project; it introduces no NuGet dependency. Hosted exports require
 the public Supabase CA certificate with hostname verification. That certificate is
 regenerated public input, not a secret; never disable certificate checks to make an
@@ -343,6 +347,96 @@ logs. The backup private identity belongs in a separate protected offline recove
 set and never enters the development transfer archive, GitHub or R2. CLI export and
 authenticated readback currently exist; cloud scheduling and application recovery
 acceptance are separate gates. See `docs/hosted-backup-tools.md`.
+
+The optional Preview compatibility test also uses two disposable managed-service
+images pinned by digest in `tools/hosted-backup/preview-logical-contract.json`.
+After starting Docker Desktop, run `docker pull <image>` for each `targetImages`
+value in that file; Verify reports their cache presence as optional. These images,
+test containers/databases and compatibility evidence are regenerated dependencies
+or outputs, never development-transfer assets. Existing SDK/CLI requirements stay
+the same. Run `node --test --test-concurrency=1 tools/hosted-backup/preview-compatibility.integration.test.mjs`
+with the existing local Supabase stack running. See
+`docs/hosted-backup-preview-logical-contract.md` for the exact tested mapping and limits.
+
+The supervised logical route uses `supervised-logical-export.mjs` only on the owner
+PC. It reuses canonical `ElectronicLogbook/HostedBackup/source-root.crt` (public CA,
+already classified for transfer), the existing public recipient/recovery receipt
+and existing owner metadata/token. No routine owner credential file is created.
+The separate `logical-client.mjs` receives only the publishable API key, expiring
+export token, public recipient and reconstruction inputs; deployed source bundles
+are encrypted separately before reaching it. `logical-restore.mjs` uses the same
+pinned disposable images and existing SDKs. `Test-SupervisedBackup.ps1` dispatches
+from the authenticated receipt format and prompts locally for the USB password.
+Current usage screenshots/receipts and downloaded evidence are deliberately excluded
+regenerated outputs. The encrypted archive is protected backup output, outside the
+development transfer. Never transfer the expiring token or offline private identity.
+
+The daily runner `tools/hosted-backup/daily-backup.mjs` reuses Node 24 and curl's
+already-verified `--aws-sigv4` support (`curl.exe` on Windows, `curl` on the standard
+Ubuntu runner). `daily-workflow.json` is a JSON-form YAML workflow template for the
+separate private `alphadelta332/flightlogx-preview-backups` repository; it has no
+schedule and requires `BACKUP_ENABLED=true` before either job can run. Its upload
+and readback jobs receive different scoped R2 credentials; only upload receives the
+expiring source capability. Those GitHub Actions secrets are fresh authentication,
+never local-transfer assets. Do not export them to local configuration files.
+Public `daily-job.public.json` reconstruction inputs are regenerated, reviewed
+deployment output for that private repository. Temporary ciphertext staging and
+private-repository staging under `ElectronicLogbook/Temp` are regenerated output,
+never transfer inputs. A current trusted HTTPS usage/deployment evidence service is
+required; absent or stale evidence blocks the runner. Its provider authentication
+must be scoped and independently reviewed before activation, never borrowed from
+owner-wide/recovery credentials. Approved restricted read-only metadata tokens
+belong only in the collector. See `docs/hosted-backup-daily-runner.md` for
+the exact runtime variables, evidence fields and incomplete deployment gates.
+
+The approved revised controls add optional transferable
+`ElectronicLogbook/HostedBackup/daily-review.local.json`; preserve approval/expiry
+dates and recheck expiry after import. Upload also uses the separate
+`BACKUP_RESERVATION_TOKEN` GitHub secret. Its hash `BACKUP_RESERVATION_SHA256` and
+`OWNER_REVIEW_JSON` belong in the future `flightlogx-backup-controls` Worker.
+The SQLite Durable Object binding `DAILY_ATTEMPTS` is remote operational budget
+state, not a local asset: preserve its class/namespace and stable object identity
+across deployments/device transfer. Never reset it to repeat an attempt. Tests use
+existing Wrangler 4.147.0, with no new package; retained synthetic
+`%TEMP%/elb-daily-controls-*` SQLite is regenerated evidence, excluded from transfer.
+Provider collector tokens must be freshly provisioned under the approved exact
+read-only scopes, never copied from the owner's broader login or put in either job.
+The dedicated GitHub Plan read token uses the optional owner-created
+`ElectronicLogbook/HostedBackup/github-plan-read-token.txt` under LocalAppData.
+The approved Preview-scoped Supabase organization-settings/Edge Functions read
+token uses optional `ElectronicLogbook/HostedBackup/supabase-metadata-read-token.txt`.
+Live testing proved its Preview function reads succeed but organization-plan reads
+return 403 despite Organization Settings READ being selected. Keep it project-scoped;
+the separate organization-only token uses optional
+`ElectronicLogbook/HostedBackup/supabase-organization-read-token.txt` with only
+Organization Settings READ and no project capabilities. It also requires fresh
+authentication and is excluded from transfer. Never broaden the Edge token to all
+projects or substitute the owner credential to hide a denied plan check.
+Both Supabase credentials passed the production collector on 18 October 2026:
+selected organization Free plan and exact two Preview deployment revisions. The
+organization token was denied Preview/Development functions, API keys, secrets,
+Auth settings and a constant read-only database query. The optional Cloudflare
+account-bound monitoring token uses
+`ElectronicLogbook/HostedBackup/cloudflare-monitoring-read-token.txt`, with only
+Account Analytics Read and Workers R2 Storage Read. It requires fresh
+authentication, is excluded from transfer, and belongs only in the separate
+collector. This read grant can also read R2 objects; no edit scope is approved.
+The owner supplied all five Cloudflare-generated details together and authorized
+normalization. Preserve them in optional
+`ElectronicLogbook/HostedBackup/cloudflare-monitoring-credentials.local.json`;
+the `.txt` file contains only the API token for the collector. The bundle is fresh
+authentication, excluded from transfer. Its S3 keys represent the monitoring
+identity; never substitute them for the separately scoped upload/restore identities.
+Both are fresh authentication excluded from transfer and neither belongs in the
+export/upload/readback jobs. The saved GitHub no-expiry token passed live Plan read
+API checks on 18 October 2026; the private backup repository read returned 404.
+This is fresh authentication, excluded from transfer. The initial form used a
+30-day expiry as an agent precaution; monitoring-token expiry is an owner choice,
+separate from the mandatory 31-day owner review and source-capability expiry.
+The collector implementation/tests are verified
+after checkout. It currently collects observations only: live scope validation,
+remaining Actions allowance, R2 billing/freshness proof and permit deployment remain
+open. Do not turn those observations into a successful permit or enable the job.
 
 One-time protected recovery setup uses the optional PowerShell 7 installation
 (version 7.2 or later); its password entry occurs in a local console. It creates the

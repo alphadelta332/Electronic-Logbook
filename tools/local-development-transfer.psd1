@@ -4,6 +4,7 @@
     RepoAssets = @(
         @{ Path = 'AGENTS.md'; Required = $true; Classification = 'private-context' }
         @{ Path = 'TODO.md'; Required = $true; Classification = 'private-context' }
+        @{ Path = 'docs/local/*.md'; Required = $false; Classification = 'private-reference' }
         @{ Path = 'regulations.md'; Required = $true; Classification = 'private-reference' }
         @{ Path = 'LOCAL_DEVICE_SETUP_HANDOVER.md'; Required = $true; Classification = 'public-guide' }
         @{ Path = 'release.local.json'; Required = $false; Classification = 'private-config' }
@@ -40,11 +41,17 @@
         @{ Path = 'ElectronicLogbook/HostedBackup/r2-credentials.local.json'; Required = $false; Classification = 'secret-backup-storage-credentials'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/source-connection.local.json'; Required = $false; Classification = 'secret-backup-source-credentials'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/source-root.crt'; Required = $false; Classification = 'public-backup-source-ca'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/daily-review.local.json'; Required = $false; Classification = 'private-backup-owner-review'; Lifecycle = 'local-transfer' }
     )
 
     # Known local trees that must stay outside the operational transfer archive. This is
     # policy documentation consumed by transfer validation, not a deletion list.
     LocalAppDataExclusions = @(
+        @{ Path = 'ElectronicLogbook/HostedBackup/github-plan-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Recreate the dedicated Plan read token after transfer; never transfer monitoring authentication or reuse the broader CLI login.' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/supabase-metadata-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only Preview-scoped organization settings and Edge Functions read access; never transfer monitoring authentication or reuse the owner token.' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/supabase-organization-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only organization settings read on the selected organization; no project capabilities, token transfer or owner credential substitution.' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/cloudflare-monitoring-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only Account Analytics Read and Workers R2 Storage Read on the backup account; no edit permissions or token transfer.' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/cloudflare-monitoring-credentials.local.json'; Lifecycle = 'fresh-authentication'; Reason = 'Owner-retained metadata/API/S3 credentials for the same read-only identity; never transfer or use as backup upload/restore credentials.' }
         @{ Path = 'ElectronicLogbook/AnalysisTools'; Lifecycle = 'regenerated-dependency'; Reason = 'Installed analysis packages and source caches are reproducible and machine-specific.' }
         @{ Path = 'ElectronicLogbook/AndroidDeviceBridge'; Lifecycle = 'deliberate-exclusion'; Reason = 'Device-specific IndexedDB backups remain on the source machine.' }
         @{ Path = 'ElectronicLogbook/Evidence'; Lifecycle = 'regenerated-output'; Reason = 'Generated local evidence is not an operational prerequisite.' }
@@ -60,6 +67,9 @@
     ExternalLocalStateExclusions = @(
         @{ Path = '%APPDATA%/xdg.config/.wrangler'; Lifecycle = 'fresh-authentication'; Reason = 'Cloudflare OAuth credentials must be recreated with wrangler login, never transferred.' }
         @{ Path = '%USERPROFILE%/.android/avd'; Lifecycle = 'deliberate-exclusion'; Reason = 'Android virtual devices and snapshots can contain live Google sessions; recreate and authenticate the recovery AVD once on each trusted development machine.' }
+        @{ Path = 'GitHub/alphadelta332/flightlogx-preview-backups/ActionsSecrets'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision scoped source/upload/readback job secrets through GitHub; never archive them or copy owner/recovery credentials into the job.' }
+        @{ Path = 'Cloudflare/flightlogx-backup-controls'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision the reservation token hash and approved read-only monitoring secrets; preserve the existing DAILY_ATTEMPTS SQLite namespace and its counter across deployments, never reset it during transfer.' }
+        @{ Path = '%TEMP%/elb-daily-controls-*'; Lifecycle = 'regenerated-output'; Reason = 'Synthetic local Cloudflare SQLite test evidence is retained locally, never transferred as operational state.' }
     )
 
     CodexAssets = @(
@@ -175,9 +185,19 @@
         AirportCatalogSchedulerSource = 'supabase/activity-worker/worker.mjs'
         ParticipantHandoffDirectory = 'ElectronicLogbook\ParticipantHandoffs'
         PostgreSqlMajor = 17
-        PostgreSqlBackupTools = @('pg_dump', 'pg_dumpall', 'pg_restore')
+        PostgreSqlBackupTools = @('pg_dump', 'pg_dumpall', 'pg_restore', 'initdb', 'pg_ctl')
         HostedBackupScript = 'tools/hosted-backup/cli.mjs'
         HostedBackupReplayProject = 'tools/hosted-backup/ReplayCheck/ReplayCheck.csproj'
+        HostedBackupCompatibilityContract = 'tools/hosted-backup/preview-logical-contract.json'
+        HostedBackupCompatibilityTestScript = 'tools/hosted-backup/preview-compatibility.integration.test.mjs'
+        HostedBackupLogicalExportScript = 'tools/hosted-backup/supervised-logical-export.mjs'
+        HostedBackupLogicalClientScript = 'tools/hosted-backup/logical-client.mjs'
+        HostedBackupLogicalRestoreScript = 'tools/hosted-backup/logical-restore.mjs'
+        HostedBackupDailyScript = 'tools/hosted-backup/daily-backup.mjs'
+        HostedBackupDailyTestScript = 'tools/hosted-backup/daily-backup.test.mjs'
+        HostedBackupDailyWorkflow = 'tools/hosted-backup/daily-workflow.json'
+        HostedBackupDailyControls = @('tools/hosted-backup/daily-controls.mjs', 'tools/hosted-backup/daily-controls-worker.mjs', 'tools/hosted-backup/daily-controls.wrangler.json', 'tools/hosted-backup/daily-controls.test.mjs', 'tools/hosted-backup/daily-controls.integration.test.mjs')
+        HostedBackupProviderCollector = @('tools/hosted-backup/daily-provider-collector.mjs', 'tools/hosted-backup/daily-provider-collector.test.mjs')
         HostedBackupRecoveryScript = 'tools/hosted-backup/Initialize-Recovery.ps1'
         HostedBackupRecoveryPowerShellMinVersion = '7.2'
         HostedBackupR2AccessScript = 'tools/hosted-backup/Initialize-R2Access.ps1'

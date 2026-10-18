@@ -7,6 +7,7 @@ import { openArchive, maxArchiveBytes } from './archive.mjs';
 import { tableManifestSql } from './orchestrate.mjs';
 import { restoreDisposable, readDisposable, dropDisposable } from './restore.mjs';
 import { buildReplayCheck, replaySupervised } from './replay-supervised.mjs';
+import { restoreLogicalArchive } from './logical-restore.mjs';
 
 export function verifySupervisedArchive(archive, identity, expectedSha256, local, recoveryEnvironment) {
   assert.equal(createHash('sha256').update(archive).digest('hex'), expectedSha256, 'Archive differs from the trusted receipt.');
@@ -14,6 +15,7 @@ export function verifySupervisedArchive(archive, identity, expectedSha256, local
   let target;
   try {
     const expected = JSON.parse(files['verification.json']);
+    if(expected.accessMode==='logical-capability')return restoreLogicalArchive(archive,identity,expectedSha256,local,recoveryEnvironment);
     assert.equal(expected.accessMode, 'supervised-owner');
     try { target = restoreDisposable(archive, identity, expectedSha256, local); }
     catch (error) { target = error.restoreReceipt; throw error; }
@@ -39,7 +41,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     if (request.applicationReplay) buildReplayCheck();
     assert.ok(statSync(request.archive).size <= maxArchiveBytes);
     const receipt = JSON.parse(readFileSync(request.archive + '.receipt.json'));
-    assert.equal(receipt.accessMode, 'supervised-owner');
+    assert.ok(['supervised-owner','logical-capability'].includes(receipt.accessMode));
     const identity = { key: readFileSync(request.identity), passphrase: request.passphrase };
     assert.match(identity.key.toString('utf8'), /^-----BEGIN ENCRYPTED PRIVATE KEY-----/);
     const recoveryReceipt = JSON.parse(readFileSync(join(process.env.LOCALAPPDATA, 'ElectronicLogbook/HostedBackup/recovery-receipt.json')));

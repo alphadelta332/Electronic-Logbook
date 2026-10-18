@@ -93,10 +93,6 @@ in the observation; no server upgrade is performed. Missing/empty/unreadable
 managed metadata, unreadable catalogs/deparsers, unknown catalogs/extensions,
 unsupported relations and large objects fail closed.
 
-On 2026-10-18 all 56 mutation/rejection cases passed under PostgreSQL 17.10 in
-15.49 seconds (one integration test, zero skips). Raw results and cleanup evidence
-are in `artifacts/hosted-backup-automation-assessment-20261018/metadata-guard-*`.
-
 The locked transaction explicitly locks **both** fixed data/version views before
 exporting its row snapshot. Base TRUNCATE times out, while ordinary INSERT works.
 A committed function-body replacement is not blocked. Raw catalog rows queried

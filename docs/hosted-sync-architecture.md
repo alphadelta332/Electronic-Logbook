@@ -306,12 +306,6 @@ Owner acceptance has demonstrated:
 - ordinary Android edit/delete/Undo/restore, validation, warnings, exports, offline-safe
   storage, hosted acknowledgement, and state-preserving Preview update behavior.
 
-Durable evidence:
-
-- `artifacts/gate4-owner-final-journey-20260908/verification.json`
-- `artifacts/gate3d-disposable-android-recovery-20260907/verification.json`
-- `artifacts/gate3d-disposable-cleanup-20260908/verification.json`
-
 ## Non-Goals
 
 - Continuing workbook/app synchronization.

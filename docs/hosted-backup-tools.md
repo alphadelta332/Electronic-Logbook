@@ -1,14 +1,12 @@
 # Encrypted hosted backup tooling
 
-Status: local export, authenticated readback, disposable SQL restoration and shared
-application replay, protected offline recovery setup and disposable-tested complete archive
-orchestration implemented. Real supervised Preview restoration and USB-capsule-key
-shared application replay passed on 2026-10-18. R2 production backup upload,
-scheduling and end-to-end Google/managed-service recovery acceptance are not yet complete.
-The measured design and owner decisions are in
-[the backup plan](hosted-preview-backup-plan.md).
-The [automation assessment](hosted-backup-automation-assessment-research-2026-10-18.md)
-records tested drift/snapshot hazards and the remaining restricted-export proof.
+Status and recovery requirements are maintained in
+[the backup contract](hosted-preview-backup-plan.md). These tools support local
+encrypted export, authenticated readback, disposable restoration and application
+replay. The [logical compatibility contract](hosted-backup-preview-logical-contract.md)
+defines the 47-table source and tested service reconstruction; the
+[supervised logical procedure](hosted-backup-supervised-logical-export.md) describes
+the hosted HTTP route. Neither enables an automatic schedule.
 The [disposable metadata contract](hosted-backup-metadata-guard-contract.md) defines
 the separate PG17 guard experiment and its mutation/concurrency checks. It is not
 called by these archive commands and cannot connect to hosted sources.
@@ -35,6 +33,9 @@ private key in the backup workflow.
 ## Supervised manual safety copy
 
 The restricted automated export remains blocked by managed-schema permissions.
+This applies to the direct database CLI. The separately supervised HTTP capability
+route uses the existing NOLOGIN API role plus an expiring scoped token and does
+not give its client database, owner, management, service or signing credentials.
 The owner-authorized interim path reads Preview using credentials already on the
 trusted Windows PC, and immediately encrypts the complete archive to the existing
 offline recovery recipient. It does not change Preview or save owner credentials
@@ -63,17 +64,10 @@ table's row count/hash/revision with the archive snapshot and removes that datab
 Supervised verification also removes its marked target if restoration fails.
 It writes a separate `.verification.json` only after every check and cleanup succeeds.
 
-The real Preview archive was exported and copied byte-for-byte to the recovery USB
-on 2026-10-18. Its password-prompted verification passed: all 47 tables matched,
-the protected recovery capsule authenticated and the disposable database was removed.
-The archive and verification report are retained on both the trusted PC and USB.
-This database report does not prove Google sign-in, app-level key recovery, R2 upload
-or unattended scheduling. Evidence: `artifacts/hosted-backup-manual-20261018/`.
-
-Use `-ApplicationReplay` for the next, separate recovered-key check:
+Use `-ApplicationReplay` for the separate recovered-key check:
 
 ```powershell
-pwsh -NoProfile -File tools/hosted-backup/Test-SupervisedBackup.ps1 -Archive G:\ElectronicLogbook\Preview-Backup-2026-10-18.elbbackup -RecoveryDirectory G:\ElectronicLogbook -ApplicationReplay -LocalPort 55432
+pwsh -NoProfile -File tools/hosted-backup/Test-SupervisedBackup.ps1 -Archive <full-path.elbbackup> -RecoveryDirectory <full-path-on-recovery-USB> -ApplicationReplay -LocalPort 55432
 ```
 
 This requires an already running isolated native PostgreSQL 17 fixture on loopback
@@ -97,34 +91,14 @@ is preserved. The marked restore database is removed on success or failure. This
 proves shared application decryption/replay; phone UI and Google recovery still need
 their own acceptance. It does not enable automatic backups.
 
-The real archive passed this additional check on 2026-10-18: all 47 tables matched,
-both populated logbooks decrypted and validated, and their operation/configuration
-histories materialized without unresolved conflicts. The separate report is retained
-on USB and the trusted PC, with ignored evidence under
-`artifacts/hosted-backup-manual-20261018/`. The marked database was removed and the
-verified native fixture stopped; the original archive and protected recovery files
-remain unchanged. No phone operation or Google sign-in was exercised.
-
 ## Restricted source setup
 
-**Preview blocked (2026-10-17):** live `net` objects inherit PUBLIC reads/writes,
-and their `supabase_admin` owner has not delegated revocation rights to `postgres`.
-The permission audit stopped setup before LOGIN; the temporary role and explicit
-grants were removed. No source credentials were saved and no participant rows were
-exported by this batch. Do not enable this job by bypassing the audit or substituting
-owner credentials. Resolve the provider boundary or choose a different export design
-first. Catalog evidence: `artifacts/hosted-backup-plan-20261017/batch3c1.json`.
-
-The authorized Cloudflare fallback was proved on development only: a real external
-scheduled airport run succeeded, pg_net was removed without CASCADE, and catalogue
-checks passed. Provisioning then stopped before LOGIN at `unreadable_relations=145`:
-project postgres cannot delegate auth schema USAGE, all auth reads or all storage
-reads. Its SELECT grant options cover 16/27 auth and 2/8 storage tables/views.
-The temporary role/grants were removed; no source credentials or live row exports
-were created. Preview remains unchanged. A supported managed-schema grant remedy
-or a separately reviewed export design is required before continuing; broad
-`pg_read_all_data` membership does not satisfy this export boundary. Evidence:
-`artifacts/hosted-backup-plan-20261017/airport-fallback-result.md`.
+**Restricted direct-database export remains blocked.** Preview's PUBLIC `net`
+privileges and managed Auth/Storage read delegation do not satisfy its permission
+audit. Relocating the airport timer alone does not resolve managed-schema access.
+Do not bypass the audit, substitute owner credentials into a job or broaden the
+reader with `pg_read_all_data`. The supervised native and fixed HTTP paths have
+separate trust boundaries; see the [backup contract](hosted-preview-backup-plan.md).
 
 Run `node tools/hosted-backup/initialize-source.mjs --ca <absolute-trusted-root.crt>`
 once on the owner PC after that blocker is resolved. It uses the existing private
@@ -234,6 +208,12 @@ observe 30 days of expiry or restore a real Preview archive.
 
 ## Archive coverage and format
 
+A scoped HTTP capability with logical application recovery has a separate
+[disposable HTTP/encryption/reconstruction/replay proof](hosted-backup-logical-http-fixture.md).
+Its Preview mapping is in the [compatibility contract](hosted-backup-preview-logical-contract.md).
+Real Google/service recovery and independent daily protection remain separate
+acceptance conditions.
+
 Version 1 uses a PostgreSQL custom-format dump of `public`, `auth`, `storage` and
 `supabase_migrations` in a single consistent read-only data transaction. All 11
 application tables, Auth users/identities and migration history must be present or
@@ -315,6 +295,10 @@ raw logbook keys or server recovery secrets are packaged.
 
 ## Focused checks
 
+The separate synthetic baseline/COPY candidate has an end-to-end restoration check:
+[disposable PG17 hybrid fixture](hosted-backup-hybrid-restore-fixture.md). It does not
+change or replace the supervised native archive workflow below.
+
 ```powershell
 node --test tools/hosted-backup/archive.test.mjs
 node --test tools/hosted-backup/r2-credentials.test.mjs
@@ -346,6 +330,11 @@ database name; it cannot bypass hosted TLS/identity checks. This is not the real
 Preview archive restoration or Google/app recovery acceptance test.
 
 ## Disposable restore safety
+
+The experimental hybrid candidate is unsuitable for unattended Preview use: it exceeds its
+supported object boundary, PUBLIC pg_net writes remain, and full change exclusion
+is unproved. Missing direct-table grant options alone do not reject owner-permission
+views. The supervised native archive path remains separate and unchanged.
 
 `restoreDisposable` requires the SHA-256 from trusted job history and fully
 authenticates the archive before creating a target. It only accepts the local

@@ -125,6 +125,8 @@ async function airportFiles(origin, inventory) {
   return files;
 }
 
+export { sources as reconstructionSources, airportFiles };
+
 export async function buildHostedArchive(connection, recipient, root) {
   if (connection.host !== '127.0.0.1' || connection.user === 'flightlogx_backup') inspectSourceAccess(connection);
   return buildArchive(connection, recipient, root, false);

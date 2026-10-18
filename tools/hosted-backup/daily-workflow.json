@@ -1,0 +1,45 @@
+{
+  "name": "Preview encrypted backup",
+  "on": {"workflow_dispatch": {}},
+  "permissions": {"contents": "read"},
+  "concurrency": {"group": "preview-daily-backup", "cancel-in-progress": false},
+  "jobs": {
+    "upload": {
+      "if": "${{ github.repository == 'alphadelta332/flightlogx-preview-backups' && github.event.repository.private == true && vars.BACKUP_ENABLED == 'true' }}",
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 5,
+      "outputs": {"request": "${{ steps.upload.outputs.request }}"},
+      "steps": [
+        {"uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "with": {"persist-credentials": false}},
+        {"uses": "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1", "with": {"node-version": "24"}},
+        {
+          "id": "upload",
+          "run": "node tools/hosted-backup/daily-backup.mjs upload daily-job.public.json",
+          "env": {
+            "SOURCE_CAPABILITY": "${{ secrets.SOURCE_CAPABILITY }}",
+            "BACKUP_RESERVATION_TOKEN": "${{ secrets.BACKUP_RESERVATION_TOKEN }}",
+            "R2_ACCESS_KEY_ID": "${{ secrets.R2_UPLOAD_ACCESS_KEY_ID }}",
+            "R2_SECRET_ACCESS_KEY": "${{ secrets.R2_UPLOAD_SECRET_ACCESS_KEY }}"
+          }
+        }
+      ]
+    },
+    "readback": {
+      "needs": "upload",
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 5,
+      "steps": [
+        {"uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", "with": {"persist-credentials": false}},
+        {"uses": "actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1", "with": {"node-version": "24"}},
+        {
+          "run": "node tools/hosted-backup/daily-backup.mjs readback daily-job.public.json",
+          "env": {
+            "BACKUP_READBACK_REQUEST": "${{ needs.upload.outputs.request }}",
+            "R2_ACCESS_KEY_ID": "${{ secrets.R2_READBACK_ACCESS_KEY_ID }}",
+            "R2_SECRET_ACCESS_KEY": "${{ secrets.R2_READBACK_SECRET_ACCESS_KEY }}"
+          }
+        }
+      ]
+    }
+  }
+}

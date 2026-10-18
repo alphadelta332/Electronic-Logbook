@@ -108,6 +108,7 @@ try {
     Assert-True ($config.SchemaVersion -eq 1) 'manifest schema version must be 1'
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'AGENTS.md' -and $_.Required }).Count -eq 1) 'AGENTS.md must be required'
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'TODO.md' -and $_.Required }).Count -eq 1) 'TODO.md must be required'
+    Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'docs/local/*.md' -and -not $_.Required -and $_.Classification -eq 'private-reference' }).Count -eq 1) 'local Markdown research must be optional private transfer material'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*auth.json*' }).Count -eq 1) 'Codex auth must be forbidden'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*sessions*' }).Count -eq 1) 'Codex sessions must be forbidden'
     Assert-True (@($config.WingetPackages | Where-Object { $_.Id -eq 'PostgreSQL.PostgreSQL.17' -and $_.Required }).Count -eq 1) 'PostgreSQL 17 must be required for hosted cleanup and SQL evidence'
@@ -172,12 +173,41 @@ try {
     Assert-True ($entrypointText -match "Cloudflare Wrangler version.*Expected\.WranglerVersion") 'verifier must check the optional pinned Wrangler version'
     Assert-True ($entrypointText -match 'Resend sending key') 'verifier must require the separate Resend sending keys without printing them'
     Assert-True ($entrypointText.Contains("Add-CheckResult `$results 'PostgreSQL client 17' (`$psqlVersion -match ' 17\.') `$true")) 'PostgreSQL 17 version must be a required verification check'
-    Assert-True (($config.Expected.PostgreSqlBackupTools -join ',') -eq 'pg_dump,pg_dumpall,pg_restore') 'backup export and restoration clients must share the PostgreSQL installation'
+    Assert-True (($config.Expected.PostgreSqlBackupTools -join ',') -eq 'pg_dump,pg_dumpall,pg_restore,initdb,pg_ctl') 'backup clients and isolated lifecycle fixture tools must share the PostgreSQL installation'
     Assert-True ($config.Expected.HostedBackupScript -eq 'tools/hosted-backup/cli.mjs' -and (Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupScript))) 'backup entrypoint must resolve after checkout'
     Assert-True ($entrypointText -match 'Expected\.PostgreSqlBackupTools' -and $entrypointText -match 'PostgreSQL backup tool') 'transfer verification must check all backup client versions'
     Assert-True ($config.Expected.HostedBackupReplayProject -eq 'tools/hosted-backup/ReplayCheck/ReplayCheck.csproj' -and (Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupReplayProject))) 'application replay project must resolve after checkout'
     Assert-True ($entrypointText -match 'HostedBackupReplayProject') 'transfer verification must check the application replay project'
-    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -like 'ElectronicLogbook/HostedBackup/*' }).Count -eq 5) 'HostedBackup transfer must be limited to recipient, receipt, storage/source credentials and source CA'
+    foreach ($setting in @('HostedBackupCompatibilityContract','HostedBackupCompatibilityTestScript')) {
+        Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected[$setting])) -and $entrypointText.Contains('Expected.' + $setting)) 'backup compatibility sources must resolve after checkout'
+    }
+    foreach ($setting in @('HostedBackupLogicalExportScript','HostedBackupLogicalClientScript','HostedBackupLogicalRestoreScript')) {
+        Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected[$setting])) -and $entrypointText.Contains('Expected.' + $setting)) 'scoped logical export/client/restorer must resolve after checkout'
+    }
+    foreach ($setting in @('HostedBackupDailyScript','HostedBackupDailyTestScript','HostedBackupDailyWorkflow')) {
+        Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected[$setting])) -and $entrypointText.Contains('Expected.' + $setting)) 'daily backup runner, regression and disabled workflow must resolve after checkout'
+    }
+    Assert-True (@($config.ExternalLocalStateExclusions | Where-Object { $_.Path -eq 'GitHub/alphadelta332/flightlogx-preview-backups/ActionsSecrets' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'scoped private job secrets must be reprovisioned, never transferred'
+    $compatibility = Get-Content (Join-Path $repoRoot $config.Expected.HostedBackupCompatibilityContract) -Raw | ConvertFrom-Json
+    Assert-True (@($compatibility.targetImages.PSObject.Properties).Count -eq 2 -and @($compatibility.targetImages.PSObject.Properties.Value | Where-Object { $_ -notmatch '^public\.ecr\.aws/supabase/(gotrue|storage-api):v[0-9.]+@sha256:[a-f0-9]{64}$' }).Count -eq 0) 'disposable service image dependencies must pin reviewed immutable digests'
+    Assert-True ($entrypointText -match 'compatibility.targetImages' -and $entrypointText -match 'Optional backup compatibility image') 'verification must report optional regenerated service images'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -like 'ElectronicLogbook/HostedBackup/*' }).Count -eq 6) 'HostedBackup transfer must be limited to recipient, receipt, storage/source credentials, source CA and expiring owner review'
+    Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/daily-review.local.json' -and $_.Lifecycle -eq 'local-transfer' -and -not $_.Required }).Count -eq 1) 'owner review transfers without silently renewing its expiry'
+    Assert-True ($config.Expected.HostedBackupDailyControls.Count -eq 5 -and $entrypointText.Contains('Expected.HostedBackupDailyControls')) 'review and durable reservation implementation must be verified after checkout'
+    foreach($controlFile in $config.Expected.HostedBackupDailyControls) {
+        Assert-True (Test-Path (Join-Path $repoRoot $controlFile)) 'durable reservation source/configuration/tests must exist'
+    }
+    Assert-True (@($config.ExternalLocalStateExclusions | Where-Object { $_.Path -eq 'Cloudflare/flightlogx-backup-controls' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'remote reservation namespace must survive transfer and secrets must be freshly provisioned'
+    Assert-True (@($config.ExternalLocalStateExclusions | Where-Object { $_.Path -eq '%TEMP%/elb-daily-controls-*' -and $_.Lifecycle -eq 'regenerated-output' }).Count -eq 1) 'synthetic local SQLite evidence must be excluded from operational transfer'
+    Assert-True ($config.Expected.HostedBackupProviderCollector.Count -eq 2 -and $entrypointText.Contains('Expected.HostedBackupProviderCollector')) 'collector implementation and tests must resolve after checkout'
+    foreach ($collectorFile in $config.Expected.HostedBackupProviderCollector) {
+        Assert-True (Test-Path (Join-Path $repoRoot $collectorFile)) 'collector source must exist'
+    }
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/github-plan-read-token.txt' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'dedicated monitoring authentication must not enter the transfer bundle'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/supabase-metadata-read-token.txt' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'Supabase metadata monitoring authentication must not enter the transfer bundle'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/supabase-organization-read-token.txt' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'separate organization-only monitoring authentication must not enter the transfer bundle'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/cloudflare-monitoring-read-token.txt' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'read-only Cloudflare monitoring authentication must not enter the transfer bundle'
+    Assert-True (@($config.LocalAppDataExclusions | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/cloudflare-monitoring-credentials.local.json' -and $_.Lifecycle -eq 'fresh-authentication' }).Count -eq 1) 'owner-retained Cloudflare API/S3 details must not enter the transfer bundle'
     Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/source-connection.local.json' -and $_.Classification -eq 'secret-backup-source-credentials' -and -not $_.Required }).Count -eq 1) 'restricted source credentials must be explicitly classified for trusted transfer'
     Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/source-root.crt' -and $_.Classification -eq 'public-backup-source-ca' }).Count -eq 1) 'source TLS CA must accompany the restricted connection'
     Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupSourceSetupScript)) -and $entrypointText -match 'Expected\.HostedBackupSourceSetupScript') 'source setup must resolve and be verified after checkout'
@@ -214,6 +244,8 @@ try {
     Assert-True ($LASTEXITCODE -ne 0) 'the sanitized handover must be trackable'
     $archiveIgnore = & git -C $repoRoot check-ignore 'ElectronicLogbook-LocalDevelopment-20990101-000000.7z' 2>$null
     Assert-True ($LASTEXITCODE -eq 0) 'generated archives must remain ignored'
+    & git -C $repoRoot check-ignore 'docs/local/research.md' | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) 'local research must remain ignored'
 
     $syntheticRepo = Join-Path $temporaryRoot 'dry-run-repo'
     $syntheticLocal = Join-Path $temporaryRoot 'dry-run-localappdata'
@@ -236,6 +268,10 @@ try {
         Set-Content -LiteralPath $path -Value "synthetic $($asset.Classification)" -Encoding UTF8
     }
     $excludedLocalState = Join-Path $syntheticLocal 'ElectronicLogbook\Gate1RetainedState\must-not-transfer.json'
+    $researchPath = Join-Path $syntheticRepo 'docs\local\research.md'
+    New-Item -ItemType Directory -Path (Split-Path $researchPath -Parent) -Force | Out-Null
+    Set-Content -LiteralPath $researchPath -Value 'synthetic private research' -Encoding UTF8
+    Set-Content -LiteralPath (Join-Path (Split-Path $researchPath -Parent) 'not-allowlisted.json') -Value '{}' -Encoding UTF8
     New-Item -ItemType Directory -Path (Split-Path $excludedLocalState -Parent) -Force | Out-Null
     Set-Content -LiteralPath $excludedLocalState -Value '{"generated":true}' -Encoding UTF8
     $excludedTempState = Join-Path $syntheticLocal 'ElectronicLogbook\Temp\receipt-verify-test\source.zip'
@@ -271,6 +307,8 @@ try {
     Assert-True ($mainListing -notmatch 'must-not-transfer\.json') 'unlisted retained-device state must stay outside the transfer archive'
     Assert-True ($mainListing -notmatch 'source\.zip') 'temporary diagnostic files must stay outside the transfer archive'
     Assert-True ($mainListing -match 'electronic-logbook-development\.keystore') 'explicitly allowlisted signing identity must be present in the transfer archive'
+    Assert-True ($mainListing -match 'docs[/\\]local[/\\]research\.md') 'local research must survive operational export'
+    Assert-True ($mainListing -notmatch 'not-allowlisted\.json') 'local research transfer must select Markdown only'
 
     $bundleSource = Join-Path $temporaryRoot 'valid-source'
     $validArchive = Join-Path $temporaryRoot 'valid.7z'

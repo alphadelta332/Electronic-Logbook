@@ -192,12 +192,6 @@ recovery-code prompt, and preserved the separate development installation. A sta
 mobile build failed before activation; the corrected build resumed the same canonical
 state, superseded the failed device, and restored exact entries and totals.
 
-Evidence:
-
-- `artifacts/gate4-owner-final-journey-20260908/verification.json`
-- `artifacts/gate3d-disposable-android-recovery-20260907/verification.json`
-- `artifacts/gate3d-disposable-cleanup-20260908/verification.json`
-
 ## Remaining Preview Proof
 
 Repeat the complete customer-facing journey once as the final owner dress rehearsal,

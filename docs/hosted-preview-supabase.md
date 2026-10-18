@@ -373,8 +373,7 @@ detail remain Advanced/support tools.
 The owner clean-reinstall journey has passed on the permanent Pixel. A stale mixed publish
 first failed closed before activation; the clean-publish repair resumed safely, superseded
 the failed pending device, restored exact entries and totals, and created no duplicate
-logbook or operation. Durable evidence is in
-`artifacts/gate4-owner-final-journey-20260908/verification.json`.
+logbook or operation. Detailed owner acceptance receipts remain private.
 
 For private owner verification tools, configure only the desktop values required by the
 specific script and never print them:
@@ -463,12 +462,10 @@ separate wrong account, restores the exact ledger into a new device, verifies th
 Windows credential was deleted after completion, writes redacted evidence, and removes every
 disposable Auth and hosted row. It does not install, clear, or automate the retained Pixel app.
 
-The owner has also passed the complete permanent-package workbook-to-Android journey and
-clean reinstall on the physical Pixel. Keep
-`artifacts/gate4-owner-final-journey-20260908/verification.json` as the durable redacted
-baseline. The next live proof is the final owner dress rehearsal followed by one external
-Windows Excel plus Android canary, using the exact procedure in
-`docs/flightlogx-preview-runbook.md`.
+The physical-device acceptance procedure, including the final owner rehearsal and
+external Windows Excel plus Android canary, is defined in the
+[Preview runbook](flightlogx-preview-runbook.md). Keep detailed receipts and the
+current acceptance work queue private.
 
 ## References
 

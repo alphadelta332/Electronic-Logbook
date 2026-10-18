@@ -881,13 +881,36 @@ function Invoke-VerifyAction {
 
     foreach ($backupTool in $script:TransferConfig.Expected.PostgreSqlBackupTools) {
         $backupToolVersion = Get-NativeCommandOutput -Name $backupTool -Arguments @('--version')
-        Add-CheckResult $results "PostgreSQL backup tool $backupTool" ($backupToolVersion -match " $($script:TransferConfig.Expected.PostgreSqlMajor)\.") $true 'required by the encrypted hosted backup tooling'
+        Add-CheckResult $results "PostgreSQL backup tool $backupTool" ($backupToolVersion -match " $($script:TransferConfig.Expected.PostgreSqlMajor)\.") $true 'required by encrypted backups and isolated capability lifecycle tests'
     }
     $hostedBackupScript = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupScript
     Add-CheckResult $results 'Hosted backup command' (Test-Path -LiteralPath $hostedBackupScript -PathType Leaf) $true $script:TransferConfig.Expected.HostedBackupScript
     $hostedBackupReplay = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupReplayProject
     Add-CheckResult $results 'Hosted backup replay check' (Test-Path -LiteralPath $hostedBackupReplay -PathType Leaf) $true 'uses the already-required .NET 10 SDK and shared portable application code'
     $hostedBackupRecovery = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupRecoveryScript
+    $compatibilityContract = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupCompatibilityContract
+    Add-CheckResult $results 'Hosted backup compatibility contract' (Test-Path -LiteralPath $compatibilityContract -PathType Leaf) $true 'tracked metadata only; container images are regenerated, never transferred'
+    Add-CheckResult $results 'Hosted backup compatibility test' (Test-Path -LiteralPath (Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupCompatibilityTestScript) -PathType Leaf) $true 'isolated managed-service reconstruction test'
+    foreach ($logicalFile in @($script:TransferConfig.Expected.HostedBackupLogicalExportScript, $script:TransferConfig.Expected.HostedBackupLogicalClientScript, $script:TransferConfig.Expected.HostedBackupLogicalRestoreScript)) {
+        Add-CheckResult $results 'Hosted logical backup implementation' (Test-Path -LiteralPath (Join-Path $RepoRoot $logicalFile) -PathType Leaf) $true $logicalFile
+    }
+    foreach ($dailyFile in @($script:TransferConfig.Expected.HostedBackupDailyScript, $script:TransferConfig.Expected.HostedBackupDailyTestScript, $script:TransferConfig.Expected.HostedBackupDailyWorkflow)) {
+        Add-CheckResult $results 'Daily backup implementation' (Test-Path -LiteralPath (Join-Path $RepoRoot $dailyFile) -PathType Leaf) $true $dailyFile
+    }
+    foreach ($controlFile in $script:TransferConfig.Expected.HostedBackupDailyControls) {
+        Add-CheckResult $results 'Daily backup review/reservation controls' (Test-Path -LiteralPath (Join-Path $RepoRoot $controlFile) -PathType Leaf) $true $controlFile
+    }
+    foreach ($collectorFile in $script:TransferConfig.Expected.HostedBackupProviderCollector) {
+        Add-CheckResult $results 'Daily backup provider collector' (Test-Path -LiteralPath (Join-Path $RepoRoot $collectorFile) -PathType Leaf) $true $collectorFile
+    }
+    Add-CheckResult $results 'Backup monitoring credential custody' $true $true 'GitHub Plan, split Supabase reads and Cloudflare Analytics/R2 Storage Read tokens (including the owner-retained S3 credential bundle) require fresh authentication; never transfer or substitute broader owner credentials'
+    if (Test-Path -LiteralPath $compatibilityContract -PathType Leaf) {
+        $compatibility = Get-Content -LiteralPath $compatibilityContract -Raw | ConvertFrom-Json
+        foreach ($image in $compatibility.targetImages.PSObject.Properties.Value) {
+            $imageId = Get-NativeCommandOutput -Name 'docker' -Arguments @('image', 'inspect', '--format', '{{.Id}}', $image)
+            Add-CheckResult $results 'Optional backup compatibility image' ($imageId -match '^sha256:[a-f0-9]{64}$') $false "regenerated dependency: docker pull $image"
+        }
+    }
     Add-CheckResult $results 'Hosted backup recovery setup' (Test-Path -LiteralPath $hostedBackupRecovery -PathType Leaf) $true 'private identity and recovery archive remain in owner-controlled offline storage'
     foreach ($backupSetupFile in @($script:TransferConfig.Expected.HostedBackupR2AccessScript, $script:TransferConfig.Expected.HostedBackupR2Policy, $script:TransferConfig.Expected.HostedBackupR2CheckScript, $script:TransferConfig.Expected.HostedBackupSourceSetupScript, $script:TransferConfig.Expected.HostedBackupSupervisedExportScript, $script:TransferConfig.Expected.HostedBackupSupervisedVerifyScript)) {
         Add-CheckResult $results 'Hosted backup storage setup' (Test-Path -LiteralPath (Join-Path $RepoRoot $backupSetupFile) -PathType Leaf) $true $backupSetupFile
