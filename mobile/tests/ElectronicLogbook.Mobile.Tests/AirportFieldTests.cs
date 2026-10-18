@@ -19,11 +19,15 @@ public sealed class AirportFieldTests : BunitContext, IAsyncLifetime
     public Task InitializeAsync() => Task.CompletedTask;
     async Task IAsyncLifetime.DisposeAsync() => await base.DisposeAsync();
 
-    [Fact]
-    public async Task EmptyQueryUsesRankedDefaultsAndTypingSearchesTheWholeCatalogue()
+    [Theory]
+    [InlineData("From")]
+    [InlineData("To")]
+    public async Task EmptyQueryUsesRankedDefaultsAndTypingSearchesTheWholeCatalogue(string label)
     {
-        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "From")
-            .Add(component => component.LoadSuggestions, () => Task.FromResult<IReadOnlyList<string>>(["YSSY", "YSBK"])));
+        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, label)
+            .Add(component => component.LoadSuggestions, text => Task.FromResult<IReadOnlyList<string>>(
+                string.IsNullOrWhiteSpace(text) ? ["YSSY", "YSBK"] :
+                    MobileAirportSuggestions.Ranked([], [], new(2026, 10, 18), MobileAirportCatalog.Default, text))));
         var autocomplete = field.FindComponent<MudAutocomplete<string>>().Instance;
         Assert.Equal(new[] { "YSSY", "YSBK" }, await autocomplete.SearchFunc!("", CancellationToken.None)!);
         var codes = (await autocomplete.SearchFunc!("ymm", CancellationToken.None)!).ToArray();
@@ -48,7 +52,7 @@ public sealed class AirportFieldTests : BunitContext, IAsyncLifetime
         string? saved = null;
         var edits = 0;
         var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "To")
-            .Add(component => component.LoadSuggestions, () => Task.FromResult<IReadOnlyList<string>>([]))
+            .Add(component => component.LoadSuggestions, _ => Task.FromResult<IReadOnlyList<string>>([]))
             .Add(component => component.ValueChanged, value => saved = value)
             .Add(component => component.Edited, () => edits++));
         field.Find("input").Input("PRIVATE FARM");
@@ -69,7 +73,7 @@ public sealed class AirportFieldTests : BunitContext, IAsyncLifetime
         string? saved = null;
         var edits = 0;
         var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "From")
-            .Add(component => component.LoadSuggestions, () => Task.FromResult<IReadOnlyList<string>>([]))
+            .Add(component => component.LoadSuggestions, _ => Task.FromResult<IReadOnlyList<string>>([]))
             .Add(component => component.ValueChanged, value => saved = value)
             .Add(component => component.Edited, () => edits++));
         var autocomplete = field.FindComponent<MudAutocomplete<string>>();

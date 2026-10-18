@@ -1950,7 +1950,7 @@ public sealed class PwaPageWiringTests
             @"(?s)\.preview-changelog-dialog\s*\{[^}]*max-height:\s*100%[^}]*overflow:\s*hidden",
             css);
         Assert.Matches(
-            @"(?s)\.preview-changelog-dialog\s*>\s*\.mud-button-root\s*\{[^}]*min-height:\s*48px",
+            @"(?s)\.preview-changelog-dialog\s*>\s*button\.mud-button-root\s*\{[^}]*min-height:\s*48px",
             css);
     }
 

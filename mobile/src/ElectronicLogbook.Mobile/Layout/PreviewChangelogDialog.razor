@@ -35,9 +35,15 @@
                     {
                         <li>
                             <MudIcon Icon="@Icons.Material.Filled.CheckCircle" aria-hidden="true" />
-                            <div>
+                            <div class="preview-changelog-headline">
                                 <strong>@item.Title</strong>
-                                <span>@item.Detail</span>
+                                @if (item.IsNew)
+                                {
+                                    <span class="preview-changelog-new">
+                                        <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" aria-hidden="true" />
+                                        New
+                                    </span>
+                                }
                             </div>
                         </li>
                     }

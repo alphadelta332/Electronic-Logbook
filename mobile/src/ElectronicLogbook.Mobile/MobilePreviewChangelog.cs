@@ -3,15 +3,12 @@ namespace ElectronicLogbook.Mobile;
 public static class MobilePreviewChangelog
 {
     public static MobilePreviewChangelogRelease Current { get; } = new(
-        "0.2.2",
-        300000020,
+        "0.3.0",
+        300000021,
         [
-            new(
-                "Improved Readability",
-                "Ensured consistent UI items across devices, and display settings."),
-            new(
-                "Circling currency fixes",
-                "Corrected how IPC and IFR OPC entries affect circling currency, and clarified the warning when an IPC has no circling approach.")
+            new("Charts & Stats", IsNew: true),
+            new("Smarter airport suggestions"),
+            new("Automatic airport database updates")
         ]);
 
     public static MobilePreviewChangelogDecision Evaluate(MobilePreviewInstallationInfo? installation)
@@ -39,9 +36,7 @@ public static class MobilePreviewChangelog
                 installation.VersionName,
                 installation.VersionCode,
                 [
-                    new(
-                        "Preview improvements",
-                        "This build includes the latest FlightLogX fixes and reliability improvements.")
+                    new("Preview improvements")
                 ]);
 }
 
@@ -57,4 +52,4 @@ public sealed record MobilePreviewChangelogRelease(
     long VersionCode,
     IReadOnlyList<MobilePreviewChangelogItem> Items);
 
-public sealed record MobilePreviewChangelogItem(string Title, string Detail);
+public sealed record MobilePreviewChangelogItem(string Title, bool IsNew = false);

@@ -34,6 +34,8 @@ public sealed class MobileAirportSuggestionsTests
         Assert.Equal(new[] { "BBBB", "AAAA" },
             MobileAirportSuggestions.Ranked(entries, [], new(2026, 10, 17), Catalog));
         Assert.Equal(new[] { "EEEE" }, MobileAirportSuggestions.Ranked([], ["EEEE"], new(2026, 10, 17), Catalog));
+        Assert.Equal(new[] { "AAAA", "BBBB", "CCCC", "DDDD", "EEEE" },
+            MobileAirportSuggestions.Ranked(entries, [], new(2026, 10, 17), Catalog, "airport"));
     }
 
     [Fact]
@@ -54,6 +56,48 @@ public sealed class MobileAirportSuggestionsTests
         Assert.Empty(Catalog.Search("unrecognised", 20));
         Assert.Empty(Catalog.Search("", 20));
         Assert.Empty(Catalog.Search("airport", 0));
+    }
+
+    [Fact]
+    public void TypedMatchesUseVisitsThenNamesWithoutPromotingBasesOrLastDestination()
+    {
+        var catalog = MobileAirportCatalog.Create([
+            new("AAAA", "Zulu Airport", "AAA", null, 0, 0),
+            new("BBBB", "beta Airport", null, null, 0, 0),
+            new("CCCC", "Alpha Airport", null, null, 0, 0),
+            new("DDDD", "Delta Airport", null, null, 0, 0),
+            new("EEEE", "Charlie Airport", null, null, 0, 0),
+            new("FFFF", "Bravo Airport", null, null, 0, 0),
+            new("GGGG", "Other Strip", null, null, 0, 0)]);
+        var entries = new[] {
+            Flight(1, "CCCC", "CCCC", "AAA AAA AAA"),
+            Flight(2, "CCCC", "BBBB", ""),
+            Flight(3, "CCCC", "DDDD", ""),
+            Flight(4, "GGGG", "GGGG", ""),
+            Flight(5, "GGGG", "GGGG", ""),
+            Flight(6, "GGGG", "GGGG", ""),
+            Flight(7, "GGGG", "GGGG", "") };
+
+        Assert.Equal(new[] { "CCCC", "BBBB", "DDDD", "AAAA", "FFFF", "EEEE" },
+            MobileAirportSuggestions.Ranked(entries, ["EEEE"], new(2026, 10, 17), catalog, " AIRPORT "));
+        Assert.Equal(new[] { "BBBB" },
+            MobileAirportSuggestions.Ranked(entries, [], new(2026, 10, 17), catalog, "bb"));
+        Assert.Empty(MobileAirportSuggestions.Ranked(entries, [], new(2026, 10, 17), catalog, "missing"));
+    }
+
+    [Fact]
+    public void TypedSearchRanksAllMatchesBeforeLimitingToOneHundred()
+    {
+        var catalog = MobileAirportCatalog.Create(Enumerable.Range(0, 105)
+            .Select(index => new MobileAirport($"A{index:000}", $"Airport {index:000}", null, null, 0, 0))
+            .Append(new("ZZZZ", "Zulu Airport", null, null, 0, 0)));
+        var results = MobileAirportSuggestions.Ranked([Flight(1, "ZZZZ", "ZZZZ", "")], [],
+            new(2026, 10, 17), catalog, "airport");
+
+        Assert.Equal(100, results.Count);
+        Assert.Equal("ZZZZ", results[0]);
+        Assert.Equal("A000", results[1]);
+        Assert.Equal("A098", results[^1]);
     }
 
     private static PortableLogbookMaterializedEntryV2 Flight(int day, string from, string to, string via) =>

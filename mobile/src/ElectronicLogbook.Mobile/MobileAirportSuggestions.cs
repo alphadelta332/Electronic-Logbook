@@ -10,7 +10,8 @@ public static class MobileAirportSuggestions
         IEnumerable<PortableLogbookMaterializedEntryV2> currentEntries,
         IEnumerable<string> bases,
         DateOnly today,
-        MobileAirportCatalog catalog)
+        MobileAirportCatalog catalog,
+        string? query = null)
     {
         var flights = currentEntries.Where(item => !item.IsDeleted && item.Entry?.Date is { } date && date <= today)
             .Select(item => item.Entry!)
@@ -22,11 +23,19 @@ public static class MobileAirportSuggestions
                 .Where(code => code is not null && catalog.TryFind(code, out _))
                 .Select(code => Canonical(code!)).Distinct(StringComparer.OrdinalIgnoreCase))
             .GroupBy(code => code, StringComparer.OrdinalIgnoreCase)
-            .OrderByDescending(group => group.Count()).ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Count(), StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(query))
+            return catalog.Search(query, int.MaxValue)
+                .OrderByDescending(airport => visits.GetValueOrDefault(airport.Icao))
+                .ThenBy(airport => airport.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(airport => airport.Icao, StringComparer.OrdinalIgnoreCase)
+                .Take(100).Select(airport => airport.Icao).ToArray();
+        var rankedVisits = visits
+            .OrderByDescending(group => group.Value).ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.Key);
         return new[] { flights.FirstOrDefault()?.To }
             .Concat(bases).Where(code => !string.IsNullOrWhiteSpace(code))
-            .Select(code => Canonical(code!)).Concat(visits)
+            .Select(code => Canonical(code!)).Concat(rankedVisits)
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
     }
 

@@ -330,9 +330,9 @@ else
         if (Session.DocumentV2.LogbookId == logbookId) AirportBases = bases;
     }
 
-    private Task<IReadOnlyList<string>> LoadAirportSuggestionsAsync() => Task.FromResult(
+    private Task<IReadOnlyList<string>> LoadAirportSuggestionsAsync(string? query) => Task.FromResult(
         MobileAirportSuggestions.Ranked(Session.CurrentEntriesV2, AirportBases,
-            DateOnly.FromDateTime(DateTime.Today), MobileAirportCatalog.Default));
+            DateOnly.FromDateTime(DateTime.Today), MobileAirportCatalog.Default, query));
     private string ReviewWarningCountLabel => $"{ReviewWarnings.Count} {(ReviewWarnings.Count == 1 ? "Warning" : "Warnings")}";
     private string ValidationFeedbackMessage => Session.WorkbookDraftErrors.Count == 1
         ? "Can't continue. 1 problem needs attention."

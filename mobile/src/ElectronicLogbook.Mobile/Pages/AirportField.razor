@@ -23,18 +23,16 @@
     [Parameter, EditorRequired] public string Label { get; set; } = "";
     [Parameter] public string? Value { get; set; }
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
-    [Parameter, EditorRequired] public Func<Task<IReadOnlyList<string>>> LoadSuggestions { get; set; } = default!;
+    [Parameter, EditorRequired] public Func<string?, Task<IReadOnlyList<string>>> LoadSuggestions { get; set; } = default!;
     [Parameter] public EventCallback Edited { get; set; }
     private readonly string id = $"airport-{Guid.NewGuid():N}";
     private bool touched;
 
     private async Task<IEnumerable<string>> SearchAsync(string? text, CancellationToken cancellationToken)
     {
-        if (!string.IsNullOrWhiteSpace(text))
-            return MobileAirportCatalog.Default.Search(text, 100).Select(airport => airport.Icao);
-        var defaults = await LoadSuggestions();
+        var suggestions = await LoadSuggestions(text);
         cancellationToken.ThrowIfCancellationRequested();
-        return defaults;
+        return suggestions;
     }
 
     private async Task ChangedAsync(string? code)
