@@ -103,18 +103,29 @@ export function openArchive(archive, identity) {
 export function exportDatabase(connection, snapshot) {
   requireValue(snapshot === undefined || /^[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9]+$/.test(snapshot), 'Invalid export snapshot.');
   if (connection.host !== '127.0.0.1' || connection.user === 'flightlogx_backup') inspectSourceAccess(connection);
+  return readDatabase(connection, snapshot, false);
+}
+
+// Only the separate trusted-PC command uses owner access; routine exports still audit the restricted login.
+export function exportSupervisedDatabase(connection, snapshot) {
+  return readDatabase(connection, snapshot, true);
+}
+
+function readDatabase(connection, snapshot, ownerSetup) {
+  requireValue(snapshot === undefined || /^[0-9A-Fa-f]+-[0-9A-Fa-f]+-[0-9]+$/.test(snapshot), 'Invalid export snapshot.');
+  const run = (executable, args, input) => postgres(connection, executable, args, input, ownerSetup);
   // pg_dump uses one REPEATABLE READ, READ ONLY transaction for the data snapshot.
-  const dump = postgres(connection, 'pg_dump', ['--no-password', '--format=custom', '--compress=9',
+  const dump = run('pg_dump', ['--no-password', '--format=custom', '--compress=9',
     '--lock-wait-timeout=10000', '--schema=public', '--schema=auth', '--schema=storage', '--schema=supabase_migrations',
     ...(snapshot ? ['--snapshot=' + snapshot] : [])]);
   try {
-    const toc = postgres(connection, 'pg_restore', ['--list'], dump).toString('utf8');
+    const toc = run('pg_restore', ['--list'], dump).toString('utf8');
     for (const table of requiredTables)
       requireValue(toc.includes(`TABLE DATA public ${table} `), `Backup is missing required table ${table}.`);
     for (const table of ['users', 'identities'])
       requireValue(toc.includes(`TABLE DATA auth ${table} `), `Backup is missing required Auth table ${table}.`);
     requireValue(toc.includes('TABLE DATA supabase_migrations schema_migrations '), 'Backup is missing migration history.');
-    const roles = postgres(connection, 'pg_dumpall', ['--no-password', '--roles-only', '--no-role-passwords']);
+    const roles = run('pg_dumpall', ['--no-password', '--roles-only', '--no-role-passwords']);
     return { 'database.dump': dump, 'roles.sql': roles };
   } catch (error) { dump.fill(0); throw error; }
 }

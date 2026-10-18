@@ -181,6 +181,9 @@ try {
     Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/source-connection.local.json' -and $_.Classification -eq 'secret-backup-source-credentials' -and -not $_.Required }).Count -eq 1) 'restricted source credentials must be explicitly classified for trusted transfer'
     Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/source-root.crt' -and $_.Classification -eq 'public-backup-source-ca' }).Count -eq 1) 'source TLS CA must accompany the restricted connection'
     Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupSourceSetupScript)) -and $entrypointText -match 'Expected\.HostedBackupSourceSetupScript') 'source setup must resolve and be verified after checkout'
+    foreach ($setting in @('HostedBackupSupervisedExportScript','HostedBackupSupervisedVerifyScript')) {
+        Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected[$setting])) -and $entrypointText.Contains('Expected.' + $setting)) 'supervised backup entrypoints must resolve and be verified after checkout'
+    }
     Assert-True (@($config.LocalAppDataAssets | Where-Object { $_.Path -eq 'ElectronicLogbook/HostedBackup/r2-credentials.local.json' -and $_.Classification -eq 'secret-backup-storage-credentials' -and -not $_.Required }).Count -eq 1) 'R2 storage credentials must be explicitly classified for trusted local transfer'
     Assert-True ((Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupR2AccessScript)) -and (Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupR2Policy))) 'R2 setup and policy must resolve after checkout'
     Assert-True ($entrypointText -match 'Expected\.HostedBackupR2AccessScript' -and $entrypointText -match 'Expected\.HostedBackupR2Policy') 'transfer verification must check R2 setup files'

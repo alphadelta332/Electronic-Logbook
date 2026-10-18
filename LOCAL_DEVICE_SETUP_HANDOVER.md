@@ -541,6 +541,22 @@ service-role/secret key to Cloudflare, mobile configuration or repository files.
 The mobile cached catalogue and verification outputs are regenerated data, not
 development prerequisites. The existing bundled catalogue remains the offline seed.
 
+The supervised backup commands use the same trusted Windows project metadata,
+management token, PostgreSQL 17 and Node 24 prerequisites. The TLS CA is passed
+explicitly; the earlier CA under `ElectronicLogbook/Evidence/BackupMeasurement`
+is regenerated public evidence, not a new credential/configuration location.
+`tools/hosted-backup/supervised-export.mjs` reads owner credentials only in the local
+process and saves an entirely encrypted archive plus a nonsecret receipt.
+`tools/hosted-backup/Test-SupervisedBackup.ps1` uses PowerShell 7.2+ to request the
+existing offline-identity password locally and passes it through captured stdin,
+never command arguments, files or logs. PostgreSQL/Supabase must be running locally
+for its new, isolated disposable restore target. No hosted data is modified.
+Generated archives/receipts/reports under `ElectronicLogbook/Evidence` are excluded
+outputs; encrypted copies on the recovery USB are deliberately excluded recovery
+artifacts. The USB's protected identity/capsule remain in their existing location
+and never enter the transfer archive. These commands create no new stored credential
+or authentication session. They are manual recovery support, not scheduled backups.
+
 The executable source of truth is `tools/local-development-transfer.psd1`. When a
 dependency, SDK, extension, local-state path, signing rule, or credential location
 changes, update all four surfaces together:

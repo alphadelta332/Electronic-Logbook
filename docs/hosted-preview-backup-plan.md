@@ -1,8 +1,18 @@
 # Independent Preview backup and restoration plan
 
-Prepared 2026-10-17 (Australia/Sydney). Status: inventory verified; owner choices
-recorded, with a conditional zero-expected-cost deployment gate. **No independent backup or successful database restoration
-has been established.** The existing keepalive is not a backup.
+Prepared 2026-10-17 (Australia/Sydney). Current status (2026-10-18): the supervised
+encrypted Preview backup, isolated 47-table restoration and USB-key shared
+application replay have passed. **Independent automatic backups are not enabled.**
+The existing keepalive is not a backup. Owner choices retain their conditional
+zero-expected-cost deployment gate. Historical sizing/setup notes below describe
+their original state; current accepted scope is in `hosted-backup-tools.md`.
+
+The [automatic-export assessment](hosted-backup-automation-assessment-research-2026-10-18.md)
+proved that the prior column guard misses nine kinds of relevant change and that
+an unlocked old snapshot can see an emptied table after TRUNCATE. Restricted view
+locks prevent that table-DDL case without direct base grants or blocking ordinary
+row writes. The baseline/COPY candidate still needs a bounded metadata guard and
+its own complete restore proof before hosted provisioning or scheduling.
 
 Batch 3c2 update (2026-10-17): complete local archive orchestration is implemented
 and tested only against disposable databases/reference HTTP fixtures. `bundle` adds

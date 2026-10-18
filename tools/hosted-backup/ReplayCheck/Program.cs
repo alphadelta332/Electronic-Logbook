@@ -59,6 +59,58 @@ try
         }, json));
         CryptographicOperations.ZeroMemory(kek);
     }
+    else if (args is ["verify-real"])
+    {
+        using var input = JsonDocument.Parse(await Console.In.ReadToEndAsync());
+        var root = input.RootElement;
+        var kek = Convert.FromBase64String(root.GetProperty("kek").GetString()!);
+        try
+        {
+            var results = new List<object>();
+            foreach (var stored in root.GetProperty("logbooks").EnumerateArray())
+            {
+                var guid = stored.GetProperty("logbookGuid").GetGuid();
+                var logbook = new LogbookId("log_" + guid.ToString("N"));
+                Require(stored.GetProperty("identityCount").GetInt32() > 0, "Original owner identity is unavailable.");
+                var envelope = stored.GetProperty("keyEnvelope");
+                Require(envelope.GetProperty("wrapping_algorithm").GetString() == "AES-256-GCM" &&
+                    envelope.GetProperty("key_version_id").GetString() == root.GetProperty("keyVersionId").GetString(),
+                    "Managed recovery key version is unavailable.");
+                var wrapped = Convert.FromBase64String(envelope.GetProperty("ciphertext").GetString()!);
+                var bytes = new byte[32];
+                try
+                {
+                    Require(wrapped.Length == 48, "Invalid managed recovery envelope.");
+                    using var aes = new AesGcm(kek, 16);
+                    aes.Decrypt(Convert.FromBase64String(envelope.GetProperty("nonce").GetString()!), wrapped[..32], wrapped[32..], bytes,
+                        Encoding.UTF8.GetBytes($"electronic-logbook|managed-service-v1|{guid}|{root.GetProperty("keyVersionId").GetString()}"));
+                    var key = PortableLogbookKey.FromBytes(bytes);
+                    var envelopes = stored.GetProperty("operations").Deserialize<HostedOperationEnvelope[]>(json)!;
+                    Require(envelopes.Length > 0 && envelopes.Select(e => e.HostedRevision)
+                        .SequenceEqual(Enumerable.Range(1, envelopes.Length).Select(i => (long)i)), "Incomplete operation history.");
+                    var operations = envelopes.Select(e => HostedOperationCipher.Decrypt(e, key)).ToArray();
+                    Require(operations.All(o => o.LogbookId == logbook), "Operations belong to another logbook.");
+                    var configurations = stored.GetProperty("configurations").Deserialize<HostedConfigurationRevisionEnvelope[]>(json)!;
+                    Require(configurations.Length > 0 && configurations.Select(e => e.HostedRevision)
+                        .SequenceEqual(Enumerable.Range(1, configurations.Length).Select(i => (long)i)), "Incomplete configuration history.");
+                    var settings = configurations.Select(e => HostedConfigurationRevisionCipher.Decrypt(logbook, e, key)).Last();
+                    var document = PortableLogbookDocumentV2.CreateAustraliaFirst(logbook, settings.CustomFieldDefinitions,
+                        settings.CurrencyOverrideDates, operations);
+                    Require(PortableLogbookValidatorV2.Validate(document).IsValid, "Recovered document failed application validation.");
+                    var projection = PortableLogbookWorkbookProjection.MergeV2(document.Operations);
+                    // Only counts leave this process; flight records, identifiers and document fingerprints stay private.
+                    results.Add(new { operations = operations.Length, configurations = configurations.Length,
+                        activeEntries = projection.Entries.Values.Count(e => !e.IsDeleted),
+                        deletedEntries = projection.Entries.Values.Count(e => e.IsDeleted), conflicts = projection.Conflicts.Count,
+                        customFields = settings.CustomFieldDefinitions.Count });
+                }
+                finally { CryptographicOperations.ZeroMemory(bytes); }
+            }
+            Require(results.Count > 0, "No populated logbook was replayed.");
+            Console.WriteLine(JsonSerializer.Serialize(new { status = "application-replayed", logbooks = results }, json));
+        }
+        finally { CryptographicOperations.ZeroMemory(kek); }
+    }
     else if (args is ["verify"])
     {
         using var input = JsonDocument.Parse(await Console.In.ReadToEndAsync());

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, generateKeyPairSync, randomUUID } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID } from 'node:crypto';
 import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
@@ -8,8 +8,9 @@ import { join, resolve, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
 import { gzipSync } from 'node:zlib';
-import { buildHostedArchive, tableManifestSql } from './orchestrate.mjs';
-import { openArchive } from './archive.mjs';
+import { buildHostedArchive, buildSupervisedArchive, tableManifestSql } from './orchestrate.mjs';
+import { openArchive, sealArchive } from './archive.mjs';
+import { verifySupervisedArchive } from './verify-supervised.mjs';
 import { restoreDisposable, readDisposable, dropDisposable } from './restore.mjs';
 
 test('bundles a coherent disposable snapshot and rejects incomplete/changing inputs without a success file', async () => {
@@ -18,7 +19,7 @@ test('bundles a coherent disposable snapshot and rejects incomplete/changing inp
   const database = 'elb_backup_fixture_' + randomUUID().replaceAll('-', '');
   const pgBin = process.platform === 'win32' ? 'C:/Program Files/PostgreSQL/17/bin' : '/usr/bin';
   const suffix = process.platform === 'win32' ? '.exe' : '';
-  const local = { host: '127.0.0.1', port: 54322, user: 'postgres', password: 'postgres', pgBin };
+  const local = { host: '127.0.0.1', port: Number(process.env.ELB_BACKUP_TEST_PORT ?? 54322), user: 'postgres', password: 'postgres', pgBin };
   function sql(target, input) {
     const result = spawnSync(join(pgBin, 'psql' + suffix), ['-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1', '-d', target], {
       env: { ...process.env, PGHOST: local.host, PGPORT: String(local.port), PGUSER: local.user,
@@ -81,9 +82,10 @@ test('bundles a coherent disposable snapshot and rejects incomplete/changing inp
     const tables = ['accounts','logbooks','logbook_memberships','devices','operation_acks','pairing_requests',
       'key_envelopes','security_events','workbook_migrations','configuration_revisions'];
     sql(database, `create schema auth; create schema storage; create schema supabase_migrations;
+      create extension citext with schema public;
       create table auth.users(id integer); create table auth.identities(id integer);
       ${tables.map(name => `create table public.${name}(id integer);`).join('\n')}
-      create table public.operations(id integer, payload_ciphertext text);
+      create table public.operations(id integer, payload_ciphertext public.citext);
       insert into public.operations values(1,'synthetic-snapshot-value');
       create table storage.buckets(id text, public boolean);
       insert into storage.buckets values('airport-catalog',true);
@@ -105,6 +107,7 @@ test('bundles a coherent disposable snapshot and rejects incomplete/changing inp
     restored = restoreDisposable(archive, keys.privateKey, createHash('sha256').update(archive).digest('hex'), local);
     const restoredTables = readDisposable(local, restored, tableManifestSql).split(/\r?\n/).map(line => JSON.parse(line));
     assert.deepEqual(restoredTables, verification.tables);
+    assert.equal(readDisposable(local, restored, "select n.nspname from pg_extension e join pg_namespace n on n.oid=e.extnamespace where e.extname='citext';"), 'public');
     dropDisposable(local, restored); restored = undefined;
 
     const configPath = join(directory, 'connection.json'); const recipient = join(directory, 'public.pem');
@@ -142,6 +145,46 @@ test('bundles a coherent disposable snapshot and rejects incomplete/changing inp
       resetMutation(failure);
     }
     mode = 'normal'; mutated = false;
+    const supervised = await buildSupervisedArchive(connection, keys.publicKey, root);
+    const supervisedHash = createHash('sha256').update(supervised).digest('hex');
+    const supervisedResult = verifySupervisedArchive(supervised, keys.privateKey, supervisedHash, local);
+    assert.equal(supervisedResult.status, 'database-restored-and-matched');
+    assert.equal(supervisedResult.allRowsAndRevisionsMatched, true);
+    assert.throws(() => verifySupervisedArchive(supervised, keys.privateKey, '0'.repeat(64), local), /trusted receipt/);
+    const mismatched = openArchive(supervised, keys.privateKey);
+    const wrongManifest = JSON.parse(mismatched['verification.json']); wrongManifest.tables[0].rows++;
+    const changed = sealArchive({ ...mismatched, 'verification.json': Buffer.from(JSON.stringify(wrongManifest)) }, keys.publicKey);
+    assert.throws(() => verifySupervisedArchive(changed, keys.privateKey, createHash('sha256').update(changed).digest('hex'), local), /Restored table/);
+    Object.values(mismatched).forEach(value => value.fill(0));
+    const passphrase = 'synthetic local-only recovery test password';
+    const protectedKey = createPrivateKey(keys.privateKey).export({ type: 'pkcs8', format: 'pem', cipher: 'aes-256-cbc', passphrase });
+    const recoveryRoot = join(directory, 'manual-recovery'); mkdirSync(recoveryRoot);
+    const trustedRoot = join(directory, 'local/ElectronicLogbook/HostedBackup'); mkdirSync(trustedRoot, { recursive: true });
+    const capsule = sealArchive({ 'preview-recovery.env': Buffer.from('synthetic offline recovery secret') }, keys.publicKey);
+    const recipientHash = createHash('sha256').update(createPublicKey(keys.publicKey).export({ type: 'spki', format: 'der' })).digest('hex');
+    const digest = bytes => createHash('sha256').update(bytes).digest('hex');
+    writeFileSync(join(recoveryRoot, 'backup-private.encrypted.pem'), protectedKey);
+    writeFileSync(join(recoveryRoot, 'recovery.elbbackup'), capsule);
+    writeFileSync(join(trustedRoot, 'recovery-receipt.json'), JSON.stringify({ protectedIdentitySha256: digest(protectedKey),
+      recoveryArchiveSha256: digest(capsule), recipientSha256: recipientHash }));
+    const manualPath = join(directory, 'manual.elbbackup'); writeFileSync(manualPath, supervised);
+    writeFileSync(manualPath + '.receipt.json', JSON.stringify({ accessMode: 'supervised-owner', sha256: supervisedHash, recipientSha256: recipientHash }));
+    const verifyRequest = { archive: manualPath, identity: join(recoveryRoot, 'backup-private.encrypted.pem'),
+      recoveryArchive: join(recoveryRoot, 'recovery.elbbackup'), passphrase, localPort: local.port };
+    const verifyCli = request => spawnSync(process.execPath, [resolve('tools/hosted-backup/verify-supervised.mjs')], {
+      input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, timeout: 30000,
+      env: { ...process.env, LOCALAPPDATA: join(directory, 'local') } });
+    const rejected = verifyCli({ ...verifyRequest, passphrase: 'wrong password' });
+    assert.equal(rejected.status, 1); assert.equal(rejected.stdout, '');
+    assert.ok(!rejected.stderr.includes(passphrase) && !rejected.stderr.includes('synthetic offline recovery secret'));
+    assert.equal(existsSync(manualPath + '.verification.json'), false);
+    const verified = verifyCli(verifyRequest);
+    assert.equal(verified.status, 0, 'Protected owner-run verification CLI failed: ' + verified.stderr);
+    assert.equal(JSON.parse(verified.stdout).recoveryCapsuleAuthenticated, true);
+    const verificationBytes = readFileSync(manualPath + '.verification.json');
+    assert.equal(verifyCli(verifyRequest).status, 1);
+    assert.ok(readFileSync(manualPath + '.verification.json').equals(verificationBytes));
+    assert.equal(sql('postgres', "select count(*) from pg_database where shobj_description(oid,'pg_database') like 'flightlogx-backup-restore:%';"), '0');
     const actualFiles = openArchive(await buildHostedArchive(connection, keys.publicKey, resolve('.')), keys.privateKey);
     for (const name of ['tools/hosted-backup/orchestrate.mjs', 'supabase/config.toml',
       'updater/src/ElectronicLogbook.Portable/ElectronicLogbook.Portable.csproj'])

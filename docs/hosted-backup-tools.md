@@ -2,10 +2,16 @@
 
 Status: local export, authenticated readback, disposable SQL restoration and shared
 application replay, protected offline recovery setup and disposable-tested complete archive
-orchestration implemented. R2 production backup upload,
+orchestration implemented. Real supervised Preview restoration and USB-capsule-key
+shared application replay passed on 2026-10-18. R2 production backup upload,
 scheduling and end-to-end Google/managed-service recovery acceptance are not yet complete.
 The measured design and owner decisions are in
 [the backup plan](hosted-preview-backup-plan.md).
+The [automation assessment](hosted-backup-automation-assessment-research-2026-10-18.md)
+records tested drift/snapshot hazards and the remaining restricted-export proof.
+The [disposable metadata contract](hosted-backup-metadata-guard-contract.md) defines
+the separate PG17 guard experiment and its mutation/concurrency checks. It is not
+called by these archive commands and cannot connect to hosted sources.
 
 ## Local commands
 
@@ -23,8 +29,81 @@ The explicit connection file has `host`, integer `port`, `database`, `user`,
 binary directory. Hosted sources must be the Sydney session pooler on port 5432,
 database `postgres`, and a matching `flightlogx_backup.<projectRef>` identity. TLS CA
 and hostname verification are mandatory. Owner credentials are accepted only by the
-separate provisioning path. Do not put a Supabase management token, app KEK or ingress
+separate provisioning and supervised local export paths. Do not put a Supabase management token, app KEK or ingress
 private key in the backup workflow.
+
+## Supervised manual safety copy
+
+The restricted automated export remains blocked by managed-schema permissions.
+The owner-authorized interim path reads Preview using credentials already on the
+trusted Windows PC, and immediately encrypts the complete archive to the existing
+offline recovery recipient. It does not change Preview or save owner credentials
+for scheduled use. The routine CLI keeps its restricted-role audit.
+
+```powershell
+node tools/hosted-backup/supervised-export.mjs --ca <absolute-trusted-root.crt> --output <new-full-path.elbbackup>
+pwsh -NoProfile -File tools/hosted-backup/Test-SupervisedBackup.ps1 -Archive <full-path.elbbackup> -RecoveryDirectory <full-path-on-recovery-USB>
+```
+
+Copy the encrypted archive and its `.receipt.json` together to trusted storage,
+and compare their SHA-256 values after copying. Preserve the original receipt on
+the trusted PC: encryption alone does not authenticate who produced an archive.
+Existing archive, receipt and completed verification files are never overwritten.
+Export uses verified TLS and checks the configured Preview project's identity,
+region and health before reading. No new software or reusable secret is introduced.
+
+Verification needs an isolated PostgreSQL 17 test instance at `127.0.0.1:54322`
+with the existing disposable fixture credentials and Supabase role prerequisites;
+the local Supabase stack also provides these. Enter the recovery USB password only
+at the local masked PowerShell prompt. It passes to Node through stdin, never
+through command arguments, chat or a saved file. The verifier checks the protected
+identity and recovery capsule against the independently retained recovery receipt,
+authenticates the capsule in memory, restores a new marked database, compares every
+table's row count/hash/revision with the archive snapshot and removes that database.
+Supervised verification also removes its marked target if restoration fails.
+It writes a separate `.verification.json` only after every check and cleanup succeeds.
+
+The real Preview archive was exported and copied byte-for-byte to the recovery USB
+on 2026-10-18. Its password-prompted verification passed: all 47 tables matched,
+the protected recovery capsule authenticated and the disposable database was removed.
+The archive and verification report are retained on both the trusted PC and USB.
+This database report does not prove Google sign-in, app-level key recovery, R2 upload
+or unattended scheduling. Evidence: `artifacts/hosted-backup-manual-20261018/`.
+
+Use `-ApplicationReplay` for the next, separate recovered-key check:
+
+```powershell
+pwsh -NoProfile -File tools/hosted-backup/Test-SupervisedBackup.ps1 -Archive G:\ElectronicLogbook\Preview-Backup-2026-10-18.elbbackup -RecoveryDirectory G:\ElectronicLogbook -ApplicationReplay -LocalPort 55432
+```
+
+This requires an already running isolated native PostgreSQL 17 fixture on loopback
+port 55432 (54322 remains the default). The native fixture avoids changing the running
+Docker stack, whose `postgres` role cannot set `session_replication_role`. Restore
+requires that setting to suppress data-insertion triggers. Only these two loopback
+ports are accepted; existing databases cannot be selected as restore targets.
+`ELB_BACKUP_TEST_PORT=55432` selects the native fixture for the orchestration and
+recovered-key integration tests.
+
+The additional check builds the existing .NET replay harness, authenticates the same
+USB files against the trusted PC receipt, then obtains the managed recovery KEK and
+version solely from the decrypted capsule. Each populated, nondeleted logbook must
+retain its owner identity, exactly one usable managed envelope, and contiguous
+operation and configuration histories. Shared application ciphers decrypt every
+revision, validate the reconstructed document and materialize its current entries.
+Wrong keys, unavailable settings and incomplete histories fail closed. Decrypted
+records and keys stay in captured process memory; only aggregate counts enter the
+separate `.application-verification.json` report. The original SQL verification report
+is preserved. The marked restore database is removed on success or failure. This
+proves shared application decryption/replay; phone UI and Google recovery still need
+their own acceptance. It does not enable automatic backups.
+
+The real archive passed this additional check on 2026-10-18: all 47 tables matched,
+both populated logbooks decrypted and validated, and their operation/configuration
+histories materialized without unresolved conflicts. The separate report is retained
+on USB and the trusted PC, with ignored evidence under
+`artifacts/hosted-backup-manual-20261018/`. The marked database was removed and the
+verified native fixture stopped; the original archive and protected recovery files
+remain unchanged. No phone operation or Google sign-in was exercised.
 
 ## Restricted source setup
 
@@ -243,6 +322,7 @@ node --test tools/hosted-backup/r2-credentials.test.mjs
 node --test tools/hosted-backup/archive.integration.test.mjs
 node --test tools/hosted-backup/source-access.integration.test.mjs
 node --test tools/hosted-backup/orchestrate.integration.test.mjs
+node --test tools/hosted-backup/replay-supervised.integration.test.mjs
 .\tools\Test-LocalDevelopmentTransfer.ps1
 ```
 
@@ -269,14 +349,19 @@ Preview archive restoration or Google/app recovery acceptance test.
 
 `restoreDisposable` requires the SHA-256 from trusted job history and fully
 authenticates the archive before creating a target. It only accepts the local
-Supabase endpoint (`127.0.0.1:54322`) and creates a random database from `template0`;
+Supabase endpoint (`127.0.0.1:54322`) or isolated native fixture (`127.0.0.1:55432`)
+and creates a random database from `template0`;
 it cannot restore into a caller-specified existing database. A random database
-comment marker is verified before SQL restore, reads and deletion. The empty default
-`public` schema is removed without CASCADE before restoring the dump. Native restore
-uses one transaction and exits on the first error. Files remain in memory.
+comment marker is verified before SQL restore, reads and deletion. Public database
+access is revoked. Reviewed extension prerequisites are installed in their original
+schemas before restoring tables; the dump's duplicate schema entries are skipped
+through a temporary metadata-only object list. Native restore uses one transaction,
+suppresses data-insertion triggers and exits on the first error. Decrypted dump and
+row contents stay in memory or the disposable database, never a plaintext dump file.
 
 Cluster roles/ownership/ACLs are deliberately not applied to the shared local server;
 they require a separate empty stack/hosted-project restoration procedure. Tests check
 preserved RLS/policy definitions, not a full production authorization or Google login
 journey. Cron/Edge Functions/SMTP are not started in the new database. A failed target
-is retained with its disposable name for investigation; cleanup must verify its marker.
+is retained with its disposable name for investigation by the low-level helper;
+the supervised verifier cleans up its identified target on success or failure.

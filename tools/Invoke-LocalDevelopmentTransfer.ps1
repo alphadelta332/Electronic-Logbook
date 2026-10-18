@@ -889,7 +889,7 @@ function Invoke-VerifyAction {
     Add-CheckResult $results 'Hosted backup replay check' (Test-Path -LiteralPath $hostedBackupReplay -PathType Leaf) $true 'uses the already-required .NET 10 SDK and shared portable application code'
     $hostedBackupRecovery = Join-Path $RepoRoot $script:TransferConfig.Expected.HostedBackupRecoveryScript
     Add-CheckResult $results 'Hosted backup recovery setup' (Test-Path -LiteralPath $hostedBackupRecovery -PathType Leaf) $true 'private identity and recovery archive remain in owner-controlled offline storage'
-    foreach ($backupSetupFile in @($script:TransferConfig.Expected.HostedBackupR2AccessScript, $script:TransferConfig.Expected.HostedBackupR2Policy, $script:TransferConfig.Expected.HostedBackupR2CheckScript, $script:TransferConfig.Expected.HostedBackupSourceSetupScript)) {
+    foreach ($backupSetupFile in @($script:TransferConfig.Expected.HostedBackupR2AccessScript, $script:TransferConfig.Expected.HostedBackupR2Policy, $script:TransferConfig.Expected.HostedBackupR2CheckScript, $script:TransferConfig.Expected.HostedBackupSourceSetupScript, $script:TransferConfig.Expected.HostedBackupSupervisedExportScript, $script:TransferConfig.Expected.HostedBackupSupervisedVerifyScript)) {
         Add-CheckResult $results 'Hosted backup storage setup' (Test-Path -LiteralPath (Join-Path $RepoRoot $backupSetupFile) -PathType Leaf) $true $backupSetupFile
     }
     $backupCurlHelp = Get-NativeCommandOutput -Name $script:TransferConfig.Expected.HostedBackupCurlCommand -Arguments @('--help', 'all')

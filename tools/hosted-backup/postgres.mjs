@@ -30,8 +30,8 @@ export function postgres(connection, executable, args, input, ownerSetup = false
 }
 
 // Keep the exporting transaction alive until pg_dump has imported its snapshot.
-export async function withDatabaseSnapshot(connection, sql, action) {
-  const spec = command(connection, 'psql');
+export async function withDatabaseSnapshot(connection, sql, action, ownerSetup = false) {
+  const spec = command(connection, 'psql', ownerSetup);
   const child = spawn(spec.executable, ['-X', '-w', '-qAt', '-v', 'ON_ERROR_STOP=1'], {
     windowsHide: true, env: spec.env, stdio: ['pipe', 'pipe', 'ignore']
   });

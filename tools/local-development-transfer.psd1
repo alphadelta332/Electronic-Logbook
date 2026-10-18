@@ -184,6 +184,8 @@
         HostedBackupR2Policy = 'tools/hosted-backup/r2-policy.json'
         HostedBackupR2CheckScript = 'tools/hosted-backup/check-r2-access.mjs'
         HostedBackupSourceSetupScript = 'tools/hosted-backup/initialize-source.mjs'
+        HostedBackupSupervisedExportScript = 'tools/hosted-backup/supervised-export.mjs'
+        HostedBackupSupervisedVerifyScript = 'tools/hosted-backup/Test-SupervisedBackup.ps1'
         HostedBackupCurlCommand = 'curl.exe'
         ResendApiKeyFiles = @('privatepilotauthdevapi.txt', 'privatepilotauthapi.txt')
         RecoveryEnvelopeSecretFiles = @('development.env', 'private-pilot.env')
