@@ -8,6 +8,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { gzipSync } from 'node:zlib';
 import { uploadDaily, readbackDaily, r2Request } from './daily-backup.mjs';
 import { sealArchive, openArchive, maxArchiveBytes } from './archive.mjs';
+import { reserveDailyAttempt, reserveDailyReadback, reserveWorkflowRequest } from './daily-controls.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const identity=generateKeyPairSync('rsa',{modulusLength:3072,
@@ -34,16 +35,24 @@ function fixture(t) {
       sources:Object.fromEntries(Object.entries(sources).map(([name,bytes])=>[name,bytes.toString('base64')])),
       sourceManifest:{revision:context.commit,dirty:true,files:Object.entries(sources).map(([name,bytes])=>({name,sha256:hash(bytes)}))}}};
   const approvedAt=new Date(Date.now()-1000).toISOString();
-  const ownerReview={version:1,approvedAt,expiresAt:new Date(Date.parse(approvedAt)+31*24*60*60*1000).toISOString(),
+  const end=new Date(Date.parse(approvedAt)+31*24*60*60*1000).toISOString();
+  const ownerReview={version:2,approvedAt,expiresAt:end,weeklyCheckedAt:approvedAt,sourceExpiresAt:end,
     jobSha256:hash(JSON.stringify(job)),sourceOrigin:job.source.origin,githubPaidActionsBlocked:true,supabasePlan:'free',
-    egress:{used:1,included:5e9},cachedEgress:{used:1,included:5e9}};
-  const permit={version:2,checkedAt:new Date(Date.now()-1000).toISOString(),expiresAt:new Date(Date.now()+60000).toISOString(),ownerReview,
+    egress:{used:1,included:5e9},cachedEgress:{used:1,included:5e9},
+    github:{observedAt:approvedAt,periodStart:approvedAt,periodEnd:end,remainingLinuxMinutes:1997},
+    r2:{observedAt:approvedAt,periodStart:approvedAt,periodEnd:end,storageGbMonths:0.01,requests:67,
+      storageBillableGbMonths:0,classABillable:0,classBBillable:0,usageCostUsd:0}};
+  const observedAt=new Date().toISOString();
+  const permit={version:3,checkedAt:observedAt,expiresAt:new Date(Date.now()+60000).toISOString(),ownerReview,
     jobSha256:hash(JSON.stringify(job)),deploymentRevisions:structuredClone(job.deploymentRevisions),
-    deploymentObservedAt:new Date().toISOString(),
-    github:{observedAt:new Date().toISOString(),remainingLinuxMinutes:1997},
-    supabase:{observedAt:new Date().toISOString(),plan:'free'},
+    deploymentObservedAt:observedAt,
+    github:{observedAt,plan:'free',queryStart:approvedAt,queryEnd:observedAt,
+      actionsMinutes:[{sku:'actions_linux',grossQuantity:7,netAmount:0}]},
+    supabase:{observedAt,plan:'free'},
     r2:{accountId:job.accountId,bucket:job.bucket,policySha256:hash(JSON.stringify(policy)),privateStandardBucket:true,
-      observedAt:new Date().toISOString(),storageBytes:{used:1500000,included:1e10},classA:{used:1,included:1e6},classB:{used:1,included:1e7}}};
+      observedAt,currentBytes:1500000,sampledPeakBytes:1500000,newestStorageMeasurementAt:observedAt,
+      pendingUploads:0,infrequentAccessBytes:0,windows:[{from:approvedAt,until:observedAt,requests:67},
+        {from:new Date(Date.parse(observedAt)-31*24*60*60*1000).toISOString(),until:observedAt,requests:67}]}};
   const rows={
     'storage.buckets':[{id:'airport-catalog',public:true}],
     'storage.objects':Object.entries(references).map(([name,bytes])=>({bucket_id:'airport-catalog',name,
@@ -55,7 +64,15 @@ function fixture(t) {
     ledgers:{auth:contract.ledgers.auth,storage:contract.ledgers.storage,application:contract.ledgers.application},
     datasets:contract.shape.map(t=>({table:t.table,rows:(rows[t.table]??[]).map(r=>JSON.stringify(r))})),sequences:[]};
   const state={permits:0,captures:0,puts:0,lists:0,readbacks:0,permitStatus:200,failPut:false,corrupt:false,truncated:false,
-    oversizedInventory:false,reserved:false,reservations:0,failCapture:false,beforeSecondPermit:()=>{},beforeSecondList:()=>{}};
+    oversizedInventory:false,reserved:false,reservations:0,denyReadback:false,failReadback:false,
+    loseReadbackReply:false,alterReadbackReply:false,
+    failCapture:false,beforeSecondPermit:()=>{},beforeSecondList:()=>{}};
+  const grants=new Map();let tail=Promise.resolve();
+  const storage={transaction(action){
+    const operation=tail.then(()=>action({get:async key=>structuredClone(grants.get(key)),
+      put:async(key,value)=>grants.set(key,structuredClone(value))}));
+    tail=operation.catch(()=>{});return operation;
+  }};
   const previous=Buffer.from('preserve previous independently retained bytes');
   const objects=new Map([['manual/previous.elbbackup',Buffer.from(previous)]]);
   t.mock.method(globalThis,'fetch',async (url,options)=>{
@@ -66,12 +83,33 @@ function fixture(t) {
     if(url===job.permitUrl.replace('/daily-backup-permit','/daily-backup-reservation')){
       state.reservations++;assert.equal(options.method,'POST');
       assert.equal(options.headers['x-flightlogx-reservation-token'],reservationToken);
-      if(state.reserved)return Response.json({error:'Already reserved'},{status:409});
-      state.reserved=true;
       const payload=JSON.parse(options.body);
       assert.equal(payload.sourceOrigin,job.source.origin);
-      return Response.json({version:1,status:'reserved',day:new Date().toISOString().slice(0,10),reservedAt:new Date().toISOString(),
-        jobSha256:payload.jobSha256,reviewSha256:hash(JSON.stringify(ownerReview)),sourceEgressBytes:64*1024*1024,...context},{status:201});
+      try {
+        const receipt=await reserveDailyAttempt(storage,payload,ownerReview);state.reserved=true;
+        return Response.json(receipt,{status:201});
+      }catch{return Response.json({error:'Already reserved'},{status:409});}
+    }
+    if(url===job.permitUrl.replace('/daily-backup-permit','/daily-backup-readback')){
+      assert.equal(options.method,'POST');
+      assert.equal(options.headers['x-flightlogx-reservation-token'],undefined);
+      if(state.denyReadback)return new Response('',{status:409});
+      try{
+        const claim=await reserveDailyReadback(storage,JSON.parse(options.body),ownerReview);
+        if(state.loseReadbackReply)throw new Error('Synthetic lost claim response');
+        if(state.alterReadbackReply)claim.reservationSha256='0'.repeat(64);
+        return Response.json(claim,{status:201});
+      }
+      catch{return Response.json({error:'Already used'},{status:409});}
+    }
+    if(url===job.permitUrl.replace('/daily-backup-permit','/daily-backup-request')){
+      if(state.denyStorageClaim)return new Response('',{status:409});
+      try{
+        const claim=await reserveWorkflowRequest(storage,JSON.parse(options.body),ownerReview);
+        if(state.loseStorageReply)throw new Error('Synthetic lost storage claim');
+        return Response.json(claim,{status:201});
+      }
+      catch{return Response.json({error:'Request denied'},{status:409});}
     }
     if(url===job.source.origin+'/rest/v1/rpc/elb_backup_snapshot'){
       state.captures++;assert.equal(options.headers['x-flightlogx-backup-token'],token);
@@ -83,6 +121,8 @@ function fixture(t) {
     return new Response(references[url.slice(prefix.length).split('?')[0]]);
   });
   const uploadRequest=async(method,key,body)=>{
+    assert.equal(state.reserved,true,'Every storage request needs a committed allowance.');
+    assert.equal(grants.get('component-requests').counts.workflow,state.lists+state.puts+1);
     if(method==='GET' && key===''){
       state.lists++;if(state.lists===2)state.beforeSecondList();
       return Buffer.from('<ListBucketResult><IsTruncated>'+state.truncated+'</IsTruncated>'+[...objects]
@@ -95,7 +135,10 @@ function fixture(t) {
   };
   const readRequest=async(method,key)=>{
     assert.equal(method,'GET','Independent readback credential never writes.');
-    state.readbacks++;const bytes=Buffer.from(objects.get(key));if(state.corrupt)bytes[bytes.length-1]^=1;return bytes;
+    assert.equal(grants.get('source-budget').readbackUsed,true,'Download must follow durable consumption.');
+    assert.equal(grants.get('component-requests').counts.workflow,4);
+    state.readbacks++;if(state.failReadback)throw new Error('Synthetic download failure');
+    const bytes=Buffer.from(objects.get(key));if(state.corrupt)bytes[bytes.length-1]^=1;return bytes;
   };
   t.after(()=>assert.deepEqual(objects.get('manual/previous.elbbackup'),previous));
   return {job,permit,snapshot,state,objects,uploadRequest,readRequest};
@@ -114,7 +157,12 @@ test('real capture/encryption plus separate readback produces a verified receipt
   assert.ok(files['deployment-sources.elbbackup']);Object.values(files).forEach(bytes=>bytes.fill(0));
   const receipt=await readbackDaily(f.job,pending,context,f.readRequest);
   assert.equal(receipt.status,'verified');assert.equal(receipt.sha256,hash(stored));assert.equal(f.state.readbacks,1);
-  await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/Today already has/);
+  assert.equal(receipt.reservation.readbackToken,undefined);
+  assert.ok(!JSON.stringify(receipt).includes(pending.reservation.readbackToken));
+  await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/not reserved/);
+  assert.equal(f.state.readbacks,1);
+  await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/not reserved/);
+  assert.equal(f.state.lists,2);
   assert.equal(f.state.captures,1);assert.equal(f.state.puts,1);
 });
 
@@ -130,7 +178,7 @@ test('missing, stale, incorrect and exhausted evidence stops before source expor
     f=>f.permit.jobSha256='0'.repeat(64),
     f=>f.permit.deploymentRevisions[0].version++,
     f=>f.permit.ownerReview.githubPaidActionsBlocked=false,
-    f=>f.permit.github.remainingLinuxMinutes=19,
+    f=>f.permit.ownerReview.github.remainingLinuxMinutes=639,
     f=>f.permit.supabase.plan='pro',
     f=>f.permit.ownerReview.egress.included=1024,
     f=>f.permit.ownerReview.cachedEgress.used=5e9,
@@ -140,9 +188,9 @@ test('missing, stale, incorrect and exhausted evidence stops before source expor
     f=>f.permit.github.paidActionsBlocked=true,
     f=>f.permit.r2.privateStandardBucket=false,
     f=>f.permit.r2.policySha256='0'.repeat(64),
-    f=>f.permit.r2.storageBytes.included=1,
-    f=>f.permit.r2.classA.included=99,
-    f=>f.permit.r2.classB.included=99
+    f=>f.permit.r2.currentBytes=2*1024*1024*1024,
+    f=>f.permit.r2.windows[0].requests=10000,
+    f=>f.permit.r2.windows[1].requests=10000
   ])await t.test(String(mutate),async t=>{
     const f=fixture(t);mutate(f);await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken));
     assert.equal(f.state.captures,0);assert.equal(f.state.lists,0);assert.equal(f.state.puts,0);
@@ -157,6 +205,8 @@ test('inventory limits, truncated listings and another writer stop without repla
   ])await t.test(String(mutate),async t=>{
     const f=fixture(t);mutate(f);await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken));
     assert.equal(f.state.captures,0);assert.equal(f.state.puts,0);
+    await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/not reserved/);
+    assert.equal(f.state.lists,1);
   });
   await t.test('concurrent archive between capture and upload',async t=>{
     const f=fixture(t);f.state.beforeSecondList=()=>f.objects.set('daily/'+new Date().toISOString().slice(0,10)+'.elbbackup',Buffer.from('other writer'));
@@ -178,13 +228,31 @@ test('post-capture drift and upload failures leave prior backups and never repor
 
 test('corrupt readback, stale/mismatched requests and altered prepared sources cannot produce a verified receipt',async t=>{
   const f=fixture(t);const pending=await uploadDaily(f.job,token,context,f.uploadRequest,reservationToken);
-  f.state.corrupt=true;await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/Readback digest/);
-  f.state.corrupt=false;
-  await assert.rejects(readbackDaily(f.job,{...pending,bytes:pending.bytes+1},context,f.readRequest),/Readback size/);
   await assert.rejects(readbackDaily(f.job,{...pending,runId:'999'},context,f.readRequest));
   await assert.rejects(readbackDaily(f.job,{...pending,uploadedAt:new Date(Date.now()-31*60*1000).toISOString()},context,f.readRequest),/stale/);
+  f.state.corrupt=true;await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/Readback digest/);
+  await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/not reserved/);
+  assert.equal(f.state.readbacks,1);
   f.job.source.sources['sources/fixture.mjs']=Buffer.from('altered').toString('base64');
   await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/Reconstruction inputs/);
+});
+
+test('readback size mismatch consumes the allowance and never reports verification',async t=>{
+  const f=fixture(t);const pending=await uploadDaily(f.job,token,context,f.uploadRequest,reservationToken);
+  await assert.rejects(readbackDaily(f.job,{...pending,bytes:pending.bytes+1},context,f.readRequest),/Readback size/);
+  await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/not reserved/);
+  assert.equal(f.state.readbacks,1);
+});
+
+test('denied readback never downloads; a failed download cannot reuse its allowance',async t=>{
+  const f=fixture(t);const pending=await uploadDaily(f.job,token,context,f.uploadRequest,reservationToken);
+  f.state.denyReadback=true;
+  await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/not reserved/);
+  assert.equal(f.state.readbacks,0);
+  f.state.denyReadback=false;f.state.failReadback=true;
+  await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/Synthetic download failure/);
+  await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/not reserved/);
+  assert.equal(f.state.readbacks,1);
 });
 
 test('capture failure consumes the reservation before source reading and prevents another attempt today',async t=>{
@@ -192,7 +260,29 @@ test('capture failure consumes the reservation before source reading and prevent
   await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/Hosted capability export failed/);
   assert.equal(f.state.reserved,true);assert.equal(f.state.captures,1);assert.equal(f.state.puts,0);
   await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/not reserved/);
-  assert.equal(f.state.captures,1);
+  assert.equal(f.state.captures,1);assert.equal(f.state.lists,1);
+});
+
+test('denied or lost per-request allowance stops before storage/source I/O and never buys a retry',async t=>{
+  for(const field of ['denyStorageClaim','loseStorageReply'])await t.test(field,async t=>{
+    const f=fixture(t);f.state[field]=true;
+    await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/not reserved/);
+    assert.equal(f.state.lists,0);assert.equal(f.state.puts,0);assert.equal(f.state.captures,0);
+    f.state[field]=false;
+    await assert.rejects(uploadDaily(f.job,token,context,f.uploadRequest,reservationToken),/not reserved/);
+    assert.equal(f.state.lists,0);
+  });
+});
+
+test('lost or mismatched readback claim responses prevent downloads and cannot refund the consumed grant',async t=>{
+  for(const field of ['loseReadbackReply','alterReadbackReply'])await t.test(field,async t=>{
+    const f=fixture(t);const pending=await uploadDaily(f.job,token,context,f.uploadRequest,reservationToken);
+    f.state[field]=true;
+    await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest));
+    f.state[field]=false;
+    await assert.rejects(readbackDaily(f.job,pending,context,f.readRequest),/not reserved/);
+    assert.equal(f.state.readbacks,0);
+  });
 });
 
 test('R2 adapter rejects dangerous methods, names and credentials before starting curl',()=>{

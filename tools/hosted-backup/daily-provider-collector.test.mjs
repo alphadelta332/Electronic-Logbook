@@ -2,10 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { collectGithubEvidence, collectSupabaseEvidence, collectProviderEvidence } from './daily-provider-collector.mjs';
+import { validateCostEvidence } from './daily-cost-policy.mjs';
+import { refreshProviderEvidence, cachedProviderEvidence } from './daily-request-controls.mjs';
 
 const now = Date.parse('2026-10-18T12:00:00Z');
 const policy = JSON.parse(readFileSync(new URL('./r2-policy.json', import.meta.url)));
-const config = { version: 1, githubUser: 'alphadelta332', accountId: 'a'.repeat(32), bucket: policy.bucket,
+const config = { version: 2, githubUser: 'alphadelta332', accountId: 'a'.repeat(32), bucket: policy.bucket,
+  r2Period: { periodStart: '2026-10-06T00:00:00.000Z', periodEnd: '2026-11-06T00:00:00.000Z' },
   supabaseOrganization: 'fixture-org', projectRef: 'b'.repeat(20), policy,
   deploymentRevisions: ['airport-catalog', 'recovery-envelope'].map(slug => ({ slug, version: 1, updated_at: 123 })) };
 const credentials = { github: 'github-' + 'g'.repeat(30), supabaseProject: 'sbp-' + 's'.repeat(30),
@@ -13,6 +16,8 @@ const credentials = { github: 'github-' + 'g'.repeat(30), supabaseProject: 'sbp-
 function fixture(mutate = () => {}) {
   const zero = { objects: 0, payloadSize: 0, metadataSize: 0 };
   const values = {
+    entitlements: ['r2.enabled', 'r2.fedramp', 'r2.infrequent_access'].map(key =>
+      ({ id: key, feature: { key }, allocation: { type: 'bool', value: key !== 'r2.fedramp' }, deleted_date: '' })),
     account: { login: config.githubUser, plan: { name: 'free' } },
     usage: { user: config.githubUser, timePeriod: { year: 2026, month: 10 }, usageItems: [
       { product: 'Actions', sku: 'actions_linux', grossQuantity: 3, unitType: 'minutes', netAmount: 0 },
@@ -21,13 +26,14 @@ function fixture(mutate = () => {}) {
     functions: config.deploymentRevisions.map(item => ({ ...item, status: 'ACTIVE' })),
     metrics: { standard: { published: { ...zero, objects: 3, payloadSize: 1500, metadataSize: 129 }, uploaded: zero },
       infrequentAccess: { published: zero, uploaded: zero } },
-    bucket: { name: config.bucket, storage_class: 'Standard' }, lock: policy.lock, lifecycle: policy.lifecycle,
+    bucket: { name: config.bucket, storage_class: 'Standard', jurisdiction: 'default' }, lock: policy.lock, lifecycle: policy.lifecycle,
+    inventories: { default: { result: { buckets: [{ name: config.bucket, creation_date: '2026-10-17T03:58:25Z' }] },
+      result_info: { total_count: 1 } }, ...Object.fromEntries(['eu', 'us'].map(name =>
+      [name, { result: { buckets: [] }, result_info: { total_count: 0 } }])) },
     managed: { enabled: false }, domains: { domains: [] },
-    analytics: { data: { viewer: { accounts: [{ operations: [{ sum: { requests: 62 }, dimensions: { actionType: 'GetObject' } }],
+    analytics: { data: { viewer: { accounts: [{ operations: [{ sum: { requests: 62 }, dimensions: { actionType: 'GetObject', bucketName: config.bucket } }],
       storage: [{ max: { payloadSize: 1800, metadataSize: 129, uploadCount: 0 },
-        dimensions: { bucketName: config.bucket, datetime: '2026-10-18T11:45:00Z' } },
-      { max: { payloadSize: 4000, metadataSize: 50, uploadCount: 0 },
-        dimensions: { bucketName: 'other-deleted-bucket', datetime: '2026-10-01T12:00:00Z' } }] }] } } }
+        dimensions: { bucketName: config.bucket, datetime: '2026-10-18T11:45:00Z' } }] }] } } }
   };
   mutate(values);
   const calls = [];
@@ -38,14 +44,25 @@ function fixture(mutate = () => {}) {
       : url.includes('/organizations/') ? 'supabaseOrganization' : url.includes('supabase.com') ? 'supabaseProject' : 'cloudflare']);
     assert.ok(Object.values(credentials).every(token => !url.includes(token)));
     let key;
+    if (url.includes('/r2/buckets?')) return Response.json({ success: true, errors: [], ...values.inventories[options.headers['cf-r2-jurisdiction']] });
     if (url.includes('github.com')) key = url.endsWith('/user') ? 'account' : 'usage';
     else if (url.endsWith('/functions')) key = 'functions';
     else if (url.includes('/organizations/')) key = 'organization';
     else if (url.endsWith('/graphql')) {
       key = 'analytics'; const body = JSON.parse(options.body);
-      assert.equal(body.variables.from, '2026-10-01T00:00:00.000Z');
       assert.ok(!body.query.includes('bucketName:') && !body.query.includes('repository:'));
-    } else key = url.endsWith('/domains/custom') ? 'domains' : url.endsWith('/domains/managed') ? 'managed'
+      assert.ok(body.query.includes('datetime_lt:') && !body.query.includes('datetime_leq:'));
+      const result = structuredClone(values.analytics), account = result.data?.viewer?.accounts?.[0];
+      if (account) for (let index = 0; Object.hasOwn(body.variables, 'from' + index); index++) {
+        account['operations' + index] = account.operations;
+        account['storage' + index] = account.storage?.filter(item => {
+          const at = Date.parse(item.dimensions?.datetime);
+          return !Number.isFinite(at) || (at >= Date.parse(body.variables['from' + index]) && at < Date.parse(body.variables['until' + index]));
+        });
+        if (account.storage?.length === 10000) account['storage' + index] = account.storage;
+      }
+      return Response.json(result);
+    } else key = url.endsWith('/entitlements') ? 'entitlements' : url.endsWith('/domains/custom') ? 'domains' : url.endsWith('/domains/managed') ? 'managed'
       : url.endsWith('/metrics') ? 'metrics' : url.endsWith('/lock') ? 'lock' : url.endsWith('/lifecycle') ? 'lifecycle' : 'bucket';
     const value = values[key];
     return Response.json(['account', 'usage', 'organization', 'functions', 'analytics'].includes(key) ? value : { success: true, errors: [], result: value });
@@ -53,13 +70,128 @@ function fixture(mutate = () => {}) {
   return { values, calls, request };
 }
 
+function durableFixture() {
+  const values=new Map();let tail=Promise.resolve();
+  return {values,transaction(action) {
+    const next=tail.then(()=>action({get:async key=>structuredClone(values.get(key)),
+      put:async(key,value)=>values.set(key,structuredClone(value))}));
+    tail=next.catch(()=>{});return next;
+  }};
+}
+
+test('real minimal bucket lists use authenticated bucket details for class and jurisdiction', async () => {
+  const f = fixture(v => { v.inventories.default.result.buckets = [{ name: config.bucket, creation_date: '2026-10-17T03:58:25Z' }]; });
+  const result = await collectProviderEvidence(config, credentials, f.request, now);
+  assert.equal(result.status, 'collected-not-permitted');
+  const details = f.calls.filter(call => call.url.endsWith('/r2/buckets/' + config.bucket));
+  assert.equal(details.length, 1);
+  assert.equal(details[0].options.headers['cf-r2-jurisdiction'], 'default');
+});
+
+test('regional HTTP denials cannot become empty inventories when bucket details succeed', async () => {
+  for (const [jurisdiction, status] of [['eu', 403], ['us', 400]]) {
+    const f = fixture(), storage = durableFixture();
+    await assert.rejects(refreshProviderEvidence(storage, config, credentials, (url, options) =>
+      url.includes('/r2/buckets?') && options.headers['cf-r2-jurisdiction'] === jurisdiction
+        ? Promise.resolve(new Response(status === 400 ? 'BadRequest: invalid jurisdiction' : 'Access Denied', { status }))
+        : f.request(url, options), () => now), /Provider evidence request failed/);
+    await assert.rejects(cachedProviderEvidence(storage, config, now), /unavailable/);
+  }
+});
+
+test('collection-start ceiling preserves inherited counters without refunding attempts', async () => {
+  const storage = durableFixture();
+  storage.values.set('provider-cache', { day: new Date(now).toISOString().slice(0, 10), batches: 21,
+    startedAt: now - 60 * 60 * 1000, active: null });
+  await assert.rejects(refreshProviderEvidence(storage, config, credentials, () => assert.fail('No I/O after ceiling'), () => now), /ceiling/);
+  assert.equal(storage.values.get('provider-cache').batches, 21);
+});
+
+test('concurrent cache refresh makes one bounded collection; reads do not fan out or re-date evidence',async()=>{
+  const storage=durableFixture(),f=fixture();
+  await assert.rejects(cachedProviderEvidence(storage,config,now),/unavailable/);
+  const results=await Promise.allSettled(Array.from({length:16},()=>refreshProviderEvidence(storage,config,credentials,f.request,()=>now)));
+  assert.equal(results.filter(r=>r.status==='fulfilled').length,1);
+  assert.equal(f.calls.length,15);
+  assert.deepEqual(storage.values.get('component-requests').counts,{collector:11,github:2,supabase:2});
+  for(let i=0;i<40;i++)assert.equal((await cachedProviderEvidence(storage,config,now+1000)).retrievedAt,new Date(now).toISOString());
+  assert.equal(f.calls.length,15);
+  await assert.rejects(refreshProviderEvidence(storage,config,{...credentials,cloudflare:'rotated-token-value-is-long'},f.request,()=>now+1000),/hour/);
+  await assert.rejects(cachedProviderEvidence(storage,{...config,accountId:'f'.repeat(32)},now+1000),/unavailable/);
+  await assert.rejects(cachedProviderEvidence(storage,config,now+2*60*60*1000),/stale/);
+  await assert.rejects(cachedProviderEvidence(storage,config,now-1),/stale/);
+});
+
+test('failed refresh invalidates previous cache, charges failures and prevents hourly retry after restart/config rotation',async()=>{
+  const storage=durableFixture(),f=fixture();
+  await refreshProviderEvidence(storage,config,credentials,f.request,()=>now);
+  const later=now+60*60*1000;
+  const failed=fixture(v=>v.managed.enabled=true);
+  await assert.rejects(refreshProviderEvidence(storage,config,credentials,failed.request,()=>later),/public/);
+  assert.equal(failed.calls.length,15);
+  await assert.rejects(cachedProviderEvidence(storage,config,later),/unavailable/);
+  await assert.rejects(refreshProviderEvidence(storage,{...config,accountId:'f'.repeat(32)},credentials,f.request,()=>later+1000),/hour/);
+  assert.equal(storage.values.get('provider-cache').batches,2);
+  assert.equal(storage.values.get('component-requests').counts.collector,22);
+});
+
+test('cached provider measurement age can expire before retrieval age',async()=>{
+  const storage=durableFixture(),f=fixture();
+  await refreshProviderEvidence(storage,config,credentials,f.request,()=>now);
+  await assert.rejects(cachedProviderEvidence(storage,config,now+105*60*1000),/Underlying/);
+});
+
+test('daily batch ceiling survives failed collections, UTC rollover, abandoned leases and late completion',async()=>{
+  const storage=durableFixture();
+  const midnight=Date.parse('2026-10-18T00:00:00Z');
+  for(let i=0;i<21;i++)await assert.rejects(refreshProviderEvidence(storage,{},credentials,()=>assert.fail('Invalid config did I/O'),
+    ()=>midnight+i*60*60*1000),/account/);
+  await assert.rejects(refreshProviderEvidence(storage,config,credentials,()=>assert.fail('Batch ceiling did I/O'),
+    ()=>midnight+21*60*60*1000),/ceiling/);
+  assert.equal(storage.values.get('provider-cache').batches,21);
+  await assert.rejects(refreshProviderEvidence(storage,{},credentials,fetch,()=>midnight+24*60*60*1000),/account/);
+  assert.equal(storage.values.get('provider-cache').batches,1);
+  const hung=durableFixture(),f=fixture();let release,entered;
+  const ready=new Promise(resolve=>entered=resolve),gate=new Promise(resolve=>release=resolve);
+  let time=now;
+  const late=refreshProviderEvidence(hung,config,credentials,async(...args)=>{entered();await gate;return f.request(...args);},()=>time);
+  const rejected=assert.rejects(late,/expired/);
+  await ready;time+=60*60*1000;
+  await assert.rejects(refreshProviderEvidence(hung,{},credentials,fetch,()=>time),/account/);
+  release();await rejected;
+  await assert.rejects(cachedProviderEvidence(hung,config,time),/unavailable/);
+  assert.equal(hung.values.get('provider-cache').batches,2);
+});
+
+test('provider HTTP failure is counted before I/O and cannot spend more than the batch envelope',async()=>{
+  const storage=durableFixture();let attempts=0;
+  await assert.rejects(refreshProviderEvidence(storage,config,credentials,async url=>{
+    const component=url.includes('github.com')?'github':url.includes('supabase.com')?'supabase':'collector';
+    assert.ok(storage.values.get('component-requests').counts[component]>0);
+    attempts++;return new Response('',{status:503});
+  },()=>now));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(attempts,1);
+  assert.equal(storage.values.get('component-requests').counts.collector,1);
+  await assert.rejects(cachedProviderEvidence(storage,config,now),/unavailable/);
+});
+
 test('collector isolates provider credentials and records actual observations without inventing a permit or billing freshness', async () => {
   const f = fixture(); const result = await collectProviderEvidence(config, credentials, f.request, now);
-  assert.equal(f.calls.length, 11); assert.deepEqual(result.github.actionsMinutes,
-    [{ sku: 'actions_linux', grossQuantity: 3 }, { sku: 'actions_windows', grossQuantity: 2 }]);
+  assert.equal(f.calls.length, 15); assert.deepEqual(result.github.actionsMinutes,
+    [{ sku: 'actions_linux', grossQuantity: 3, netAmount: 0 }, { sku: 'actions_windows', grossQuantity: 2, netAmount: 0 }]);
   assert.equal(result.github.remainingAllowanceProved, false);
-  assert.equal(result.r2.currentBytes, 1629); assert.equal(result.r2.sampledPeakBytes, 5979);
+  assert.equal(result.r2.currentBytes, 1629); assert.equal(result.r2.sampledPeakBytes, 1929);
+  assert.equal(result.r2.pendingUploads, 0); assert.equal(result.r2.infrequentAccessBytes, 0);
+  assert.equal(result.r2.uploadedObjects, 0); assert.equal(result.r2.uploadedBytes, 0); assert.equal(result.r2.infrequentAccessObjects, 0);
   assert.equal(result.r2.currentMeasurementAt, null); assert.equal(result.r2.monthlyBillingCoverageProved, false);
+  const analyticsQuery = JSON.parse(f.calls.find(call => call.url.endsWith('/graphql')).options.body);
+  assert.deepEqual(result.r2.windows, [config.r2Period.periodStart, '2026-09-17T12:00:00.000Z'].map(from =>
+    ({ from, until: new Date(now).toISOString(), requests: 62 })));
+  assert.equal(analyticsQuery.variables.from0, config.r2Period.periodStart);
+  assert.equal(analyticsQuery.variables.from1, result.r2.windows[1].from);
+  assert.equal(result.r2.billingPeriodProved, false);
+  assert.ok(!Object.hasOwn(result.r2, 'periodStart'));
   assert.equal(result.status, 'collected-not-permitted');
   assert.ok(!JSON.stringify(result).includes(credentials.github));
   assert.ok(!Object.hasOwn(result, 'expiresAt')); assert.ok(!Object.hasOwn(result.supabase, 'egress'));
@@ -75,8 +207,12 @@ test('collector rejects account, period, paid/SKU, deployment, privacy, policy a
     'paid plan': v => v.organization.plan = 'pro', 'revision drift': v => v.functions[0].version++,
     'missing function': v => v.functions.pop(), 'inactive function': v => v.functions[0].status = 'REMOVED',
     'public bucket': v => v.managed.enabled = true, 'custom domain': v => v.domains.domains.push({ enabled: true }),
-    'wrong storage class': v => v.bucket.storage_class = 'InfrequentAccess', 'lock drift': v => v.lock = { rules: [] },
-    'missing storage class': v => { delete v.bucket.storage_class; v.bucket.storageClass = 'Standard'; },
+    'wrong listed storage class': v => v.inventories.default.result.buckets[0].storage_class = 'InfrequentAccess', 'lock drift': v => v.lock = { rules: [] },
+    'wrong detail storage class': v => v.bucket.storage_class = 'InfrequentAccess',
+    'missing detail storage class': v => { delete v.bucket.storage_class; },
+    'wrong detail name': v => v.bucket.name = 'another-bucket',
+    'wrong detail jurisdiction': v => v.bucket.jurisdiction = 'eu',
+    'missing detail jurisdiction': v => { delete v.bucket.jurisdiction; },
     'missing storage field': v => delete v.metrics.standard.published.metadataSize,
     'infrequent access usage': v => v.metrics.infrequentAccess = { published: { objects: 1, payloadSize: 10, metadataSize: 0 }, uploaded: { objects: 0, payloadSize: 0, metadataSize: 0 } },
     'GraphQL error': v => v.analytics.errors = [{ message: 'denied' }],
@@ -120,4 +256,158 @@ test('HTTP denials, redirects, pagination, malformed and oversized bodies do not
     await assert.rejects(collectProviderEvidence(config, credentials, async () => response(), now), error => !error.message.includes('private'));
   });
   await assert.rejects(collectProviderEvidence(config, { ...credentials, github: '' }, fixture().request, now));
+});
+
+test('every jurisdiction, historical bucket, operation and actual multipart/storage count is checked', async t => {
+  const cases = {
+    'default extra bucket': v => { v.inventories.default.result.buckets.push({ name: 'new-bucket' }); v.inventories.default.result_info.total_count++; },
+    'missing inventory total': v => delete v.inventories.default.result_info,
+    'unseen inventory page': v => v.inventories.default.result_info.total_count++,
+    'continuation cursor': v => v.inventories.default.result_info.cursor = 'next',
+    'wrong inventory jurisdiction': v => v.inventories.default.result.buckets[0].jurisdiction = 'eu',
+    'unknown storage class': v => v.metrics.futureClass = {},
+    'unknown storage state': v => v.metrics.standard.futureState = {},
+    'uploaded object without payload': v => v.metrics.standard.uploaded = { objects: 1, payloadSize: 0, metadataSize: 0 },
+    'uploaded bytes without objects': v => v.metrics.standard.uploaded = { objects: 0, payloadSize: 0, metadataSize: 1 },
+    'IA object without payload': v => v.metrics.infrequentAccess.published = { objects: 1, payloadSize: 0, metadataSize: 0 },
+    'uploaded IA metadata': v => v.metrics.infrequentAccess.uploaded = { objects: 0, payloadSize: 0, metadataSize: 1 },
+    'unknown operation': v => v.analytics.data.viewer.accounts[0].operations[0].dimensions.actionType = 'NewAction',
+    'tier transition': v => v.analytics.data.viewer.accounts[0].operations[0].dimensions.actionType = 'LifecycleStorageTierTransition',
+    'other operation bucket': v => v.analytics.data.viewer.accounts[0].operations[0].dimensions.bucketName = 'deleted-bucket',
+    'missing operation bucket': v => delete v.analytics.data.viewer.accounts[0].operations[0].dimensions.bucketName,
+    'empty object bucket': v => v.analytics.data.viewer.accounts[0].operations[0].dimensions.bucketName = '',
+    'historical storage bucket': v => v.analytics.data.viewer.accounts[0].storage[0].dimensions.bucketName = 'deleted-bucket',
+    'missing upload count': v => delete v.analytics.data.viewer.accounts[0].storage[0].max.uploadCount,
+    'negative requests': v => v.analytics.data.viewer.accounts[0].operations[0].sum.requests = -1,
+    'request overflow': v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: Number.MAX_SAFE_INTEGER },
+      dimensions: { actionType: 'HeadObject', bucketName: config.bucket } }),
+    'duplicate operation group': v => v.analytics.data.viewer.accounts[0].operations.push(v.analytics.data.viewer.accounts[0].operations[0]),
+    'duplicate storage group': v => v.analytics.data.viewer.accounts[0].storage.push(v.analytics.data.viewer.accounts[0].storage[0]),
+    'truncated storage': v => v.analytics.data.viewer.accounts[0].storage = Array(10000).fill(v.analytics.data.viewer.accounts[0].storage[0]),
+    'exact two-hour stale boundary': v => v.analytics.data.viewer.accounts[0].storage[0].dimensions.datetime = '2026-10-18T10:00:00Z'
+  };
+  for (const jurisdiction of ['eu', 'us']) cases[jurisdiction + ' new bucket'] = v => {
+    v.inventories[jurisdiction].result.buckets.push({ name: 'new-bucket', jurisdiction, storage_class: 'Standard' });
+    v.inventories[jurisdiction].result_info.total_count = 1;
+  };
+  for (const [name, mutate] of Object.entries(cases)) await t.test(name, async () => {
+    await assert.rejects(collectProviderEvidence(config, credentials, fixture(mutate).request, now));
+  });
+  const f = fixture(v => v.analytics.data.viewer.accounts[0].operations.push(
+    { sum: { requests: 5 }, dimensions: { actionType: 'ListBuckets', bucketName: '' } },
+    { sum: { requests: 3 }, dimensions: { actionType: 'DeleteObject', bucketName: config.bucket } }));
+  const evidence = await collectProviderEvidence(config, credentials, f.request, now);
+  assert.deepEqual(evidence.r2.windows.map(window => window.requests), [70, 70]);
+  assert.deepEqual(f.calls.filter(call => call.url.includes('/r2/buckets?')).map(call => call.options.headers['cf-r2-jurisdiction']),
+    ['default', 'eu', 'us']);
+});
+
+test('positive disabled FedRAMP evidence is required before any regional or usage read', async t => {
+  const cases = {
+    'enabled government region': v => { v.entitlements[1].allocation.value = true; },
+    'unknown active R2 region': v => v.entitlements.push({ id: 'r2.fedramp-high', feature: { key: 'r2.fedramp-high' },
+      allocation: { type: 'bool', value: false }, deleted_date: '' }),
+    'missing government flag': v => v.entitlements.splice(1, 1),
+    'wrong entitlement id': v => { v.entitlements[1].id = 'r2.another'; },
+    'nonboolean flag': v => { v.entitlements[1].allocation.value = 'false'; },
+    'wrong allocation type': v => { v.entitlements[1].allocation.type = 'string'; },
+    'inactive government flag': v => { v.entitlements[1].deleted_date = '2026-10-17T00:00:00Z'; },
+    'malformed deletion time': v => { v.entitlements[1].deleted_date = 'bad'; },
+    'future deletion time': v => { v.entitlements[1].deleted_date = '2026-10-19T00:00:00Z'; },
+    'duplicate flag': v => v.entitlements.push(structuredClone(v.entitlements[1])),
+    'R2 disabled': v => { v.entitlements[0].allocation.value = false; },
+    'missing entitlements': v => { v.entitlements = {}; }
+  };
+  for (const [name, mutate] of Object.entries(cases)) await t.test(name, async () => {
+    const f = fixture(mutate);
+    await assert.rejects(collectProviderEvidence(config, credentials, f.request, now));
+    assert.equal(f.calls.length, 1);
+    assert.ok(f.calls[0].url.endsWith('/entitlements'));
+  });
+  const f = fixture();
+  const result = await collectProviderEvidence(config, credentials, f.request, now);
+  assert.deepEqual(result.r2.jurisdictionCoverage, { inspected: ['default', 'eu', 'us'], fedrampEnabled: false });
+});
+
+test('reviewed period is mandatory, current and bounded before any provider I/O', async () => {
+  for (const r2Period of [undefined, {}, { periodStart: 'invalid', periodEnd: config.r2Period.periodEnd },
+    { periodStart: new Date(now).toISOString(), periodEnd: config.r2Period.periodEnd },
+    { periodStart: config.r2Period.periodStart, periodEnd: new Date(now).toISOString() },
+    { periodStart: '2026-08-01T00:00:00Z', periodEnd: config.r2Period.periodEnd }]) {
+    const f = fixture();
+    await assert.rejects(collectProviderEvidence({ ...config, r2Period }, credentials, f.request, now), /reviewed R2 period/);
+    assert.equal(f.calls.length, 0);
+  }
+  const f = fixture();
+  await assert.rejects(collectProviderEvidence({ ...config, version: 1 }, credentials, f.request, now));
+  assert.equal(f.calls.length, 0);
+});
+
+test('split request windows use adjacent half-open 31-day pieces without losing or double-counting boundary events', async () => {
+  const longConfig = { ...config, r2Period: { periodStart: '2026-09-01T00:00:00.000Z', periodEnd: '2026-11-01T00:00:00.000Z' } };
+  const boundary = Date.parse('2026-10-02T00:00:00Z');
+  const events = [Date.parse(longConfig.r2Period.periodStart), boundary - 1, boundary, now - 1, now];
+  const f = fixture();
+  const request = async (url, options) => {
+    const response = await f.request(url, options);
+    if (!url.endsWith('/graphql')) return response;
+    const body = JSON.parse(options.body), result = await response.json(), account = result.data.viewer.accounts[0];
+    for (let index = 0; Object.hasOwn(body.variables, 'from' + index); index++) {
+      const from = Date.parse(body.variables['from' + index]), until = Date.parse(body.variables['until' + index]);
+      assert.ok(until - from <= 31 * 86400000);
+      account['operations' + index] = [{ sum: { requests: events.filter(at => at >= from && at < until).length },
+        dimensions: { actionType: 'GetObject', bucketName: config.bucket } }];
+    }
+    assert.equal(body.variables.until0, body.variables.from1);
+    assert.equal(body.variables.from1, new Date(boundary).toISOString());
+    assert.equal(body.variables.until1, new Date(now).toISOString());
+    assert.equal(body.variables.from2, new Date(now - 31 * 86400000).toISOString());
+    assert.ok(!Object.hasOwn(body.variables, 'from3'));
+    return Response.json(result);
+  };
+  const result = await collectProviderEvidence(longConfig, credentials, request, now);
+  assert.deepEqual(result.r2.windows.map(window => window.requests), [4, 3]);
+  assert.equal(f.calls.filter(call => call.url.endsWith('/graphql')).length, 1);
+});
+
+test('missing split responses and malformed/out-of-range timestamps reject instead of producing partial evidence', async t => {
+  const cases = {
+    'missing operations window': a => delete a.operations1,
+    'missing storage window': a => delete a.storage1,
+    'truncated second operations window': a => a.operations1 = Array(10000).fill({}),
+    'stale second window': a => a.storage1 = [],
+    'missing timestamp': a => delete a.storage0[0].dimensions.datetime,
+    'future timestamp': a => a.storage0[0].dimensions.datetime = new Date(now + 1).toISOString(),
+    'exact until timestamp': a => a.storage0[0].dimensions.datetime = new Date(now).toISOString(),
+    'outside from timestamp': a => a.storage0[0].dimensions.datetime = '2026-10-05T23:59:59.999Z'
+  };
+  for (const [name, mutate] of Object.entries(cases)) await t.test(name, async () => {
+    const f = fixture();
+    const request = async (url, options) => {
+      const response = await f.request(url, options);
+      if (!url.endsWith('/graphql')) return response;
+      const result = await response.json(); mutate(result.data.viewer.accounts[0]); return Response.json(result);
+    };
+    await assert.rejects(collectProviderEvidence(config, credentials, request, now));
+  });
+});
+
+test('collected R2 windows/counts pass permit3 without fabricating balances or changing the historical review', async () => {
+  const evidence = await collectProviderEvidence(config, credentials, fixture().request, now);
+  const at = new Date(now).toISOString(), start = '2026-10-01T00:00:00.000Z', end = '2026-11-01T00:00:00.000Z';
+  const jobSha256 = 'c'.repeat(64), sourceOrigin = 'https://' + config.projectRef + '.supabase.co';
+  const ownerReview = { version: 2, approvedAt: at, expiresAt: end, sourceExpiresAt: end, weeklyCheckedAt: at,
+    jobSha256, sourceOrigin, githubPaidActionsBlocked: true, supabasePlan: 'free',
+    egress: { used: 1, included: 5e9 }, cachedEgress: { used: 1, included: 5e9 },
+    github: { observedAt: at, periodStart: start, periodEnd: end, remainingLinuxMinutes: 640 },
+    r2: { observedAt: at, ...config.r2Period, storageGbMonths: 0.1, requests: 62,
+      storageBillableGbMonths: 0, classABillable: 0, classBBillable: 0, usageCostUsd: 0 } };
+  const permit = { version: 3, checkedAt: at, expiresAt: new Date(now + 60000).toISOString(), jobSha256,
+    ownerReview, deploymentObservedAt: at, supabase: { ...evidence.supabase, observedAt: at },
+    github: { ...evidence.github, observedAt: at, queryStart: evidence.github.periodStart, queryEnd: at },
+    r2: { ...evidence.r2, observedAt: at } };
+  assert.deepEqual(validateCostEvidence(permit, jobSha256, sourceOrigin, now), { warnings: [] });
+  assert.equal(permit.r2.billingPeriodProved, false); assert.equal(permit.r2.monthlyBillingCoverageProved, false);
+  assert.equal(ownerReview.github.remainingLinuxMinutes, 640);
+  assert.ok(!Object.hasOwn(evidence, 'ownerReview'));
 });

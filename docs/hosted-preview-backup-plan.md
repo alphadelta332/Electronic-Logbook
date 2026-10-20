@@ -66,14 +66,18 @@ owner-review rules are specified in [daily runner](hosted-backup-daily-runner.md
 
 Zero expected recurring cost is a deployment condition, not a spending guarantee.
 Verify account-wide storage/operation headroom, included runner allowance, paid
-Actions blocking and alert-service allowance before activation. Missing, stale or
-unsupported observations must block a permit. Use dedicated restricted metadata
+Actions blocking and alert-service allowance before activation. Missing/stale
+supported observations must block a permit. Unsupported exact live balances must
+remain absent; versioned supervised baselines and conservative reported-usage stops
+replace them as specified in the daily-runner contract. Use dedicated restricted metadata
 credentials in the [provider collector](hosted-backup-provider-collector.md), outside
 the export/readback jobs; never substitute broader owner credentials.
 
 The current design combines fresh supported provider observations with an approved
-review lasting at most 31 days for paid Actions blocking and baseline all-project
-Supabase egress. Reserve 31 daily source budgets of 64 MiB, enforce one attempted
+review lasting at most 31 days, bounded by reviewed provider periods/source expiry,
+for paid Actions blocking, actual starting Actions balance, R2 billable usage and
+baseline all-project Supabase egress. Require a weekly shared-usage acknowledgement
+without renewing the budget. Reserve 31 daily source budgets of 64 MiB, enforce one attempted
 capture per UTC day and a 31-attempt ceiling atomically, and stop on expired review.
 Other application use can still exhaust shared allowances. Provider telemetry may
 lag; application controls and budget alerts do not establish a hard spending cap.
@@ -84,6 +88,12 @@ stored objects. Check freshness every four hours, alert on job failure or more t
 30 hours without a verified backup, and test absent-run alerts independently of
 the backup scheduler. Use configured operational email with bounded retries and
 duplicate suppression. Recipient addresses and delivery receipts remain private.
+The missing-monitor observer is a separate Cloudflare Worker/SQLite namespace
+with private completion heartbeats and its own timer after acceptance. It can
+alert without the primary Worker, but a Cloudflare-wide outage can stop both.
+That accepted shared dependency has no guaranteed one-day outage limit. The two
+senders share the approved delivery ceiling through fixed1/1 daily and16/15
+monthly allowances; larger legacy counts must be inspected before commissioning.
 Daily frequency targets a 24-hour loss window while functioning; unsynced phone
 changes and corruption discovered after retention expires remain outside that bound.
 

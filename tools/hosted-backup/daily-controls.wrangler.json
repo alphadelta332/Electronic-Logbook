@@ -4,6 +4,7 @@
   "compatibility_date": "2026-10-05",
   "workers_dev": false,
   "preview_urls": false,
+  "services": [{ "binding": "MONITOR_HEARTBEAT", "service": "flightlogx-backup-watchdog", "entrypoint": "MonitorHeartbeat" }],
   "durable_objects": {"bindings": [{"name": "DAILY_ATTEMPTS", "class_name": "DailyAttemptGuard"}]},
   "migrations": [{"tag": "v1", "new_sqlite_classes": ["DailyAttemptGuard"]}],
   "observability": {"enabled": false}

@@ -898,12 +898,17 @@ function Invoke-VerifyAction {
         Add-CheckResult $results 'Daily backup implementation' (Test-Path -LiteralPath (Join-Path $RepoRoot $dailyFile) -PathType Leaf) $true $dailyFile
     }
     foreach ($controlFile in $script:TransferConfig.Expected.HostedBackupDailyControls) {
-        Add-CheckResult $results 'Daily backup review/reservation controls' (Test-Path -LiteralPath (Join-Path $RepoRoot $controlFile) -PathType Leaf) $true $controlFile
+        Add-CheckResult $results 'Daily backup cost-policy/review/reservation/request-cache controls' (Test-Path -LiteralPath (Join-Path $RepoRoot $controlFile) -PathType Leaf) $true $controlFile
     }
+    foreach ($monitorFile in $script:TransferConfig.Expected.HostedBackupMonitor) {
+        Add-CheckResult $results 'Backup monitoring policy, delivery and separate disabled watchdog sources' (Test-Path -LiteralPath (Join-Path $RepoRoot $monitorFile) -PathType Leaf) $true $monitorFile
+    }
+    Add-CheckResult $results 'Backup alert recipient custody' $true $true 'Optional HostedBackup/alert-delivery.local.json transfers only through trusted storage; existing domain-restricted Resend sending key remains separate. No recipient address or credential value is printed.'
+    Add-CheckResult $results 'Separate backup watchdog custody' $true $true 'Recreate the private MONITOR_HEARTBEAT named service binding and restricted RESEND_SEND_TOKEN/ALERT_DELIVERY_JSON on the separate Worker; keep WATCHDOG_ENABLED=false/no schedule during transfer. Preserve MISSING_MONITOR and its stable flightlogx-preview-monitor object, monitor-state and monitor-heartbeat. Primary/observer delivery shares are 1/1 daily and 16/15 monthly; do not reset either ledger.'
     foreach ($collectorFile in $script:TransferConfig.Expected.HostedBackupProviderCollector) {
-        Add-CheckResult $results 'Daily backup provider collector' (Test-Path -LiteralPath (Join-Path $RepoRoot $collectorFile) -PathType Leaf) $true $collectorFile
+        Add-CheckResult $results 'Daily backup provider collector and reviewed-input contract' (Test-Path -LiteralPath (Join-Path $RepoRoot $collectorFile) -PathType Leaf) $true $collectorFile
     }
-    Add-CheckResult $results 'Backup monitoring credential custody' $true $true 'GitHub Plan, split Supabase reads and Cloudflare Analytics/R2 Storage Read tokens (including the owner-retained S3 credential bundle) require fresh authentication; never transfer or substitute broader owner credentials'
+    Add-CheckResult $results 'Backup monitoring credential custody' $true $true 'GitHub Plan and separate backup-repository Actions Read, split Supabase reads and Cloudflare Analytics/R2 Storage Read tokens (including the owner-retained S3 credential bundle) require fresh authentication; never transfer or substitute broader owner credentials'
     if (Test-Path -LiteralPath $compatibilityContract -PathType Leaf) {
         $compatibility = Get-Content -LiteralPath $compatibilityContract -Raw | ConvertFrom-Json
         foreach ($image in $compatibility.targetImages.PSObject.Properties.Value) {

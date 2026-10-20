@@ -7,7 +7,8 @@ import { join, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { captureLogicalArchive } from './logical-client.mjs';
 import { maxArchiveBytes } from './archive.mjs';
-import { validateOwnerReview, dailySourceEgressBytes } from './daily-controls.mjs';
+import { dailySourceEgressBytes } from './daily-controls.mjs';
+import { validateCostEvidence, ownerReviewBudget } from './daily-cost-policy.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const bucket = 'flightlogx-preview-backups';
@@ -96,27 +97,11 @@ async function currentPermit(job, jobSha256) {
   const chunks=[]; let size=0;
   for await (const part of response.body) {size+=part.length;assert.ok(size<=16384);chunks.push(part);}
   const permit=JSON.parse(Buffer.concat(chunks));
-  const age=Date.now()-Date.parse(permit.checkedAt), expires=Date.parse(permit.expiresAt)-Date.now();
-  assert.equal(permit.version,2); assert.ok(age>=0 && age<2*60*60*1000 && expires>0 && expires<=2*60*60*1000,'Cost/deployment evidence is stale.');
-  for (const observedAt of [permit.deploymentObservedAt,permit.github.observedAt,permit.supabase.observedAt,permit.r2.observedAt]) {
-    const observedAge=Date.now()-Date.parse(observedAt);
-    assert.ok(observedAge>=0 && observedAge<2*60*60*1000,'Underlying provider evidence is stale.');
-  }
+  validateCostEvidence(permit,jobSha256,job.source.origin);
   assert.equal(permit.jobSha256,jobSha256,'Prepared job or source inputs changed.');
   assert.deepEqual(permit.deploymentRevisions,job.deploymentRevisions,'Deployed source revision changed.');
-  validateOwnerReview(permit.ownerReview,jobSha256,job.source.origin);
-  assert.ok(!Object.hasOwn(permit.github,'paidActionsBlocked'),'Paid-usage stop must come from the owner review.');
-  assert.ok(Number.isSafeInteger(permit.github.remainingLinuxMinutes) && permit.github.remainingLinuxMinutes>=20);
-  assert.equal(permit.supabase.plan,'free');
-  assert.ok(!Object.hasOwn(permit.supabase,'egress') && !Object.hasOwn(permit.supabase,'cachedEgress'),
-    'Unsupported live egress counters must be absent.');
   assert.equal(permit.r2.accountId,job.accountId); assert.equal(permit.r2.bucket,bucket);
   assert.equal(permit.r2.policySha256,hash(JSON.stringify(policy))); assert.equal(permit.r2.privateStandardBucket,true);
-  for (const [name,reserve] of [['storageBytes',maxArchiveBytes],['classA',100],['classB',100]]) {
-    const quota=permit.r2[name];
-    assert.ok(Number.isSafeInteger(quota.used) && quota.used>=0 && Number.isSafeInteger(quota.included) &&
-      quota.included-quota.used>=reserve,'Insufficient account-wide R2 headroom.');
-  }
   return permit;
 }
 
@@ -137,11 +122,30 @@ function inventory(xml, day) {
 }
 
 function validateReservation(receipt,jobSha256,review,context,day) {
-  assert.equal(receipt.version,1); assert.equal(receipt.status,'reserved');assert.equal(receipt.day,day);
-  assert.equal(receipt.jobSha256,jobSha256);assert.equal(receipt.reviewSha256,hash(JSON.stringify(review)));
+  assert.equal(receipt.version,2); assert.equal(receipt.status,'reserved');assert.equal(receipt.day,day);
+  assert.match(receipt.readbackToken,/^[a-f0-9]{64}$/);
+  assert.equal(receipt.jobSha256,jobSha256);assert.equal(receipt.reviewSha256,hash(JSON.stringify(ownerReviewBudget(review))));
   assert.equal(receipt.sourceEgressBytes,dailySourceEgressBytes);
   for(const name of ['repository','runId','runAttempt','commit'])assert.equal(receipt[name],context[name]);
   const age=Date.now()-Date.parse(receipt.reservedAt);assert.ok(age>=0 && age<30*60*1000,'Reservation is stale.');
+}
+
+async function requestAllowance(job,route,payload,headers) {
+  const response=await fetch(job.permitUrl.replace('/daily-backup-permit',route),{
+    method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(payload),
+    redirect:'error',signal:AbortSignal.timeout(10000)
+  });
+  assert.equal(response.status,201,'Backup allowance was not reserved.');
+  const chunks=[];let size=0;
+  for await(const part of response.body){size+=part.length;assert.ok(size<=2048);chunks.push(part);}
+  return JSON.parse(Buffer.concat(chunks));
+}
+
+async function storageAllowance(job,context,reservation,operation) {
+  const claim=await requestAllowance(job,'/daily-backup-request',
+    {version:2,jobSha256:reservation.jobSha256,sourceOrigin:job.source.origin,...context,reservation,operation},{});
+  assert.equal(claim.version,2);assert.equal(claim.status,'request-reserved');assert.equal(claim.operation,operation);
+  assert.equal(claim.reservationSha256,hash(JSON.stringify(reservation)));
 }
 
 export async function uploadDaily(job, capability, context, request, reservationToken) {
@@ -150,23 +154,20 @@ export async function uploadDaily(job, capability, context, request, reservation
   assert.match(reservationToken,/^[a-f0-9]{64}$/);
   const day=new Date().toISOString().slice(0,10);
   const permit=await currentPermit(job,jobSha256);
-  inventory(await request('GET',''),day);
-  const reserved=await fetch(job.permitUrl.replace('/daily-backup-permit','/daily-backup-reservation'),{
-    method:'POST',headers:{'Content-Type':'application/json','x-flightlogx-reservation-token':reservationToken},
-    body:JSON.stringify({version:1,jobSha256,sourceOrigin:job.source.origin,...context}),redirect:'error',signal:AbortSignal.timeout(10000)
-  });
-  assert.equal(reserved.status,201,'Daily source budget was not reserved.');
-  const reservationChunks=[];let reservationSize=0;
-  for await(const part of reserved.body){reservationSize+=part.length;assert.ok(reservationSize<=2048);reservationChunks.push(part);}
-  const reservation=JSON.parse(Buffer.concat(reservationChunks));
+  const reservation=await requestAllowance(job,'/daily-backup-reservation',
+    {version:2,jobSha256,sourceOrigin:job.source.origin,...context},{'x-flightlogx-reservation-token':reservationToken});
   validateReservation(reservation,jobSha256,permit.ownerReview,context,day);
+  await storageAllowance(job,context,reservation,'list-before');
+  inventory(await request('GET',''),day);
   const archive=await captureLogicalArchive({...job.source,capability});
   try {
     const after=await currentPermit(job,jobSha256);
-    assert.deepEqual(after.ownerReview,permit.ownerReview,'Owner review changed during export.');
+    assert.deepEqual(ownerReviewBudget(after.ownerReview),ownerReviewBudget(permit.ownerReview),'Owner review changed during export.');
+    await storageAllowance(job,context,reservation,'list-after');
     inventory(await request('GET',''),day);
     assert.equal(new Date().toISOString().slice(0,10),day,'UTC day changed; retry on the new day.');
     const key=`daily/${day}.elbbackup`;
+    await storageAllowance(job,context,reservation,'upload');
     await request('PUT',key,archive);
     return {version:2,key,bytes:archive.length,sha256:hash(archive),jobSha256,reservation,
       uploadedAt:new Date().toISOString(),...context};
@@ -185,11 +186,17 @@ export async function readbackDaily(job, pending, context, request) {
   assert.equal(pending.key,`daily/${pending.uploadedAt.slice(0,10)}.elbbackup`);
   const permit=await currentPermit(job,jobSha256);
   validateReservation(pending.reservation,jobSha256,permit.ownerReview,context,pending.uploadedAt.slice(0,10));
+  const claim=await requestAllowance(job,'/daily-backup-readback',
+    {version:2,jobSha256,sourceOrigin:job.source.origin,...context,reservation:pending.reservation},{});
+  assert.equal(claim.version,2);assert.equal(claim.status,'readback-reserved');
+  assert.equal(claim.reservationSha256,hash(JSON.stringify(pending.reservation)));
+  await storageAllowance(job,context,pending.reservation,'readback');
   const downloaded=await request('GET',pending.key);
   try {
     assert.equal(downloaded.length,pending.bytes,'Readback size mismatch.');
     assert.equal(hash(downloaded),pending.sha256,'Readback digest mismatch.');
-    return {...pending,status:'verified',verifiedAt:new Date().toISOString()};
+    const reservation={...pending.reservation};delete reservation.readbackToken;
+    return {...pending,reservation,status:'verified',verifiedAt:new Date().toISOString()};
   } finally {downloaded.fill(0);}
 }
 

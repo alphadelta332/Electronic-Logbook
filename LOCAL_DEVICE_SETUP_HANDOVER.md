@@ -390,8 +390,91 @@ belong only in the collector. See `docs/hosted-backup-daily-runner.md` for
 the exact runtime variables, evidence fields and incomplete deployment gates.
 
 The approved revised controls add optional transferable
-`ElectronicLogbook/HostedBackup/daily-review.local.json`; preserve approval/expiry
-dates and recheck expiry after import. Upload also uses the separate
+`ElectronicLogbook/HostedBackup/daily-review.local.json`; preserve approval/expiry,
+billing-period, baseline observation and weekly-check dates exactly after import.
+Owner review version 2 and permit version 3 use the shared
+`tools/hosted-backup/daily-cost-policy.mjs` and its boundary tests, both checked by
+transfer verification. An expired review/weekly check or legacy version must deny
+backups; do not automatically convert it or refresh dates. Weekly acknowledgement
+updates do not renew the budget identity or reset the remote attempt counter.
+`tools/hosted-backup/daily-request-controls.mjs` is also required source. The same
+remote object retains `component-requests` and `provider-cache` alongside
+`source-budget`; preserve all three across deployment and credential/review rotation.
+The internal `tools/hosted-backup/daily-monitor.mjs`, its tests and
+`docs/hosted-backup-monitor.md` are verified checkout sources. Its fourth durable
+key `monitor-state` retains check leases, incident suppression and delivery-attempt
+counters in that same remote object; never reset it on transfer or rotation.
+`daily-monitor-observation.mjs` and its test are also required checkout sources.
+The internal adapters use Web Crypto/fetch (no additional runtime/package) and only
+GET the reviewed private workflow history and matching encrypted daily R2 object.
+Before live validation, provision a separate fine-grained GitHub token with only
+Actions Read and required Metadata Read on `alphadelta332/flightlogx-preview-backups`.
+Its optional local path is `ElectronicLogbook/HostedBackup/github-actions-read-token.txt`
+under LOCALAPPDATA: fresh authentication, excluded from transfer. Owner provisioned
+it and private history/attempt reads passed on 20 October 2026; file-content and
+secret-list reads were denied. Reprovision it after transfer; do not substitute
+the Plan token or broader CLI authentication. Positive successful-job logs remain
+pending the first actual approved backup run. R2 reads
+use the existing read-only monitoring S3 identity, never upload credentials.
+Preserve `component-requests.counts.monitorGithub` (30/day) alongside monitor R2
+counts (12/day). No new local input config path or timer is introduced.
+The monitoring S3 identity read the existing authenticated archive and its hash
+matched; the production signer rejected the absent daily object. No write-denial
+probe or fresh decryption was performed. Positive actual daily readback/log
+acceptance, missing-monitor detection and owner delivery remain prerequisites.
+Supervised Resend inspection passed on 20 October 2026 through the existing
+browser/GitHub sign-in: Transactional Free, usage0/100 daily and0/3000 monthly,
+paid overage disabled; both auth domains Verified. Refresh shared headroom before
+activation. The production key is sending-only/domain-restricted; its domain-list
+401 explicitly means restricted_api_key, not an invalid sending key. Do not
+broaden it for inspection or transfer browser authentication. Actual send/inbox
+acceptance was still open at that inspection; no credentials or dependency changed.
+The restricted Resend adapter sources `daily-alert-delivery.mjs` and its test are
+also required checkout files. Optional private
+`ElectronicLogbook/HostedBackup/alert-delivery.local.json` under LOCALAPPDATA
+contains only `{"version":1,"recipient":"<owner-approved email>"}` and is classified
+for trusted local transfer; never put the real recipient in tracked files or
+diagnostic evidence. The sender is fixed to `backups@auth.flightlogx.app`; use the
+existing separate `Resend/privatepilotauthapi.txt` sending-only credential.
+No new runtime/package/environment variable is required. The monitor stores only
+the outgoing-body digest and consumed attempt in `monitor-state.resend`; retain
+them through restart, configuration and key rotation. A changed recipient/body
+cannot reuse an incident's idempotency key. The isolated local acceptance ledger's
+`deliveryTest` flag labels its test email; never seed that flag into the operational
+namespace. A successful test send alone does not provide independent monitoring.
+The separate `flightlogx-backup-watchdog` Worker is source-complete but undeployed.
+Its five `daily-watchdog*` files are required checkout sources, using the existing
+Wrangler/Workers runtime (no new dependency or local secret file). Keep
+`WATCHDOG_ENABLED=false` and no Cron Triggers until deployment acceptance. Recreate
+its `RESEND_SEND_TOKEN` from the existing production-domain sending-only key and
+`ALERT_DELIVERY_JSON` from the approved private recipient config; never copy broader
+credentials. `MONITOR_HEARTBEAT` is a private service binding on the controls Worker,
+targeting the watchdog's named `MonitorHeartbeat` entrypoint; it needs no shared
+token or public heartbeat URL. Primary scheduled composition must pass
+`() => env.MONITOR_HEARTBEAT.completed()` as the sixth `checkBackupMonitor` argument;
+the underlying primary timer/configuration composition remains a deployment gate.
+Preserve the watchdog's separate `MISSING_MONITOR` namespace and stable
+`flightlogx-preview-monitor` object, including `monitor-state` and `monitor-heartbeat`.
+Primary delivery is capped at1/day,16/month; observer delivery at1/day,15/month.
+Existing larger legacy counts are retained, never refunded; commissioning must
+inspect them and wait until the next UTC month if primary counts already exceed16.
+If primary counts already exceed1 for the day, also wait until the next UTC day.
+Only completed checks/accepted-or-already-accepted alerts publish heartbeats.
+The observer checks its own receiver-timed heartbeat, alerts after >6h silence and
+never reads the primary ledger, R2 or GitHub. Use separate four-hour Cron Triggers
+only after acceptance; no timers are configured in the supplied files. A shared
+Cloudflare outage stops both monitors, an explicitly accepted limitation with no
+one-day upper bound. `%TEMP%/elb-daily-watchdog-*` SQLite is retained synthetic
+evidence, excluded from transfer; it must never replace operational state.
+After explicit owner recipient confirmation on 20 October 2026, one real test
+was API-accepted and independently marked Delivered by Resend. Recipient is now
+saved only in that private config; safe evidence and retained diagnostic SQLite
+stay under excluded artifacts. Owner confirmed receipt in junk, marked the sender
+as not junk and accepted receipt. Future inbox placement and the independent
+outage watcher remain unproved. No credential expansion, schedule or backup activation.
+Do not export/reset the remote cache or counters as machine-transfer assets.
+No new runtime is required; live history monitoring needs the scoped token above.
+Upload also uses the separate
 `BACKUP_RESERVATION_TOKEN` GitHub secret. Its hash `BACKUP_RESERVATION_SHA256` and
 `OWNER_REVIEW_JSON` belong in the future `flightlogx-backup-controls` Worker.
 The SQLite Durable Object binding `DAILY_ATTEMPTS` is remote operational budget
@@ -433,10 +516,23 @@ API checks on 18 October 2026; the private backup repository read returned 404.
 This is fresh authentication, excluded from transfer. The initial form used a
 30-day expiry as an agent precaution; monitoring-token expiry is an owner choice,
 separate from the mandatory 31-day owner review and source-capability expiry.
-The collector implementation/tests are verified
-after checkout. It currently collects observations only: live scope validation,
-remaining Actions allowance, R2 billing/freshness proof and permit deployment remain
-open. Do not turn those observations into a successful permit or enable the job.
+The collector implementation/tests and reviewed-input contract are verified after
+checkout. Its version-2 in-memory inputs require the actual reviewed R2 period;
+there is no calendar allowance fallback or new local configuration/secret path.
+The unchanged dedicated token must first prove an active disabled FedRAMP account
+entitlement and the exact reviewed R2 feature inventory, then read all three
+ordinary jurisdiction lists (default/EU/US). Government access enabled, missing/
+changed entitlements, denied ordinary lists or new buckets stop collection.
+Never convert403/400 into an empty inventory or substitute broader credentials.
+Bucket lists may omit class/jurisdiction; the separate default-bucket details GET
+must prove both with the existing token, without new permissions. Eleven Cloudflare
+reads retain a durable maximum of21 collection starts/day before deployment
+(251 combined collector/workflow/monitor attempts, below256). Preserve all
+inherited counters through code/configuration/token rotation. Individual live
+details/disabled-entitlement reads passed; revised full collection remains unproved.
+It still collects observations only: live validation of the new response shapes,
+real owner baseline, billing/freshness assurance and permit deployment remain open.
+Do not turn those observations into a successful permit or enable the job.
 
 One-time protected recovery setup uses the optional PowerShell 7 installation
 (version 7.2 or later); its password entry occurs in a local console. It creates the

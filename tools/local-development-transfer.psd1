@@ -42,12 +42,14 @@
         @{ Path = 'ElectronicLogbook/HostedBackup/source-connection.local.json'; Required = $false; Classification = 'secret-backup-source-credentials'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/source-root.crt'; Required = $false; Classification = 'public-backup-source-ca'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/daily-review.local.json'; Required = $false; Classification = 'private-backup-owner-review'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/alert-delivery.local.json'; Required = $false; Classification = 'private-backup-alert-recipient'; Lifecycle = 'local-transfer' }
     )
 
     # Known local trees that must stay outside the operational transfer archive. This is
     # policy documentation consumed by transfer validation, not a deletion list.
     LocalAppDataExclusions = @(
         @{ Path = 'ElectronicLogbook/HostedBackup/github-plan-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Recreate the dedicated Plan read token after transfer; never transfer monitoring authentication or reuse the broader CLI login.' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/github-actions-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision Actions Read and required Metadata Read for only the private backup repository; never transfer the token or substitute Plan/owner credentials.' }
         @{ Path = 'ElectronicLogbook/HostedBackup/supabase-metadata-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only Preview-scoped organization settings and Edge Functions read access; never transfer monitoring authentication or reuse the owner token.' }
         @{ Path = 'ElectronicLogbook/HostedBackup/supabase-organization-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only organization settings read on the selected organization; no project capabilities, token transfer or owner credential substitution.' }
         @{ Path = 'ElectronicLogbook/HostedBackup/cloudflare-monitoring-read-token.txt'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only Account Analytics Read and Workers R2 Storage Read on the backup account; no edit permissions or token transfer.' }
@@ -69,7 +71,9 @@
         @{ Path = '%USERPROFILE%/.android/avd'; Lifecycle = 'deliberate-exclusion'; Reason = 'Android virtual devices and snapshots can contain live Google sessions; recreate and authenticate the recovery AVD once on each trusted development machine.' }
         @{ Path = 'GitHub/alphadelta332/flightlogx-preview-backups/ActionsSecrets'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision scoped source/upload/readback job secrets through GitHub; never archive them or copy owner/recovery credentials into the job.' }
         @{ Path = 'Cloudflare/flightlogx-backup-controls'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision the reservation token hash and approved read-only monitoring secrets; preserve the existing DAILY_ATTEMPTS SQLite namespace and its counter across deployments, never reset it during transfer.' }
+        @{ Path = 'Cloudflare/flightlogx-backup-watchdog'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only the existing restricted Resend sender and private recipient config; preserve the separate MISSING_MONITOR namespace, stable object, monitor-state and monitor-heartbeat across deployments/rotation. Recreate the private named service binding; never copy remote SQLite or enable schedules during transfer.' }
         @{ Path = '%TEMP%/elb-daily-controls-*'; Lifecycle = 'regenerated-output'; Reason = 'Synthetic local Cloudflare SQLite test evidence is retained locally, never transferred as operational state.' }
+        @{ Path = '%TEMP%/elb-daily-watchdog-*'; Lifecycle = 'regenerated-output'; Reason = 'Synthetic isolated observer SQLite and local Worker harnesses are retained diagnostic output, not transferable operational state.' }
     )
 
     CodexAssets = @(
@@ -196,8 +200,9 @@
         HostedBackupDailyScript = 'tools/hosted-backup/daily-backup.mjs'
         HostedBackupDailyTestScript = 'tools/hosted-backup/daily-backup.test.mjs'
         HostedBackupDailyWorkflow = 'tools/hosted-backup/daily-workflow.json'
-        HostedBackupDailyControls = @('tools/hosted-backup/daily-controls.mjs', 'tools/hosted-backup/daily-controls-worker.mjs', 'tools/hosted-backup/daily-controls.wrangler.json', 'tools/hosted-backup/daily-controls.test.mjs', 'tools/hosted-backup/daily-controls.integration.test.mjs')
-        HostedBackupProviderCollector = @('tools/hosted-backup/daily-provider-collector.mjs', 'tools/hosted-backup/daily-provider-collector.test.mjs')
+        HostedBackupDailyControls = @('tools/hosted-backup/daily-controls.mjs', 'tools/hosted-backup/daily-controls-worker.mjs', 'tools/hosted-backup/daily-controls.wrangler.json', 'tools/hosted-backup/daily-controls.test.mjs', 'tools/hosted-backup/daily-controls.integration.test.mjs', 'tools/hosted-backup/daily-cost-policy.mjs', 'tools/hosted-backup/daily-cost-policy.test.mjs', 'tools/hosted-backup/daily-request-controls.mjs')
+        HostedBackupProviderCollector = @('tools/hosted-backup/daily-provider-collector.mjs', 'tools/hosted-backup/daily-provider-collector.test.mjs', 'docs/hosted-backup-provider-collector.md')
+        HostedBackupMonitor = @('tools/hosted-backup/daily-monitor.mjs', 'tools/hosted-backup/daily-monitor.test.mjs', 'tools/hosted-backup/daily-monitor-observation.mjs', 'tools/hosted-backup/daily-monitor-observation.test.mjs', 'tools/hosted-backup/daily-alert-delivery.mjs', 'tools/hosted-backup/daily-alert-delivery.test.mjs', 'tools/hosted-backup/daily-watchdog.mjs', 'tools/hosted-backup/daily-watchdog-worker.mjs', 'tools/hosted-backup/daily-watchdog.wrangler.json', 'tools/hosted-backup/daily-watchdog.test.mjs', 'tools/hosted-backup/daily-watchdog.integration.test.mjs', 'docs/hosted-backup-monitor.md')
         HostedBackupRecoveryScript = 'tools/hosted-backup/Initialize-Recovery.ps1'
         HostedBackupRecoveryPowerShellMinVersion = '7.2'
         HostedBackupR2AccessScript = 'tools/hosted-backup/Initialize-R2Access.ps1'

@@ -10,7 +10,7 @@ and reproducible operating or validation procedures.
 | Backup requirements and status | [Recovery contract](hosted-preview-backup-plan.md) |
 | Backup operation and formats | [Backup tooling](hosted-backup-tools.md), [supervised logical export](hosted-backup-supervised-logical-export.md) |
 | Logical reconstruction | [Preview compatibility contract](hosted-backup-preview-logical-contract.md), [local HTTP fixture](hosted-backup-logical-http-fixture.md) |
-| Daily backup components | [Capability lifecycle](hosted-backup-daily-capability.md), [runner and controls](hosted-backup-daily-runner.md), [provider collector](hosted-backup-provider-collector.md) |
+| Daily backup components | [Capability lifecycle](hosted-backup-daily-capability.md), [runner and controls](hosted-backup-daily-runner.md), [provider collector](hosted-backup-provider-collector.md), [internal monitoring policy](hosted-backup-monitor.md) |
 | Experimental backup boundary | [Metadata guard](hosted-backup-metadata-guard-contract.md), [hybrid restore fixture](hosted-backup-hybrid-restore-fixture.md) |
 | Other maintenance | [Airport catalogue](airport-catalog-updates.md), [LogTen format](logten-dynamic-export.md), [UI consistency](product-ui-consistency.md), [architecture map](architecture-graph.md), [releases](release-runbook.md), [public hardening gate](public-release-hardening-gate.md) |
 
