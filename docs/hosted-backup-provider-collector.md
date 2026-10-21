@@ -3,7 +3,8 @@
 `tools/hosted-backup/daily-provider-collector.mjs` collects supported GitHub,
 Supabase and Cloudflare HTTP observations using separate dedicated monitoring
 credentials. It is an importable collector, not a deployed service or a CLI.
-No existing worker/job imports it. Automation remains disabled.
+The disabled primary scheduled composition imports it through the durable request
+helper; neither export/readback job receives these credentials. Automation remains disabled.
 
 Initial live version-2 validation on 20 October 2026 rejected: government-region
 list requests returned403/400, and the default list omitted optional metadata.
@@ -11,8 +12,16 @@ Follow-up reads with the unchanged dedicated token proved default-bucket details
 and an explicit active `r2.fedramp: false` account entitlement. The collector now
 requires that positive disabled-feature evidence before inspecting ordinary
 regions, and gets required class/jurisdiction from bucket details. It does not
-interpret403/400 as empty inventories. Full revised live collection remains a
-separate acceptance gate; these individual reads do not claim its success.
+interpret403/400 as empty inventories. Full revised live refresh on21October2026
+passed those prerequisites but rejected operation history for a retired bucket
+outside the reviewed single-bucket contract. A follow-up full live refresh accepted
+the bounded retired operation review, then rejected a storage-history row for that
+same retired bucket. A separate charged diagnostic identified one zero-valued row.
+The optional exact zero-sample review below is implemented and locally tested;
+unreviewed rows still reject. A full live refresh on21October2026 passed all fifteen
+reads, both complete usage/storage windows, freshness and SQLite cache reopen.
+Status remains collected-not-permitted: billing-review/permit commissioning,
+deployment and scheduled backup/recovery acceptance remain separate gates.
 
 ## Configuration and credentials
 
@@ -23,6 +32,43 @@ the actual owner-reviewed R2 billing baseline. There is no calendar-month fallba
 The period must contain collection time and span at most 62 days; longer/expired
 periods reject before provider I/O. These are in-memory inputs; no new local
 configuration file, credential path, environment variable or runtime is introduced.
+Optional `retiredBucketReview: {bucket, observedAt}` admits one exact, explicitly
+reviewed retired bucket name. It must differ from the live bucket, contain no
+wildcard, and have a non-future observation less than31days old. Unknown fields
+reject; count ceilings cannot be configured. The only admitted operations are
+at most one `PutBucket` and one `DeleteBucket` per complete window, summed across
+its query pieces. Groups may disappear as history ages out. Every request still
+counts in that window. A second create/delete, any other operation (even with
+zero requests), unreviewed storage, or live reappearance in any jurisdiction rejects.
+Without this input, all other buckets still reject.
+
+The review may additionally contain `zeroStorageAt`, taken from the exact observed
+storage sample. It must be a valid timestamp no later than `observedAt` and less
+than31days old. This admits at most one sample per complete window, only for that
+exact retired name and timestamp, with numeric `payloadSize`, `metadataSize` and
+`uploadCount` all exactly zero. Missing/unknown group, dimension or measurement
+fields reject. Different times/names, extra samples, any nonzero/invalid values,
+other operations or live reappearance still reject. Review timestamps are bound
+in the cache fingerprint; both observation and sample expiry apply on cache reads.
+Omitting `zeroStorageAt` retains the prior any-other-storage rejection.
+
+Each window retains `zeroStorageSamples` only when this explicit review is present.
+The sample is acknowledged metadata: it does not update live-bucket freshness,
+storage totals or peaks, establish probe provenance, prove historical emptiness or
+replace a fresh live-bucket measurement. Different buckets may legitimately have
+samples at the same time; duplicate groups are checked by bucket and timestamp.
+Half-open split windows count the reviewed sample once, and requests remain fully
+counted regardless of the sample. Expiry cannot be renewed by changing only the
+review observation time; the historical sample has its own31day limit.
+
+The returned `r2.retiredBucketReview` retains the exact input and the two windows'
+observed create/delete counts. The input is included in the existing cache
+fingerprint; changing it cannot reuse a previous result or reset request counters.
+The31day expiry is also enforced on cache reads. This is acceptance of bounded
+observed metadata, not proof of who created the bucket, exact operation times,
+historical emptiness or a new owner billing/activation review. Aggregated analytics
+do not authenticate probe provenance. Review the exact evidence before supplying
+this input; do not infer permission from a name prefix or from current absence.
 Credentials are supplied separately as
 `{github, supabaseProject, supabaseOrganization, cloudflare}`. They stay in their
 provider's authorization headers, never URLs or returned evidence. There is no
@@ -88,7 +134,7 @@ List items must name the reviewed bucket; optional class/jurisdiction fields mus
 agree when present. A separate default-jurisdiction bucket-details GET must name
 that same bucket and prove `jurisdiction: default` and `storage_class: Standard`.
 Missing, changed or Infrequent Access details reject; no defaults are invented.
-Unknown operation names, storage classes/states and other historical/deleted
+Unknown operation names, storage classes/states and unreviewed historical/deleted
 buckets reject too. Account-level `ListBuckets`/`UsageSummary` may have an empty
 bucket name. Known operation names follow the pricing lists, except tier
 transitions, which require review. Every observed request counts toward each
@@ -97,8 +143,8 @@ window's total, including free/error requests; no Class A/B allowance is inferre
 The result has `status: collected-not-permitted`. `retrievedAt` is collection time,
 not provider measurement time. R2 REST metrics expose no measurement timestamp;
 that field remains null. Storage samples compute sampled per-bucket peaks, without
-proving every daily billing peak. Other/deleted buckets stop collection for review,
-rather than being silently dropped. Operations are
+proving every daily billing peak. All other/deleted bucket storage stops collection;
+only the explicit bounded retired operation review above is accepted. Operations are
 not silently classified into billable Class A/B. Gross GitHub usage by SKU is not
 the remaining included allowance: discounts and different runner types prevent
 blind subtraction as Linux minutes.

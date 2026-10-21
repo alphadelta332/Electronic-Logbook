@@ -63,7 +63,7 @@ export function logicalCapabilityRpcSql(contract,tokenHash,expiresAt,database='p
   assert.ok(Number.isFinite(Date.parse(expiresAt))&&Date.parse(expiresAt)>Date.now()&&
     Date.parse(expiresAt)<=Date.now()+(daily?31*24*60:30)*60*1000);
   const tables=contract.shape.map(t=>{assert.match(t.table,/^(auth|public|storage|supabase_migrations)\.[a-z][a-z0-9_]*$/);return t.table;});
-  return `begin; set local transaction_read_only=off; set local lock_timeout='2s';
+  return `begin; set local transaction_read_only=off; set local lock_timeout='2s'; set local search_path=pg_catalog;
     ${lifecycleGuard(database,expectedDefinitionHash)}
     ${daily ? `do $audit$ declare boundary jsonb; begin
       select jsonb_build_object(

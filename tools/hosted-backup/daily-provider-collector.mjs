@@ -86,6 +86,16 @@ export async function collectProviderEvidence(config, credentials, request = fet
   requireValue(integer(now), 'Invalid collection time.');
   const retrievedAt = new Date(now).toISOString();
   const day = 24 * 60 * 60 * 1000;
+  const retired = config.retiredBucketReview;
+  requireValue(retired === undefined || (retired && same(Object.keys(retired).sort(),
+    Object.hasOwn(retired, 'zeroStorageAt') ? ['bucket', 'observedAt', 'zeroStorageAt'] : ['bucket', 'observedAt']) &&
+    typeof retired.bucket === 'string' && /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(retired.bucket) &&
+    retired.bucket !== config.bucket && typeof retired.observedAt === 'string' &&
+    Number.isFinite(Date.parse(retired.observedAt)) && Date.parse(retired.observedAt) <= now &&
+    now - Date.parse(retired.observedAt) < 31 * day &&
+    (!Object.hasOwn(retired, 'zeroStorageAt') || (typeof retired.zeroStorageAt === 'string' &&
+      Number.isFinite(Date.parse(retired.zeroStorageAt)) && Date.parse(retired.zeroStorageAt) <= Date.parse(retired.observedAt) &&
+      now - Date.parse(retired.zeroStorageAt) < 31 * day))), 'Invalid or expired retired bucket review.');
   const periodStart = Date.parse(config.r2Period?.periodStart), periodEnd = Date.parse(config.r2Period?.periodEnd);
   requireValue(Number.isFinite(periodStart) && Number.isFinite(periodEnd) && periodStart < now && periodEnd > now &&
     periodEnd - periodStart <= 62 * day, 'Missing, expired or unsupported reviewed R2 period.');
@@ -181,8 +191,10 @@ export async function collectProviderEvidence(config, credentials, request = fet
     'DeleteObject', 'DeleteBucket', 'AbortMultipartUpload']);
   let newestStorage = 0, pendingUploads = 0, partIndex = 0;
   const peaks = new Map();
+  const retiredWindows = [];
   for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {
     let requests = 0, windowNewest = 0;
+    const retiredCounts = { PutBucket: 0, DeleteBucket: 0, ...(retired?.zeroStorageAt ? { zeroStorageSamples: 0 } : {}) };
     for (const part of ranges[windowIndex]) {
       const operations = account['operations' + partIndex], storage = account['storage' + partIndex++];
       requireValue(Array.isArray(operations) && operations.length < 10000 &&
@@ -191,7 +203,13 @@ export async function collectProviderEvidence(config, credentials, request = fet
       for (const item of operations) {
         const name = item.dimensions?.bucketName, action = item.dimensions?.actionType;
         requireValue(integer(item.sum?.requests) && actions.has(action), 'Invalid or unreviewed operation metric.');
-        requireValue(name === config.bucket || (name === '' && ['ListBuckets', 'UsageSummary'].includes(action)), 'Unreviewed operation bucket.');
+        const retiredOperation = retired && name === retired.bucket && Object.hasOwn(retiredCounts, action);
+        requireValue(name === config.bucket || (name === '' && ['ListBuckets', 'UsageSummary'].includes(action)) ||
+          retiredOperation, 'Unreviewed operation bucket.');
+        if (retiredOperation) {
+          retiredCounts[action] += item.sum.requests;
+          requireValue(retiredCounts[action] <= 1, 'Retired bucket operation ceiling exceeded.');
+        }
         const group = JSON.stringify([name, action]);
         requireValue(!operationGroups.has(group), 'Duplicate operation metric.'); operationGroups.add(group);
         requests += item.sum.requests;
@@ -199,9 +217,20 @@ export async function collectProviderEvidence(config, credentials, request = fet
       for (const item of storage) {
         const measured = Date.parse(item.dimensions?.datetime), name = item.dimensions?.bucketName;
         requireValue(Number.isFinite(measured) && measured >= Date.parse(part.from) && measured < Date.parse(part.until) &&
-          name === config.bucket && ['payloadSize', 'metadataSize', 'uploadCount'].every(key => integer(item.max?.[key])),
+          ['payloadSize', 'metadataSize', 'uploadCount'].every(key => integer(item.max?.[key])),
           'Invalid or unreviewed storage measurement.');
-        requireValue(!storageGroups.has(measured), 'Duplicate storage metric.'); storageGroups.add(measured);
+        const group = JSON.stringify([name, measured]);
+        requireValue(!storageGroups.has(group), 'Duplicate storage metric.'); storageGroups.add(group);
+        if (name !== config.bucket) {
+          requireValue(retired?.zeroStorageAt && name === retired.bucket && measured === Date.parse(retired.zeroStorageAt) &&
+            same(Object.keys(item).sort(), ['dimensions', 'max']) &&
+            same(Object.keys(item.dimensions).sort(), ['bucketName', 'datetime']) &&
+            same(Object.keys(item.max).sort(), ['metadataSize', 'payloadSize', 'uploadCount']) &&
+            ['payloadSize', 'metadataSize', 'uploadCount'].every(key => item.max[key] === 0) &&
+            ++retiredCounts.zeroStorageSamples <= 1, 'Unreviewed retired storage measurement.');
+          // An acknowledged zero sample is not evidence of live-bucket freshness or historical emptiness.
+          continue;
+        }
         pendingUploads = Math.max(pendingUploads, item.max.uploadCount);
         newestStorage = Math.max(newestStorage, measured);
         windowNewest = Math.max(windowNewest, measured);
@@ -210,6 +239,7 @@ export async function collectProviderEvidence(config, credentials, request = fet
     }
     requireValue(now - windowNewest < 2 * 60 * 60 * 1000, 'Storage analytics are stale.');
     requireValue(integer(requests), 'Invalid account request total.'); windows[windowIndex].requests = requests;
+    if (retired) retiredWindows.push(retiredCounts);
   }
   const sampledPeakBytes = [...peaks.values()].reduce((sum, bytes) => sum + bytes, 0);
   requireValue(integer(sampledPeakBytes) && peaks.has(config.bucket), 'Incomplete account analytics.');
@@ -224,6 +254,7 @@ export async function collectProviderEvidence(config, credentials, request = fet
       currentBytes, currentMeasurementAt: null, windows,
       jurisdictionCoverage: { inspected: jurisdictions, fedrampEnabled: false },
       reviewedPeriod: { periodStart: config.r2Period.periodStart, periodEnd: config.r2Period.periodEnd },
+      ...(retired ? { retiredBucketReview: { ...retired, windows: retiredWindows } } : {}),
       pendingUploads, uploadedObjects, uploadedBytes, infrequentAccessBytes, infrequentAccessObjects,
       billingPeriodProved: false,
       newestStorageMeasurementAt: new Date(newestStorage).toISOString(), sampledPeakBytes,

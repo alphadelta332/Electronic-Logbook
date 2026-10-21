@@ -900,14 +900,21 @@ function Invoke-VerifyAction {
     foreach ($controlFile in $script:TransferConfig.Expected.HostedBackupDailyControls) {
         Add-CheckResult $results 'Daily backup cost-policy/review/reservation/request-cache controls' (Test-Path -LiteralPath (Join-Path $RepoRoot $controlFile) -PathType Leaf) $true $controlFile
     }
+    foreach ($preparationFile in $script:TransferConfig.Expected.HostedBackupDailyPreparation) {
+        Add-CheckResult $results 'Private backup source/job preparation and isolated validation' (Test-Path -LiteralPath (Join-Path $RepoRoot $preparationFile) -PathType Leaf) $true $preparationFile
+    }
     foreach ($monitorFile in $script:TransferConfig.Expected.HostedBackupMonitor) {
         Add-CheckResult $results 'Backup monitoring policy, delivery and separate disabled watchdog sources' (Test-Path -LiteralPath (Join-Path $RepoRoot $monitorFile) -PathType Leaf) $true $monitorFile
     }
+    Add-CheckResult $results 'Primary backup timer composition' $true $true 'Keep MONITOR_ENABLED=false/no schedule. PRIMARY_MONITOR_JSON holds reviewed provider/history inputs; OWNER_REVIEW_JSON and ALERT_DELIVERY_JSON retain their existing private contracts. PROVIDER_CREDENTIALS_JSON and MONITOR_CREDENTIALS_JSON are remote secrets using only dedicated existing credentials; RESEND_SEND_TOKEN retains its restricted scope. Preserve DAILY_ATTEMPTS and MONITOR_HEARTBEAT; recreate secret bindings through fresh authentication, never transfer diagnostic SQLite.'
+    Add-CheckResult $results 'Cached backup permit activation' $true $true 'Keep Worker BACKUP_ENABLED=false separately from the disabled GitHub repository variable. GET daily-backup-permit can only read existing fresh durable evidence; it cannot trigger refresh, monitoring or source export. Revalidate reviewed inputs and live acceptance before either activation.'
     Add-CheckResult $results 'Backup alert recipient custody' $true $true 'Optional HostedBackup/alert-delivery.local.json transfers only through trusted storage; existing domain-restricted Resend sending key remains separate. No recipient address or credential value is printed.'
+    Add-CheckResult $results 'Daily source lifecycle custody' $true $true 'Preserve sourceDefinitionSha256 and sourceExpiresAt in HostedBackup/daily-review.local.json. Verify the live marked function against that fingerprint before rotation/revocation; never adopt a changed function hash or renew review dates automatically. Raw source/reservation tokens live only in approved Actions secrets.'
     Add-CheckResult $results 'Separate backup watchdog custody' $true $true 'Recreate the private MONITOR_HEARTBEAT named service binding and restricted RESEND_SEND_TOKEN/ALERT_DELIVERY_JSON on the separate Worker; keep WATCHDOG_ENABLED=false/no schedule during transfer. Preserve MISSING_MONITOR and its stable flightlogx-preview-monitor object, monitor-state and monitor-heartbeat. Primary/observer delivery shares are 1/1 daily and 16/15 monthly; do not reset either ledger.'
     foreach ($collectorFile in $script:TransferConfig.Expected.HostedBackupProviderCollector) {
-        Add-CheckResult $results 'Daily backup provider collector and reviewed-input contract' (Test-Path -LiteralPath (Join-Path $RepoRoot $collectorFile) -PathType Leaf) $true $collectorFile
+        Add-CheckResult $results 'Daily backup provider collector, expiring review cache and reviewed-input contract' (Test-Path -LiteralPath (Join-Path $RepoRoot $collectorFile) -PathType Leaf) $true $collectorFile
     }
+    Add-CheckResult $results 'Exact retired storage review' $true $true 'Reconstruct optional zeroStorageAt only from the exact retained bucket/time and all-zero payloadSize/metadataSize/uploadCount evidence. At most one sample per complete window; no unknown/nonzero storage or live reappearance. Both sample and observation expire after31days on collection and cache reads. Preserve counters; this is no historical emptiness or probe-identity proof.'
     Add-CheckResult $results 'Backup monitoring credential custody' $true $true 'GitHub Plan and separate backup-repository Actions Read, split Supabase reads and Cloudflare Analytics/R2 Storage Read tokens (including the owner-retained S3 credential bundle) require fresh authentication; never transfer or substitute broader owner credentials'
     if (Test-Path -LiteralPath $compatibilityContract -PathType Leaf) {
         $compatibility = Get-Content -LiteralPath $compatibilityContract -Raw | ConvertFrom-Json

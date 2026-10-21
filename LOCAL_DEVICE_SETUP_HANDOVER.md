@@ -397,9 +397,40 @@ Owner review version 2 and permit version 3 use the shared
 transfer verification. An expired review/weekly check or legacy version must deny
 backups; do not automatically convert it or refresh dates. Weekly acknowledgement
 updates do not renew the budget identity or reset the remote attempt counter.
+Commissioned reviews also retain `sourceDefinitionSha256` and actual
+`sourceExpiresAt`. Compare the marked hosted function to the saved fingerprint
+before rotation/revocation; do not adopt an unexpectedly changed definition.
+Source/reservation raw tokens remain only in approved Actions secrets. During
+supervised setup, the owner SQL/metadata credential stays local; it is never a
+replacement for the collector's dedicated read-only credentials. Installation
+normalizes its transaction search path so custom-type signatures compare to the
+reviewed contract without weakening the anonymous API audit.
 `tools/hosted-backup/daily-request-controls.mjs` is also required source. The same
 remote object retains `component-requests` and `provider-cache` alongside
 `source-budget`; preserve all three across deployment and credential/review rotation.
+The primary `daily-primary.mjs` and its test are required checkout sources, included
+in private source staging. Keep `MONITOR_ENABLED=false` and Worker
+`BACKUP_ENABLED=false` with no Cron Triggers. The Worker flag separately disables
+the cache-only public permit route; the GitHub repository flag also stays false.
+Remote `PRIMARY_MONITOR_JSON` holds reviewed `provider` and `history` configuration;
+`PROVIDER_CREDENTIALS_JSON` holds dedicated `github`, `cloudflare`, `supabaseProject`
+and `supabaseOrganization` tokens, and `MONITOR_CREDENTIALS_JSON` holds the separate
+Actions-read `github` token and monitoring `r2` access key/secret. These remote
+secret bindings require fresh authentication and never enter the transfer archive.
+Reuse existing `OWNER_REVIEW_JSON`, `ALERT_DELIVERY_JSON`, `RESEND_SEND_TOKEN` and
+private `MONITOR_HEARTBEAT` binding. No new local credential/config file or runtime.
+Preserve the stable primary SQLite object and all its keys during reprovisioning.
+
+Owner-side `tools/hosted-backup/prepare-daily-job.mjs` and its regression are required
+checkout sources. The importable function uses the existing dedicated project-read
+credential to GET both deployed Edge bodies/metadata, verifies unchanged revisions
+and reconstruction bytes, encrypts deployed sources to the verified public recipient,
+and validates the complete job with the runner's own validator. It performs no
+participant export or remote mutation. Never put its monitoring token into the
+returned job. Generated job files in temporary staging are regenerated outputs;
+retain the reviewed immutable job only in the approved private automation repository.
+No new local authentication/configuration path or runtime is introduced.
+
 The internal `tools/hosted-backup/daily-monitor.mjs`, its tests and
 `docs/hosted-backup-monitor.md` are verified checkout sources. Its fourth durable
 key `monitor-state` retains check leases, incident suppression and delivery-attempt
@@ -450,9 +481,9 @@ its `RESEND_SEND_TOKEN` from the existing production-domain sending-only key and
 `ALERT_DELIVERY_JSON` from the approved private recipient config; never copy broader
 credentials. `MONITOR_HEARTBEAT` is a private service binding on the controls Worker,
 targeting the watchdog's named `MonitorHeartbeat` entrypoint; it needs no shared
-token or public heartbeat URL. Primary scheduled composition must pass
+token or public heartbeat URL. The local primary scheduled composition passes
 `() => env.MONITOR_HEARTBEAT.completed()` as the sixth `checkBackupMonitor` argument;
-the underlying primary timer/configuration composition remains a deployment gate.
+live primary timer/configuration acceptance remains a deployment gate.
 Preserve the watchdog's separate `MISSING_MONITOR` namespace and stable
 `flightlogx-preview-monitor` object, including `monitor-state` and `monitor-heartbeat`.
 Primary delivery is capped at1/day,16/month; observer delivery at1/day,15/month.
@@ -519,6 +550,17 @@ separate from the mandatory 31-day owner review and source-capability expiry.
 The collector implementation/tests and reviewed-input contract are verified after
 checkout. Its version-2 in-memory inputs require the actual reviewed R2 period;
 there is no calendar allowance fallback or new local configuration/secret path.
+An optional in-memory `retiredBucketReview: {bucket, observedAt}` binds one exact
+retired name to at most one create and one delete in each complete request window.
+It expires after31days, including on cache reads. All requests remain counted;
+unreviewed storage, other operations or live reappearance reject. An optional
+`zeroStorageAt` admits at most one exact all-zero sample per full window, bound to
+that name/time. Missing/unknown/nonzero values or any extra name/time reject.
+Both the review observation and sample expire after31days, including cache reads;
+the sample cannot provide live-bucket freshness or historical-emptiness proof.
+Reconstruct the
+review from retained evidence and revalidate before commissioning; it is not a new
+transferable credential/configuration file or proof of the original probe identity.
 The unchanged dedicated token must first prove an active disabled FedRAMP account
 entitlement and the exact reviewed R2 feature inventory, then read all three
 ordinary jurisdiction lists (default/EU/US). Government access enabled, missing/
@@ -529,10 +571,22 @@ must prove both with the existing token, without new permissions. Eleven Cloudfl
 reads retain a durable maximum of21 collection starts/day before deployment
 (251 combined collector/workflow/monitor attempts, below256). Preserve all
 inherited counters through code/configuration/token rotation. Individual live
-details/disabled-entitlement reads passed; revised full collection remains unproved.
+details/disabled-entitlement reads and the revised full collection passed, including
+both usage/storage windows, freshness and retained SQLite cache reopen. This is
+collected-not-permitted evidence; live permit/deployment/backup acceptance remains open.
 It still collects observations only: live validation of the new response shapes,
 real owner baseline, billing/freshness assurance and permit deployment remain open.
 Do not turn those observations into a successful permit or enable the job.
+
+`tools/hosted-backup/prepare-daily-repository.mjs` prepares a new local source
+stage for the separate private automation repository. It copies only its explicit
+source allowlist, includes inherited dirty source bytes and writes matching
+provenance hashes plus the disabled workflow. It refuses an existing destination;
+it never pushes, deploys, creates job inputs or provisions credentials. Run its
+focused test to validate the stage independently, including the existing local
+Worker/SQLite tests. `%TEMP%/elb-daily-repository-*` stages are regenerated output,
+excluded from transfer. Publish only reviewed allowlisted files, never a whole
+stage after running tools, since generated state can appear there.
 
 One-time protected recovery setup uses the optional PowerShell 7 installation
 (version 7.2 or later); its password entry occurs in a local console. It creates the

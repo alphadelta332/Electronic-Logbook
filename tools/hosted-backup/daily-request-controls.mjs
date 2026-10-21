@@ -31,6 +31,11 @@ export async function cachedProviderEvidence(storage, config, now = Date.now()) 
     const cache = await txn.get('provider-cache');
     requireValue(cache?.fingerprint === fingerprint && cache.evidence &&
       now >= cache.startedAt && now - cache.startedAt < 2 * hour, 'Provider cache unavailable or stale.');
+    if (config.retiredBucketReview) for (const at of [config.retiredBucketReview.observedAt,
+      ...(Object.hasOwn(config.retiredBucketReview, 'zeroStorageAt') ? [config.retiredBucketReview.zeroStorageAt] : [])]) {
+      const age = now - Date.parse(at);
+      requireValue(age >= 0 && age < 31 * 24 * hour, 'Retired bucket review expired.');
+    }
     for (const at of [cache.evidence.retrievedAt, cache.evidence.github.retrievedAt,
       cache.evidence.supabase.retrievedAt, cache.evidence.r2.newestStorageMeasurementAt]) {
       const age = now - Date.parse(at);

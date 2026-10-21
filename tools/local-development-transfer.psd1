@@ -41,7 +41,7 @@
         @{ Path = 'ElectronicLogbook/HostedBackup/r2-credentials.local.json'; Required = $false; Classification = 'secret-backup-storage-credentials'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/source-connection.local.json'; Required = $false; Classification = 'secret-backup-source-credentials'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/source-root.crt'; Required = $false; Classification = 'public-backup-source-ca'; Lifecycle = 'local-transfer' }
-        @{ Path = 'ElectronicLogbook/HostedBackup/daily-review.local.json'; Required = $false; Classification = 'private-backup-owner-review'; Lifecycle = 'local-transfer' }
+        @{ Path = 'ElectronicLogbook/HostedBackup/daily-review.local.json'; Required = $false; Classification = 'private-backup-owner-review-and-source-fingerprint'; Lifecycle = 'local-transfer' }
         @{ Path = 'ElectronicLogbook/HostedBackup/alert-delivery.local.json'; Required = $false; Classification = 'private-backup-alert-recipient'; Lifecycle = 'local-transfer' }
     )
 
@@ -70,9 +70,10 @@
         @{ Path = '%APPDATA%/xdg.config/.wrangler'; Lifecycle = 'fresh-authentication'; Reason = 'Cloudflare OAuth credentials must be recreated with wrangler login, never transferred.' }
         @{ Path = '%USERPROFILE%/.android/avd'; Lifecycle = 'deliberate-exclusion'; Reason = 'Android virtual devices and snapshots can contain live Google sessions; recreate and authenticate the recovery AVD once on each trusted development machine.' }
         @{ Path = 'GitHub/alphadelta332/flightlogx-preview-backups/ActionsSecrets'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision scoped source/upload/readback job secrets through GitHub; never archive them or copy owner/recovery credentials into the job.' }
-        @{ Path = 'Cloudflare/flightlogx-backup-controls'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision the reservation token hash and approved read-only monitoring secrets; preserve the existing DAILY_ATTEMPTS SQLite namespace and its counter across deployments, never reset it during transfer.' }
+        @{ Path = 'Cloudflare/flightlogx-backup-controls'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision the reservation token hash and approved read-only monitoring secrets; keep Worker BACKUP_ENABLED=false and MONITOR_ENABLED=false independently of the GitHub variable. Preserve the existing DAILY_ATTEMPTS SQLite namespace and every counter/cache across deployments. Reconstruct any exact retired zeroStorageAt review from evidence without renewing its sample expiry; never reset operational state during transfer.' }
         @{ Path = 'Cloudflare/flightlogx-backup-watchdog'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision only the existing restricted Resend sender and private recipient config; preserve the separate MISSING_MONITOR namespace, stable object, monitor-state and monitor-heartbeat across deployments/rotation. Recreate the private named service binding; never copy remote SQLite or enable schedules during transfer.' }
         @{ Path = '%TEMP%/elb-daily-controls-*'; Lifecycle = 'regenerated-output'; Reason = 'Synthetic local Cloudflare SQLite test evidence is retained locally, never transferred as operational state.' }
+        @{ Path = '%TEMP%/elb-daily-repository-*'; Lifecycle = 'regenerated-output'; Reason = 'Allowlisted private source stages and isolated validation output are regenerated from current reviewed source, never transferred as configuration or copied wholesale to GitHub.' }
         @{ Path = '%TEMP%/elb-daily-watchdog-*'; Lifecycle = 'regenerated-output'; Reason = 'Synthetic isolated observer SQLite and local Worker harnesses are retained diagnostic output, not transferable operational state.' }
     )
 
@@ -200,8 +201,9 @@
         HostedBackupDailyScript = 'tools/hosted-backup/daily-backup.mjs'
         HostedBackupDailyTestScript = 'tools/hosted-backup/daily-backup.test.mjs'
         HostedBackupDailyWorkflow = 'tools/hosted-backup/daily-workflow.json'
+        HostedBackupDailyPreparation = @('tools/hosted-backup/prepare-daily-repository.mjs', 'tools/hosted-backup/prepare-daily-repository.test.mjs', 'tools/hosted-backup/daily-primary.mjs', 'tools/hosted-backup/daily-primary.test.mjs', 'tools/hosted-backup/prepare-daily-job.mjs', 'tools/hosted-backup/prepare-daily-job.test.mjs')
         HostedBackupDailyControls = @('tools/hosted-backup/daily-controls.mjs', 'tools/hosted-backup/daily-controls-worker.mjs', 'tools/hosted-backup/daily-controls.wrangler.json', 'tools/hosted-backup/daily-controls.test.mjs', 'tools/hosted-backup/daily-controls.integration.test.mjs', 'tools/hosted-backup/daily-cost-policy.mjs', 'tools/hosted-backup/daily-cost-policy.test.mjs', 'tools/hosted-backup/daily-request-controls.mjs')
-        HostedBackupProviderCollector = @('tools/hosted-backup/daily-provider-collector.mjs', 'tools/hosted-backup/daily-provider-collector.test.mjs', 'docs/hosted-backup-provider-collector.md')
+        HostedBackupProviderCollector = @('tools/hosted-backup/daily-provider-collector.mjs', 'tools/hosted-backup/daily-provider-collector.test.mjs', 'tools/hosted-backup/daily-request-controls.mjs', 'docs/hosted-backup-provider-collector.md')
         HostedBackupMonitor = @('tools/hosted-backup/daily-monitor.mjs', 'tools/hosted-backup/daily-monitor.test.mjs', 'tools/hosted-backup/daily-monitor-observation.mjs', 'tools/hosted-backup/daily-monitor-observation.test.mjs', 'tools/hosted-backup/daily-alert-delivery.mjs', 'tools/hosted-backup/daily-alert-delivery.test.mjs', 'tools/hosted-backup/daily-watchdog.mjs', 'tools/hosted-backup/daily-watchdog-worker.mjs', 'tools/hosted-backup/daily-watchdog.wrangler.json', 'tools/hosted-backup/daily-watchdog.test.mjs', 'tools/hosted-backup/daily-watchdog.integration.test.mjs', 'docs/hosted-backup-monitor.md')
         HostedBackupRecoveryScript = 'tools/hosted-backup/Initialize-Recovery.ps1'
         HostedBackupRecoveryPowerShellMinVersion = '7.2'

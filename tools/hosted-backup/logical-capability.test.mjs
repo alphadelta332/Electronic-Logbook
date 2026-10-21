@@ -55,9 +55,12 @@ test('isolated PostgreSQL proves daily expiry, guarded rotation/revocation, API 
       create table auth.schema_migrations(version text); create table storage.migrations(id int,name text,hash text);
       create table supabase_migrations.schema_migrations(version text);
       create sequence auth.refresh_tokens_id_seq;
-      create table public.synthetic(id int primary key,note text); insert into public.synthetic values(1,'preserve me');`);
+      create table public.synthetic(id int primary key,note text); insert into public.synthetic values(1,'preserve me');
+      create type public.synthetic_type as enum ('value');
+      create function public.typed(value public.synthetic_type) returns int language sql as 'select 1';`);
     const shape = JSON.parse(sql(logicalShapeSql));
-    const fixture = {shape,generatedExpressions:null,ledgers:{auth:null,storage:null,application:null},apiAnonymousFunctions:[]};
+    const fixture = {shape,generatedExpressions:null,ledgers:{auth:null,storage:null,application:null},apiAnonymousFunctions:[
+      {schema:'public',name:'typed',args:'value public.synthetic_type',definer:false,bodyHash:hash('select 1'),extension:null}]};
     const first = randomBytes(32).toString('hex'), second = randomBytes(32).toString('hex');
     const install = (token, until, expectedDefinitionHash) => sql(logicalCapabilityRpcSql(fixture,hash(token),until,database,
       {daily:true,...(expectedDefinitionHash===undefined?{}:{expectedDefinitionHash})}));

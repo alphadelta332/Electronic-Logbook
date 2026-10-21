@@ -1,6 +1,6 @@
 # Daily encrypted backup runner
 
-The runner and disabled private-repository workflow are implemented. Permit version
+The runner, cache-only permit endpoint and disabled private-repository workflow are implemented. Permit version
 3 combines reported usage with version-2 reviewed billing baselines. Scheduled backup
 acceptance is incomplete: the owner-side deployment/usage evidence
 service, prepared real reconstruction inputs and scoped runtime secrets are not
@@ -37,6 +37,37 @@ ledger; it shares Cloudflare outage risk. It has no schedule or public heartbeat
 endpoint. Primary/observer delivery shares are1/1 daily and16/15 monthly, preserving
 the combined ceiling. Neither sender can reset counters during rotation. The job stores no artifacts or
 caches and puts no unsigned success marker in R2.
+
+## Local source preparation
+
+From the owner checkout, run the following as one command:
+
+```powershell
+node tools/hosted-backup/prepare-daily-repository.mjs <new-directory>
+```
+
+The destination's parent must exist; the destination must not. This prepares the
+private repository's source tree without contacting any service. The explicit
+allowlist includes runner dependencies, review/cost/request/cache controls,
+provider collector, primary monitoring/alert adapters, separate watchdog, their
+focused tests/configuration and the airport validator. It preserves current
+dirty/untracked required source bytes using the existing reconstruction inventory.
+Missing or unsafe reconstruction sources reject before creating the stage.
+
+`source-provenance.json` records the originating revision/dirty state and hashes
+of each staged file. The disabled workflow is also copied to its private-repository
+workflow path. No job inputs, recovery archives, credentials, git metadata,
+Wrangler caches or remote state are copied. Preparation refuses to overwrite an
+existing stage and cannot publish, deploy or enable anything. Its regression test
+runs the mirrored tests from the stage with a restricted environment, including
+the isolated local Worker/SQLite checks. This verifies packaging and current local
+contracts, including disabled primary scheduled provider/permit/history/heartbeat
+composition. Live commissioning acceptance remains open.
+
+Run `node --test tools/hosted-backup/prepare-daily-repository.test.mjs` before a
+private source update. Inspect the explicit files/provenance for publication;
+never recursively publish a stage after executing tools in it. Generated caches
+or SQLite state are excluded from source publication and trusted transfer.
 
 ## Disabled workflow
 
@@ -108,8 +139,19 @@ producer must inspect the supported actual provider state and effective deployed
 Do not re-date old screenshots, substitute nominal free-plan limits for observed
 usage, or publish a permanently successful constant response. Every unavailable
 supported metric must make the endpoint refuse a permit. Its implementation and
-approved restricted read-only provider authentication are still required before
-live activation. No management credential may be added to either workflow job.
+approved restricted read-only provider authentication require live commissioning
+before activation. No management credential may be added to either workflow job.
+
+The controls Worker's GET `/daily-backup-permit` now reads only its existing stable
+durable provider cache. Worker `BACKUP_ENABLED=false` refuses it before storage;
+the separate GitHub repository variable also remains false. POST and other methods
+are not permit requests. An enabled read still refuses absent/failed/stale caches,
+changed reviewed source/job/account/deployment/period, expired reviews, privacy or
+usage stops. It preserves original provider timestamps and historical baselines,
+includes the reviewed policy hash and never refreshes providers or runs monitoring.
+Only the private scheduled composition can populate the cache. No source grant or
+export occurs through the permit route. Local tests use the actual produced permit
+through runner capture/encryption/readback; live acceptance remains required.
 
 `daily-cost-policy.mjs` shares validation between controller and runner. Reported
 account bytes are the greater of current total and summed sampled peaks. Adding

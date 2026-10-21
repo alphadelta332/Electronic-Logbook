@@ -58,7 +58,7 @@ export function r2Request(accountId, access, method, key = '', body) {
   }
 }
 
-function validateJob(job, context) {
+export function validateJob(job, context) {
   assert.deepEqual(Object.keys(job).sort(), ['accountId','bucket','deploymentRevisions','permitUrl','repository','source','version'].sort());
   assert.equal(job.version,1); assert.equal(job.repository,repository); assert.equal(context.repository,repository);
   assert.equal(job.bucket,bucket); assert.match(job.accountId,/^[a-f0-9]{32}$/);

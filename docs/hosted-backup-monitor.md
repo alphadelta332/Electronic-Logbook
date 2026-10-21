@@ -6,9 +6,37 @@ R2-byte inspection adapters, tested with synthetic provider responses and the lo
 Worker runtime. `daily-alert-delivery.mjs` connects reserved alert attempts to the
 existing restricted Resend sender. `daily-watchdog*` supplies the separate disabled
 Worker, receiver-timed heartbeat and durable missing-monitor observer. It is **not
-a live monitor**: neither Worker is deployed or scheduled and the primary timer's
-composition is not yet connected. Backup automation remains
+a live monitor**: neither Worker is deployed or scheduled. The primary timer's
+local composition is connected and disabled. Backup automation remains
 disabled with no schedule. Synthetic observations do not establish protection.
+
+`daily-primary.mjs` connects the primary scheduled handler to the existing stable
+`DAILY_ATTEMPTS` object. `MONITOR_ENABLED=false` and no Cron Triggers keep dispatch
+disabled without provider, namespace, email or heartbeat I/O. Only the internal
+object route accepts checks; the public router rejects monitoring/refresh routes.
+The four-hour monitor lease is reserved before collection. A matching fresh cache
+is reused; otherwise the existing hourly collector attempts a refresh, preserving
+all counters and invalidating failed evidence. Original provider timestamps feed
+the version-3 cost policy alongside the unchanged historical owner review.
+Monitoring evaluates usage warnings/stops internally. The separate GET permit route
+uses the same policy on cached observations, gated by Worker BACKUP_ENABLED=false.
+Public reads never refresh providers, reserve source grants or start monitoring.
+Changed source, account, job hash, reviewed R2 period or deployment inputs deny.
+Invalid collection/configuration becomes evidence-unavailable; failed cost policy
+becomes usage-stopped. History and stored ciphertext use the existing individually
+charged adapters. Accepted checks call the private heartbeat; failed/suppressed
+unaccepted delivery cannot forge completion or refund attempts.
+
+Remote `PRIMARY_MONITOR_JSON` contains reviewed `provider` collector configuration
+and `history` adapter configuration. Secret `PROVIDER_CREDENTIALS_JSON` contains
+the existing dedicated `github`, `cloudflare`, `supabaseProject` and
+`supabaseOrganization` monitoring tokens. Secret `MONITOR_CREDENTIALS_JSON` holds
+the separate Actions-read `github` token and read-only `r2` accessKeyId/secretAccessKey.
+Reuse existing `OWNER_REVIEW_JSON`, `ALERT_DELIVERY_JSON`, `RESEND_SEND_TOKEN` and
+`MONITOR_HEARTBEAT`. Provision these remote bindings through fresh authentication;
+no new local file, credential scope, runtime or operational state namespace is added.
+Staging/reconstruction include the composition and regression sources. Synthetic
+local runtime checks cannot establish live provider acceptance or protection.
 
 The internal `observeBackup` adapter makes two authenticated GitHub reads: latest
 workflow run and latest successful run. It pins the workflow ID/path, private source
@@ -125,8 +153,8 @@ recipient/configuration/key rotation. Never reuse the primary namespace or deriv
 an object name from a review/token.
 
 The controls Worker's `MONITOR_HEARTBEAT` service binding targets the watchdog's
-named `MonitorHeartbeat` RPC entrypoint. The primary timer's final composition must
-pass `() => env.MONITOR_HEARTBEAT.completed()` as the sixth `checkBackupMonitor`
+named `MonitorHeartbeat` RPC entrypoint. The primary timer's local composition
+passes `() => env.MONITOR_HEARTBEAT.completed()` as the sixth `checkBackupMonitor`
 argument. Checks with failed delivery, or suppression of an incident never accepted,
 do not publish heartbeats. Already-accepted incidents can continue heartbeats
 without duplicate alerts. A failed heartbeat transport never refunds an alert.
@@ -148,7 +176,7 @@ needs `RESEND_SEND_TOKEN` from the existing restricted sender and
 disabled watchdog before resolving the primary service binding. After live
 acceptance, use a separate four-hour Cron Trigger on each Worker. No deployment,
 namespace, secret or timer is created by these files. The primary timer's
-provider-cache/usage/history composition remains a deployment acceptance gate.
+provider-cache/usage/history composition requires live deployment acceptance.
 
 Inspect operational counters before commissioning. Larger legacy primary counters
 are retained; if its16/month share is already exceeded, wait until the next UTC

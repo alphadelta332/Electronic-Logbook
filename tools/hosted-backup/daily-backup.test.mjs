@@ -9,6 +9,7 @@ import { gzipSync } from 'node:zlib';
 import { uploadDaily, readbackDaily, r2Request } from './daily-backup.mjs';
 import { sealArchive, openArchive, maxArchiveBytes } from './archive.mjs';
 import { reserveDailyAttempt, reserveDailyReadback, reserveWorkflowRequest } from './daily-controls.mjs';
+import { cachedBackupPermit } from './daily-primary.mjs';
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const identity=generateKeyPairSync('rsa',{modulusLength:3072,
@@ -143,6 +144,28 @@ function fixture(t) {
   t.after(()=>assert.deepEqual(objects.get('manual/previous.elbbackup'),previous));
   return {job,permit,snapshot,state,objects,uploadRequest,readRequest};
 }
+
+test('production cached permit feeds real runner capture, encryption and independent readback',async t=>{
+  const f=fixture(t),review=f.permit.ownerReview,at=f.permit.checkedAt;
+  const provider={accountId:f.job.accountId,projectRef:f.job.source.origin.slice(8,28),bucket:f.job.bucket,
+    r2Period:{periodStart:review.r2.periodStart,periodEnd:review.r2.periodEnd},policy,
+    deploymentRevisions:f.job.deploymentRevisions};
+  const history={accountId:provider.accountId,jobSha256:f.permit.jobSha256};
+  const evidence={version:2,status:'collected-not-permitted',retrievedAt:at,
+    github:{retrievedAt:at,periodStart:review.github.periodStart,plan:'free',actionsMinutes:f.permit.github.actionsMinutes},
+    supabase:{retrievedAt:at,plan:'free',deploymentRevisions:f.job.deploymentRevisions},
+    r2:{...f.permit.r2,reviewedPeriod:provider.r2Period}};
+  const cache={startedAt:Date.parse(at),fingerprint:hash(JSON.stringify(provider)),evidence};
+  const storage={transaction:async action=>action({get:async key=>{
+    assert.equal(key,'provider-cache');return structuredClone(cache);
+  }})};
+  const actual=await cachedBackupPermit(storage,{BACKUP_ENABLED:'true',PRIMARY_MONITOR_JSON:JSON.stringify({provider,history}),
+    OWNER_REVIEW_JSON:JSON.stringify(review)});
+  for(const key of Object.keys(f.permit))delete f.permit[key];Object.assign(f.permit,actual);
+  const pending=await uploadDaily(f.job,token,context,f.uploadRequest,reservationToken);
+  assert.equal((await readbackDaily(f.job,pending,context,f.readRequest)).status,'verified');
+  assert.equal(f.state.captures,1);assert.equal(f.state.puts,1);assert.equal(f.state.readbacks,1);
+});
 
 test('real capture/encryption plus separate readback produces a verified receipt and preserves prior objects',async t=>{
   const f=fixture(t);

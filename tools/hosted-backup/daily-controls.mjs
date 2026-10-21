@@ -1,5 +1,6 @@
 import { validateOwnerReview, ownerReviewBudget } from './daily-cost-policy.mjs';
 import { chargeComponentRequest } from './daily-request-controls.mjs';
+import { cachedBackupPermit, checkPrimaryMonitor, runPrimaryMonitor } from './daily-primary.mjs';
 export { validateOwnerReview } from './daily-cost-policy.mjs';
 export const dailySourceEgressBytes = 64 * 1024 * 1024;
 export const maximumReviewAttempts = 31;
@@ -89,6 +90,12 @@ export class DailyAttemptGuard {
   constructor(state,env) {this.storage=state.storage;this.env=env;}
   async fetch(request) {
     try {
+      if (request.method === 'GET' && new URL(request.url).pathname === '/daily-backup-permit')
+        return Response.json(await cachedBackupPermit(this.storage,this.env),{headers:{'Cache-Control':'no-store'}});
+      if (request.method === 'POST' && new URL(request.url).pathname === '/internal-monitor' && !request.body) {
+        if (this.env.MONITOR_ENABLED !== 'true') return new Response('Disabled', {status:409});
+        return Response.json(await checkPrimaryMonitor(this.storage,this.env));
+      }
       const expected=this.env.BACKUP_RESERVATION_SHA256;
       const token=request.headers.get('x-flightlogx-reservation-token');
       const route=new URL(request.url).pathname;
@@ -111,8 +118,13 @@ export class DailyAttemptGuard {
 }
 
 export default {
+  async scheduled(controller,env) { await runPrimaryMonitor(env); },
   async fetch(request,env) {
     const route=new URL(request.url).pathname;
+    if(request.method==='GET' && route==='/daily-backup-permit') {
+      if(env.BACKUP_ENABLED!=='true')return Response.json({error:'Backup permit unavailable.'},{status:409,headers:{'Cache-Control':'no-store'}});
+      return env.DAILY_ATTEMPTS.get(env.DAILY_ATTEMPTS.idFromName('flightlogx-preview-source')).fetch(request);
+    }
     if(request.method!=='POST' || !['/daily-backup-reservation','/daily-backup-readback','/daily-backup-request'].includes(route))
       return new Response('Not found',{status:404});
     if(route==='/daily-backup-reservation') {

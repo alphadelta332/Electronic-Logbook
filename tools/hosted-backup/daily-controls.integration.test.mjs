@@ -27,6 +27,7 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     import router, { DailyAttemptGuard as Base } from ${JSON.stringify(fileURLToPath(new URL('./daily-controls.mjs',import.meta.url)))};
     import { reserveComponentRequest, refreshProviderEvidence, cachedProviderEvidence } from ${JSON.stringify(fileURLToPath(new URL('./daily-request-controls.mjs',import.meta.url)))};
     import { checkBackupMonitor } from ${JSON.stringify(fileURLToPath(new URL('./daily-monitor.mjs',import.meta.url)))};
+    import { cachedBackupPermit, checkPrimaryMonitor } from ${JSON.stringify(fileURLToPath(new URL('./daily-primary.mjs',import.meta.url)))};
     import { sendBackupAlert } from ${JSON.stringify(fileURLToPath(new URL('./daily-alert-delivery.mjs',import.meta.url)))};
     import { inspectBackupObject } from ${JSON.stringify(fileURLToPath(new URL('./daily-monitor-observation.mjs',import.meta.url)))};
     const policy=${readFileSync(new URL('./r2-policy.json',import.meta.url),'utf8')};
@@ -34,11 +35,15 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     const config={version:2,githubUser:'alphadelta332',accountId:'a'.repeat(32),supabaseOrganization:'fixture-org',
       projectRef:'b'.repeat(20),bucket:policy.bucket,policy,
       r2Period:{periodStart:new Date(now-day).toISOString(),periodEnd:new Date(now+day).toISOString()},
+      retiredBucketReview:{bucket:'retired-fixture-bucket',observedAt:new Date(now-1000).toISOString(),
+        zeroStorageAt:new Date(now-60000).toISOString()},
       deploymentRevisions:['airport-catalog','recovery-envelope'].map(slug=>({slug,version:1,updated_at:123}))};
     const credentials={github:'g'.repeat(30),cloudflare:'c'.repeat(30),supabaseProject:'s'.repeat(30),supabaseOrganization:'o'.repeat(30)};
     let calls=0;
     const provider=async(url,options)=>{
       calls++;
+      if(url==='https://api.resend.com/emails')return Response.json({id:'01234567-89ab-cdef-0123-456789abcdef'});
+      if(url.includes('/actions/'))return Response.json({total_count:0,workflow_runs:[]});
       if(url.endsWith('/user'))return Response.json({login:config.githubUser,plan:{name:'free'}});
       if(url.includes('github.com'))return Response.json({user:config.githubUser,
         timePeriod:{year:new Date(now).getUTCFullYear(),month:new Date(now).getUTCMonth()+1},usageItems:[]});
@@ -47,9 +52,12 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
       if(url.endsWith('/graphql')){
         const account={},variables=JSON.parse(options.body).variables;
         for(let i=0;variables['from'+i];i++){
-          account['operations'+i]=[];
+          account['operations'+i]=['PutBucket','DeleteBucket'].map(actionType=>({sum:{requests:1},
+            dimensions:{actionType,bucketName:config.retiredBucketReview.bucket}}));
           account['storage'+i]=[{max:{payloadSize:1500,metadataSize:129,uploadCount:0},
-            dimensions:{bucketName:config.bucket,datetime:new Date(now-60000).toISOString()}}];
+            dimensions:{bucketName:config.bucket,datetime:new Date(now-60000).toISOString()}},
+            {max:{payloadSize:0,metadataSize:0,uploadCount:0},dimensions:{bucketName:config.retiredBucketReview.bucket,
+              datetime:config.retiredBucketReview.zeroStorageAt}}];
         }
         return Response.json({data:{viewer:{accounts:[account]}}});
       }
@@ -81,6 +89,22 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
         if(route==='/test-state')return Response.json({requests:await this.storage.get('component-requests'),
           cache:await this.storage.get('provider-cache'),source:await this.storage.get('source-budget'),monitor:await this.storage.get('monitor-state')});
         try {
+          if(['/test-primary','/test-permit'].includes(route)) {
+            const review=JSON.parse(this.env.OWNER_REVIEW_JSON);
+            review.sourceOrigin='https://'+config.projectRef+'.supabase.co';
+            review.r2.periodStart=config.r2Period.periodStart;review.r2.periodEnd=config.r2Period.periodEnd;
+            const history={workflowId:1,workflowPath:'.github/workflows/daily-backup.yml',branch:'main',
+              commit:'d'.repeat(40),jobSha256:review.jobSha256,accountId:config.accountId};
+            const primaryEnv={...this.env,MONITOR_ENABLED:'true',BACKUP_ENABLED:'true',OWNER_REVIEW_JSON:JSON.stringify(review),
+              PRIMARY_MONITOR_JSON:JSON.stringify({provider:config,history}),
+              PROVIDER_CREDENTIALS_JSON:JSON.stringify(credentials),
+              MONITOR_CREDENTIALS_JSON:JSON.stringify({github:'g'.repeat(30)}),
+              ALERT_DELIVERY_JSON:JSON.stringify({version:1,recipient:'owner@example.test'}),RESEND_SEND_TOKEN:'re_'+'a'.repeat(30),
+              MONITOR_HEARTBEAT:{completed:async()=>{await this.storage.put('test-heartbeat',true);}}};
+            if(route==='/test-permit')return Response.json({permit:await cachedBackupPermit(this.storage,primaryEnv,payload.now),calls});
+            const result=await checkPrimaryMonitor(this.storage,primaryEnv,provider,()=>payload.now);
+            return Response.json({result,calls,heartbeat:await this.storage.get('test-heartbeat')});
+          }
           if(route==='/test-monitor')return Response.json(await checkBackupMonitor(this.storage,null,async (r2,github)=>{
             for(let i=0;i<5;i++)await github(async()=>{});
             await inspectBackupObject('a'.repeat(32),{accessKeyId:'b'.repeat(32),secretAccessKey:'c'.repeat(64)},
@@ -92,7 +116,8 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
           },message=>sendBackupAlert(this.storage,{version:1,recipient:'owner@example.test'},'re_'+'a'.repeat(30),message,
             async()=>{if(payload.fail)throw new Error('Synthetic lost delivery');return Response.json({id:'01234567-89ab-cdef-0123-456789abcdef'});},
             ()=>payload.now),()=>payload.now));
-          if(route==='/test-cache')return Response.json({evidence:await cachedProviderEvidence(this.storage,config,payload.now),calls});
+          if(route==='/test-cache')return Response.json({evidence:await cachedProviderEvidence(this.storage,payload.changed ?
+            {...config,retiredBucketReview:{...config.retiredBucketReview,zeroStorageAt:new Date(now-120000).toISOString()}} : config,payload.now),calls});
           if(route==='/test-refresh-valid')return Response.json(await refreshProviderEvidence(this.storage,config,credentials,provider,()=>payload.now),{status:201});
           if(route==='/test-component')await reserveComponentRequest(this.storage,payload.component,payload.now);
           else await refreshProviderEvidence(this.storage,{}, {},()=>{throw new Error('No provider I/O allowed');},()=>payload.now);
@@ -196,19 +221,45 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     assert.equal(state.requests.counts.workflow,4);assert.equal(state.requests.counts.monitor,12);
     assert.equal(state.cache.batches,21);assert.equal(state.source.attempts,1);
     const collectedAt=Date.now();
-    const refreshes=await Promise.all(Array.from({length:16},()=>internal('/test-refresh-valid',{now:collectedAt})));
-    assert.equal(refreshes.filter(r=>r.status===201).length,1);
-    const evidence=await refreshes.find(r=>r.status===201).json();
+    // Exercise actual collection/history/delivery/heartbeat through the primary composition.
+    const primaries=await Promise.all(Array.from({length:16},()=>internal('/test-primary',{now:collectedAt})));
+    assert.equal(primaries.filter(r=>r.status===200).length,1);
+    const primary=await primaries.find(r=>r.status===200).json();
+    assert.deepEqual(primary.result,{conditions:['missing-run','review-expiring','stale-backup'],delivery:'accepted'});
+    assert.equal(primary.calls,18);assert.equal(primary.heartbeat,true);
+    state=await (await internal('/test-state')).json();
+    const evidence=state.cache.evidence;
+    assert.deepEqual(evidence.r2.windows.map(window=>window.requests),[2,2]);
+    assert.equal(evidence.r2.retiredBucketReview.bucket,'retired-fixture-bucket');
+    assert.deepEqual(evidence.r2.retiredBucketReview.windows,[{PutBucket:1,DeleteBucket:1,zeroStorageSamples:1},
+      {PutBucket:1,DeleteBucket:1,zeroStorageSamples:1}]);
     const before=await (await internal('/test-cache',{now:collectedAt+1000})).json();
-    assert.deepEqual(before.evidence,evidence);assert.equal(before.calls,15);
+    assert.deepEqual(before.evidence,evidence);assert.equal(before.calls,18);
+    const savedState=await (await internal('/test-state')).json();
+    const firstPermit=await (await internal('/test-permit',{now:collectedAt+1000})).json();
+    assert.equal(firstPermit.calls,18);assert.equal(firstPermit.permit.version,3);
+    assert.equal(firstPermit.permit.checkedAt,evidence.retrievedAt);
+    assert.deepEqual(firstPermit.permit.deploymentRevisions,evidence.supabase.deploymentRevisions);
+    assert.equal(firstPermit.permit.r2.policySha256,createHash('sha256').update(JSON.stringify(JSON.parse(readFileSync(new URL('./r2-policy.json',import.meta.url))))).digest('hex'));
+    assert.deepEqual(await (await internal('/test-state')).json(),savedState);
     await stop();await start();
     const after=await (await internal('/test-cache',{now:collectedAt+1000})).json();
     assert.deepEqual(after.evidence,evidence);assert.equal(after.calls,0,'Cache read after process restart must make no provider calls.');
+    assert.equal((await internal('/test-cache',{now:collectedAt+1000,changed:true})).status,409);
+    const restartedPermit=await (await internal('/test-permit',{now:collectedAt+1000})).json();
+    assert.deepEqual(restartedPermit.permit,firstPermit.permit);assert.equal(restartedPermit.calls,0);
+    assert.deepEqual(await (await internal('/test-state')).json(),savedState);
+    assert.equal((await internal('/test-permit',{now:collectedAt+2*60*60*1000})).status,409);
     assert.equal((await internal('/test-refresh-valid',{now:collectedAt+1000})).status,409);
     assert.equal((await internal('/test-cache',{now:collectedAt+2*60*60*1000})).status,409);
     state=await (await internal('/test-state')).json();
-    assert.deepEqual(state.requests.counts,{workflow:4,monitor:12,collector:11,github:2,supabase:2});
+    assert.deepEqual(state.requests.counts,{workflow:4,monitor:12,collector:11,github:2,supabase:2,monitorGithub:2});
     assert.equal(state.cache.batches,1);assert.equal(state.source.attempts,1);
+    assert.equal((await internal('/test-primary',{now:collectedAt+2000})).status,409);
+    state=await (await internal('/test-state')).json();
+    assert.equal(state.monitor.checks,1);assert.equal(state.monitor.resend.attempt,1);
+    assert.equal(state.requests.counts.monitorGithub,2);assert.equal(state.cache.batches,1);
+    assert.equal((await fetch(url.replace('/daily-backup-reservation','/internal-monitor'),{method:'POST'})).status,404);
     const monitorTime=Math.floor(Date.now()/(24*60*60*1000))*24*60*60*1000+2*24*60*60*1000+20*60*60*1000;
     assert.equal((await internal('/test-monitor',{now:monitorTime,fail:true})).status,409);
     state=await (await internal('/test-state')).json();
@@ -222,7 +273,7 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     assert.equal((await internal('/test-monitor',{now:monitorTime+4*60*60*1000,fail:true})).status,409);
     state=await (await internal('/test-state')).json();
     assert.equal(state.monitor.incident,incident);assert.equal(state.monitor.dailyAttempts,1);
-    assert.equal(state.monitor.monthlyAttempts,2);assert.equal(state.requests.counts.monitor,2);
+    assert.equal(state.monitor.monthlyAttempts,3);assert.equal(state.requests.counts.monitor,2);
     assert.equal(state.requests.counts.monitorGithub,5);
     assert.equal(state.monitor.resend.attempt,2);assert.match(state.monitor.resend.bodySha256,/^[a-f0-9]{64}$/);
     const wireDigest=state.monitor.resend.bodySha256;

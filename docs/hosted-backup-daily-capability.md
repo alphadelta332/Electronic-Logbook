@@ -1,8 +1,17 @@
 # Daily export capability lifecycle
 
-The daily job is not deployed or scheduled. This component implements
+The daily job is prepared privately but remains disabled and unscheduled. This component implements
 the source credential's installation, expiry, rotation and revocation. The
 existing supervised export continues to use its short-lived temporary endpoint.
+
+Supervised daily lifecycle commissioning passed on 21 October 2026: missing/wrong
+token and POST denial, old-token denial before its original expiry, actual short
+replacement expiry, incorrect-definition removal refusal and guarded removal.
+The final marked endpoint and scoped job/reservation credentials are installed;
+all automation switches remain false, with no schedule or dispatch. This did not
+export participant records. Current exact source/job/review evidence and the next
+acceptance task remain in ignored TODO/evidence. Scheduled operation and restoration
+acceptance are incomplete.
 
 `logicalCapabilityRpcSql(contract, tokenHash, expiresAt, database, {daily: true})`
 generates owner-executed SQL for the same fixed, parameterless GET/read-only snapshot.
@@ -16,6 +25,9 @@ attributes, memberships, all table/column privileges in the exposed schemas and
 the exact reviewed function fingerprints in `preview-logical-contract.json`.
 The function owner must bypass RLS. The installed function retains the coherent
 snapshot, shape/generated-expression/migration checks and 32 MiB response limit.
+The installation transaction fixes `search_path=pg_catalog` before auditing function
+identity arguments. Otherwise custom types can be spelled differently under the
+caller's session path, falsely rejecting an unchanged permission boundary.
 An owner controller must separately verify the expected project, free plan, exact
 PostgREST schema exposure (`public,graphql_public`) and current usage headroom before
 installation. This SQL builder does not inspect provider configuration or billing.

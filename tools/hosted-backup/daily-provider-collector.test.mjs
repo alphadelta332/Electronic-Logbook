@@ -302,6 +302,174 @@ test('every jurisdiction, historical bucket, operation and actual multipart/stor
     ['default', 'eu', 'us']);
 });
 
+test('exact reviewed retired bucket counts stay in both windows and bind the cache', async () => {
+  const retiredBucketReview = { bucket: 'retired-fixture-bucket', observedAt: new Date(now - 1000).toISOString() };
+  const reviewed = { ...config, retiredBucketReview }, storage = durableFixture();
+  const f = fixture(v => v.analytics.data.viewer.accounts[0].operations.push(...['PutBucket', 'DeleteBucket'].map(actionType =>
+    ({ sum: { requests: 1 }, dimensions: { actionType, bucketName: retiredBucketReview.bucket } }))));
+  const evidence = await refreshProviderEvidence(storage, reviewed, credentials, f.request, () => now);
+  assert.deepEqual(evidence.r2.windows.map(window => window.requests), [64, 64]);
+  assert.deepEqual(evidence.r2.retiredBucketReview, { ...retiredBucketReview,
+    windows: [{ PutBucket: 1, DeleteBucket: 1 }, { PutBucket: 1, DeleteBucket: 1 }] });
+  assert.equal(evidence.status, 'collected-not-permitted');
+  assert.equal(f.calls.length, 15);
+  assert.deepEqual(storage.values.get('component-requests').counts, { collector: 11, github: 2, supabase: 2 });
+  assert.deepEqual(await cachedProviderEvidence(storage, reviewed, now), evidence);
+  await assert.rejects(cachedProviderEvidence(storage, config, now), /unavailable/);
+  await assert.rejects(cachedProviderEvidence(storage, { ...reviewed,
+    retiredBucketReview: { ...retiredBucketReview, bucket: 'different-retired-bucket' } }, now), /unavailable/);
+  const expiring = { ...reviewed, retiredBucketReview: { ...retiredBucketReview,
+    observedAt: new Date(now - 31 * 86400000 + 1).toISOString() } };
+  const expiringStorage = durableFixture();
+  await refreshProviderEvidence(expiringStorage, expiring, credentials, fixture().request, () => now);
+  await assert.rejects(cachedProviderEvidence(expiringStorage, expiring, now + 1), /review expired/);
+});
+
+test('retired bucket review never allows storage, other actions, extra counts or a live bucket', async t => {
+  const retiredBucketReview = { bucket: 'retired-fixture-bucket', observedAt: new Date(now - 1000).toISOString() };
+  const reviewed = { ...config, retiredBucketReview };
+  const cases = {
+    'object operation': v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: 1 },
+      dimensions: { actionType: 'GetObject', bucketName: retiredBucketReview.bucket } }),
+    'create count exceeds one': v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: 2 },
+      dimensions: { actionType: 'PutBucket', bucketName: retiredBucketReview.bucket } }),
+    'delete count exceeds one': v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: 2 },
+      dimensions: { actionType: 'DeleteBucket', bucketName: retiredBucketReview.bucket } }),
+    'same prefix different bucket': v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: 1 },
+      dimensions: { actionType: 'PutBucket', bucketName: retiredBucketReview.bucket + '-other' } }),
+    'zero-byte storage sample': v => v.analytics.data.viewer.accounts[0].storage.push({
+      max: { payloadSize: 0, metadataSize: 0, uploadCount: 0 },
+      dimensions: { bucketName: retiredBucketReview.bucket, datetime: '2026-10-18T11:45:00Z' } })
+  };
+  for (const jurisdiction of ['default', 'eu', 'us']) cases['live ' + jurisdiction] = v => {
+    v.inventories[jurisdiction].result.buckets.push({ name: retiredBucketReview.bucket });
+    v.inventories[jurisdiction].result_info.total_count++;
+  };
+  for (const [name, mutate] of Object.entries(cases)) await t.test(name, async () => {
+    const storage = durableFixture(), f = fixture(mutate);
+    await assert.rejects(refreshProviderEvidence(storage, reviewed, credentials, f.request, () => now));
+    await assert.rejects(cachedProviderEvidence(storage, reviewed, now), /unavailable/);
+  });
+  const f = fixture();
+  const evidence = await collectProviderEvidence(reviewed, credentials, f.request, now);
+  assert.deepEqual(evidence.r2.retiredBucketReview.windows, [{ PutBucket: 0, DeleteBucket: 0 }, { PutBucket: 0, DeleteBucket: 0 }]);
+});
+
+test('invalid or expired retired reviews reject before I/O', async () => {
+  for (const retiredBucketReview of [null, [], {}, { bucket: config.bucket, observedAt: new Date(now).toISOString() },
+    { bucket: 'retired-*', observedAt: new Date(now).toISOString() },
+    { bucket: 'retired-bucket', observedAt: null }, { bucket: 'retired-bucket', observedAt: 'invalid' },
+    { bucket: 'retired-bucket', observedAt: new Date(now + 1).toISOString() },
+    { bucket: 'retired-bucket', observedAt: new Date(now - 31 * 86400000).toISOString() },
+    { bucket: 'retired-bucket', observedAt: new Date(now).toISOString(), maxRequests: 500 }]) {
+    const f = fixture();
+    await assert.rejects(collectProviderEvidence({ ...config, retiredBucketReview }, credentials, f.request, now), /retired bucket review/);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test('retired operation ceiling applies across every part of a split window', async () => {
+  const reviewed = { ...config, r2Period: { periodStart: '2026-09-01T00:00:00Z', periodEnd: '2026-11-01T00:00:00Z' },
+    retiredBucketReview: { bucket: 'retired-fixture-bucket', observedAt: new Date(now - 1000).toISOString() } };
+  const f = fixture(v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: 1 },
+    dimensions: { actionType: 'PutBucket', bucketName: reviewed.retiredBucketReview.bucket } }));
+  await assert.rejects(collectProviderEvidence(reviewed, credentials, f.request, now), /Retired bucket operation ceiling/);
+});
+
+const zeroReview = { bucket: 'retired-fixture-bucket', observedAt: new Date(now - 1000).toISOString(),
+  zeroStorageAt: '2026-10-18T11:45:00Z' };
+const zeroSample = () => ({ dimensions: { bucketName: zeroReview.bucket, datetime: zeroReview.zeroStorageAt },
+  max: { payloadSize: 0, metadataSize: 0, uploadCount: 0 } });
+
+test('one explicit retired zero sample is retained per window without dropping requests or changing live storage/freshness', async () => {
+  const reviewed = { ...config, retiredBucketReview: zeroReview }, storage = durableFixture();
+  const f = fixture(v => {
+    const account = v.analytics.data.viewer.accounts[0]; account.storage.push(zeroSample());
+    account.operations.push(...['PutBucket', 'DeleteBucket'].map(actionType =>
+      ({ sum: { requests: 1 }, dimensions: { bucketName: zeroReview.bucket, actionType } })));
+  });
+  const evidence = await refreshProviderEvidence(storage, reviewed, credentials, f.request, () => now);
+  assert.deepEqual(evidence.r2.retiredBucketReview, { ...zeroReview,
+    windows: [0, 1].map(() => ({ PutBucket: 1, DeleteBucket: 1, zeroStorageSamples: 1 })) });
+  assert.deepEqual(evidence.r2.windows.map(window => window.requests), [64, 64]);
+  assert.equal(evidence.r2.currentBytes, 1629); assert.equal(evidence.r2.sampledPeakBytes, 1929);
+  assert.equal(evidence.r2.newestStorageMeasurementAt, new Date(Date.parse(zeroReview.zeroStorageAt)).toISOString());
+  assert.equal(f.calls.length, 15);
+  assert.deepEqual(await cachedProviderEvidence(storage, reviewed, now+1000), evidence);
+  for (const retiredBucketReview of [{ ...zeroReview, zeroStorageAt: '2026-10-18T11:44:00Z' },
+    { bucket: zeroReview.bucket, observedAt: zeroReview.observedAt }])
+    await assert.rejects(cachedProviderEvidence(storage, { ...reviewed, retiredBucketReview }, now), /unavailable/);
+  assert.equal(f.calls.length, 15);
+});
+
+test('explicit zero review rejects other names/times, duplicate/nonzero/unknown samples, object operations and live reappearance', async t => {
+  const cases = {
+    'different name': v => { v.analytics.data.viewer.accounts[0].storage.at(-1).dimensions.bucketName += '-other'; },
+    'different time': v => { v.analytics.data.viewer.accounts[0].storage.at(-1).dimensions.datetime = '2026-10-18T11:44:00Z'; },
+    'duplicate exact sample': v => v.analytics.data.viewer.accounts[0].storage.push(zeroSample()),
+    'additional zero sample': v => v.analytics.data.viewer.accounts[0].storage.push({ ...zeroSample(),
+      dimensions: { bucketName: zeroReview.bucket, datetime: '2026-10-18T11:44:00Z' } }),
+    'unknown measurement': v => { v.analytics.data.viewer.accounts[0].storage.at(-1).max.unknown = 0; },
+    'unknown dimension': v => { v.analytics.data.viewer.accounts[0].storage.at(-1).dimensions.unknown = ''; },
+    'unknown group field': v => { v.analytics.data.viewer.accounts[0].storage.at(-1).unknown = {}; },
+    'object operation even zero': v => v.analytics.data.viewer.accounts[0].operations.push({ sum: { requests: 0 },
+      dimensions: { bucketName: zeroReview.bucket, actionType: 'GetObject' } })
+  };
+  for (const key of ['payloadSize', 'metadataSize', 'uploadCount']) {
+    for (const value of [1, -1, 0.1, '0', null]) cases[key+'='+value] = v => { v.analytics.data.viewer.accounts[0].storage.at(-1).max[key] = value; };
+    cases['missing '+key] = v => { delete v.analytics.data.viewer.accounts[0].storage.at(-1).max[key]; };
+  }
+  for (const jurisdiction of ['default', 'eu', 'us']) cases['live '+jurisdiction] = v => {
+    v.inventories[jurisdiction].result.buckets.push({ name: zeroReview.bucket }); v.inventories[jurisdiction].result_info.total_count++;
+  };
+  for (const [name, mutate] of Object.entries(cases)) await t.test(name, async () => {
+    const f = fixture(v => { v.analytics.data.viewer.accounts[0].storage.push(zeroSample()); mutate(v); });
+    const storage = durableFixture(), reviewed = { ...config, retiredBucketReview: zeroReview };
+    await assert.rejects(refreshProviderEvidence(storage, reviewed, credentials, f.request, () => now));
+    await assert.rejects(cachedProviderEvidence(storage, reviewed, now), /unavailable/);
+  });
+});
+
+test('invalid/expired zero sample reviews reject before I/O and cached evidence expires on the earlier sample boundary', async () => {
+  for (const zeroStorageAt of [null, undefined, 0, 'bad', new Date(now).toISOString(),
+    new Date(now - 31*86400000).toISOString()]) {
+    const f = fixture();
+    await assert.rejects(collectProviderEvidence({ ...config, retiredBucketReview: { ...zeroReview, zeroStorageAt } }, credentials, f.request, now), /retired bucket review/);
+    assert.equal(f.calls.length, 0);
+  }
+  const expiredAt = now - 31*86400000 + 1;
+  const reviewed = { ...config, retiredBucketReview: { ...zeroReview, zeroStorageAt: new Date(expiredAt).toISOString() } };
+  const storage = durableFixture();
+  await refreshProviderEvidence(storage, reviewed, credentials, fixture().request, () => now);
+  await cachedProviderEvidence(storage, reviewed, now);
+  await assert.rejects(cachedProviderEvidence(storage, reviewed, now+1), /review expired/);
+});
+
+test('reviewed zero sample cannot satisfy live storage freshness or replace the live bucket', async () => {
+  const reviewed = { ...config, retiredBucketReview: zeroReview };
+  for (const storage of [[zeroSample()], [zeroSample(), { dimensions: { bucketName: config.bucket, datetime: '2026-10-18T09:00:00Z' },
+    max: { payloadSize: 1000, metadataSize: 129, uploadCount: 0 } }]]) {
+    const f = fixture(v => { v.analytics.data.viewer.accounts[0].storage = storage; });
+    await assert.rejects(collectProviderEvidence(reviewed, credentials, f.request, now), /Storage analytics are stale/);
+  }
+});
+
+test('zero sample at a split boundary is counted once and duplicates across pieces reject', async () => {
+  const boundary = '2026-10-02T00:00:00.000Z';
+  const reviewed = { ...config, r2Period: { periodStart: '2026-09-01T00:00:00.000Z', periodEnd: '2026-11-01T00:00:00.000Z' },
+    retiredBucketReview: { ...zeroReview, zeroStorageAt: boundary } };
+  const sample = { ...zeroSample(), dimensions: { bucketName: zeroReview.bucket, datetime: boundary } };
+  const f = fixture(v => v.analytics.data.viewer.accounts[0].storage.push(sample));
+  const result = await collectProviderEvidence(reviewed, credentials, f.request, now);
+  assert.deepEqual(result.r2.retiredBucketReview.windows.map(window => window.zeroStorageSamples), [1, 1]);
+  const duplicate = async (url, options) => {
+    const response = await f.request(url, options);
+    if (!url.endsWith('/graphql')) return response;
+    const body = await response.json(); body.data.viewer.accounts[0].storage0.push(sample); return Response.json(body);
+  };
+  await assert.rejects(collectProviderEvidence(reviewed, credentials, duplicate, now), /storage measurement/);
+});
+
 test('positive disabled FedRAMP evidence is required before any regional or usage read', async t => {
   const cases = {
     'enabled government region': v => { v.entitlements[1].allocation.value = true; },
