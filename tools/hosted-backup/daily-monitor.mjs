@@ -7,6 +7,42 @@ const age = (value, now) => typeof value === 'string' ? now - Date.parse(value) 
 export const monitorDeliveryLimits = Object.freeze({ primary: Object.freeze({ day: 1, month: 16 }),
   observer: Object.freeze({ day: 1, month: 15 }) });
 
+// An empty POST can have a stream; reject actual bytes without buffering a payload.
+export async function emptyMonitorBody(request) {
+  const reader = request.body?.getReader();
+  if (!reader) return true;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return true;
+      if (value.byteLength) return false;
+    }
+  } finally { await reader.cancel(); reader.releaseLock(); }
+}
+
+// Fixed operational fields only: never log whole ledgers, provider responses or alert bodies.
+export async function logMonitorCheckpoint(storage, kind, phase) {
+  requireValue(['primary', 'observer'].includes(kind) && ['before', 'after', 'heartbeat'].includes(phase), 'Invalid monitor checkpoint.');
+  const count = value => Number.isSafeInteger(value) && value >= 0 ? value : null;
+  const date = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+  const checkpoint = await storage.transaction(async txn => {
+    const [monitor, requests, cache, heartbeat, source] = await Promise.all(
+      ['monitor-state', 'component-requests', 'provider-cache', 'monitor-heartbeat', 'source-budget'].map(key => txn.get(key)));
+    return { version: 1, event: 'backup-monitor-checkpoint', kind, phase,
+      monitor: monitor ? { day: date(monitor.day), startedAt: count(monitor.startedAt), checks: count(monitor.checks),
+        dailyAttempts: count(monitor.dailyAttempts), monthlyAttempts: count(monitor.monthlyAttempts),
+        incidentAttempts: count(monitor.incidentAttempts), delivered: monitor.delivered === true,
+        active: Boolean(monitor.active), wireAttempt: count(monitor.resend?.attempt) } : null,
+      requests: requests ? { day: date(requests.day), counts: Object.fromEntries(
+        ['collector', 'github', 'supabase', 'workflow', 'monitor', 'monitorGithub'].map(key => [key, count(requests.counts?.[key])])) } : null,
+      cache: cache ? { startedAt: count(cache.startedAt), batches: count(cache.batches), active: Boolean(cache.active),
+        hasEvidence: Boolean(cache.evidence), retrievedAt: count(Date.parse(cache.evidence?.retrievedAt)) } : null,
+      heartbeatAt: count(heartbeat?.completedAt),
+      source: source ? { attempts: count(source.attempts), readbackUsed: source.readbackUsed === true } : null };
+  });
+  console.log(JSON.stringify(checkpoint));
+}
+
 export function monitorAlertMessage(state) {
   return { idempotencyKey: `${state.kind === 'observer' ? 'backup-watchdog' : 'backup-monitor'}/${state.incident}`,
     subject: state.deliveryTest === true ? 'FlightLogX backup alert test' : 'FlightLogX backup needs attention',

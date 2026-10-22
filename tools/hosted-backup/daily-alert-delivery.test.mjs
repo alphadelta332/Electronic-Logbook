@@ -26,7 +26,7 @@ test('real monitor reservation sends one exact fixed-origin request and persists
   const db = storage(); let calls = 0;
   const result = await run(db, async (url, options) => {
     calls++; assert.equal(url, 'https://api.resend.com/emails'); assert.equal(options.method, 'POST');
-    assert.equal(options.redirect, 'error'); assert.ok(options.signal);
+    assert.equal(options.redirect, 'manual'); assert.ok(options.signal);
     const state = db.values.get('monitor-state');
     assert.equal(state.incidentAttempts, 1); assert.equal(state.resend.attempt, 1);
     assert.match(state.resend.bodySha256, /^[a-f0-9]{64}$/);

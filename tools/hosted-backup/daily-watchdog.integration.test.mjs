@@ -21,6 +21,7 @@ test('isolated observer SQLite schedules/deduplicates alerts with no primary Wor
     Date.now = () => now;
     // Synthetic-only outbound transport. Any unexpected provider request fails immediately.
     globalThis.fetch = async (url, options) => {
+      new Request(url, options); // Preserve native request validation while isolating delivery I/O.
       if (url !== 'https://api.resend.com/emails' || options.method !== 'POST') throw new Error('Unexpected outbound I/O');
       wireCalls++;
       if (loseReply) throw new Error('Synthetic lost reply');

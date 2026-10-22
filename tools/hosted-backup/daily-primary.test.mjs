@@ -133,6 +133,46 @@ test('timer uses the original stable object and propagates failed internal check
   await assert.rejects(runPrimaryMonitor(env)); assert.equal(calls, 1);
 });
 
+test('internal primary checkpoints show persisted attempts on success and failure without public diagnostics', async t => {
+  const f = fixture(), db = storage(), env = envFor(f), lines = [];
+  t.mock.method(Date, 'now', () => now);
+  t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.startsWith('https://api.github.com/')) return Response.json({ total_count: 0, workflow_runs: [] });
+    return Response.json({ id: '01234567-89ab-cdef-0123-456789abcdef' });
+  });
+  await seed(db, f);
+  env.MONITOR_HEARTBEAT = { async completed() {} };
+  const guard = new DailyAttemptGuard({ storage: db }, env);
+  const request = () => new Request('https://internal/internal-monitor', { method: 'POST' });
+  assert.equal((await guard.fetch(request())).status, 200);
+  assert.deepEqual(lines.map(line => line.phase), ['before', 'after']);
+  assert.equal(lines[0].monitor, null); assert.equal(lines[1].monitor.checks, 1);
+  assert.equal(lines[1].monitor.delivered, true); assert.equal(lines[1].monitor.wireAttempt, 1);
+  assert.equal(lines[1].requests.counts.monitorGithub, 2); assert.equal(lines[1].source, null);
+  const before = structuredClone(db.values);
+  assert.equal((await guard.fetch(request())).status, 409);
+  assert.deepEqual(lines.slice(2).map(line => line.phase), ['before', 'after']);
+  assert.deepEqual(db.values, before); assert.deepEqual(lines[3], lines[1]);
+  assert.equal((await router.fetch(request(), env)).status, 404); assert.equal(lines.length, 4);
+});
+
+test('internal primary accepts a zero-byte streamed POST but rejects nonempty streams before storage', async t => {
+  const f = fixture(), db = storage(), env = envFor(f); await seed(db, f);
+  t.mock.method(Date, 'now', () => now); t.mock.method(console, 'log', () => {});
+  t.mock.method(globalThis, 'fetch', async url => url.startsWith('https://api.github.com/')
+    ? Response.json({ total_count: 0, workflow_runs: [] }) : Response.json({ id: '01234567-89ab-cdef-0123-456789abcdef' }));
+  env.MONITOR_HEARTBEAT = { async completed() {} };
+  const guard = new DailyAttemptGuard({ storage: db }, env);
+  const streamed = value => new Request('https://internal/internal-monitor', { method: 'POST', duplex: 'half',
+    body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array());
+      if (value.length) controller.enqueue(new TextEncoder().encode(value)); controller.close(); } }) });
+  const before = structuredClone(db.values);
+  assert.equal((await guard.fetch(streamed('x'))).status, 409); assert.deepEqual(db.values, before);
+  assert.equal((await guard.fetch(streamed(''))).status, 200);
+  assert.equal(db.values.get('monitor-state').checks, 1); assert.equal(db.values.get('monitor-state').delivered, true);
+});
+
 test('cached composition reserves before delivery, deduplicates concurrent checks and completes private heartbeat', async () => {
   const f = fixture(), db = storage(), env = envFor(f); await seed(db, f);
   let requests = 0, heartbeats = 0;

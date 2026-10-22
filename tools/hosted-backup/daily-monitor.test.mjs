@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { monitorConditions, checkBackupMonitor } from './daily-monitor.mjs';
+import { monitorConditions, checkBackupMonitor, logMonitorCheckpoint } from './daily-monitor.mjs';
 
 const hour = 60 * 60 * 1000, start = Date.parse('2026-10-20T00:00:00Z');
 const iso = time => new Date(time).toISOString();
@@ -34,6 +34,40 @@ function memoryStorage(values = new Map()) {
   } };
 }
 const unhealthy = now => ({ ...observation(now), lastRun: null, lastVerified: null });
+
+test('authenticated tail checkpoints read persisted counters without writes or private ledger fields', async t => {
+  const secret = 'private-sentinel@example.test', db = memoryStorage();
+  db.values.set('monitor-state', { day: '2026-10-20', startedAt: start, checks: 1, dailyAttempts: 1,
+    monthlyAttempts: 2, incidentAttempts: 1, delivered: true, active: null,
+    resend: { attempt: 1, bodySha256: secret }, signature: secret, incident: secret });
+  db.values.set('component-requests', { day: '2026-10-20', counts: { collector: 11, github: 2, supabase: 2, secret } });
+  db.values.set('provider-cache', { startedAt: start, batches: 1, active: null,
+    fingerprint: secret, evidence: { retrievedAt: iso(start), credentials: secret } });
+  db.values.set('monitor-heartbeat', { completedAt: start });
+  db.values.set('source-budget', { attempts: 3, readbackUsed: true, readbackToken: secret });
+  const before = structuredClone(db.values), lines = [];
+  t.mock.method(console, 'log', value => lines.push(JSON.parse(value)));
+  await logMonitorCheckpoint(db, 'primary', 'before');
+  await logMonitorCheckpoint(memoryStorage(db.values), 'observer', 'heartbeat');
+  assert.deepEqual(db.values, before);
+  assert.deepEqual(lines[0], { version: 1, event: 'backup-monitor-checkpoint', kind: 'primary', phase: 'before',
+    monitor: { day: '2026-10-20', startedAt: start, checks: 1, dailyAttempts: 1, monthlyAttempts: 2,
+      incidentAttempts: 1, delivered: true, active: false, wireAttempt: 1 },
+    requests: { day: '2026-10-20', counts: { collector: 11, github: 2, supabase: 2, workflow: null, monitor: null, monitorGithub: null } },
+    cache: { startedAt: start, batches: 1, active: false, hasEvidence: true, retrievedAt: start },
+    heartbeatAt: start, source: { attempts: 3, readbackUsed: true } });
+  assert.equal(lines[1].kind, 'observer'); assert.equal(lines[1].heartbeatAt, start);
+  assert.equal(JSON.stringify(lines).includes(secret), false);
+  db.values.set('monitor-state', { day: secret, checks: secret, dailyAttempts: -1, monthlyAttempts: Infinity });
+  await logMonitorCheckpoint(db, 'primary', 'after');
+  assert.equal(lines[2].monitor.day, null); assert.equal(lines[2].monitor.checks, null);
+  assert.equal(lines[2].monitor.dailyAttempts, null); assert.equal(lines[2].monitor.monthlyAttempts, null);
+  assert.equal(JSON.stringify(lines).includes(secret), false);
+  await logMonitorCheckpoint(memoryStorage(), 'primary', 'before');
+  assert.equal(lines[3].monitor, null); assert.equal(lines[3].cache, null); assert.equal(lines[3].source, null);
+  await assert.rejects(logMonitorCheckpoint(db, secret, 'before'));
+  await assert.rejects(logMonitorCheckpoint(db, 'primary', secret)); assert.equal(lines.length, 4);
+});
 
 test('GitHub monitoring attempts are charged before I/O, bounded to five/check and thirty/day across restart', async () => {
   const storage = memoryStorage(); let now = start, calls = 0;

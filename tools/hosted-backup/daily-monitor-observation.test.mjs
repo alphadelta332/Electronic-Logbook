@@ -46,7 +46,7 @@ function transport(data, override = () => undefined) {
     }
     if (url.includes('.r2.cloudflarestorage.com/')) {
       assert.equal(url, `https://${config.accountId}.r2.cloudflarestorage.com/flightlogx-preview-backups/${data.receipt.key}`);
-      assert.equal(options.redirect, 'error');
+      assert.equal(options.redirect, 'manual');
       assert.ok(!options.headers.Authorization.includes(credentials.github));
       return new Response(data.object);
     }
@@ -149,6 +149,17 @@ test('R2 GET signature matches independent Node HMAC construction, signed read-o
     return new Response(bytes);
   }, now);
   assert.equal(called, true);
+});
+
+test('all R2 redirect responses reject after one charged request without forwarding the signed credentials', async () => {
+  for (const status of [301, 302, 303, 307, 308]) {
+    const data = fixture();
+    await assert.rejects(observeBackup(config, credentials, 'allowed', invoke, invoke, transport(data, url =>
+      url.includes('r2.cloudflarestorage.com') ? new Response(null, { status, headers: { location: 'https://example.test/redirect' } }) : undefined), now));
+    assert.equal(data.calls.length, 6);
+    assert.equal(data.calls.filter(item => item.url.includes('r2.cloudflarestorage.com')).length, 1);
+    assert.equal(data.calls.some(item => item.url.includes('example.test')), false);
+  }
 });
 
 test('failed reads have no hidden retries, second redirects deny and every I/O uses its allowance', async () => {

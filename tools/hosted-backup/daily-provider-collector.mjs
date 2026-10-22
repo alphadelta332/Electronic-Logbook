@@ -6,7 +6,7 @@ const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 async function jsonRequest(url, token, request, body, headers = {}) {
   requireValue(typeof token === 'string' && token.length >= 20 && !/\s/.test(token), 'Missing dedicated monitoring credential.');
   const response = await request(url, {
-    method: body ? 'POST' : 'GET', redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15000),
+    method: body ? 'POST' : 'GET', redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(15000),
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json',
       'User-Agent': 'FlightLogX-backup-evidence', ...headers, ...(url.startsWith('https://api.github.com/')
         ? { 'X-GitHub-Api-Version': '2026-03-10' } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },

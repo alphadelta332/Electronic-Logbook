@@ -1,6 +1,7 @@
 import { validateOwnerReview, ownerReviewBudget } from './daily-cost-policy.mjs';
 import { chargeComponentRequest } from './daily-request-controls.mjs';
 import { cachedBackupPermit, checkPrimaryMonitor, runPrimaryMonitor } from './daily-primary.mjs';
+import { emptyMonitorBody, logMonitorCheckpoint } from './daily-monitor.mjs';
 export { validateOwnerReview } from './daily-cost-policy.mjs';
 export const dailySourceEgressBytes = 64 * 1024 * 1024;
 export const maximumReviewAttempts = 31;
@@ -92,9 +93,11 @@ export class DailyAttemptGuard {
     try {
       if (request.method === 'GET' && new URL(request.url).pathname === '/daily-backup-permit')
         return Response.json(await cachedBackupPermit(this.storage,this.env),{headers:{'Cache-Control':'no-store'}});
-      if (request.method === 'POST' && new URL(request.url).pathname === '/internal-monitor' && !request.body) {
+      if (request.method === 'POST' && new URL(request.url).pathname === '/internal-monitor' && await emptyMonitorBody(request)) {
         if (this.env.MONITOR_ENABLED !== 'true') return new Response('Disabled', {status:409});
-        return Response.json(await checkPrimaryMonitor(this.storage,this.env));
+        await logMonitorCheckpoint(this.storage,'primary','before');
+        try { return Response.json(await checkPrimaryMonitor(this.storage,this.env)); }
+        finally { await logMonitorCheckpoint(this.storage,'primary','after'); }
       }
       const expected=this.env.BACKUP_RESERVATION_SHA256;
       const token=request.headers.get('x-flightlogx-reservation-token');

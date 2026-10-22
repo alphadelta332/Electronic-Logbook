@@ -127,6 +127,24 @@ test('disabled observer never touches storage or network; scheduled dispatch pin
     assert.equal((await enabled.fetch(request)).status, 404);
 });
 
+test('observer accepts empty streamed heartbeats/checks and rejects actual payloads before touching state', async t => {
+  t.mock.method(Date, 'now', () => start); const lines = [];
+  t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+  const db = storage(), guard = new MissingMonitorGuard({ storage: db }, { WATCHDOG_ENABLED: 'true',
+    ALERT_DELIVERY_JSON: JSON.stringify(config), RESEND_SEND_TOKEN: token });
+  const request = (route, value) => new Request('https://internal/' + route, { method: 'POST', duplex: 'half',
+    body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array());
+      if (value.length) controller.enqueue(new TextEncoder().encode(value)); controller.close(); } }) });
+  assert.equal((await guard.fetch(request('heartbeat', 'x'))).status, 404); assert.equal(db.values.size, 0);
+  assert.equal((await guard.fetch(request('heartbeat', ''))).status, 204);
+  assert.equal(db.values.get('monitor-heartbeat').completedAt, start);
+  const before = structuredClone(db.values);
+  assert.equal((await guard.fetch(request('check', 'x'))).status, 404); assert.deepEqual(db.values, before);
+  assert.equal((await guard.fetch(request('check', ''))).status, 200);
+  assert.equal(db.values.get('monitor-state').checks, 1);
+  assert.deepEqual(lines.map(line => line.phase), ['heartbeat', 'before', 'after']);
+});
+
 test('a lease cannot charge yesterday or the previous month for a send after midnight', async () => {
   for (const at of ['2026-10-20T23:59:59Z', '2026-10-31T23:59:59Z']) {
     const db = storage(), now = Date.parse(at); let calls = 0;

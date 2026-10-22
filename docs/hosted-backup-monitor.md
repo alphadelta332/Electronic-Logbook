@@ -6,9 +6,38 @@ R2-byte inspection adapters, tested with synthetic provider responses and the lo
 Worker runtime. `daily-alert-delivery.mjs` connects reserved alert attempts to the
 existing restricted Resend sender. `daily-watchdog*` supplies the separate disabled
 Worker, receiver-timed heartbeat and durable missing-monitor observer. It is **not
-a live monitor**: neither Worker is deployed or scheduled. The primary timer's
-local composition is connected and disabled. Backup automation remains
-disabled with no schedule. Synthetic observations do not establish protection.
+an accepted operational monitor**. Both Workers are deployed; the first native
+scheduled acceptance on22October2026 failed before its first state checkpoint.
+Both monitoring schedules/switches were stopped afterward; backup automation
+remains disabled. Current acceptance state is recorded in local TODO/evidence.
+Synthetic observations do not establish protection.
+
+Internal checks emit `backup-monitor-checkpoint` JSON before and after execution;
+the private heartbeat receiver emits one after saving its receiver time. Inspect
+these through authenticated real-time tails on each existing Worker. The fixed
+allowlist contains only UTC days, timestamps, counters and boolean completion/cache/
+source flags. It excludes conditions, incident IDs, hashes, configuration, provider
+responses, addresses, credentials and records. Reads use a storage transaction and
+never change ledgers or invoke providers. Failed checks also emit their persisted
+post-check counters when the runtime permits; CPU termination may prevent that log.
+An absent completion log is not success. Disabled checks emit nothing. No public
+inspection/trigger route, new service, persistent log sink or credential is added.
+Keep `observability.enabled=false`; authenticated live tails do not require storing
+logs. Capture the bounded acceptance session privately, and verify remote source
+and namespace identities before trusting those events. Logging alone is not proof
+of inbox delivery, restored data or runtime CPU headroom.
+
+Private POST transport validates zero bytes by reading the stream, rather than
+requiring a null body. Empty streams are valid; actual payload bytes reject before
+state access and are cancelled without buffering. The primary internal check and
+the observer's check/heartbeat share this validation. Public routes are unchanged.
+
+Worker HTTP adapters use `redirect: manual` and require the expected success status;
+redirect responses reject without forwarding credentials. Workers does not support
+the Fetch standard's `error` mode: it throws before sending a request. Isolated
+Worker tests construct a native `Request` before supplying synthetic HTTP replies,
+so mocks cannot silently accept unsupported runtime options. The Node-only backup
+runner retains its supported `error` mode.
 
 `daily-primary.mjs` connects the primary scheduled handler to the existing stable
 `DAILY_ATTEMPTS` object. `MONITOR_ENABLED=false` and no Cron Triggers keep dispatch

@@ -41,6 +41,7 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     const credentials={github:'g'.repeat(30),cloudflare:'c'.repeat(30),supabaseProject:'s'.repeat(30),supabaseOrganization:'o'.repeat(30)};
     let calls=0;
     const provider=async(url,options)=>{
+      new Request(url,options); // Keep real workerd option validation before the synthetic response.
       calls++;
       if(url==='https://api.resend.com/emails')return Response.json({id:'01234567-89ab-cdef-0123-456789abcdef'});
       if(url.includes('/actions/'))return Response.json({total_count:0,workflow_runs:[]});
@@ -110,7 +111,7 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
             await inspectBackupObject('a'.repeat(32),{accessKeyId:'b'.repeat(32),secretAccessKey:'c'.repeat(64)},
               {version:2,status:'verified',key:'daily/2026-10-20.elbbackup',bytes:500,
                 sha256:'${createHash('sha256').update(Buffer.alloc(500,42)).digest('hex')}',verifiedAt:new Date(payload.now).toISOString()},
-              r2,async()=>new Response(new Uint8Array(500).fill(42)),payload.now);
+              r2,async(url,options)=>{new Request(url,options);return new Response(new Uint8Array(500).fill(42));},payload.now);
             await r2(async()=>{});
             return {version:1,observedAt:new Date(payload.now).toISOString(),usage:'allowed',lastRun:null,lastVerified:null};
           },message=>sendBackupAlert(this.storage,{version:1,recipient:'owner@example.test'},'re_'+'a'.repeat(30),message,

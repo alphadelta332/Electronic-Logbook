@@ -125,7 +125,7 @@ export async function inspectBackupObject(accountId, access, receipt, r2, reques
   let key = text('AWS4' + access.secretAccessKey);
   for (const part of [day, 'auto', 's3', 'aws4_request']) key = await hmac(key, part);
   const signature = hex(await hmac(key, `AWS4-HMAC-SHA256\n${at}\n${scope}\n${await digest(text(`GET\n${path}\n\n${headers}\n${names}\n${empty}`))}`));
-  const response = await r2(() => request(`https://${host}${path}`, { method: 'GET', redirect: 'error',
+  const response = await r2(() => request(`https://${host}${path}`, { method: 'GET', redirect: 'manual',
     cache: 'no-store', signal: AbortSignal.timeout(60000), headers: {
       'x-amz-date': at, 'x-amz-content-sha256': empty,
       Authorization: `AWS4-HMAC-SHA256 Credential=${access.accessKeyId}/${scope}, SignedHeaders=${names}, Signature=${signature}`

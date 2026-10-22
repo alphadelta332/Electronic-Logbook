@@ -1,4 +1,4 @@
-import { checkMissingMonitor, recordMonitorHeartbeat } from './daily-monitor.mjs';
+import { checkMissingMonitor, recordMonitorHeartbeat, emptyMonitorBody, logMonitorCheckpoint } from './daily-monitor.mjs';
 import { sendBackupAlert } from './daily-alert-delivery.mjs';
 
 export const watchdogObjectName = 'flightlogx-preview-monitor';
@@ -9,16 +9,19 @@ export class MissingMonitorGuard {
   async fetch(request) {
     if (this.env.WATCHDOG_ENABLED !== 'true') return new Response('Disabled', { status: 409 });
     try {
-      if (request.method !== 'POST' || request.body) return new Response('Not found', { status: 404 });
+      if (request.method !== 'POST' || !await emptyMonitorBody(request)) return new Response('Not found', { status: 404 });
       const route = new URL(request.url).pathname;
       if (route === '/heartbeat') {
         await recordMonitorHeartbeat(this.storage);
+        await logMonitorCheckpoint(this.storage, 'observer', 'heartbeat');
         return new Response(null, { status: 204 });
       }
       if (route !== '/check') return new Response('Not found', { status: 404 });
       const config = JSON.parse(this.env.ALERT_DELIVERY_JSON);
-      return Response.json(await checkMissingMonitor(this.storage, message =>
-        sendBackupAlert(this.storage, config, this.env.RESEND_SEND_TOKEN, message)));
+      await logMonitorCheckpoint(this.storage, 'observer', 'before');
+      try { return Response.json(await checkMissingMonitor(this.storage, message =>
+        sendBackupAlert(this.storage, config, this.env.RESEND_SEND_TOKEN, message))); }
+      finally { await logMonitorCheckpoint(this.storage, 'observer', 'after'); }
     } catch { return new Response('Missing-monitor check unavailable', { status: 409 }); }
   }
 }

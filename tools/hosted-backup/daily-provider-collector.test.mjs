@@ -39,7 +39,7 @@ function fixture(mutate = () => {}) {
   const calls = [];
   const request = async (url, options) => {
     calls.push({ url, options });
-    assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
+    assert.equal(options.redirect, 'manual'); assert.equal(options.cache, 'no-store');
     assert.equal(options.headers.Authorization, 'Bearer ' + credentials[url.includes('github.com') ? 'github'
       : url.includes('/organizations/') ? 'supabaseOrganization' : url.includes('supabase.com') ? 'supabaseProject' : 'cloudflare']);
     assert.ok(Object.values(credentials).every(token => !url.includes(token)));

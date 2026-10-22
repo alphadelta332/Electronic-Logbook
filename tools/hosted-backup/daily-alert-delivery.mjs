@@ -31,7 +31,7 @@ export async function sendBackupAlert(storage, config, token, message, request =
   });
   let response;
   try {
-    response = await request('https://api.resend.com/emails', { method: 'POST', redirect: 'error', cache: 'no-store',
+    response = await request('https://api.resend.com/emails', { method: 'POST', redirect: 'manual', cache: 'no-store',
       signal: AbortSignal.timeout(10000), headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json',
         'Idempotency-Key': message.idempotencyKey }, body });
     requireValue(response.status === 200 && response.body &&
