@@ -1,4 +1,4 @@
-import { collectProviderEvidence } from './daily-provider-collector.mjs';
+import { collectProviderEvidence, tagProviderFailure, logProviderFailure } from './daily-provider-collector.mjs';
 
 const hour = 60 * 60 * 1000;
 const requireValue = (condition, message) => { if (!condition) throw new Error(message); };
@@ -67,17 +67,21 @@ export async function refreshProviderEvidence(storage, config, credentials, requ
     const component = { 'https://api.cloudflare.com': 'collector', 'https://api.github.com': 'github',
       'https://api.supabase.com': 'supabase' }[origin];
     requireValue(component && ++calls[component] <= limits[component], 'Unreviewed provider request.');
-    await storage.transaction(async txn => {
+    let stage = 'lease';
+    try { await storage.transaction(async txn => {
       const current = await txn.get('provider-cache'), now = clock();
       requireValue(current?.active === id && now >= startedAt && now - startedAt < 5 * 60 * 1000,
         'Provider refresh lease expired.');
+      stage = 'allowance';
       await chargeComponentRequest(txn, component, now);
-    });
+    }); } catch (error) { throw tagProviderFailure(error, 'cache', stage); }
     return request(url, options);
   };
+  let stage = 'validation';
   try {
     const evidence = await collectProviderEvidence(config, credentials, boundedRequest, startedAt);
     requireValue(new TextEncoder().encode(JSON.stringify(evidence)).length <= 16384, 'Provider cache exceeds size limit.');
+    stage = 'lease';
     await storage.transaction(async txn => {
       const current = await txn.get('provider-cache'), now = clock();
       requireValue(current?.active === id && now >= startedAt && now - startedAt < 5 * 60 * 1000,
@@ -85,6 +89,9 @@ export async function refreshProviderEvidence(storage, config, credentials, requ
       await txn.put('provider-cache', { ...current, active: null, evidence });
     });
     return evidence;
+  } catch (error) {
+    logProviderFailure(tagProviderFailure(error, 'cache', stage));
+    throw error;
   } finally {
     // A late completion cannot replace a newer refresh or refund any attempted request.
     await storage.transaction(async txn => {

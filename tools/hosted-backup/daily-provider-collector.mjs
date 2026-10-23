@@ -2,9 +2,29 @@
 const requireValue = (condition, message) => { if (!condition) throw new Error(message); };
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const failures = new WeakMap();
 
-async function jsonRequest(url, token, request, body, headers = {}) {
+// Keep provenance private: a thrown provider object cannot supply log fields.
+export function tagProviderFailure(error, adapter, stage, status = null) {
+  if (error && typeof error === 'object' && !failures.has(error)) failures.set(error, { adapter, stage, status });
+  return error;
+}
+
+export function logProviderFailure(error) {
+  const failure = failures.get(error) ?? {};
+  const adapter = ['collector', 'github', 'supabase', 'cloudflare', 'cache'].includes(failure.adapter) ? failure.adapter : 'collector';
+  const stage = ['credentials', 'request', 'http', 'body', 'json', 'pagination', 'validation', 'lease', 'allowance']
+    .includes(failure.stage) ? failure.stage : 'validation';
+  const status = Number.isInteger(failure.status) && failure.status >= 100 && failure.status <= 599 ? failure.status : null;
+  try { console.log(JSON.stringify({ version: 1, event: 'backup-provider-failure', adapter, stage, status })); }
+  catch { /* Logging must not replace a failed collection or prevent lease cleanup. */ }
+}
+
+async function jsonRequest(adapter, url, token, request, body, headers = {}) {
+  let stage = 'credentials', status = null;
+  try {
   requireValue(typeof token === 'string' && token.length >= 20 && !/\s/.test(token), 'Missing dedicated monitoring credential.');
+  stage = 'request';
   const response = await request(url, {
     method: body ? 'POST' : 'GET', redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(15000),
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json',
@@ -12,18 +32,22 @@ async function jsonRequest(url, token, request, body, headers = {}) {
         ? { 'X-GitHub-Api-Version': '2026-03-10' } : {}), ...(body ? { 'Content-Type': 'application/json' } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {})
   });
+  stage = 'http'; status = response.status;
   requireValue(response.status === 200, 'Provider evidence request failed; response suppressed.');
+  stage = 'body';
   const chunks = []; let size = 0;
   for await (const part of response.body) {
     size += part.length; requireValue(size <= 1024 * 1024, 'Provider evidence response exceeded limit.'); chunks.push(part);
   }
   const bytes = new Uint8Array(size); let offset = 0;
   for (const part of chunks) { bytes.set(part, offset); offset += part.length; }
-  let result;
+  let result; stage = 'json';
   try { result = JSON.parse(new TextDecoder().decode(bytes)); }
   catch { throw new Error('Provider evidence response is not JSON; response suppressed.'); }
+  stage = 'pagination';
   requireValue(!response.headers.has('link'), 'Paginated provider evidence is unsupported.');
   return result;
+  } catch (error) { throw tagProviderFailure(error, adapter, stage, status); }
 }
 
 function cloudflareResult(value) {
@@ -33,9 +57,10 @@ function cloudflareResult(value) {
 }
 
 export async function collectGithubEvidence(user, token, request = fetch, now = Date.now()) {
+  try {
   requireValue(user === 'alphadelta332' && integer(now), 'Unexpected GitHub account or time.');
   const date = new Date(now), year = date.getUTCFullYear(), month = date.getUTCMonth() + 1;
-  const get = path => jsonRequest('https://api.github.com' + path, token, request);
+  const get = path => jsonRequest('github', 'https://api.github.com' + path, token, request);
   const [account, usage] = await Promise.all([get('/user'),
     get(`/users/${user}/settings/billing/usage/summary?year=${year}&month=${month}`)]);
   requireValue(account?.login === user && account.plan?.name === 'free', 'GitHub account/plan missing or changed.');
@@ -50,9 +75,11 @@ export async function collectGithubEvidence(user, token, request = fetch, now = 
   }
   return { retrievedAt: date.toISOString(), plan: account.plan.name,
     periodStart: new Date(Date.UTC(year, month - 1, 1)).toISOString(), actionsMinutes, remainingAllowanceProved: false };
+  } catch (error) { throw tagProviderFailure(error, 'github', 'validation'); }
 }
 
 export async function collectSupabaseEvidence(config, projectToken, organizationToken, request = fetch, now = Date.now()) {
+  try {
   requireValue(/^[a-z0-9-]+$/.test(config.supabaseOrganization) && /^[a-z]{20}$/.test(config.projectRef) && integer(now),
     'Invalid Supabase identifiers or time.');
   requireValue(projectToken !== organizationToken, 'Project and organization metadata credentials must be separate.');
@@ -60,8 +87,8 @@ export async function collectSupabaseEvidence(config, projectToken, organization
     same(config.deploymentRevisions.map(item => item.slug).sort(), ['airport-catalog', 'recovery-envelope']),
     'Missing reviewed deployment revisions.');
   const [organization, functions] = await Promise.all([
-    jsonRequest('https://api.supabase.com/v1/organizations/' + config.supabaseOrganization, organizationToken, request),
-    jsonRequest('https://api.supabase.com/v1/projects/' + config.projectRef + '/functions', projectToken, request)
+    jsonRequest('supabase', 'https://api.supabase.com/v1/organizations/' + config.supabaseOrganization, organizationToken, request),
+    jsonRequest('supabase', 'https://api.supabase.com/v1/projects/' + config.projectRef + '/functions', projectToken, request)
   ]);
   requireValue(organization?.id === config.supabaseOrganization && organization.plan === 'free', 'Supabase organization/plan changed.');
   requireValue(Array.isArray(functions) && functions.length === config.deploymentRevisions.length, 'Deployment inventory changed.');
@@ -73,9 +100,12 @@ export async function collectSupabaseEvidence(config, projectToken, organization
     return { slug: expected.slug, version: actual[0].version, updated_at: actual[0].updated_at };
   });
   return { retrievedAt: new Date(now).toISOString(), plan: organization.plan, deploymentRevisions };
+  } catch (error) { throw tagProviderFailure(error, 'supabase', 'validation'); }
 }
 
 export async function collectProviderEvidence(config, credentials, request = fetch, now = Date.now()) {
+  let adapter = 'collector';
+  try {
   requireValue(config?.version === 2 && config.githubUser === 'alphadelta332', 'Unexpected evidence account.');
   requireValue(/^[a-f0-9]{32}$/.test(config.accountId) && /^[a-z0-9-]+$/.test(config.supabaseOrganization) &&
     /^[a-z]{20}$/.test(config.projectRef), 'Invalid provider identifiers.');
@@ -119,8 +149,9 @@ export async function collectProviderEvidence(config, credentials, request = fet
     storage${index}: r2StorageAdaptiveGroups(limit: 10000, filter: {datetime_geq: $from${index}, datetime_lt: $until${index}}) {
       max { payloadSize metadataSize uploadCount } dimensions { bucketName datetime }
     }`);
-  const cf = (path, headers = {}) => jsonRequest('https://api.cloudflare.com/client/v4/accounts/' + config.accountId + path,
+  const cf = (path, headers = {}) => jsonRequest('cloudflare', 'https://api.cloudflare.com/client/v4/accounts/' + config.accountId + path,
     credentials.cloudflare, request, undefined, headers).then(cloudflareResult);
+  adapter = 'cloudflare';
   const entitlements = await cf('/entitlements');
   requireValue(Array.isArray(entitlements), 'Missing account entitlements.');
   const r2Features = entitlements.filter(item => item?.feature?.key?.startsWith('r2.') || item?.id?.startsWith('r2.'));
@@ -135,7 +166,7 @@ export async function collectProviderEvidence(config, credentials, request = fet
   // Exclude government namespaces using positive account evidence, never a denied list request.
   const jurisdictions = ['default', 'eu', 'us'];
   const inventories = jurisdictions.map(async jurisdiction => {
-    const response = await jsonRequest('https://api.cloudflare.com/client/v4/accounts/' + config.accountId + '/r2/buckets?per_page=1000',
+    const response = await jsonRequest('cloudflare', 'https://api.cloudflare.com/client/v4/accounts/' + config.accountId + '/r2/buckets?per_page=1000',
       credentials.cloudflare, request, undefined, { 'cf-r2-jurisdiction': jurisdiction });
     const inventory = cloudflareResult(response), info = response.result_info;
     requireValue(Array.isArray(inventory.buckets) && integer(info?.total_count) && info.total_count === inventory.buckets.length &&
@@ -153,7 +184,7 @@ export async function collectProviderEvidence(config, credentials, request = fet
     cf('/r2/metrics'), cf(`/r2/buckets/${config.bucket}/lock`),
     cf(`/r2/buckets/${config.bucket}/lifecycle`), cf(`/r2/buckets/${config.bucket}/domains/managed`),
     cf(`/r2/buckets/${config.bucket}/domains/custom`),
-    jsonRequest('https://api.cloudflare.com/client/v4/graphql', credentials.cloudflare, request, {
+    jsonRequest('cloudflare', 'https://api.cloudflare.com/client/v4/graphql', credentials.cloudflare, request, {
       query: `query($account: string!, ${declarations.join(', ')}) {
         viewer { accounts(filter: {accountTag: $account}) { ${queries.join('\n')} } }
       }`, variables
@@ -260,4 +291,5 @@ export async function collectProviderEvidence(config, credentials, request = fet
       newestStorageMeasurementAt: new Date(newestStorage).toISOString(), sampledPeakBytes,
       monthlyBillingCoverageProved: false }
   };
+  } catch (error) { throw tagProviderFailure(error, adapter, 'validation'); }
 }

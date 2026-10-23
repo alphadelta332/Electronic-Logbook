@@ -151,9 +151,17 @@ test('internal primary checkpoints show persisted attempts on success and failur
   assert.equal(lines[1].monitor.delivered, true); assert.equal(lines[1].monitor.wireAttempt, 1);
   assert.equal(lines[1].requests.counts.monitorGithub, 2); assert.equal(lines[1].source, null);
   const before = structuredClone(db.values);
+  let writes = 0, outboundCalls = 0, heartbeats = 0;
+  const transaction = db.transaction.bind(db);
+  t.mock.method(db, 'transaction', action => transaction(txn => action({ ...txn,
+    async put() { writes++; throw new Error('Guarded inspection must not write.'); }
+  })));
+  t.mock.method(globalThis, 'fetch', async () => { outboundCalls++; throw new Error('Guarded inspection must not call providers.'); });
+  env.MONITOR_HEARTBEAT = { async completed() { heartbeats++; throw new Error('Guarded inspection must not send a heartbeat.'); } };
   assert.equal((await guard.fetch(request())).status, 409);
   assert.deepEqual(lines.slice(2).map(line => line.phase), ['before', 'after']);
   assert.deepEqual(db.values, before); assert.deepEqual(lines[3], lines[1]);
+  assert.deepEqual({ writes, outboundCalls, heartbeats }, { writes: 0, outboundCalls: 0, heartbeats: 0 });
   assert.equal((await router.fetch(request(), env)).status, 404); assert.equal(lines.length, 4);
 });
 
@@ -196,9 +204,17 @@ test('cached composition reserves before delivery, deduplicates concurrent check
   assert.equal(requests, 3);
 });
 
-test('missing/changed inputs and failed collection alert once without a successful provider/history claim', async () => {
+test('missing/changed inputs and failed collection alert once without a successful provider/history claim', async t => {
+  const lines = [];
+  t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
   for (const kind of ['missing-review', 'changed-input', 'failed-refresh', 'missing-heartbeat', 'failed-delivery']) {
     const f = fixture(), db = storage(), env = envFor(f);
+    if (kind === 'failed-refresh') {
+      Object.assign(f.provider, { version: 2, githubUser: 'alphadelta332', supabaseOrganization: 'fixture-org',
+        deploymentRevisions: ['airport-catalog', 'recovery-envelope'].map(slug => ({ slug, version: 1, updated_at: 123 })) });
+      env.PRIMARY_MONITOR_JSON = JSON.stringify({ provider: f.provider, history: f.history });
+      env.PROVIDER_CREDENTIALS_JSON = JSON.stringify({ cloudflare: 'c'.repeat(30) });
+    }
     if (kind !== 'failed-refresh') await seed(db, f);
     if (kind === 'missing-review') delete env.OWNER_REVIEW_JSON;
     if (kind === 'changed-input') env.PRIMARY_MONITOR_JSON = JSON.stringify({ provider: f.provider, history: { ...f.history, jobSha256: 'e'.repeat(64) } });
@@ -219,4 +235,5 @@ test('missing/changed inputs and failed collection alert once without a successf
     assert.equal(sends, 1); assert.equal(db.values.get('monitor-state').dailyAttempts, 1);
     if (kind === 'failed-refresh') assert.equal(db.values.get('provider-cache').batches, 1);
   }
+  assert.deepEqual(lines, [{ version: 1, event: 'backup-provider-failure', adapter: 'cloudflare', stage: 'request', status: null }]);
 });

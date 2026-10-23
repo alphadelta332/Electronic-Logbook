@@ -79,6 +79,76 @@ function durableFixture() {
   }};
 }
 
+test('private refresh failures expose only allowlisted provider/stage/status and preserve fail-closed state', async t => {
+  const marker = 'SECRET-RESPONSE-IDENTITY-MARKER';
+  const cases = [
+    { name: 'HTTP denial', target: '/entitlements', reply: () => new Response(marker, { status: 403, headers: { private: marker } }),
+      expected: ['cloudflare', 'http', 403], requests: 1 },
+    { name: 'GitHub HTTP denial', target: '/user', reply: () => new Response(marker, { status: 429 }), expected: ['github', 'http', 429] },
+    { name: 'Supabase JSON', target: '/functions', reply: () => new Response(marker), expected: ['supabase', 'json', 200] },
+    { name: 'pagination', target: '/entitlements', reply: () => Response.json({}, { headers: { link: marker } }),
+      expected: ['cloudflare', 'pagination', 200], requests: 1 },
+    { name: 'body stream', target: '/entitlements', reply: () => new Response(new ReadableStream({
+      start(controller) { controller.error(new Error(marker)); }
+    })), expected: ['cloudflare', 'body', 200], requests: 1 },
+    { name: 'forged error fields', target: '/entitlements', reply: () => { throw Object.assign(new Error(marker),
+      { adapter: marker, stage: marker, status: marker, diagnostic: { adapter: marker } }); },
+      expected: ['cloudflare', 'request', null], requests: 1 },
+    { name: 'invalid status', target: '/entitlements', reply: () => ({ status: marker }),
+      expected: ['cloudflare', 'http', null], requests: 1 },
+    { name: 'GitHub validation', mutate: v => { v.account.plan.name = marker; }, expected: ['github', 'validation', null] },
+    { name: 'Supabase revision', mutate: v => { v.functions[0].version = marker; }, expected: ['supabase', 'validation', null] },
+    { name: 'Cloudflare validation', mutate: v => { v.managed.enabled = marker; }, expected: ['cloudflare', 'validation', null] },
+    { name: 'stale analytics', mutate: v => { v.analytics.data.viewer.accounts[0].storage[0].dimensions.datetime = '2026-10-18T09:00:00Z'; },
+      expected: ['cloudflare', 'validation', null] },
+    { name: 'configuration', config: {}, expected: ['collector', 'validation', null], requests: 0 },
+    { name: 'credential', credentials: { ...credentials, cloudflare: marker.slice(0, 10) },
+      expected: ['cloudflare', 'credentials', null], requests: 0 },
+    { name: 'lease before outbound', expireAt: 2, expected: ['cache', 'lease', null], requests: 0 },
+    { name: 'lease before save', expireAt: 17, expected: ['cache', 'lease', null] },
+    { name: 'daily allowance', exhausted: true, expected: ['cache', 'allowance', null], requests: 0 }
+  ];
+  for (const scenario of cases) await t.test(scenario.name, async t => {
+    const lines = [], db = durableFixture(), f = fixture(scenario.mutate);
+    t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+    if (scenario.exhausted) db.values.set('component-requests', { day: '2026-10-18', counts: { collector: 231 } });
+    let outbound = 0, ticks = 0;
+    await assert.rejects(refreshProviderEvidence(db, scenario.config ?? config, scenario.credentials ?? credentials,
+      (url, options) => {
+        outbound++;
+        return scenario.target && url.endsWith(scenario.target) ? scenario.reply() : f.request(url, options);
+      }, () => ++ticks >= (scenario.expireAt ?? Infinity) ? now + 300000 : now));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(lines, [{ version: 1, event: 'backup-provider-failure',
+      adapter: scenario.expected[0], stage: scenario.expected[1], status: scenario.expected[2] }]);
+    const serialized = JSON.stringify(lines);
+    for (const secret of [marker, ...Object.values(credentials), config.accountId, config.projectRef, config.bucket,
+      config.githubUser, config.supabaseOrganization]) assert.ok(!serialized.includes(secret));
+    assert.equal(outbound, scenario.requests ?? 15);
+    const counts = db.values.get('component-requests')?.counts ?? {};
+    assert.equal(Object.values(counts).reduce((sum, count) => sum + count, 0), scenario.exhausted ? 231 : outbound);
+    assert.equal(db.values.get('provider-cache').batches, 1);
+    assert.equal(db.values.get('provider-cache').active, null);
+    assert.equal(db.values.get('provider-cache').evidence, undefined);
+    assert.ok([...db.values.keys()].every(key => ['provider-cache', 'component-requests'].includes(key)));
+    await assert.rejects(cachedProviderEvidence(db, scenario.config ?? config, now), /unavailable/);
+  });
+});
+
+test('success and admission denial emit no failure event; logging failure preserves the original error and cleanup', async t => {
+  const lines = [], db = durableFixture();
+  t.mock.method(console, 'log', line => lines.push(line));
+  await refreshProviderEvidence(db, config, credentials, fixture().request, () => now);
+  await assert.rejects(refreshProviderEvidence(db, config, credentials, () => assert.fail('Cooldown did I/O'), () => now), /hour/);
+  assert.deepEqual(lines, []);
+  const error = new Error('SECRET-ERROR-MARKER'), failed = durableFixture();
+  t.mock.method(console, 'log', () => { throw new Error('Logger failed'); });
+  await assert.rejects(refreshProviderEvidence(failed, config, credentials, () => { throw error; }, () => now),
+    actual => actual === error);
+  assert.equal(failed.values.get('provider-cache').active, null);
+  assert.equal(failed.values.get('component-requests').counts.collector, 1);
+});
+
 test('real minimal bucket lists use authenticated bucket details for class and jurisdiction', async () => {
   const f = fixture(v => { v.inventories.default.result.buckets = [{ name: config.bucket, creation_date: '2026-10-17T03:58:25Z' }]; });
   const result = await collectProviderEvidence(config, credentials, f.request, now);

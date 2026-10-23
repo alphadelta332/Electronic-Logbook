@@ -27,6 +27,21 @@ logs. Capture the bounded acceptance session privately, and verify remote source
 and namespace identities before trusting those events. Logging alone is not proof
 of inbox delivery, restored data or runtime CPU headroom.
 
+The locally tested collector also emits one separate `backup-provider-failure`
+event for the first error that rejects an admitted refresh. Its only fields are `version: 1`, `event`,
+`adapter`, `stage` and `status`. Adapters are `collector`, `github`, `supabase`,
+`cloudflare` or `cache`; stages are `credentials`, `request`, `http`, `body`,
+`json`, `pagination`, `validation`, `lease` or `allowance`. Status is an integer
+HTTP code from 100 through 599 when observed at the failed request stage, otherwise
+null. Validation failures do not imply a failed HTTP status. Error provenance
+is held privately in memory; arbitrary thrown objects cannot supply log fields.
+No error message, URL, configured identity, response body or header is logged.
+This event leaves the checkpoint schema, durable keys, counters, cache invalidation,
+alerts and heartbeats unchanged. Success and refresh admission denials emit no
+failure event. Logging errors cannot replace the collection error or skip cleanup.
+This addition still requires disabled deployment and native acceptance; runtime
+termination may prevent emission, so a missing event does not prove success.
+
 Private POST transport validates zero bytes by reading the stream, rather than
 requiring a null body. Empty streams are valid; actual payload bytes reject before
 state access and are cancelled without buffering. The primary internal check and
