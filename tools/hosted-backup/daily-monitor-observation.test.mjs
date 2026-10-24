@@ -73,6 +73,30 @@ test('missing history is missing evidence without an R2 call; lookup failure nev
     async () => new Response('private diagnostics', { status: 403 }), now), /unavailable/);
 });
 
+test('GitHub history and readback work when the runtime supplies no default User-Agent', async () => {
+  const data = fixture();
+  const result = await observeBackup(config, credentials, 'allowed', invoke, invoke, transport(data, (url, options) => {
+    if (url.startsWith('https://api.github.com/') && !new Headers(options.headers).get('User-Agent'))
+      return new Response(null, { status: 403 });
+  }), now);
+  assert.equal(result.lastVerified.verifiedAt, data.receipt.verifiedAt);
+  assert.equal(result.lastRun.conclusion, 'success');
+});
+
+for (const [stage, status, reply] of [
+  ['http', 403, () => new Response('SECRET-MARKER', { status: 403 })],
+  ['json', 200, () => new Response('SECRET-MARKER')],
+  ['body', 200, () => new Response('SECRET-MARKER'.repeat(24000))],
+  ['request', null, () => { throw new Error('SECRET-MARKER'); }],
+  ['validation', null, () => Response.json({ total_count: 1, workflow_runs: [] })]
+]) test(`history ${stage} failure records only allowlisted evidence and still rejects`, async t => {
+  const lines = [], data = fixture();
+  t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+  await assert.rejects(observeBackup(config, credentials, 'allowed', invoke, invoke, transport(data, reply), now));
+  assert.deepEqual(lines, [{ version: 1, event: 'backup-provider-failure', adapter: 'github', stage, status }]);
+  assert.equal(data.calls.length, 1); assert.ok(!JSON.stringify(lines).includes('SECRET-MARKER'));
+});
+
 test('live disabled-workflow shape reports skipped as failed with no successful readback or R2 request', async () => {
   const data = fixture(); data.run.conclusion = 'skipped'; data.successful = null;
   const result = await observe(data);
@@ -80,6 +104,29 @@ test('live disabled-workflow shape reports skipped as failed with no successful 
   assert.equal(data.calls.length, 2);
   const conditions = monitorConditions(result, null, now);
   assert.ok(conditions.includes('failed-run')); assert.ok(conditions.includes('stale-backup'));
+});
+
+for (const [oldConclusion, currentConclusion] of [['skipped', null], ['success', null], ['success', 'failure']])
+test(`previous commit's ${oldConclusion} run cannot establish history for current ${currentConclusion ?? 'unrun'} version`, async () => {
+  const data = fixture(), reviewed = { ...config, commit: '0faede82fcf8aaa066deb66f4d98924c39dc4c8d' };
+  const old = { ...data.run, head_sha: '942e0f063e27449bcebbd04127eea67d95300dcb', conclusion: oldConclusion };
+  const current = { ...data.run, id: 35, head_sha: reviewed.commit, conclusion: currentConclusion };
+  const otherBranch = { ...current, id: 36, head_branch: 'other', conclusion: 'success' };
+  const runs = [...(currentConclusion ? [otherBranch, current] : []), old];
+  const result = await observeBackup(reviewed, credentials, 'allowed', invoke, invoke, transport(data, url => {
+    const { pathname, searchParams } = new URL(url);
+    assert.ok(pathname.endsWith(`/workflows/${config.workflowId}/runs`));
+    const matching = runs.filter(run => (!searchParams.has('head_sha') || run.head_sha === searchParams.get('head_sha')) &&
+      (!searchParams.has('branch') || run.head_branch === searchParams.get('branch')) &&
+      (!searchParams.has('status') || run.conclusion === searchParams.get('status')));
+    return Response.json({ total_count: matching.length, workflow_runs: matching.slice(0, 1) });
+  }), now);
+  assert.equal(result.lastVerified, null);
+  assert.deepEqual(result.lastRun, currentConclusion ? { startedAt: current.run_started_at, conclusion: currentConclusion } : null);
+  assert.equal(data.calls.length, 2);
+  const conditions = monitorConditions(result, null, now);
+  assert.ok(conditions.includes(currentConclusion ? 'failed-run' : 'missing-run'));
+  assert.ok(conditions.includes('stale-backup'));
 });
 
 test('new failed run does not conceal an older independently verified backup; stale time is not refreshed', async () => {

@@ -294,11 +294,20 @@ inspection/reverification. Automatic retries cannot accumulate replacement archi
 This runner never changes bucket policy, retention or multipart settings.
 
 ```powershell
+node --test tools/hosted-backup/daily-backup.integration.test.mjs
 node --test tools/hosted-backup/daily-backup.test.mjs tools/hosted-backup/archive.test.mjs
 node --test tools/hosted-backup/daily-controls.test.mjs tools/hosted-backup/daily-controls.integration.test.mjs
 node --test tools/hosted-backup/daily-cost-policy.test.mjs
 pwsh -NoProfile -File tools/Test-LocalDevelopmentTransfer.ps1
 ```
+
+The CLI composition rehearsal uses the installed Wrangler runtime and disposable
+SQLite. Separate upload/readback processes use the production public routes, real
+permit/reservation parsing, encryption and GitHub output handoff. It restarts the
+Worker before readback, decrypts the resulting archive and checks that wrong
+authentication and replay cannot access data or spend another allowance. Provider
+telemetry is seeded synthetic evidence; source HTTP and R2/curl are controlled
+substitutes. It makes no provider calls and reads no operational credentials.
 
 Synthetic tests execute production capture/encryption/readback and decrypt the test
 archive with an independently held synthetic private key. R2 storage and provider

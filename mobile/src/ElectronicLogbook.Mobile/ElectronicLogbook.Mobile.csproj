@@ -21,6 +21,11 @@
            Text="Mobile chart assets are missing. Run npm.cmd ci from mobile/ before building." />
   </Target>
 
+  <Target Name="ValidateMapDependency" BeforeTargets="PrepareForBuild">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)\..\..\node_modules\maplibre-gl\dist\maplibre-gl.mjs')"
+           Text="Mobile map assets are missing. Run npm.cmd ci from mobile/ before building." />
+  </Target>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.10" PrivateAssets="all" />
@@ -40,6 +45,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\node_modules\maplibre-gl\dist\maplibre-gl.mjs" Link="wwwroot\js\vendor\maplibre-gl.mjs" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\node_modules\maplibre-gl\dist\maplibre-gl-worker.mjs" Link="wwwroot\js\vendor\maplibre-gl-worker.mjs" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\node_modules\maplibre-gl\dist\maplibre-gl.css" Link="wwwroot\css\vendor\maplibre-gl.css" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\node_modules\maplibre-gl\LICENSE.txt" Link="wwwroot\js\vendor\maplibre-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <EmbeddedResource Include="Data\airports.json.gz" LogicalName="ElectronicLogbook.Mobile.Data.airports.json.gz" />
     <EmbeddedResource Include="Templates\LogbookExportCompact.xlsx" LogicalName="ElectronicLogbook.Mobile.Templates.LogbookExportCompact.xlsx" />
     <EmbeddedResource Include="Templates\LogbookExportFull.xlsx" LogicalName="ElectronicLogbook.Mobile.Templates.LogbookExportFull.xlsx" />

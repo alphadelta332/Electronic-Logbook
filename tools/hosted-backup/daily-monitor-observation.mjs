@@ -1,3 +1,5 @@
+import { tagProviderFailure, logProviderFailure } from './daily-provider-collector.mjs';
+
 const repository = 'alphadelta332/flightlogx-preview-backups';
 const root = `https://api.github.com/repos/${repository}`;
 const bucket = 'flightlogx-preview-backups';
@@ -34,14 +36,19 @@ export async function readBackupHistory(config, token, github, request = fetch, 
   const get = async (url, authenticated = true) => github(() => request(url, {
     method: 'GET', redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(10000),
     headers: authenticated ? { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28' } : {}
+      'User-Agent': 'FlightLogX-backup-evidence', 'X-GitHub-Api-Version': '2022-11-28' } : {}
   }));
   const json = async path => {
-    const response = await get(root + path); requireValue(response.status === 200);
-    return JSON.parse(new TextDecoder().decode(await boundedBody(response, 256 * 1024)));
+    let stage = 'request', status = null;
+    try {
+      const response = await get(root + path); stage = 'http'; status = response.status;
+      requireValue(response.status === 200); stage = 'body';
+      const bytes = await boundedBody(response, 256 * 1024); stage = 'json';
+      return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (error) { throw tagProviderFailure(error, 'github', stage, status); }
   };
   const latest = async success => {
-    const result = await json(`/actions/workflows/${config.workflowId}/runs?per_page=1${success ? '&status=success' : ''}`);
+    const result = await json(`/actions/workflows/${config.workflowId}/runs?per_page=1&head_sha=${config.commit}&branch=${encodeURIComponent(config.branch)}${success ? '&status=success' : ''}`);
     requireValue(Number.isSafeInteger(result.total_count) && result.total_count >= 0 &&
       Array.isArray(result.workflow_runs) && result.workflow_runs.length === Math.min(result.total_count, 1));
     if (!result.total_count) return null;
@@ -140,7 +147,9 @@ export async function inspectBackupObject(accountId, access, receipt, r2, reques
 // Internal composition for checkBackupMonitor; usage comes from the existing reviewed permit/cache policy.
 export async function observeBackup(config, credentials, usage, r2, github, request = fetch, now = Date.now()) {
   requireValue(['allowed', 'warning', 'stopped'].includes(usage));
-  const history = await readBackupHistory(config, credentials.github, github, request, now);
+  let history;
+  try { history = await readBackupHistory(config, credentials.github, github, request, now); }
+  catch (error) { logProviderFailure(tagProviderFailure(error, 'github', 'validation')); throw error; }
   if (history.lastVerified) await inspectBackupObject(config.accountId, credentials.r2, history.lastVerified, r2, request, now);
   return { version: 1, observedAt: new Date(now).toISOString(), usage, ...history };
 }

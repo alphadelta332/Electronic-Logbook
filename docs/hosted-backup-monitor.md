@@ -83,15 +83,23 @@ Staging/reconstruction include the composition and regression sources. Synthetic
 local runtime checks cannot establish live provider acceptance or protection.
 
 The internal `observeBackup` adapter makes two authenticated GitHub reads: latest
-workflow run and latest successful run. It pins the workflow ID/path, private source
+workflow run and latest successful run, each filtered to the reviewed commit and
+branch. It pins the workflow ID/path, private source
 repository/head, reviewed commit, branch and prepared job SHA-256. It then checks
 the exact attempt's two successful upload/readback jobs and downloads only the
 readback job's timestamped version-2 receipt. A skipped job, pending uploader claim,
 wrong run/attempt/commit, changed source, missing/duplicate receipt, inconsistent
 time or leaked capability denies. Receipt verification time is retained unchanged.
 Successful-run logs being absent/expired/inaccessible is unavailable evidence,
-never a success or an empty history. The API's empty run list alone establishes
-absence. A newer failed run is retained independently of the older good backup.
+never a success or an empty history. An empty filtered list establishes absence for
+the reviewed version, producing missing/stale evidence even when earlier versions
+have runs. A response containing another commit or branch still denies. A newer
+failed run is retained independently of an older good backup of the same version.
+
+History JSON request failures use the existing private failure-event allowlist:
+GitHub adapter, request/HTTP/body/JSON stage and status only. History validation
+failures report validation with no HTTP claim. Credentials, URLs, response bodies
+and raw exceptions are excluded; these diagnostics never turn a denial into success.
 
 Job-log downloads use GitHub's one-minute signed redirect. Only HTTPS Azure Blob
 or the exact GitHub results-receiver host is accepted; userinfo/ports/another

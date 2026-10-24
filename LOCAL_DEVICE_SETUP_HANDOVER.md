@@ -687,6 +687,13 @@ Import performs these safeguards before changing a destination:
 9. runs `.NET` restore and `npm ci`; and
 10. runs the environment verifier.
 
+The existing mobile `npm ci` step restores the pinned chart and MapLibre renderer
+dependencies. The route-map background/provenance are tracked under
+`mobile/src/ElectronicLogbook.Mobile/wwwroot/data/`; renderer/worker/style assets are
+copied by MSBuild. No map-provider account, API key or global map tool is required.
+Keep `node_modules`, published assets and Android builds as regenerated output,
+outside the transfer bundle. See `docs/route-map.md` for focused offline checks.
+
 Use `-WhatIf` to validate and preview destination changes. It temporarily extracts the
 archive so hashes can be checked, but it does not restore or overwrite destination files:
 

@@ -9,7 +9,7 @@ import { reconstructionSources } from './orchestrate.mjs';
 export const dailyRepositoryFiles = [
   'archive.mjs', 'archive.test.mjs', 'postgres.mjs', 'source-access.mjs', 'orchestrate.mjs', 'logical-client.mjs',
   'preview-logical-contract.json', 'r2-policy.json', 'daily-workflow.json',
-  'daily-backup.mjs', 'daily-backup.test.mjs',
+  'daily-backup.mjs', 'daily-backup.test.mjs', 'daily-backup.integration.test.mjs',
   'daily-controls.mjs', 'daily-controls-worker.mjs', 'daily-controls.wrangler.json',
   'daily-controls.test.mjs', 'daily-controls.integration.test.mjs',
   'daily-primary.mjs', 'daily-primary.test.mjs',

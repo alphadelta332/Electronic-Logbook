@@ -3,7 +3,17 @@ using ElectronicLogbook.Portable;
 namespace ElectronicLogbook.Mobile;
 
 public sealed record MobileAnalyticsFilters(
-    DateOnly? From = null, DateOnly? To = null, IReadOnlyCollection<string>? AircraftTypes = null, IReadOnlyCollection<string>? Registrations = null);
+    DateOnly? From = null, DateOnly? To = null, IReadOnlyCollection<string>? AircraftTypes = null, IReadOnlyCollection<string>? Registrations = null)
+{
+    internal bool MatchesAircraft(PortableLogbookWorkbookEntry entry) =>
+        Matches(entry.Type, AircraftTypes) && Matches(entry.Reg, Registrations);
+
+    internal bool MatchesDate(PortableLogbookWorkbookEntry entry, DateOnly today) =>
+        entry.Date is { } date && date <= today && (From is null || date >= From) && (To is null || date <= To);
+
+    private static bool Matches(string? value, IReadOnlyCollection<string>? filters) => filters is null || filters.Count == 0 ||
+        filters.Any(filter => string.Equals(value?.Trim(), filter.Trim(), StringComparison.OrdinalIgnoreCase));
+}
 
 public sealed record MobileAnalyticsValue(string Name, decimal Value);
 public sealed record MobileAnalyticsYear(int Year, IReadOnlyList<MobileAnalyticsValue> Categories);
@@ -78,10 +88,9 @@ public sealed record MobileLogbookAnalytics(
 
         var active = entries.Where(item => !item.IsDeleted && item.Entry is not null)
             .Select(item => item.Entry!)
-            .Where(entry => Matches(entry.Type, filters.AircraftTypes) && Matches(entry.Reg, filters.Registrations))
+            .Where(filters.MatchesAircraft)
             .ToArray();
-        var selected = active.Where(entry => entry.Date is { } date && date <= today &&
-                (filters.From is null || date >= filters.From) && (filters.To is null || date <= filters.To))
+        var selected = active.Where(entry => filters.MatchesDate(entry, today))
             .OrderBy(entry => entry.Date).ToArray();
         var flights = selected.Where(entry => MobileLogbookSession.WorkbookFlightTime(entry) > 0).ToArray();
         var daily = flights.GroupBy(entry => entry.Date!.Value)
@@ -191,9 +200,6 @@ public sealed record MobileLogbookAnalytics(
 
         MobileAirport? Resolve(string token) => catalog.TryFind(token, out var airport) ? airport : null;
     }
-
-    private static bool Matches(string? value, IReadOnlyCollection<string>? filters) => filters is null || filters.Count == 0 ||
-        filters.Any(filter => string.Equals(value?.Trim(), filter.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private static bool IsOtherPerson(string? name) => !string.IsNullOrWhiteSpace(name) &&
         !string.Equals(name.Trim(), "Self", StringComparison.OrdinalIgnoreCase);

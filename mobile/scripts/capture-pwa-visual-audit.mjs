@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { createServer } from "node:http";
-import { access, mkdir, stat } from "node:fs/promises";
+import { access, mkdir, stat, writeFile, readFile } from "node:fs/promises";
 import { dirname, extname, join, normalize, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import AxeBuilder from "@axe-core/playwright";
@@ -14,6 +14,7 @@ const mimeTypes = new Map([
     [".css", "text/css"],
     [".html", "text/html"],
     [".js", "application/javascript"],
+    [".mjs", "application/javascript"],
     [".json", "application/json"],
     [".png", "image/png"],
     [".svg", "image/svg+xml"],
@@ -61,6 +62,7 @@ const routes = [
     { name: "charts-design", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics-design" },
     { name: "stats-populated", path: "/charts", readySelector: "main #hours-year-heading", state: "analytics", stats: true },
     { name: "routes", path: "/routes", readySelector: "main [aria-labelledby=\"routes-heading\"]" },
+    { name: "routes-populated", path: "/routes", readySelector: "main .route-map-canvas[aria-busy=false]", state: "route-map" },
     { name: "exchange", path: "/exchange", readySelector: "main .package-exchange-page" },
     { name: "settings", path: "/settings", readySelector: "main .settings-page" },
     { name: "settings-expanded", path: "/settings", readySelector: "main .settings-page", expanded: true },
@@ -138,6 +140,7 @@ async function createDashboardFlight(page, baseUrl) {
     await page.getByLabel("PIC", { exact: true }).fill("Self");
     await page.getByLabel("From", { exact: true }).fill("YMMB");
     await page.getByLabel("To", { exact: true }).fill("YSSY");
+    await page.getByLabel("To", { exact: true }).press("Escape");
     await page.getByLabel("SE command day", { exact: true }).fill("2.0");
     await page.getByRole("button", { name: "Add flight" }).click();
     const reviewDialog = page.getByRole("dialog", { name: "Add this flight?" });
@@ -154,12 +157,42 @@ async function createDashboardFlight(page, baseUrl) {
     return entryId;
 }
 
+async function clickMapAirport(page, icao, visits) {
+    const marker = page.getByRole("button", { name: new RegExp(`${icao}, ${visits} visits?$`) });
+    await marker.scrollIntoViewIfNeeded();
+    const bounds = await marker.boundingBox();
+    await page.mouse.click(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+}
+
 async function prepareRouteState(page, baseUrl, state) {
     if (!state) {
         return {};
     }
 
     const entryId = await createDashboardFlight(page, baseUrl);
+    if (state === "route-map") {
+        await page.evaluate(async () => {
+            const stored = JSON.parse(await window.electronicLogbookStore.load("portable-document"));
+            const document = JSON.parse(stored.documentJson);
+            const template = document.operations.find(operation => operation.entry);
+            const routes = [
+                ["YMMB", "", "YSSY", 1], ["YSSY", "YMMB YSSY", "YMMB", 1],
+                ["YSSY", "UNKNOWN", "YMML", 2], ["YMMB", "", "YMMB", 3],
+                ["NZAA", "", "PHNL", 4], ["UNKNOWN", "OTHER", "UNKNOWN", 5]
+            ];
+            document.operations = routes.map(([from, via, to, day], index) => {
+                const operation = structuredClone(template);
+                operation.entryId = `ent_route_${index}`;
+                operation.revisionId = `rev_route_${index}`;
+                Object.assign(operation.entry, { year: 2024, month: 1, day, type: index === 4 ? "C208" : "C172", reg: index === 4 ? "VH-PAC" : "VH-TEST", from, via, to, seCommandDay: 1 });
+                return operation;
+            });
+            stored.documentJson = JSON.stringify(document);
+            await window.electronicLogbookStore.save("portable-document", JSON.stringify(stored));
+        });
+        await page.evaluate(() => navigator.serviceWorker.ready);
+        await page.context().setOffline(true);
+    }
     if (state === "large-totals" || state === "analytics" || state === "analytics-design") {
         // Synthetic migrated history, isolated in this audit's disposable browser context.
         await page.evaluate(async (fixture) => {
@@ -270,9 +303,10 @@ const baseUrl = `http://127.0.0.1:${address.port}`;
 await mkdir(outputDirectory, { recursive: true });
 const failures = [];
 const warnings = [];
+const mapNetworkLog = selectedRoutes.some(route => route.state === "route-map") ? join(outputDirectory, "map-chromium-netlog.json") : null;
 
 try {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, args: mapNetworkLog ? [`--log-net-log=${mapNetworkLog}`, "--net-log-capture-mode=IncludeSensitive"] : [] });
     try {
         for (const colorScheme of selectedColorSchemes) {
             for (const profile of selectedProfiles) {
@@ -288,11 +322,14 @@ try {
                     page.on("pageerror", error => browserErrors.push(error.message));
                     page.on("console", message => {
                         if (message.type() === "error") {
+                            if (route.state === "route-map" && message.location().url.startsWith("https://tiles.openfreemap.org/") && message.text().startsWith("Failed to load resource")) return;
                             browserErrors.push(message.text());
                         }
                     });
                     try {
                     const routeState = await prepareRouteState(page, baseUrl, route.state);
+                    const mapRequests = [];
+                    if (route.state === "route-map") page.on("request", request => mapRequests.push({ url: request.url(), method: request.method(), request }));
                     const routePath = typeof route.path === "function" ? route.path(routeState) : route.path;
                     await page.goto(`${baseUrl}${routePath}`, { waitUntil: "domcontentloaded" });
                     await page.locator(route.readySelector).waitFor({ state: "visible", timeout: route.state === "large-totals" ? 90000 : 30000 });
@@ -310,6 +347,157 @@ try {
                         }
                     }
                     await applyTextScale(page, profile.fontScale);
+                    if (route.state === "route-map") {
+                        if (await page.locator(".routes-summary, .routes-help, .route-list, .route-selection, .route-flights").count()) throw new Error("Removed map prose or bottom sections returned.");
+                        if (await page.locator(".route-airport-marker").count() !== 5) throw new Error("Expected five airport markers.");
+                        const required = ["js/routeMap.mjs", "js/vendor/maplibre-gl.mjs", "js/vendor/maplibre-gl-worker.mjs", "css/vendor/maplibre-gl.css", "data/natural-earth-countries.json"];
+                        const missing = await page.evaluate(async paths => {
+                            const cache = await caches.open((await caches.keys()).find(name => name.startsWith("offline-cache-")));
+                            return (await Promise.all(paths.map(async path => await cache.match(new URL(path, document.baseURI)) ? null : path))).filter(Boolean);
+                        }, required);
+                        if (missing.length) throw new Error(`Map assets absent from offline cache: ${missing.join(", ")}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-overview.png`) });
+                        await page.getByRole("button", { name: "Filters", exact: true }).click();
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-filters.png`) });
+                        await page.locator("#routes-from").fill("2024-01-04");
+                        await page.locator("#routes-to").fill("2024-01-04");
+                        await page.locator(".route-map-canvas[aria-busy=false]").waitFor();
+                        await page.getByRole("button", { name: "Filters (1)", exact: true }).click();
+                        const canvas = page.locator(".maplibregl-canvas");
+                        const bounds = await canvas.boundingBox();
+                        await canvas.click({ position: { x: bounds.width / 2, y: bounds.height / 2 } });
+                        if (await page.locator(".maplibregl-popup").count()) throw new Error("Route lines should not open a selection panel.");
+                        await clickMapAirport(page, "NZAA", 1);
+                        const popup = page.locator(".route-airport-details");
+                        await popup.waitFor();
+                        if (await popup.locator("strong").innerText() === "" || JSON.stringify(await popup.locator("span").allTextContents()) !== JSON.stringify(["NZAA", "1 visit"])) throw new Error("Airport popup must contain name, ICAO and visits only.");
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-date-line.png`) });
+                        await page.getByRole("button", { name: "Close popup", exact: true }).click();
+                        await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+                        await page.getByRole("button", { name: "Show all routes", exact: true }).click();
+                        await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+                        await page.getByRole("button", { name: "Filters", exact: true }).click();
+                        await page.locator("#routes-from").fill("2024-01-03");
+                        await page.locator("#routes-to").fill("2024-01-03");
+                        await page.locator(".route-map-canvas[aria-busy=false]").waitFor();
+                        await page.getByRole("button", { name: "Filters (1)", exact: true }).click();
+                        const localAirport = page.getByRole("button", { name: /YMMB, 1 visit$/ });
+                        await localAirport.focus();
+                        await localAirport.press("Enter");
+                        await popup.waitFor();
+                        if (JSON.stringify(await popup.locator("span").allTextContents()) !== JSON.stringify(["YMMB", "1 visit"])) throw new Error("Keyboard airport selection failed.");
+                        await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+                        await page.locator(".route-map-canvas[aria-busy=false]").waitFor();
+                        await clickMapAirport(page, "YMMB", 3);
+                        if (JSON.stringify(await popup.locator("span").allTextContents()) !== JSON.stringify(["YMMB", "3 visits"])) throw new Error("Repeated stops inflated airport visits.");
+                        const popupBounds = await page.locator(".maplibregl-popup-content").boundingBox();
+                        const mapBounds = await page.locator(".route-map-canvas").boundingBox();
+                        if (popupBounds.x < mapBounds.x || popupBounds.x + popupBounds.width > mapBounds.x + mapBounds.width || popupBounds.y < mapBounds.y || popupBounds.y + popupBounds.height > mapBounds.y + mapBounds.height) throw new Error("Airport popup is clipped by the map.");
+                        await assertAccessible(page, `offline route map ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-airport-popup.png`) });
+                        const external = mapRequests.filter(request => new URL(request.url).origin !== new URL(baseUrl).origin);
+                        // Existing font and public airport-catalogue GETs also run on other app screens.
+                        const expectedBackgroundRequest = request => {
+                            const url = new URL(request.url);
+                            return request.method === "GET" && (
+                                url.hostname === "fonts.googleapis.com" && url.pathname === "/css2" ||
+                                url.hostname === "fonts.gstatic.com" && url.pathname.startsWith("/s/inter/") ||
+                                url.hostname.endsWith(".supabase.co") && url.pathname.startsWith("/storage/v1/object/public/airport-catalog/"));
+                        };
+                        const unexpected = external.filter(request => !expectedBackgroundRequest(request));
+                        console.log(`Offline map request inspection: ${mapRequests.length} requests; existing app background requests: ${JSON.stringify(external.map(request => ({ host: new URL(request.url).hostname, path: new URL(request.url).pathname, method: request.method })))}`);
+                        if (unexpected.length) throw new Error(`Unexpected external requests: ${JSON.stringify(unexpected.map(request => ({ host: new URL(request.url).hostname, path: new URL(request.url).pathname, method: request.method })))}`);
+                        await page.context().setOffline(false);
+                        await context.addCookies([{ name: "route_privacy_canary", value: "must-never-be-sent", domain: "tiles.openfreemap.org", path: "/", secure: true, sameSite: "None" }]);
+                        await page.goto(`${baseUrl}/routes`);
+                        await page.locator(".route-map-canvas[aria-busy=false]").waitFor();
+                        await applyTextScale(page, profile.fontScale);
+                        await page.locator('.route-map-canvas[data-background="online"]').waitFor({ timeout: 25000 });
+                        const attribution = page.locator(".maplibregl-ctrl-attrib");
+                        for (const name of ["OpenFreeMap", "OpenMapTiles", "OpenStreetMap"]) {
+                            if (!(await attribution.innerText()).includes(name)) throw new Error(`Missing ${name} attribution.`);
+                        }
+                        await assertAccessible(page, `online route map ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-online.png`) });
+                        await clickMapAirport(page, "YMMB", 3);
+                        if (JSON.stringify(await page.locator(".route-airport-details span").allTextContents()) !== JSON.stringify(["YMMB", "3 visits"])) throw new Error("Online background changed airport selection.");
+                        await page.getByRole("button", { name: "Close popup", exact: true }).click();
+                        // Fail a tile after successful startup, then fail the style on a new visit.
+                        // Worker tile fetches bypass Playwright routing. Suppress only our offline
+                        // listener here so actual failed fetches must trigger the renderer error path.
+                        await page.evaluate(() => window.addEventListener("offline", event => event.stopImmediatePropagation(), { capture: true, once: true }));
+                        await context.setOffline(true);
+                        for (let zoom = 0; zoom < 4; zoom++) {
+                            await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+                            await page.waitForTimeout(400);
+                        }
+                        await page.locator('.route-map-canvas[data-background="offline"]').waitFor({ timeout: 20000 });
+                        await page.getByRole("button", { name: "Show all routes", exact: true }).click();
+                        await clickMapAirport(page, "YMMB", 3);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-provider-failure.png`) });
+                        // Restore connectivity without firing the app retry listener, then reject
+                        // the main-thread style request to simulate a provider-specific outage.
+                        await page.evaluate(() => window.addEventListener("online", event => event.stopImmediatePropagation(), { capture: true, once: true }));
+                        await context.setOffline(false);
+                        // Inject provider responses at the fetch boundary; the service worker can
+                        // otherwise hide request failures from Playwright's page event stream.
+                        await page.addInitScript(() => {
+                            const originalFetch = window.fetch.bind(window);
+                            window.fetch = (url, options) => {
+                                if (String(url).startsWith("https://tiles.openfreemap.org/styles/")) {
+                                    window.routeMapStyleAttempted = true;
+                                    if (localStorage.getItem("route-map-audit-provider-mode") === "stall") return new Promise((resolve, reject) => {
+                                        options.signal.addEventListener("abort", () => { window.routeMapStyleAborted = true; reject(new DOMException("Aborted", "AbortError")); });
+                                    });
+                                    return Promise.resolve(new Response(null, { status: 503 }));
+                                }
+                                return originalFetch(url, options);
+                            };
+                        });
+                        await page.reload();
+                        await page.waitForFunction(() => window.routeMapStyleAttempted);
+                        await page.locator(".route-map-canvas[aria-busy=false]").waitFor();
+                        await page.waitForFunction(() => document.querySelector(".route-map-canvas")?.dataset.background === "offline");
+                        await clickMapAirport(page, "YMMB", 3);
+                        await page.getByRole("button", { name: "Close popup", exact: true }).click();
+                        if (profile.name === "phone-390x844-font100" && colorScheme === "light") {
+                            await page.evaluate(() => localStorage.setItem("route-map-audit-provider-mode", "stall"));
+                            const started = Date.now();
+                            await page.reload();
+                            await page.waitForFunction(() => window.routeMapStyleAborted, null, { timeout: 18000 });
+                            if (Date.now() - started < 11000) throw new Error("Stalled provider exercise ended before the timeout.");
+                            await page.locator('.route-map-canvas[data-background="offline"]').waitFor();
+                            await clickMapAirport(page, "YMMB", 3);
+                            await page.getByRole("button", { name: "Close popup", exact: true }).click();
+                            console.log("Stalled provider style timed out; offline airport selection passed.");
+                        }
+                        const providerRequests = [];
+                        for (const item of mapRequests.filter(item => new URL(item.url).hostname === "tiles.openfreemap.org")) {
+                            if (item.request.failure()) continue;
+                            const headers = await item.request.allHeaders();
+                            const url = new URL(item.url);
+                            if (item.method !== "GET" || item.request.postData() || url.search || url.username || url.password ||
+                                ["authorization", "cookie", "apikey", "referer"].some(name => headers[name]) ||
+                                /VH-TEST|VH-PAC|ent_route_|rev_route_|YMMB|YSSY|NZAA|PHNL|must-never-be-sent/.test(JSON.stringify({ url: item.url, headers })))
+                                throw new Error(`Private data in map provider request: ${url.pathname}`);
+                            providerRequests.push({ url: item.url, method: item.method, headers });
+                        }
+                        await writeFile(join(outputDirectory, `${profile.name}-${colorScheme}-map-network.json`), JSON.stringify(providerRequests, null, 2));
+                        console.log(`Provider inspection passed: ${providerRequests.length} GETs; no credentials, cookies, referrer, flight IDs, registrations or airport identifiers. Online detail, live tile failure and startup failure passed.`);
+                        await page.getByRole("button", { name: "Filters", exact: true }).click();
+                        await page.locator("#routes-from").fill("2024-02-01");
+                        await page.locator("#routes-to").fill("2024-01-01");
+                        await page.getByRole("alert").filter({ hasText: "Choose a Start date" }).waitFor();
+                        await page.getByRole("button", { name: "Clear filters", exact: true }).click();
+                        await page.getByRole("button", { name: "Filters", exact: true }).click();
+                        await page.locator(".route-map-canvas[aria-busy=false]").waitFor();
+                        // The Material ripple temporarily expands the button's scroll dimensions.
+                        await page.waitForFunction(() => {
+                            const button = document.querySelector(".logbook-filter-button");
+                            return button && button.getAnimations({ subtree: true }).length === 0 &&
+                                button.scrollWidth <= button.clientWidth + 1 && button.scrollHeight <= button.clientHeight + 1;
+                        }, null, { timeout: 2000 });
+                    }
                     await page.waitForTimeout(50);
                     await page.evaluate(() => {
                         window.electronicLogbookNavigation?.scrollMainToTop();
@@ -846,6 +1034,15 @@ try {
                         await assertAccessible(page, `totals expanded filters ${profile.name} ${colorScheme}`);
                         await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-filters.png`) });
                     } else if (route.path === "/settings") {
+                        const privacy = page.locator("details.settings-privacy");
+                        await privacy.evaluate(element => element.open = true);
+                        if (!(await privacy.innerText()).includes("viewed map area") ||
+                            await privacy.locator('a[href="https://openfreemap.org/privacy/"]').count() !== 1 ||
+                            await privacy.locator('a[href="https://openfreemap.org/tos/"]').count() !== 1) throw new Error("Map privacy disclosure missing.");
+                        await privacy.scrollIntoViewIfNeeded();
+                        await assertAccessible(page, `map privacy ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-settings-privacy.png`) });
+                        await privacy.evaluate(element => element.open = false);
                         const appearance = page.getByRole("group", { name: "Appearance", exact: true });
                         const originalTheme = await appearance.locator("button[aria-pressed=true]").innerText();
                         for (const theme of ["Light", "Dark", "System"]) {
@@ -956,6 +1153,21 @@ try {
         }
     } finally {
         await browser.close();
+    }
+    if (mapNetworkLog) {
+        const netlog = JSON.parse(await readFile(mapNetworkLog, "utf8"));
+        const headerTypes = ["HTTP_TRANSACTION_SEND_REQUEST_HEADERS", "HTTP_TRANSACTION_HTTP2_SEND_REQUEST_HEADERS", "HTTP_TRANSACTION_QUIC_SEND_REQUEST_HEADERS"].map(name => netlog.constants.logEventTypes[name]);
+        const sent = netlog.events.filter(event => headerTypes.includes(event.type) &&
+            /(?:host:|:authority:) tiles\.openfreemap\.org/i.test((event.params?.headers ?? []).join("\n")));
+        if (!sent.length || !sent.some(event => /\.pbf/.test(event.params.headers.join("\n")))) failures.push("Chromium network log did not capture detailed provider tile requests.");
+        for (const event of sent) {
+            const headers = event.params.headers.join("\n");
+            if (!/(?:^|\n)(?::method: GET|GET \S+ HTTP\/)/.test(headers) || /^:path: .*\?/m.test(headers) ||
+                /(?:^|\n)(?:authorization|cookie|apikey|referer):|VH-TEST|VH-PAC|ent_route_|rev_route_|YMMB|YSSY|NZAA|PHNL|must-never-be-sent/i.test(headers))
+                failures.push("Private data in Chromium map request headers.");
+        }
+        await writeFile(join(outputDirectory, "map-sent-headers.json"), JSON.stringify(sent, null, 2));
+        console.log(`Chromium wire inspection: ${sent.length} provider requests including worker tiles; no account headers, cookies, referrer or flight fixture data.`);
     }
 } finally {
     await new Promise((resolveClose) => server.close(resolveClose));

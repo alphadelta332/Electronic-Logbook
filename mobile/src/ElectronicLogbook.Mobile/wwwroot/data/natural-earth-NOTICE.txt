@@ -1,0 +1,8 @@
+Natural Earth 1:110m admin-0 country outlines. Public domain.
+Terms checked 2026-10-24: https://www.naturalearthdata.com/about/terms-of-use/
+Source: https://github.com/nvkelso/natural-earth-vector/blob/ca96624a56bd078437bca8184e78163e5039ad19/geojson/ne_110m_admin_0_countries.geojson
+Upstream SHA-256: 6866c877d39cba9c357620878839b336d569f8c662d3cfab4cb1dbe2d39c977f
+Derived file: natural-earth-countries.json (177 countries).
+Transformation: keep geometry only; round coordinates to three decimal places;
+minify JSON. The 1:110m source is already simplified. This is an overview background,
+not a navigation chart; small islands and detailed boundaries may be absent.

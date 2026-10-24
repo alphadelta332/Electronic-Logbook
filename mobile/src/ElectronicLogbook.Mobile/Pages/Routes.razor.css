@@ -1,0 +1,33 @@
+.routes-page { min-width: 0; }
+.routes-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.routes-heading { margin-block: 8px 20px; }
+.routes-heading h1 { margin: 0; font-size: 1.5rem; font-weight: 700; letter-spacing: -.025em; }
+.routes-filters { display: grid; grid-template-columns: 1fr; gap: 16px; padding-block: 8px 16px; }
+@media (min-width: 600px) { .routes-filters { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); } }
+.routes-filter-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-block: 12px; font-size: .875rem; color: var(--app-text-muted); overflow-wrap: anywhere; }
+.route-map-panel { position: relative; }
+.route-map-toolbar { position: absolute; z-index: 1; inset-block-start: 12px; inset-inline-start: 12px; }
+.route-map-toolbar ::deep button { width: 48px; height: 48px; background: var(--app-surface); }
+.routes-page ::deep button { min-height: 48px; }
+.routes-page ::deep .route-map-canvas { width: 100%; height: clamp(320px, 70dvh, 800px); border: 1px solid var(--app-border); border-radius: 12px; overflow: hidden; background: var(--app-surface-alt); font: inherit; }
+.routes-page ::deep .route-airport-marker { width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; display: grid; place-items: center; pointer-events: none; }
+.routes-page ::deep .route-airport-marker::after { content: ''; width: 12px; height: 12px; border: 2px solid var(--app-surface); border-radius: 50%; background: var(--app-primary); }
+.routes-page ::deep .route-airport-marker[aria-expanded="true"]::after { outline: 3px solid var(--app-text); outline-offset: 2px; }
+.routes-page ::deep .route-airport-marker:focus-visible { outline: 3px solid var(--app-primary); outline-offset: -3px; }
+.routes-page ::deep .maplibregl-popup { font: inherit; z-index: 3; }
+.routes-page ::deep .maplibregl-popup-content { padding: 14px 56px 14px 16px; background: var(--app-surface); color: var(--app-text); border: 1px solid var(--app-border); border-radius: 8px; box-shadow: none; overflow-wrap: anywhere; }
+.routes-page ::deep .maplibregl-popup-close-button { width: 48px; height: 48px; color: var(--app-text); font: inherit; }
+.routes-page ::deep .route-airport-details { display: grid; gap: 4px; }
+.routes-page ::deep .route-airport-details span { color: var(--app-text-muted); }
+.routes-page ::deep [class*="maplibregl-popup-anchor-top"] .maplibregl-popup-tip { border-bottom-color: var(--app-surface); }
+.routes-page ::deep [class*="maplibregl-popup-anchor-bottom"] .maplibregl-popup-tip { border-top-color: var(--app-surface); }
+.routes-page ::deep .maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--app-surface); }
+.routes-page ::deep .maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--app-surface); }
+.routes-page ::deep .maplibregl-ctrl-group { background: var(--app-surface); box-shadow: none; border: 1px solid var(--app-border); }
+.routes-page ::deep .maplibregl-ctrl-group button { width: 48px; height: 48px; color: var(--app-text); }
+.routes-page ::deep .maplibregl-ctrl button .maplibregl-ctrl-icon { background-image: none; display: grid; place-items: center; font-size: 1.5rem; font-weight: 600; }
+.routes-page ::deep .maplibregl-ctrl-zoom-in .maplibregl-ctrl-icon::after { content: '+'; }
+.routes-page ::deep .maplibregl-ctrl-zoom-out .maplibregl-ctrl-icon::after { content: '−'; }
+.routes-page ::deep .maplibregl-ctrl-attrib { background: var(--app-surface); color: var(--app-text-muted); font-size: .75rem; }
+.routes-page ::deep .maplibregl-ctrl-attrib a { display: inline-flex; align-items: center; min-height: 48px; color: inherit; }
+.routes-page ::deep .maplibregl-canvas:focus-visible { outline: 3px solid var(--app-primary); outline-offset: -4px; }

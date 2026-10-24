@@ -1,0 +1,58 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div @ref="element" class="route-map-canvas" role="region" aria-label="Route map"></div>
+@if (error)
+{
+    <MudAlert Severity="Severity.Warning">Map unavailable. Reopen this screen to retry.</MudAlert>
+}
+
+@code {
+    [Parameter, EditorRequired] public MobileRouteMap Data { get; set; } = default!;
+    private ElementReference element;
+    private IJSObjectReference? module;
+    private MobileRouteMap? renderedData;
+    private bool error;
+    private bool disposed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (disposed || ReferenceEquals(renderedData, Data)) return;
+        renderedData = Data;
+        try
+        {
+            module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/routeMap.mjs");
+            if (disposed) { await module.DisposeAsync(); return; }
+            await module.InvokeVoidAsync("update", element, new
+                {
+                    markers = Data.Markers.Select(marker => new { marker.Airport.Icao, marker.Airport.Name, marker.Airport.Latitude, marker.Airport.Longitude, count = marker.FlightIds.Count }),
+                    connections = Data.Connections.Select(line => new { from = line.From.Icao, to = line.To.Icao, count = line.FlightIds.Count })
+                });
+            if (error) { error = false; StateHasChanged(); }
+        }
+        catch (JSException)
+        {
+            if (disposed) return;
+            error = true;
+            StateHasChanged();
+        }
+    }
+
+    public async Task ShowAllAsync()
+    {
+        if (module is null || disposed) return;
+        try { await module.InvokeVoidAsync("showAll", element); }
+        catch (JSException) { error = true; StateHasChanged(); }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (disposed) return;
+        disposed = true;
+        if (module is not null)
+        {
+            try { await module.InvokeVoidAsync("dispose", element); await module.DisposeAsync(); }
+            catch (JSException) { }
+        }
+    }
+}

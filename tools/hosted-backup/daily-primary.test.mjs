@@ -181,7 +181,7 @@ test('internal primary accepts a zero-byte streamed POST but rejects nonempty st
   assert.equal(db.values.get('monitor-state').checks, 1); assert.equal(db.values.get('monitor-state').delivered, true);
 });
 
-test('cached composition reserves before delivery, deduplicates concurrent checks and completes private heartbeat', async () => {
+test('cached composition reports missing current-version history despite an old skipped run, deduplicates and completes heartbeat', async () => {
   const f = fixture(), db = storage(), env = envFor(f); await seed(db, f);
   let requests = 0, heartbeats = 0;
   env.MONITOR_HEARTBEAT = { async completed() { heartbeats++; assert.equal(db.values.get('monitor-state').delivered, true); } };
@@ -189,7 +189,15 @@ test('cached composition reserves before delivery, deduplicates concurrent check
     requests++;
     if (url.startsWith('https://api.github.com/')) {
       assert.equal(db.values.get('component-requests').counts.monitorGithub, requests);
-      return Response.json({ total_count: 0, workflow_runs: [] });
+      const old = { id: 39096124884, run_attempt: 1, workflow_id: f.history.workflowId, path: f.history.workflowPath,
+        head_sha: '942e0f063e27449bcebbd04127eea67d95300dcb', head_branch: f.history.branch, event: 'workflow_dispatch',
+        repository: { full_name: 'alphadelta332/flightlogx-preview-backups', private: true },
+        head_repository: { full_name: 'alphadelta332/flightlogx-preview-backups', private: true },
+        run_started_at: iso(now-day), updated_at: iso(now-day+1000), status: 'completed', conclusion: 'skipped' };
+      const query = new URL(url).searchParams;
+      const matches = (!query.has('head_sha') || query.get('head_sha') === old.head_sha) &&
+        (!query.has('status') || query.get('status') === old.conclusion);
+      return Response.json({ total_count: matches ? 1 : 0, workflow_runs: matches ? [old] : [] });
     }
     assert.equal(url, 'https://api.resend.com/emails');
     assert.equal(db.values.get('monitor-state').resend.attempt, 1);
@@ -200,6 +208,8 @@ test('cached composition reserves before delivery, deduplicates concurrent check
   assert.equal(checks.filter(r => r.status === 'fulfilled').length, 1);
   assert.equal(requests, 3); assert.equal(heartbeats, 1);
   assert.equal(db.values.get('monitor-state').checks, 1);
+  assert.equal(db.values.get('component-requests').counts.monitorGithub, 2);
+  assert.equal(db.values.get('component-requests').counts.monitor ?? 0, 0);
   await assert.rejects(checkPrimaryMonitor(db, { ...env, RESEND_SEND_TOKEN: 're_'+'b'.repeat(30) }, request, () => now+1000));
   assert.equal(requests, 3);
 });
