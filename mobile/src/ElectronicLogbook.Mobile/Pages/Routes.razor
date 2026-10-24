@@ -1,5 +1,6 @@
 @page "/routes"
 @inject MobileLogbookSession Session
+@inject BrowserLogbookStore Store
 @inject TimeProvider Clock
 @implements IDisposable
 
@@ -49,6 +50,10 @@
                 <MudButton OnClick="ClearFilters" Variant="Variant.Text" Color="Color.Primary">Clear filters</MudButton>
             </div>
         }
+        @if (basesError is not null)
+        {
+            <MudAlert Severity="Severity.Warning">@basesError</MudAlert>
+        }
         @if (filterError is not null)
         {
             <MudAlert Severity="Severity.Error" role="alert">@filterError</MudAlert>
@@ -59,7 +64,7 @@
             {
                 <div class="route-map-panel">
                     <div class="route-map-toolbar"><MudIconButton OnClick="ShowAllAsync" Icon="@Icons.Material.Filled.ZoomOutMap" Variant="Variant.Outlined" aria-label="Show all routes" /></div>
-                    <RouteMapCanvas @ref="canvas" Data="map" />
+                    <RouteMapCanvas @ref="canvas" Data="map" AllRoutes="allRoutes!" BaseAirports="baseAirports" />
                 </div>
             }
             else
@@ -76,7 +81,10 @@
     private string[] aircraftTypes = [], selectedRegistrations = [], types = [], registrations = [];
     private bool showFilters, disposed;
     private string? filterError;
+    private string[] baseAirports = [];
+    private string? basesError;
     private MobileRouteMap? map;
+    private MobileRouteMap? allRoutes;
     private RouteMapCanvas? canvas;
     private ITimer? dateTimer;
     private DateOnly calculatedDate;
@@ -89,11 +97,32 @@
         if (disposed) return;
         Session.WorkbookStateChanged += OnWorkbookStateChanged;
         MobileAirportCatalog.Default.Changed += OnWorkbookStateChanged;
-        Refresh();
+        await RefreshAsync();
+        if (disposed) return;
         dateTimer = Clock.CreateTimer(_ => OnDateTick(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
     }
 
-    private void OnWorkbookStateChanged() => _ = InvokeAsync(() => { if (!disposed) { Refresh(); StateHasChanged(); } });
+    private void OnWorkbookStateChanged() => _ = InvokeAsync(RefreshAsync);
+    private async Task RefreshAsync()
+    {
+        if (disposed) return;
+        var logbookId = Session.DocumentV2.LogbookId;
+        string[] codes = [];
+        string? error = null;
+        if (!Session.IsStorageBlocked)
+        {
+            try { codes = await Store.LoadBaseAirportsAsync(logbookId); }
+            catch (Exception ex) when (ex is Microsoft.JSInterop.JSException or System.Text.Json.JsonException or FormatException)
+            {
+                error = "Saved bases could not be loaded. Reopen this screen to retry.";
+            }
+        }
+        if (disposed || Session.DocumentV2.LogbookId != logbookId) return;
+        baseAirports = codes;
+        basesError = error;
+        Refresh();
+        StateHasChanged();
+    }
     private void OnDateTick() => _ = InvokeAsync(() => { if (!disposed && calculatedDate != LocalToday) { Recalculate(); StateHasChanged(); } });
     private void Refresh()
     {
@@ -115,7 +144,8 @@
         calculatedDate = LocalToday;
         if (Session.IsStorageBlocked) return;
         if (from > to) { filterError = "Choose a Start date on or before the End date."; return; }
-        map = MobileRouteMap.Create(Session.CurrentEntriesV2, new(from, to, aircraftTypes, selectedRegistrations), calculatedDate, MobileAirportCatalog.Default);
+        allRoutes = MobileRouteMap.Create(Session.CurrentEntriesV2, new(), calculatedDate, MobileAirportCatalog.Default);
+        map = FilterCount == 0 ? allRoutes : MobileRouteMap.Create(Session.CurrentEntriesV2, new(from, to, aircraftTypes, selectedRegistrations), calculatedDate, MobileAirportCatalog.Default);
     }
     private Task ShowAllAsync() => canvas?.ShowAllAsync() ?? Task.CompletedTask;
 

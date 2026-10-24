@@ -74,14 +74,45 @@ async function onlineBackground(state) {
     }
 }
 
-export function routeFeatures(data) {
-    const airports = new Map(data.markers.map(marker => [marker.icao, marker]));
+export function frequencyHeat(count, maximum) {
+    return maximum > 1 ? (count - 1) / (maximum - 1) : 0;
+}
+
+function routeColor(palette) {
+    return ["interpolate", ["linear"], ["get", "heat"], 0, palette.route, 1, palette.hot];
+}
+
+export function routeSelection(data, selectedAirport = null) {
+    if (selectedAirport === null) return data;
+    const selectedFlights = new Set(data.markers.find(marker => marker.icao === selectedAirport).flightIds);
+    return {
+        ...data,
+        maximumRouteCount: data.maximumRouteCount ?? Math.max(1, ...data.connections.map(line => line.frequencyCount ?? line.count)),
+        markers: data.markers.filter(marker => marker.flightIds.some(id => selectedFlights.has(id))),
+        connections: data.connections.filter(line => line.flightIds.some(id => selectedFlights.has(id)))
+    };
+}
+
+function selectAirport(state, selectedAirport = null) {
+    const selection = routeSelection(state.data, selectedAirport);
+    const visible = new Set(selection.markers.map(marker => marker.icao));
+    for (const marker of state.markers) {
+        const button = marker.getElement();
+        button.hidden = !visible.has(button.dataset.icao);
+    }
+    state.map.getSource("routes").setData(routeFeatures(selection));
+}
+
+export function routeFeatures(data, selectedAirport = null) {
+    const { markers, connections } = routeSelection(data, selectedAirport);
+    const airports = new Map(markers.map(marker => [marker.icao, marker]));
+    const maximum = data.maximumRouteCount ?? Math.max(1, ...data.connections.map(line => line.frequencyCount ?? line.count));
     return {
         type: "FeatureCollection",
         features: [
-            ...data.connections.map(line => {
+            ...connections.map(line => {
                 const from = airports.get(line.from), to = airports.get(line.to);
-                return { type: "Feature", properties: { key: `${line.from}/${line.to}`, count: line.count },
+                return { type: "Feature", properties: { key: `${line.from}/${line.to}`, count: line.count, heat: frequencyHeat(line.frequencyCount ?? line.count, maximum) },
                     geometry: { type: "LineString", coordinates: [[from.longitude, from.latitude], [from.longitude + longitudeDelta(from.longitude, to.longitude), to.latitude]] } };
             })
         ]
@@ -114,14 +145,14 @@ export function routeBounds(data) {
 function colors() {
     const css = getComputedStyle(document.documentElement);
     const read = name => css.getPropertyValue(name).trim();
-    return { water: read("--app-surface"), land: read("--app-surface-alt"), border: read("--app-text-muted"), route: read("--app-primary"), ink: read("--app-text") };
+    return { water: read("--app-surface"), land: read("--app-surface-alt"), border: read("--app-text-muted"), route: read("--app-primary"), hot: read("--app-error"), ink: read("--app-text") };
 }
 
 function recolor(state) {
     if (state.disposed || !state.map) return;
     const palette = colors();
     for (const [layer, property, value] of [["water", "background-color", palette.water], ["land", "fill-color", palette.land],
-        ["borders", "line-color", palette.border], ["connections", "line-color", palette.route]])
+        ["borders", "line-color", palette.border], ["connections", "line-color", routeColor(palette)]])
         state.map.setPaintProperty(layer, property, value);
     if (state.background && state.background !== backgroundTheme()) void onlineBackground(state);
 }
@@ -134,7 +165,7 @@ function updateMarkerAccessibility(state) {
         ...container.parentElement.querySelectorAll(".route-map-toolbar")].map(element => element.getBoundingClientRect());
     for (const marker of state.markers ?? []) {
         const button = marker.getElement(), bounds = button.getBoundingClientRect();
-        const obscured = bounds.left < mapBounds.left || bounds.right > mapBounds.right || bounds.top < mapBounds.top || bounds.bottom > mapBounds.bottom ||
+        const obscured = button.hidden || bounds.left < mapBounds.left || bounds.right > mapBounds.right || bounds.top < mapBounds.top || bounds.bottom > mapBounds.bottom ||
             covers.some(cover => bounds.left < cover.right && bounds.right > cover.left && bounds.top < cover.bottom && bounds.bottom > cover.top);
         button.tabIndex = obscured ? -1 : 0;
         if (obscured) button.setAttribute("aria-hidden", "true");
@@ -162,7 +193,8 @@ async function initialize(element, state) {
             { id: "water", type: "background", paint: { "background-color": palette.water } },
             { id: "land", type: "fill", source: "countries", paint: { "fill-color": palette.land } },
             { id: "borders", type: "line", source: "countries", paint: { "line-color": palette.border, "line-width": .6, "line-opacity": .6 } },
-            { id: "connections", type: "line", source: "routes", paint: { "line-color": palette.route, "line-width": 2.5, "line-opacity": .8 } }
+            { id: "connections", type: "line", source: "routes", layout: { "line-sort-key": ["get", "heat"] }, paint: { "line-color": routeColor(palette),
+                "line-width": ["interpolate", ["linear"], ["get", "heat"], 0, 2.5, 1, 8], "line-opacity": .8 } }
         ] }
     });
     state.map.touchZoomRotate.disableRotation();
@@ -187,20 +219,23 @@ async function initialize(element, state) {
     window.addEventListener("online", state.online);
     window.addEventListener("offline", state.offline);
     state.map.on("click", event => {
-        let nearest, best = Infinity;
+        let nearest, topDot, best = Infinity;
         for (const marker of state.markers ?? []) {
+            if (marker.getElement().hidden) continue;
             const position = state.map.project(marker.getLngLat());
             const dx = position.x - event.point.x, dy = position.y - event.point.y;
             const distance = dx * dx + dy * dy;
-            if (Math.abs(dx) <= 24 && Math.abs(dy) <= 24 && distance < best) { nearest = marker; best = distance; }
+            const radius = parseFloat(marker.getElement().style.getPropertyValue("--route-airport-size")) / 2;
+            if (distance <= radius * radius) topDot = marker;
+            if (Math.abs(dx) <= 24 && Math.abs(dy) <= 24 && distance <= best) { nearest = marker; best = distance; }
         }
-        nearest?.getElement().click();
+        (topDot ?? nearest)?.getElement().click();
     });
     state.map.on("moveend", () => updateMarkerAccessibility(state));
     state.resize = new ResizeObserver(() => { state.map.resize(); updateMarkerAccessibility(state); });
     state.resize.observe(element);
     state.theme = new MutationObserver(() => recolor(state));
-    state.theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-elb-theme", "style"] });
+    state.theme.observe(document.documentElement, { attributes: true, attributeFilter: ["data-elb-theme", "data-elb-accent", "style"] });
     state.media = matchMedia("(prefers-color-scheme: dark)");
     state.themeChanged = () => recolor(state);
     state.media.addEventListener("change", state.themeChanged);
@@ -221,17 +256,23 @@ export async function update(element, data) {
         state.data = data;
         state.popup?.remove();
         for (const marker of state.markers ?? []) marker.remove();
-        state.markers = data.markers.map(airport => {
+        const maximumVisits = Math.max(1, ...data.markers.map(airport => airport.count));
+        state.markers = [...data.markers].sort((left, right) => left.count - right.count).map(airport => {
             const button = document.createElement("button");
             const visits = `${airport.count} ${airport.count === 1 ? "visit" : "visits"}`;
             button.type = "button";
-            button.className = "route-airport-marker";
-            button.setAttribute("aria-label", `${airport.name}, ${airport.icao}, ${visits}`);
+            button.dataset.icao = airport.icao;
+            button.className = airport.isBase ? "route-airport-marker route-airport-base" : "route-airport-marker";
+            const heat = frequencyHeat(airport.count, maximumVisits);
+            button.style.setProperty("--route-airport-size", `${12 + 12 * heat}px`);
+            button.style.setProperty("--route-airport-color", `color-mix(in srgb, var(--app-error) ${heat * 100}%, var(--app-primary))`);
+            button.setAttribute("aria-label", `${airport.name}, ${airport.icao}, ${visits}${airport.isBase ? ", Base" : ""}`);
             button.setAttribute("aria-expanded", "false");
             const marker = new state.Marker({ element: button }).setLngLat([airport.longitude, airport.latitude]).addTo(state.map);
             button.addEventListener("click", event => {
                 event.stopPropagation();
                 state.popup?.remove();
+                selectAirport(state, airport.icao);
                 const content = document.createElement("div");
                 content.className = "route-airport-details";
                 content.setAttribute("role", "status");
@@ -244,7 +285,12 @@ export async function update(element, data) {
                 state.map.panTo(marker.getLngLat(), { duration: 0 });
                 state.popup = new state.Popup({ offset: 32, maxWidth: "min(320px, calc(100vw - 32px))" })
                     .setLngLat(marker.getLngLat()).setDOMContent(content).addTo(state.map);
-                state.popup.on("close", () => { button.setAttribute("aria-expanded", "false"); updateMarkerAccessibility(state); });
+                state.popup.on("close", () => {
+                    button.setAttribute("aria-expanded", "false");
+                    if (state.disposed) return;
+                    selectAirport(state);
+                    updateMarkerAccessibility(state);
+                });
                 updateMarkerAccessibility(state);
             });
             return marker;
@@ -260,6 +306,7 @@ export async function update(element, data) {
 export function showAll(element) {
     const state = maps.get(element);
     if (!state?.data || state.disposed) return;
+    state.popup?.remove();
     const bounds = routeBounds(state.data);
     const attributionHeight = element.querySelector(".maplibregl-ctrl-attrib")?.getBoundingClientRect().height ?? 0;
     if (bounds) state.map.fitBounds(bounds, { padding: { top: 80, right: 80, bottom: Math.max(80, attributionHeight + 32), left: 80 }, maxZoom: 7, duration: 0 });

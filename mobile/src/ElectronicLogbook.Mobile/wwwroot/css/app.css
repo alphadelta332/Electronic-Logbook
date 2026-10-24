@@ -722,8 +722,6 @@ html[data-elb-accent="ocean"] { --app-accent-light: #0077a3; --app-accent-dark: 
 html[data-elb-accent="sky"] { --app-accent-light: #1875c1; --app-accent-dark: #67b9ff; --app-accent-dark-text: #002d52; }
 html[data-elb-accent="indigo"] { --app-accent-light: #4f46b5; --app-accent-dark: #9b9cff; --app-accent-dark-text: #16134b; }
 html[data-elb-accent="violet"] { --app-accent-light: #7541a8; --app-accent-dark: #d6a7ff; --app-accent-dark-text: #35105a; }
-html[data-elb-accent="plum"] { --app-accent-light: #9c3d78; --app-accent-dark: #f09acb; --app-accent-dark-text: #551138; }
-html[data-elb-accent="rose"] { --app-accent-light: #b4345c; --app-accent-dark: #ff9db5; --app-accent-dark-text: #5e1023; }
 html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #54d8cf; --app-accent-dark-text: #003d3a; }
 
 .dashboard-last-flight-link {
@@ -2540,8 +2538,6 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .accent-option[data-accent="sky"] { --accent-swatch: #1875c1; }
 .accent-option[data-accent="indigo"] { --accent-swatch: #4f46b5; }
 .accent-option[data-accent="violet"] { --accent-swatch: #7541a8; }
-.accent-option[data-accent="plum"] { --accent-swatch: #9c3d78; }
-.accent-option[data-accent="rose"] { --accent-swatch: #b4345c; }
 .accent-option[data-accent="teal"] { --accent-swatch: #007c78; }
 
 .settings-section-intro {
@@ -3045,6 +3041,80 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .record-field-empty dd {
     color: var(--app-text-muted);
     font-weight: 600;
+}
+
+.entry-hour-table {
+    --totals-hour-columns: minmax(max-content, 1.6fr) repeat(2, minmax(64px, 1fr));
+    min-width: 0;
+    container-type: inline-size;
+}
+
+.entry-hour-table h4,
+.entry-hour-group h4,
+.record-hour-group h4 {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 14px;
+    font-weight: 800;
+}
+
+.entry-hour-table h4 {
+    padding: 16px 14px 12px;
+}
+
+.entry-hour-table + .entry-hour-table {
+    margin-top: 16px;
+}
+
+.entry-hour-table .totals-table-row {
+    gap: 8px;
+    padding: 8px 14px;
+    min-height: 48px;
+}
+
+.entry-hour-table .totals-table-row > strong {
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.entry-hour-table .record-field {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    text-align: right;
+}
+
+.entry-hour-table label {
+    min-width: 0;
+}
+
+.entry-hour-table input {
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px;
+    border: 1px solid var(--app-border);
+    border-radius: 8px;
+    background: var(--app-surface);
+    color: var(--app-text);
+    font-size: 16px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+@container (max-width: 280px) {
+    .entry-hour-table .totals-table-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .entry-hour-table .totals-table-row > :first-child {
+        grid-column: 1 / -1;
+        text-align: left;
+    }
+
+    .entry-hour-table .totals-table-header > :first-child {
+        display: none;
+    }
 }
 
 .logbook-totals {

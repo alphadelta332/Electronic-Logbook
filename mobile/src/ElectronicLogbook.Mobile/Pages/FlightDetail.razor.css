@@ -1,0 +1,14 @@
+.record-hour-group {
+    display: grid;
+    gap: 12px;
+}
+
+.record-hour-group {
+    border-top: 1px solid var(--app-border);
+    padding-top: 16px;
+    margin-top: 16px;
+}
+
+.record-field dt {
+    text-transform: none;
+}

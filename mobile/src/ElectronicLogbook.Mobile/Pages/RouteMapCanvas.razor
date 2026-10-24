@@ -9,6 +9,8 @@
 
 @code {
     [Parameter, EditorRequired] public MobileRouteMap Data { get; set; } = default!;
+    [Parameter, EditorRequired] public MobileRouteMap AllRoutes { get; set; } = default!;
+    [Parameter] public string[] BaseAirports { get; set; } = [];
     private ElementReference element;
     private IJSObjectReference? module;
     private MobileRouteMap? renderedData;
@@ -23,10 +25,12 @@
         {
             module ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/routeMap.mjs");
             if (disposed) { await module.DisposeAsync(); return; }
+            var routeCounts = AllRoutes.Connections.ToDictionary(line => (line.From.Icao, line.To.Icao), line => line.FlightIds.Count);
             await module.InvokeVoidAsync("update", element, new
                 {
-                    markers = Data.Markers.Select(marker => new { marker.Airport.Icao, marker.Airport.Name, marker.Airport.Latitude, marker.Airport.Longitude, count = marker.FlightIds.Count }),
-                    connections = Data.Connections.Select(line => new { from = line.From.Icao, to = line.To.Icao, count = line.FlightIds.Count })
+                    maximumRouteCount = routeCounts.Values.DefaultIfEmpty(1).Max(),
+                    markers = Data.Markers.Select(marker => new { marker.Airport.Icao, marker.Airport.Name, marker.Airport.Latitude, marker.Airport.Longitude, count = marker.FlightIds.Count, flightIds = marker.FlightIds.Select(id => id.Value), isBase = BaseAirports.Contains(marker.Airport.Icao, StringComparer.OrdinalIgnoreCase) }),
+                    connections = Data.Connections.Select(line => new { from = line.From.Icao, to = line.To.Icao, count = line.FlightIds.Count, frequencyCount = routeCounts[(line.From.Icao, line.To.Icao)], flightIds = line.FlightIds.Select(id => id.Value) })
                 });
             if (error) { error = false; StateHasChanged(); }
         }

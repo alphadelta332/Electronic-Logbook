@@ -1358,7 +1358,7 @@ public sealed class MobileLogbookSessionJourneyTests
     }
 
     [Fact]
-    public async Task WorkbookEntryDetailsUseDashForBlankValuesAndSeparateChecksFromCustomFields()
+    public async Task WorkbookEntryDetailsUseDashForBlankValuesAndMatchTheEntryFormSections()
     {
         var session = CreateSession(new JourneyJsRuntime());
         await session.EnsureLoadedWorkbookAsync();
@@ -1366,14 +1366,18 @@ public sealed class MobileLogbookSessionJourneyTests
         var details = session.EntryDetails(session.WorkbookDraft.ToEntry(session.WorkbookCustomFields)).ToList();
 
         Assert.Equal("-", Assert.Single(details, detail => detail.Label == "Flight ID").Value);
-        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "SE ICUS day").Value);
-        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "Landings day").Value);
-        Assert.All(details.Where(detail => detail.Label is "FR" or "IPC" or "OPC"),
-            detail => Assert.Equal(EntryDetailGroup.Checks, detail.Group));
+        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "SE ICUS Day").Value);
+        Assert.Equal("-", Assert.Single(details, detail => detail.Label == "Landings Day").Value);
+        Assert.Equal(["PIC", "Other Pilot or crew", "Flight Review (FR)", "Instrument Proficiency Check (IPC)", "Operator Proficiency Check (OPC)"],
+            details.Where(detail => detail.Group == EntryDetailGroup.Crew).Select(detail => detail.Label));
+        Assert.Equal(["From", "To", "Via", "Remarks"],
+            details.Where(detail => detail.Group == EntryDetailGroup.Route).Select(detail => detail.Label));
+        Assert.Equal(2, details.Count(detail => detail.Group == EntryDetailGroup.Landings));
+        Assert.Equal(7, details.Count(detail => detail.Group == EntryDetailGroup.InstrumentApproaches));
         Assert.All(details.Where(detail => detail.Group == EntryDetailGroup.CustomFields),
             detail => Assert.Equal("-", detail.Value));
         Assert.Equal(nameof(PortableLogbookWorkbookEntry.LandingsDay),
-            Assert.Single(details, detail => detail.Label == "Landings day").Field);
+            Assert.Single(details, detail => detail.Label == "Landings Day").Field);
     }
 
     [Fact]

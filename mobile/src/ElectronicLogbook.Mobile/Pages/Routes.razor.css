@@ -11,7 +11,9 @@
 .routes-page ::deep button { min-height: 48px; }
 .routes-page ::deep .route-map-canvas { width: 100%; height: clamp(320px, 70dvh, 800px); border: 1px solid var(--app-border); border-radius: 12px; overflow: hidden; background: var(--app-surface-alt); font: inherit; }
 .routes-page ::deep .route-airport-marker { width: 48px; height: 48px; padding: 0; border: 0; border-radius: 50%; background: transparent; box-shadow: none; display: grid; place-items: center; pointer-events: none; }
-.routes-page ::deep .route-airport-marker::after { content: ''; width: 12px; height: 12px; border: 2px solid var(--app-surface); border-radius: 50%; background: var(--app-primary); }
+.routes-page ::deep .route-airport-marker[hidden] { display: none; }
+.routes-page ::deep .route-airport-marker::after { content: ''; width: var(--route-airport-size, 12px); height: var(--route-airport-size, 12px); border: 2px solid var(--app-surface); border-radius: 50%; background: var(--route-airport-color, var(--app-primary)); }
+.routes-page ::deep .route-airport-base::after { border-color: light-dark(#000, #fff); }
 .routes-page ::deep .route-airport-marker[aria-expanded="true"]::after { outline: 3px solid var(--app-text); outline-offset: 2px; }
 .routes-page ::deep .route-airport-marker:focus-visible { outline: 3px solid var(--app-primary); outline-offset: -3px; }
 .routes-page ::deep .maplibregl-popup { font: inherit; z-index: 3; }

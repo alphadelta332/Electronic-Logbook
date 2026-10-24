@@ -84,4 +84,96 @@ public sealed class AirportFieldTests : BunitContext, IAsyncLifetime
         Assert.True(edits > 0);
         Assert.Empty(field.FindAll("[role='status']"));
     }
+
+    [Theory]
+    [InlineData("YWOL-YSCN-YWOL", "YWOL", "YSCN", "YWOL")]
+    [InlineData(" YWOL - PRIVATE FARM - YSCN ", "YWOL", "PRIVATE FARM", "YSCN")]
+    [InlineData("BK CN", "BK", "CN")]
+    [InlineData("YWOL, YSCN / YWOL", "YWOL", "YSCN", "YWOL")]
+    [InlineData("YWOL - PRIVATE-FARM - YSCN", "YWOL", "PRIVATE-FARM", "YSCN")]
+    [InlineData("PRIVATE FARM / NORTH", "PRIVATE FARM / NORTH")]
+    [InlineData("YWOL-ZZZZ-YSCN", "YWOL", "ZZZZ", "YSCN")]
+    [InlineData("YWOL-PRIVATE FARM-YSCN", "YWOL", "PRIVATE FARM", "YSCN")]
+    public void ExistingRoutesOpenAsOrderedChipsWithoutRewritingStoredText(string route, params string[] expected)
+    {
+        var edits = 0;
+        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "Via")
+            .Add(component => component.Multiple, true).Add(component => component.Value, route)
+            .Add(component => component.LoadSuggestions, _ => Task.FromResult<IReadOnlyList<string>>([]))
+            .Add(component => component.Edited, () => edits++));
+
+        Assert.Equal(expected, field.FindAll(".airport-chip-label").Select(chip => chip.TextContent));
+        Assert.Equal(route, field.Instance.Value);
+        Assert.Equal(0, edits);
+        Assert.Equal(expected.Any(code => !MobileAirportCatalog.Default.TryFind(code, out _)),
+            field.FindAll("[role='status']").Count > 0);
+    }
+
+    [Fact]
+    public async Task ViaUsesSharedLookupAndAddsSelectionsIncludingRepeatAirports()
+    {
+        string? saved = null;
+        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "Via")
+            .Add(component => component.Multiple, true)
+            .Add(component => component.LoadSuggestions, query => Task.FromResult<IReadOnlyList<string>>(
+                MobileAirportSuggestions.Ranked([], [], new(2026, 10, 25), MobileAirportCatalog.Default, query)))
+            .Add(component => component.ValueChanged, value => saved = value));
+        var autocomplete = field.FindComponent<MudAutocomplete<string>>();
+        Assert.Contains("YMML", await autocomplete.Instance.SearchFunc!("Melbourne", CancellationToken.None)!);
+
+        field.Find("input").Input("Melbourne");
+        field.Find("input").Blur();
+        await field.InvokeAsync(() => autocomplete.Instance.SelectOptionAsync("YMML"));
+        await field.InvokeAsync(() => autocomplete.Instance.SelectOptionAsync("YWOL"));
+        await field.InvokeAsync(() => autocomplete.Instance.SelectOptionAsync("YMML"));
+        field.Find("input").Blur();
+
+        Assert.Equal("YMML - YWOL - YMML", saved);
+        Assert.Equal(new[] { "YMML", "YWOL", "YMML" }, field.FindAll(".airport-chip-label").Select(chip => chip.TextContent));
+        Assert.True(string.IsNullOrEmpty(field.Find("input").GetAttribute("value")));
+        Assert.Empty(field.FindAll("[role='status']"));
+    }
+
+    [Fact]
+    public void ManualAirportIsSavedWhileTypingAndCanBeAddedAsAChipWithWarning()
+    {
+        string? saved = null;
+        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "Via")
+            .Add(component => component.Multiple, true).Add(component => component.Value, "YWOL")
+            .Add(component => component.LoadSuggestions, _ => Task.FromResult<IReadOnlyList<string>>([]))
+            .Add(component => component.ValueChanged, value => saved = value));
+
+        field.Find("input").Input("PRIVATE FARM");
+        field.WaitForAssertion(() => Assert.Equal("YWOL - PRIVATE FARM", saved));
+        field.Find("input").Blur();
+        Assert.Contains("Airport not recognised: PRIVATE FARM.", field.Find("[role='status']").TextContent);
+        field.Find("button[aria-label='Add PRIVATE FARM']").Click();
+        field.WaitForAssertion(() => Assert.Equal(new[] { "YWOL", "PRIVATE FARM" },
+            field.FindAll(".airport-chip-label").Select(chip => chip.TextContent)));
+        Assert.Contains("Airport not recognised: PRIVATE FARM.", field.Find("[role='status']").TextContent);
+        Assert.Equal("YWOL - PRIVATE FARM", saved);
+    }
+
+    [Fact]
+    public void ChipsMoveBothDirectionsAndRemoveOnlyTheChosenOccurrence()
+    {
+        string? saved = null;
+        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, "Via")
+            .Add(component => component.Multiple, true).Add(component => component.Value, "YWOL-YSCN-YWOL")
+            .Add(component => component.LoadSuggestions, _ => Task.FromResult<IReadOnlyList<string>>([]))
+            .Add(component => component.ValueChanged, value => saved = value));
+
+        field.FindAll(".airport-chip-label")[1].Click();
+        field.Find("button[aria-label='Move YSCN earlier']").Click();
+        Assert.Equal("YSCN - YWOL - YWOL", saved);
+        Assert.True(field.Find("button[aria-label='Move YSCN earlier']").HasAttribute("disabled"));
+        field.Find("button[aria-label='Move YSCN later']").Click();
+        Assert.Equal("YWOL - YSCN - YWOL", saved);
+        field.Find("button[aria-label='Remove YWOL, stop 3']").Click();
+        Assert.Equal("YWOL - YSCN", saved);
+        field.Find("button[aria-label='Remove YSCN, stop 2']").Click();
+        field.Find("button[aria-label='Remove YWOL, stop 1']").Click();
+        Assert.Equal("", saved);
+        Assert.Empty(field.FindAll(".airport-chip"));
+    }
 }

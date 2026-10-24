@@ -1,0 +1,22 @@
+<section class="entry-hour-table" aria-label="@Title">
+    <h4>@Title</h4>
+    <div class="totals-table" role="table" aria-label="@($"{Title} hours")">
+        <div class="totals-table-row totals-table-header" role="row">
+            <span role="columnheader">Capacity</span>
+            <span class="totals-time-header" role="columnheader">
+                <MudIcon Icon="@Icons.Material.Filled.LightMode" aria-hidden="true" />
+                <span>Day</span>
+            </span>
+            <span class="totals-time-header" role="columnheader">
+                <MudIcon Icon="@Icons.Material.Filled.DarkMode" aria-hidden="true" />
+                <span>Night</span>
+            </span>
+        </div>
+        @ChildContent
+    </div>
+</section>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+}

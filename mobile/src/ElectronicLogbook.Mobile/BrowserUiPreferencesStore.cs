@@ -30,8 +30,7 @@ public sealed record MobileUiPreferences(string ThemeMode, string Accent)
 
     public static IReadOnlyList<string> AccentOptions { get; } =
     [
-        "Forest", "Ocean", "Sky", "Indigo", "Violet", "Plum",
-        "Rose", "Teal"
+        "Forest", "Ocean", "Sky", "Indigo", "Violet", "Teal"
     ];
 
     public string ToStorageValue() => $"{ThemeMode}|{Accent}";

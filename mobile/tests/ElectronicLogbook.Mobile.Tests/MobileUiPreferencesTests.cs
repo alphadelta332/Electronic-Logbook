@@ -9,7 +9,9 @@ public sealed class MobileUiPreferencesTests
     [InlineData("Orange")]
     [InlineData("Amber")]
     [InlineData("Gold")]
-    public void ReservedSemanticColoursAreNotAccentOptions(string accent)
+    [InlineData("Rose")]
+    [InlineData("Plum")]
+    public void UnavailableAccentColoursFallBackToForest(string accent)
     {
         Assert.DoesNotContain(accent, MobileUiPreferences.AccentOptions);
         Assert.Equal(

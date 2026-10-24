@@ -20,9 +20,34 @@ airports. Unresolved tokens and missing endpoints remain in the local model for
 diagnostics; the page has no explanatory copy or incomplete-routes list. Remarks
 are not parsed as routes.
 
-Repeated connections and opposite directions share one line. Lines are not selectable.
+Repeated connections and opposite directions share one line. More frequent connections
+become thicker and warmer; airport dots grow and warm with their visit counts. Both
+use a linear theme-colour-to-red scale from one flight to the highest count, with
+separate maxima for connections and airports. Route colour and thickness always use
+each connection's full-logbook frequency and the full-logbook maximum; date,
+aircraft and airport filters only hide routes. The baseline uses all entries
+eligible for the map, retaining the exclusions listed above. Airport dot styling
+uses visit counts within the current date/aircraft selection.
+Lines range from 2.5 to 8px; dot interiors range from 12 to 24px while their button
+targets remain 48px. When every count is one, everything stays in the selected theme
+colour and at minimum size. Date/aircraft filtering recalculates the airport scale.
+More frequent routes
+and airports draw on top of less frequent ones when overlapping; tapping overlapping
+dots selects the visible top dot, with the nearest 48px target used outside the dots.
+Theme changes recolour the map. Rose and Plum are unavailable as accent choices;
+existing selections fall back to Forest. Styling uses the bundled renderer
+and existing theme colours, with no additional dependency or requests.
+Lines are not selectable.
+Airports selected as bases in Charts use a black dot border in light mode and a
+white border in dark mode. Selection keeps its separate outer ring with a 2px gap.
 Pressing an airport opens an on-map popup containing only its name, ICAO code and
-visit count. Visits count distinct matching flights; repeated stops/return routes
+visit count and shows only connections from entries involving that airport, including
+each matching entry's full departure → Via → arrival route. Shared connections retain
+their full-logbook colour and thickness throughout selection.
+Only airport dots belonging to matching entries remain visible and selectable;
+their visit counts retain the current date/aircraft-filtered totals.
+Closing the popup or pressing Show all routes restores all dots and connections within the
+current date/aircraft filters. Visits count distinct matching flights; repeated stops/return routes
 within a flight count once for that airport, consistent with Charts. Airports remain
 selectable without a line, including same-airport flights. Markers are keyboard
 buttons with 48px targets. Flight changes, deletion, airport updates and local-day
@@ -76,7 +101,7 @@ is shown. The map renderer is loaded only on the map screen and removed when lea
 
 ## Focused verification
 
-- `npm.cmd run test:routes` from `mobile/`: geometry, date-line/world fitting and
+- `npm.cmd run test:routes` from `mobile/`: frequency scaling, geometry, date-line/world fitting and
   bundled background integrity.
 - The mobile test project supports the VSTest filter
   `FullyQualifiedName~RoutesComponentTests|FullyQualifiedName~MobileRouteMapTests|FullyQualifiedName~ChartsComponentTests|FullyQualifiedName~MobileLogbookAnalyticsTests`.

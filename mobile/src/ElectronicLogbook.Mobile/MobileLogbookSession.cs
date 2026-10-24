@@ -1623,42 +1623,42 @@ public sealed class MobileLogbookSession(
     {
         yield return new("Date", FormatDate(entry.Date), EntryDetailGroup.Flight, nameof(entry.Year));
         yield return new("Type", FormatText(entry.Type), EntryDetailGroup.Flight, nameof(entry.Type));
-        yield return new("Reg", FormatText(entry.Reg), EntryDetailGroup.Flight, nameof(entry.Reg));
+        yield return new("Registration", FormatText(entry.Reg), EntryDetailGroup.Flight, nameof(entry.Reg));
         yield return new("Flight ID", FormatText(entry.FlightId), EntryDetailGroup.Flight, nameof(entry.FlightId));
-        yield return new("PIC", FormatText(entry.Pic), EntryDetailGroup.CrewAndRoute, nameof(entry.Pic));
-        yield return new("Other pilot or crew", FormatText(entry.OtherPilotOrCrew), EntryDetailGroup.CrewAndRoute, nameof(entry.OtherPilotOrCrew));
-        yield return new("From", FormatText(entry.From), EntryDetailGroup.CrewAndRoute, nameof(entry.From));
-        yield return new("To", FormatText(entry.To), EntryDetailGroup.CrewAndRoute, nameof(entry.To));
-        yield return new("Via", FormatText(entry.Via), EntryDetailGroup.CrewAndRoute, nameof(entry.Via));
-        yield return new("Remarks", FormatText(entry.Remarks), EntryDetailGroup.CrewAndRoute, nameof(entry.Remarks));
-        yield return new("FR", FormatFlag(entry.FlightReview), EntryDetailGroup.Checks, nameof(entry.FlightReview));
-        yield return new("IPC", FormatFlag(entry.InstrumentProficiencyCheck), EntryDetailGroup.Checks, nameof(entry.InstrumentProficiencyCheck));
-        yield return new("OPC", FormatFlag(entry.OperatorProficiencyCheck), EntryDetailGroup.Checks, nameof(entry.OperatorProficiencyCheck));
-        yield return new("SE ICUS day", FormatNullableHours(entry.SeIcusDay), EntryDetailGroup.LoggedTime, nameof(entry.SeIcusDay));
-        yield return new("SE ICUS night", FormatNullableHours(entry.SeIcusNight), EntryDetailGroup.LoggedTime, nameof(entry.SeIcusNight));
-        yield return new("SE dual day", FormatNullableHours(entry.SeDualDay), EntryDetailGroup.LoggedTime, nameof(entry.SeDualDay));
-        yield return new("SE dual night", FormatNullableHours(entry.SeDualNight), EntryDetailGroup.LoggedTime, nameof(entry.SeDualNight));
-        yield return new("SE command day", FormatNullableHours(entry.SeCommandDay), EntryDetailGroup.LoggedTime, nameof(entry.SeCommandDay));
-        yield return new("SE command night", FormatNullableHours(entry.SeCommandNight), EntryDetailGroup.LoggedTime, nameof(entry.SeCommandNight));
-        yield return new("ME ICUS day", FormatNullableHours(entry.MeIcusDay), EntryDetailGroup.LoggedTime, nameof(entry.MeIcusDay));
-        yield return new("ME ICUS night", FormatNullableHours(entry.MeIcusNight), EntryDetailGroup.LoggedTime, nameof(entry.MeIcusNight));
-        yield return new("ME dual day", FormatNullableHours(entry.MeDualDay), EntryDetailGroup.LoggedTime, nameof(entry.MeDualDay));
-        yield return new("ME dual night", FormatNullableHours(entry.MeDualNight), EntryDetailGroup.LoggedTime, nameof(entry.MeDualNight));
-        yield return new("ME command day", FormatNullableHours(entry.MeCommandDay), EntryDetailGroup.LoggedTime, nameof(entry.MeCommandDay));
-        yield return new("ME command night", FormatNullableHours(entry.MeCommandNight), EntryDetailGroup.LoggedTime, nameof(entry.MeCommandNight));
-        yield return new("Copilot day", FormatNullableHours(entry.CopilotDay), EntryDetailGroup.LoggedTime, nameof(entry.CopilotDay));
-        yield return new("Copilot night", FormatNullableHours(entry.CopilotNight), EntryDetailGroup.LoggedTime, nameof(entry.CopilotNight));
+        yield return new("PIC", FormatText(entry.Pic), EntryDetailGroup.Crew, nameof(entry.Pic));
+        yield return new("Other Pilot or crew", FormatText(entry.OtherPilotOrCrew), EntryDetailGroup.Crew, nameof(entry.OtherPilotOrCrew));
+        yield return new("Flight Review (FR)", FormatFlag(entry.FlightReview), EntryDetailGroup.Crew, nameof(entry.FlightReview));
+        yield return new("Instrument Proficiency Check (IPC)", FormatFlag(entry.InstrumentProficiencyCheck), EntryDetailGroup.Crew, nameof(entry.InstrumentProficiencyCheck));
+        yield return new("Operator Proficiency Check (OPC)", FormatFlag(entry.OperatorProficiencyCheck), EntryDetailGroup.Crew, nameof(entry.OperatorProficiencyCheck));
+        yield return new("From", FormatText(entry.From), EntryDetailGroup.Route, nameof(entry.From));
+        yield return new("To", FormatText(entry.To), EntryDetailGroup.Route, nameof(entry.To));
+        yield return new("Via", FormatText(entry.Via), EntryDetailGroup.Route, nameof(entry.Via));
+        yield return new("Remarks", FormatText(entry.Remarks), EntryDetailGroup.Route, nameof(entry.Remarks));
+        yield return new("SE ICUS Day", FormatNullableHours(entry.SeIcusDay), EntryDetailGroup.LoggedTime, nameof(entry.SeIcusDay));
+        yield return new("SE ICUS Night", FormatNullableHours(entry.SeIcusNight), EntryDetailGroup.LoggedTime, nameof(entry.SeIcusNight));
+        yield return new("SE Dual Day", FormatNullableHours(entry.SeDualDay), EntryDetailGroup.LoggedTime, nameof(entry.SeDualDay));
+        yield return new("SE Dual Night", FormatNullableHours(entry.SeDualNight), EntryDetailGroup.LoggedTime, nameof(entry.SeDualNight));
+        yield return new("SE Command Day", FormatNullableHours(entry.SeCommandDay), EntryDetailGroup.LoggedTime, nameof(entry.SeCommandDay));
+        yield return new("SE Command Night", FormatNullableHours(entry.SeCommandNight), EntryDetailGroup.LoggedTime, nameof(entry.SeCommandNight));
+        yield return new("ME ICUS Day", FormatNullableHours(entry.MeIcusDay), EntryDetailGroup.LoggedTime, nameof(entry.MeIcusDay));
+        yield return new("ME ICUS Night", FormatNullableHours(entry.MeIcusNight), EntryDetailGroup.LoggedTime, nameof(entry.MeIcusNight));
+        yield return new("ME Dual Day", FormatNullableHours(entry.MeDualDay), EntryDetailGroup.LoggedTime, nameof(entry.MeDualDay));
+        yield return new("ME Dual Night", FormatNullableHours(entry.MeDualNight), EntryDetailGroup.LoggedTime, nameof(entry.MeDualNight));
+        yield return new("ME Command Day", FormatNullableHours(entry.MeCommandDay), EntryDetailGroup.LoggedTime, nameof(entry.MeCommandDay));
+        yield return new("ME Command Night", FormatNullableHours(entry.MeCommandNight), EntryDetailGroup.LoggedTime, nameof(entry.MeCommandNight));
+        yield return new("Copilot Day", FormatNullableHours(entry.CopilotDay), EntryDetailGroup.LoggedTime, nameof(entry.CopilotDay));
+        yield return new("Copilot Night", FormatNullableHours(entry.CopilotNight), EntryDetailGroup.LoggedTime, nameof(entry.CopilotNight));
         yield return new("IFR IF", FormatNullableHours(entry.IfrIf), EntryDetailGroup.LoggedTime, nameof(entry.IfrIf));
-        yield return new("IFR sim", FormatNullableHours(entry.IfrSim), EntryDetailGroup.LoggedTime, nameof(entry.IfrSim));
-        yield return new("Landings day", FormatNullableCount(entry.LandingsDay), EntryDetailGroup.LandingsAndApproaches, nameof(entry.LandingsDay));
-        yield return new("Landings night", FormatNullableCount(entry.LandingsNight), EntryDetailGroup.LandingsAndApproaches, nameof(entry.LandingsNight));
-        yield return new("ILS", FormatNullableCount(entry.Ils), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Ils));
-        yield return new("VOR", FormatNullableCount(entry.Vor), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Vor));
-        yield return new("RNP", FormatNullableCount(entry.Rnp), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Rnp));
-        yield return new("NDB", FormatNullableCount(entry.Ndb), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Ndb));
-        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi), EntryDetailGroup.LandingsAndApproaches, nameof(entry.DgaCdi));
-        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi), EntryDetailGroup.LandingsAndApproaches, nameof(entry.DgaAzi));
-        yield return new("Circling", FormatNullableCount(entry.Circling), EntryDetailGroup.LandingsAndApproaches, nameof(entry.Circling));
+        yield return new("IFR Sim", FormatNullableHours(entry.IfrSim), EntryDetailGroup.LoggedTime, nameof(entry.IfrSim));
+        yield return new("Landings Day", FormatNullableCount(entry.LandingsDay), EntryDetailGroup.Landings, nameof(entry.LandingsDay));
+        yield return new("Landings Night", FormatNullableCount(entry.LandingsNight), EntryDetailGroup.Landings, nameof(entry.LandingsNight));
+        yield return new("ILS", FormatNullableCount(entry.Ils), EntryDetailGroup.InstrumentApproaches, nameof(entry.Ils));
+        yield return new("VOR", FormatNullableCount(entry.Vor), EntryDetailGroup.InstrumentApproaches, nameof(entry.Vor));
+        yield return new("RNP", FormatNullableCount(entry.Rnp), EntryDetailGroup.InstrumentApproaches, nameof(entry.Rnp));
+        yield return new("NDB", FormatNullableCount(entry.Ndb), EntryDetailGroup.InstrumentApproaches, nameof(entry.Ndb));
+        yield return new("DGA (CDI)", FormatNullableCount(entry.DgaCdi), EntryDetailGroup.InstrumentApproaches, nameof(entry.DgaCdi));
+        yield return new("DGA (Azi)", FormatNullableCount(entry.DgaAzi), EntryDetailGroup.InstrumentApproaches, nameof(entry.DgaAzi));
+        yield return new("Circling", FormatNullableCount(entry.Circling), EntryDetailGroup.InstrumentApproaches, nameof(entry.Circling));
 
         foreach (var field in WorkbookCustomFields)
         {
@@ -2025,11 +2025,12 @@ public enum EntryDetailGroup
 {
     Record,
     Flight,
-    CrewAndRoute,
-    Checks,
+    Crew,
+    Route,
     LoggedTime,
     CustomFields,
-    LandingsAndApproaches
+    Landings,
+    InstrumentApproaches
 }
 
 public sealed class EntryDraft

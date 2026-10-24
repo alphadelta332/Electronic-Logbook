@@ -1,10 +1,36 @@
 <div class="airport-field">
     <label for="@id">@Label</label>
-    <MudAutocomplete T="string" InputId="@id" Value="@Value" ValueChanged="ChangedAsync"
+    @if (Multiple && airports.Count > 0)
+    {
+        <ol class="airport-chips" aria-label="@($"{Label} airports in route order")">
+            @for (var index = 0; index < airports.Count; index++)
+            {
+                var position = index;
+                var code = airports[position];
+                <li class="airport-chip">
+                    <button type="button" class="airport-chip-label" aria-pressed="@(selected == position ? "true" : "false")"
+                            aria-label="@($"{code}, stop {position + 1}. Change route order")"
+                            @onclick="() => selected = selected == position ? -1 : position">@(code)</button>
+                    @if (selected == position)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowBack" Disabled="@(position == 0)"
+                                       OnClick="() => MoveAsync(position, -1)" aria-label="@($"Move {code} earlier")" />
+                        <MudIconButton Icon="@Icons.Material.Filled.ArrowForward" Disabled="@(position == airports.Count - 1)"
+                                       OnClick="() => MoveAsync(position, 1)" aria-label="@($"Move {code} later")" />
+                    }
+                    <MudIconButton Icon="@Icons.Material.Filled.Close" OnClick="() => RemoveAsync(position)"
+                                   aria-label="@($"Remove {code}, stop {position + 1}")" />
+                </li>
+            }
+        </ol>
+    }
+    <div class="airport-search">
+    <MudAutocomplete T="string" @ref="autocomplete" InputId="@id" Value="@(Multiple ? null : Value)" ValueChanged="ChangedAsync"
+                     Text="@(Multiple ? pending : Value)"
                      SearchFunc="SearchAsync" Variant="Variant.Outlined" Margin="Margin.Dense"
                      MinCharacters="0" MaxItems="100" OpenOnFocus="true" DebounceInterval="0"
-                     CoerceValue="true" CoerceText="false" Immediate="true" ResetValueOnEmptyText="true"
-                     OnBlur="() => touched = true" PopoverClass="airport-suggestions"
+                     CoerceValue="@(!Multiple)" CoerceText="false" Immediate="true" ResetValueOnEmptyText="true"
+                     TextChanged="TextChangedAsync" OnBlur="BlurredAsync" PopoverClass="airport-suggestions"
                      ListItemClass="airport-suggestion" autocomplete="off" autocapitalize="characters" spellcheck="false">
         <ItemTemplate Context="airportCode">
             <span><strong>@airportCode</strong> · @AirportName(airportCode)</span>
@@ -13,7 +39,16 @@
             <MudText Class="pa-3">No matching airports.</MudText>
         </NoItemsTemplate>
     </MudAutocomplete>
-    @if (touched && !string.IsNullOrWhiteSpace(Value) && !MobileAirportCatalog.Default.TryFind(Value, out _))
+    @if (Multiple && !string.IsNullOrWhiteSpace(pending))
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Add" OnClick="() => ChangedAsync(pending)" aria-label="@($"Add {pending}")" />
+    }
+    </div>
+    @if (Multiple && UnrecognisedAirports.Any())
+    {
+        <MudText Typo="Typo.caption" Color="Color.Warning" role="status">Airport not recognised: @string.Join(", ", UnrecognisedAirports).</MudText>
+    }
+    else if (!Multiple && touched && !string.IsNullOrWhiteSpace(Value) && !MobileAirportCatalog.Default.TryFind(Value, out _))
     {
         <MudText Typo="Typo.caption" Color="Color.Warning" role="status">Airport not recognised.</MudText>
     }
@@ -22,11 +57,47 @@
 @code {
     [Parameter, EditorRequired] public string Label { get; set; } = "";
     [Parameter] public string? Value { get; set; }
+    [Parameter] public bool Multiple { get; set; }
     [Parameter] public EventCallback<string?> ValueChanged { get; set; }
     [Parameter, EditorRequired] public Func<string?, Task<IReadOnlyList<string>>> LoadSuggestions { get; set; } = default!;
     [Parameter] public EventCallback Edited { get; set; }
     private readonly string id = $"airport-{Guid.NewGuid():N}";
     private bool touched;
+    private MudAutocomplete<string> autocomplete = default!;
+    private List<string> airports = [];
+    private string? pending;
+    private string? lastValue;
+    private int selected = -1;
+    private IEnumerable<string> UnrecognisedAirports => airports
+        .Concat(touched && !string.IsNullOrWhiteSpace(pending) ? new[] { pending.Trim() } : [])
+        .Where(code => !MobileAirportCatalog.Default.TryFind(code, out _));
+
+    protected override void OnParametersSet()
+    {
+        if (!Multiple || string.Equals(Value, lastValue, StringComparison.Ordinal)) return;
+        airports = ParseRoute(Value);
+        pending = null;
+        selected = -1;
+        lastValue = Value;
+    }
+
+    private static List<string> ParseRoute(string? value)
+    {
+        var result = new List<string>();
+        foreach (var part in (value ?? "").Split(" - ", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var stops = part.Split(['-', ',', ';', '/'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            // A recognised airport anchors compact legacy routes; ambiguous private-location names stay together.
+            foreach (var stop in stops.Any(code => MobileAirportCatalog.Default.TryFind(code, out _)) ? stops : new[] { part })
+            {
+                var words = stop.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+                if (words.Length > 1 && words.All(word => MobileAirportCatalog.Default.TryFind(word, out _)))
+                    result.AddRange(words);
+                else result.Add(stop);
+            }
+        }
+        return result;
+    }
 
     private async Task<IEnumerable<string>> SearchAsync(string? text, CancellationToken cancellationToken)
     {
@@ -37,10 +108,54 @@
 
     private async Task ChangedAsync(string? code)
     {
+        if (Multiple)
+        {
+            if (string.IsNullOrWhiteSpace(code)) return;
+            airports.Add(code.Trim());
+            pending = null;
+            await PublishRouteAsync();
+            await autocomplete.ClearAsync();
+            return;
+        }
         touched = false;
         Value = code;
         await ValueChanged.InvokeAsync(code);
         await Edited.InvokeAsync();
+    }
+
+    private async Task TextChangedAsync(string? text)
+    {
+        if (!Multiple) return;
+        pending = text;
+        await PublishRouteAsync();
+    }
+
+    private void BlurredAsync(FocusEventArgs args)
+    {
+        touched = true;
+    }
+
+    private async Task PublishRouteAsync()
+    {
+        Value = lastValue = string.Join(" - ", airports.Concat(string.IsNullOrWhiteSpace(pending) ? [] : new[] { pending.Trim() }));
+        await ValueChanged.InvokeAsync(Value);
+        await Edited.InvokeAsync();
+    }
+
+    private async Task RemoveAsync(int position)
+    {
+        airports.RemoveAt(position);
+        selected = -1;
+        await PublishRouteAsync();
+    }
+
+    private async Task MoveAsync(int position, int offset)
+    {
+        var destination = position + offset;
+        if (destination < 0 || destination >= airports.Count) return;
+        (airports[position], airports[destination]) = (airports[destination], airports[position]);
+        selected = destination;
+        await PublishRouteAsync();
     }
 
     private static string AirportName(string code) => MobileAirportCatalog.Default.TryFind(code, out var airport)

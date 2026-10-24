@@ -1340,7 +1340,6 @@ public sealed class PwaPageWiringTests
         Assert.Contains("@implements IDisposable", page, StringComparison.Ordinal);
         Assert.Contains("Session.WorkbookStateChanged += OnWorkbookStateChanged", page, StringComparison.Ordinal);
         Assert.Contains("Session.WorkbookStateChanged -= OnWorkbookStateChanged", page, StringComparison.Ordinal);
-        Assert.Contains("Read first", page, StringComparison.Ordinal);
         Assert.Contains("Edit entry", page, StringComparison.Ordinal);
         Assert.Contains("Session.EntryDetails(CurrentEntry.Entry)", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeleteWorkbookEntryAsync(CurrentEntry)", page, StringComparison.Ordinal);
@@ -1360,22 +1359,22 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Deleted entry", page, StringComparison.Ordinal);
         Assert.Contains("Navigation.NavigateTo($\"/flights/{CurrentEntry.EntryId.Value}/edit\")", page, StringComparison.Ordinal);
         Assert.Contains("record-field-groups", page, StringComparison.Ordinal);
-        Assert.Contains("Crew and route", page, StringComparison.Ordinal);
-        Assert.Contains("\"Checks\"", page, StringComparison.Ordinal);
-        Assert.Contains("Logged time", page, StringComparison.Ordinal);
-        Assert.Contains("Custom fields", page, StringComparison.Ordinal);
-        Assert.Contains("Landings and approaches", page, StringComparison.Ordinal);
+        foreach (var heading in new[] { "Flight Details", "Crew", "Route", "Hours", "Landings", "Instrument Approaches" })
+        {
+            Assert.Contains($"\"{heading}\"", page, StringComparison.Ordinal);
+        }
+        Assert.DoesNotContain("Read first", page, StringComparison.Ordinal);
         Assert.Contains("<dl class=\"record-field-list\">", page, StringComparison.Ordinal);
         Assert.Contains("<dt>@detail.Label</dt>", page, StringComparison.Ordinal);
         Assert.Contains("<dd>@detail.Value</dd>", page, StringComparison.Ordinal);
         Assert.Contains("value == \"-\"", page, StringComparison.Ordinal);
-        Assert.Contains("detail.Group == group", page, StringComparison.Ordinal);
+        Assert.Contains("groups.Contains(detail.Group)", page, StringComparison.Ordinal);
         Assert.True(
             page.IndexOf("EntryDetailGroup.LoggedTime", StringComparison.Ordinal) <
             page.IndexOf("EntryDetailGroup.CustomFields", StringComparison.Ordinal));
         Assert.True(
             page.IndexOf("EntryDetailGroup.CustomFields", StringComparison.Ordinal) <
-            page.IndexOf("EntryDetailGroup.LandingsAndApproaches", StringComparison.Ordinal));
+            page.IndexOf("EntryDetailGroup.Landings)", StringComparison.Ordinal));
         Assert.Contains("class=\"page-back-link\" href=\"/flights?view=entries\"", page, StringComparison.Ordinal);
         Assert.Contains("Back to Logbook", page, StringComparison.Ordinal);
         Assert.DoesNotContain("entry-details detail-grid", page, StringComparison.Ordinal);
@@ -1558,12 +1557,25 @@ public sealed class PwaPageWiringTests
 
         Assert.Contains("type=\"date\"", page, StringComparison.Ordinal);
         Assert.Contains("@bind=\"Session.WorkbookDraft.Date\"", page, StringComparison.Ordinal);
-        Assert.Contains("Identity", page, StringComparison.Ordinal);
-        Assert.Contains("Pilots and remarks", page, StringComparison.Ordinal);
-        Assert.Contains("FR, IPC, OPC, and custom fields", page, StringComparison.Ordinal);
-        Assert.Contains("Operating capacity", page, StringComparison.Ordinal);
-        Assert.Contains("Landings", page, StringComparison.Ordinal);
-        Assert.Contains("Approach types", page, StringComparison.Ordinal);
+        var sections = page.Split("<section class=\"form-section\"", StringSplitOptions.None).Skip(1).ToArray();
+        Assert.Equal(6, sections.Length);
+        string[] headings = ["Flight Details", "Crew", "Route", "Hours", "Landings", "Instrument Approaches"];
+        for (var index = 0; index < headings.Length; index++)
+        {
+            Assert.Contains($"<h2>{headings[index]}</h2>", sections[index], StringComparison.Ordinal);
+            Assert.DoesNotContain("eyebrow", sections[index].Split("</section>")[0], StringComparison.Ordinal);
+        }
+        Assert.Contains("Registration <input", sections[0], StringComparison.Ordinal);
+        Assert.Contains("Other Pilot or crew", sections[1], StringComparison.Ordinal);
+        Assert.Contains("Flight Review (FR)", sections[1], StringComparison.Ordinal);
+        Assert.Contains("Instrument Proficiency Check (IPC)", sections[1], StringComparison.Ordinal);
+        Assert.Contains("Operator Proficiency Check (OPC)", sections[1], StringComparison.Ordinal);
+        Assert.DoesNotContain("AirportField", sections[1], StringComparison.Ordinal);
+        Assert.Contains("Label=\"Via\" Multiple=\"true\"", sections[2], StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookDraft.Remarks", sections[2], StringComparison.Ordinal);
+        Assert.Contains("Session.WorkbookCustomFields", sections[3], StringComparison.Ordinal);
+        Assert.True(sections[3].IndexOf("Session.WorkbookDraft.IfrSim", StringComparison.Ordinal)
+            < sections[3].IndexOf("Session.WorkbookCustomFields", StringComparison.Ordinal));
         Assert.Contains("Session.WorkbookDraft.FlightReview", page, StringComparison.Ordinal);
         Assert.Contains("Session.WorkbookDraft.InstrumentProficiencyCheck", page, StringComparison.Ordinal);
         Assert.Contains("Session.WorkbookDraft.OperatorProficiencyCheck", page, StringComparison.Ordinal);

@@ -135,10 +135,7 @@ else
 
         <section class="form-section">
             <div class="section-title-row">
-                <div>
-                    <span class="eyebrow">Read first</span>
-                    <h2>Record fields</h2>
-                </div>
+                <h2>Record fields</h2>
                 <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditEntry">
                     Edit entry
                 </MudButton>
@@ -151,15 +148,48 @@ else
                             <MudIcon Icon="@group.Icon" />
                             <h3 id="@group.HeadingId">@group.Heading</h3>
                         </header>
-                        <dl class="record-field-list">
-                            @foreach (var detail in group.Details)
+                        @foreach (var block in group.Details.GroupBy(HourGroup))
+                        {
+                            var isHours = group.HeadingId == "hours-heading";
+                            @if (isHours && block.Key is "se" or "me" or "copilot")
                             {
-                                <div class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
-                                    <dt>@detail.Label</dt>
-                                    <dd>@detail.Value</dd>
+                                <EntryHourTable Title="@(block.Key switch { "se" => "Single engine", "me" => "Multi engine", _ => "Copilot" })">
+                                    @foreach (var pair in block.Chunk(2))
+                                    {
+                                        <div class="totals-table-row" role="row">
+                                            <strong role="rowheader">@CapacityLabel(pair[0].Field)</strong>
+                                            @foreach (var detail in pair)
+                                            {
+                                                <div role="cell">
+                                                    <dl class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
+                                                        <dt class="visually-hidden">@detail.Label</dt>
+                                                        <dd>@detail.Value</dd>
+                                                    </dl>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </EntryHourTable>
+                            }
+                            else
+                            {
+                                <div class="@(isHours ? "record-hour-group" : null)">
+                                    @if (isHours)
+                                    {
+                                        <h4>@(block.Key == "ifr" ? "IFR" : "Custom fields")</h4>
+                                    }
+                                    <dl class="record-field-list">
+                                        @foreach (var detail in block)
+                                        {
+                                            <div class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
+                                                <dt>@detail.Label</dt>
+                                                <dd>@detail.Value</dd>
+                                            </div>
+                                        }
+                                    </dl>
                                 </div>
                             }
-                        </dl>
+                        }
                     </section>
                 }
             </div>
@@ -198,12 +228,12 @@ else
             var details = Session.EntryDetails(CurrentEntry.Entry).ToList();
             return
             [
-                CreateDetailGroup("flight-summary-heading", "Flight", Icons.Material.Filled.Flight, EntryDetailGroup.Flight, details),
-                CreateDetailGroup("crew-route-heading", "Crew and route", Icons.Material.Filled.Route, EntryDetailGroup.CrewAndRoute, details),
-                CreateDetailGroup("checks-heading", "Checks", Icons.Material.Filled.FactCheck, EntryDetailGroup.Checks, details),
-                CreateDetailGroup("logged-time-heading", "Logged time", Icons.Material.Filled.Schedule, EntryDetailGroup.LoggedTime, details),
-                CreateDetailGroup("custom-fields-heading", "Custom fields", Icons.Material.Filled.Tune, EntryDetailGroup.CustomFields, details),
-                CreateDetailGroup("landings-approaches-heading", "Landings and approaches", Icons.Material.Filled.FlightLand, EntryDetailGroup.LandingsAndApproaches, details)
+                CreateDetailGroup("flight-summary-heading", "Flight Details", Icons.Material.Filled.Flight, details, EntryDetailGroup.Flight),
+                CreateDetailGroup("crew-heading", "Crew", Icons.Material.Filled.People, details, EntryDetailGroup.Crew),
+                CreateDetailGroup("route-heading", "Route", Icons.Material.Filled.Route, details, EntryDetailGroup.Route),
+                CreateDetailGroup("hours-heading", "Hours", Icons.Material.Filled.Schedule, details, EntryDetailGroup.LoggedTime, EntryDetailGroup.CustomFields),
+                CreateDetailGroup("landings-heading", "Landings", Icons.Material.Filled.FlightLand, details, EntryDetailGroup.Landings),
+                CreateDetailGroup("approaches-heading", "Instrument Approaches", Icons.Material.Filled.Flight, details, EntryDetailGroup.InstrumentApproaches)
             ];
         }
     }
@@ -228,12 +258,35 @@ else
         string headingId,
         string heading,
         string icon,
-        EntryDetailGroup group,
-        IReadOnlyList<EntryDetail> details) =>
-        new(headingId, heading, icon, details.Where(detail => detail.Group == group).ToList());
+        IReadOnlyList<EntryDetail> details,
+        params EntryDetailGroup[] groups) =>
+        new(headingId, heading, icon, details.Where(detail => groups.Contains(detail.Group)).ToList());
+
+    private static string HourGroup(EntryDetail detail) => detail.Group != EntryDetailGroup.LoggedTime
+        ? "fields"
+        : detail.Field switch
+        {
+            nameof(PortableLogbookWorkbookEntry.SeIcusDay) or nameof(PortableLogbookWorkbookEntry.SeIcusNight)
+                or nameof(PortableLogbookWorkbookEntry.SeDualDay) or nameof(PortableLogbookWorkbookEntry.SeDualNight)
+                or nameof(PortableLogbookWorkbookEntry.SeCommandDay) or nameof(PortableLogbookWorkbookEntry.SeCommandNight) => "se",
+            nameof(PortableLogbookWorkbookEntry.MeIcusDay) or nameof(PortableLogbookWorkbookEntry.MeIcusNight)
+                or nameof(PortableLogbookWorkbookEntry.MeDualDay) or nameof(PortableLogbookWorkbookEntry.MeDualNight)
+                or nameof(PortableLogbookWorkbookEntry.MeCommandDay) or nameof(PortableLogbookWorkbookEntry.MeCommandNight) => "me",
+            nameof(PortableLogbookWorkbookEntry.CopilotDay) or nameof(PortableLogbookWorkbookEntry.CopilotNight) => "copilot",
+            nameof(PortableLogbookWorkbookEntry.IfrIf) or nameof(PortableLogbookWorkbookEntry.IfrSim) => "ifr",
+            _ => "fields"
+        };
 
     private static bool IsEmptyDetailValue(string value) =>
         value == "-";
+
+    private static string CapacityLabel(string? field) => field switch
+    {
+        nameof(PortableLogbookWorkbookEntry.SeIcusDay) or nameof(PortableLogbookWorkbookEntry.MeIcusDay) => "ICUS",
+        nameof(PortableLogbookWorkbookEntry.SeDualDay) or nameof(PortableLogbookWorkbookEntry.MeDualDay) => "Dual",
+        nameof(PortableLogbookWorkbookEntry.SeCommandDay) or nameof(PortableLogbookWorkbookEntry.MeCommandDay) => "Command",
+        _ => "Copilot"
+    };
 
     private void EditEntry()
     {

@@ -135,13 +135,13 @@ async function createDashboardFlight(page, baseUrl) {
     await page.locator("main .flight-entry-page").waitFor({ state: "visible", timeout: 30000 });
     await page.getByLabel("Date", { exact: true }).fill("2026-08-01");
     await page.getByLabel("Type", { exact: true }).fill("B738");
-    await page.getByLabel("Reg", { exact: true }).fill("VH-LNG");
+    await page.getByLabel("Registration", { exact: true }).fill("VH-LNG");
     await page.getByLabel("Flight ID", { exact: true }).fill("QF1234");
     await page.getByLabel("PIC", { exact: true }).fill("Self");
     await page.getByLabel("From", { exact: true }).fill("YMMB");
     await page.getByLabel("To", { exact: true }).fill("YSSY");
     await page.getByLabel("To", { exact: true }).press("Escape");
-    await page.getByLabel("SE command day", { exact: true }).fill("2.0");
+    await page.getByLabel("SE Command Day", { exact: true }).fill("2.0");
     await page.getByRole("button", { name: "Add flight" }).click();
     const reviewDialog = page.getByRole("dialog", { name: "Add this flight?" });
     await reviewDialog.waitFor({ state: "visible", timeout: 30000 });
@@ -497,6 +497,70 @@ try {
                             return button && button.getAnimations({ subtree: true }).length === 0 &&
                                 button.scrollWidth <= button.clientWidth + 1 && button.scrollHeight <= button.clientHeight + 1;
                         }, null, { timeout: 2000 });
+                        await page.evaluate(async () => {
+                            const module = await import("./js/routeMap.mjs");
+                            const markers = [
+                                { icao: "YMMB", name: "Moorabbin", longitude: 145.1, latitude: -38, count: 9 },
+                                { icao: "YSSY", name: "Sydney", longitude: 151.2, latitude: -33.9, count: 1 },
+                                { icao: "YBBN", name: "Brisbane", longitude: 153.1, latitude: -27.4, count: 3 },
+                                { icao: "YPAD", name: "Adelaide", longitude: 138.5, latitude: -34.9, count: 5 }
+                            ];
+                            await module.update(document.querySelector(".route-map-canvas"), {
+                                markers, connections: markers.slice(1).map(airport => ({ from: "YMMB", to: airport.icao, count: airport.count }))
+                            });
+                            const appearances = markers.map(airport => {
+                                const button = [...document.querySelectorAll(".route-airport-marker")].find(item => item.getAttribute("aria-label").includes(airport.icao));
+                                const dot = getComputedStyle(button, "::after"), target = button.getBoundingClientRect();
+                                if (target.width !== 48 || target.height !== 48) throw new Error("Frequency styling changed an airport touch target.");
+                                return { size: parseFloat(dot.width), color: dot.backgroundColor };
+                            });
+                            if (JSON.stringify(appearances.map(dot => dot.size)) !== JSON.stringify([24, 12, 15, 18]) ||
+                                new Set(appearances.map(dot => dot.color)).size !== 4)
+                                throw new Error(`Airport frequency scale failed: ${JSON.stringify(appearances)}`);
+                            const order = [...document.querySelectorAll(".route-airport-marker")].map(button => button.getAttribute("aria-label").split(", ")[1]);
+                            if (JSON.stringify(order) !== JSON.stringify(["YSSY", "YBBN", "YPAD", "YMMB"])) throw new Error(`Airport stacking order failed: ${order}`);
+                        });
+                        await assertAccessible(page, `frequency map ${profile.name} ${colorScheme}`);
+                        await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-frequency.png`) });
+                        for (const accent of ["Ocean", "Sky", "Indigo", "Violet", "Teal", "Forest"]) {
+                            const before = await page.getByRole("button", { name: /YSSY, 1 visit$/ }).evaluate(button => getComputedStyle(button, "::after").backgroundColor);
+                            await page.evaluate(accent => window.electronicLogbookUiPreferences.applyTheme(`System|${accent}`), accent);
+                            await page.waitForFunction(before => {
+                                const button = [...document.querySelectorAll(".route-airport-marker")].find(button => button.getAttribute("aria-label").includes("YSSY"));
+                                return getComputedStyle(button, "::after").backgroundColor !== before;
+                            }, before);
+                            if (accent === "Ocean") await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-routes-ocean.png`) });
+                        }
+                        await page.evaluate(async () => {
+                            const module = await import("./js/routeMap.mjs");
+                            await module.update(document.querySelector(".route-map-canvas"), { markers: [
+                                { icao: "START", name: "Route start", longitude: 145, latitude: -38, count: 10 },
+                                { icao: "BUSY", name: "Busy destination", longitude: 149, latitude: -38, count: 9 },
+                                { icao: "QUIET", name: "Quiet destination", longitude: 147, latitude: -38, count: 1 }
+                            ], connections: [{ from: "START", to: "BUSY", count: 9 }, { from: "START", to: "QUIET", count: 1 }] });
+                            const positions = ["START", "QUIET"].map(icao => {
+                                const button = [...document.querySelectorAll(".route-airport-marker")].find(button => button.getAttribute("aria-label").includes(icao));
+                                const bounds = button.getBoundingClientRect();
+                                return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+                            });
+                            const map = document.querySelector(".maplibregl-canvas"), bounds = map.getBoundingClientRect();
+                            const sample = document.createElement("canvas");
+                            sample.width = map.width; sample.height = map.height;
+                            const context = sample.getContext("2d");
+                            context.drawImage(map, 0, 0);
+                            const [red, green] = context.getImageData(
+                                Math.round(((positions[0].x + positions[1].x) / 2 - bounds.x) * map.width / bounds.width),
+                                Math.round(((positions[0].y + positions[1].y) / 2 - bounds.y) * map.height / bounds.height), 1, 1).data;
+                            if (red <= green) throw new Error(`Quiet route obscured the busy red route: ${red}, ${green}`);
+                            await module.update(document.querySelector(".route-map-canvas"), { markers: [
+                                { icao: "BUSY", name: "Busy airport", longitude: 145, latitude: -38, count: 9 },
+                                { icao: "QUIET", name: "Quiet airport", longitude: 145, latitude: -38, count: 1 }
+                            ], connections: [] });
+                        });
+                        await clickMapAirport(page, "QUIET", 1);
+                        if (JSON.stringify(await page.locator(".route-airport-details span").allTextContents()) !== JSON.stringify(["BUSY", "9 visits"]))
+                            throw new Error("Overlapping airport tap selected the hidden dot.");
+                        await page.getByRole("button", { name: "Close popup", exact: true }).click();
                     }
                     await page.waitForTimeout(50);
                     await page.evaluate(() => {
@@ -1034,6 +1098,16 @@ try {
                         await assertAccessible(page, `totals expanded filters ${profile.name} ${colorScheme}`);
                         await page.screenshot({ path: join(outputDirectory, `${profile.name}-${colorScheme}-${route.name}-filters.png`) });
                     } else if (route.path === "/settings") {
+                        if (await page.locator(".accent-option").count() !== 6 || await page.locator('.accent-option[data-accent="rose"], .accent-option[data-accent="plum"]').count())
+                            throw new Error("Removed accent choices are still available.");
+                        for (const accent of ["Rose", "Plum"]) {
+                            const fallback = await page.evaluate(accent => {
+                                window.electronicLogbookUiPreferences.save("route-map-audit-preferences", `Dark|${accent}`);
+                                return { accent: document.documentElement.dataset.elbAccent, saved: localStorage.getItem("route-map-audit-preferences") };
+                            }, accent);
+                            if (fallback.accent !== "forest" || fallback.saved !== "Dark|Forest") throw new Error(`Removed accent fallback failed: ${accent}`);
+                        }
+                        await page.evaluate(() => window.electronicLogbookUiPreferences.applyTheme("System|Forest"));
                         const privacy = page.locator("details.settings-privacy");
                         await privacy.evaluate(element => element.open = true);
                         if (!(await privacy.innerText()).includes("viewed map area") ||

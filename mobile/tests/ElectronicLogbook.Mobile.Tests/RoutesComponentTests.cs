@@ -59,6 +59,31 @@ public sealed class RoutesComponentTests : BunitContext, IAsyncLifetime
     }
 
     [Fact]
+    public void RouteFrequencyUsesFullLogbookAcrossDateAndAircraftFilters()
+    {
+        Load(Flight(), Flight() with { Year = 2023, Type = "OTHER", Reg = "VH-OTHER" },
+            Flight() with { To = "YMML", Type = "OTHER" }, Flight() with { To = "YMML", Type = "OTHER" },
+            Flight() with { To = "YMML", Type = "OTHER" });
+        var page = Render<Routes>();
+        page.Find("#routes-from").Change("2024-01-01");
+        SetFilter(page, "Aircraft type", "TYPE");
+        SetFilter(page, "Registration", "VH-TEST");
+        Assert.Single(page.FindComponent<RouteMapCanvas>().Instance.Data.Flights);
+        var call = JSInterop.Invocations.Last(invocation => invocation.Identifier == "update");
+        var payload = JsonSerializer.SerializeToElement(call.Arguments[1], new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal(3, payload.GetProperty("maximumRouteCount").GetInt32());
+        var connection = Assert.Single(payload.GetProperty("connections").EnumerateArray());
+        Assert.Equal(1, connection.GetProperty("count").GetInt32());
+        Assert.Equal(2, connection.GetProperty("frequencyCount").GetInt32());
+        page.Find(".routes-filter-summary button").Click();
+        call = JSInterop.Invocations.Last(invocation => invocation.Identifier == "update");
+        payload = JsonSerializer.SerializeToElement(call.Arguments[1], new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        Assert.Equal(3, payload.GetProperty("maximumRouteCount").GetInt32());
+        Assert.Equal(2, payload.GetProperty("connections").EnumerateArray()
+            .Single(line => line.GetProperty("to").GetString() == "YSSY").GetProperty("frequencyCount").GetInt32());
+    }
+
+    [Fact]
     public void MapHasOnlyRequestedControlsAndAirportPopupData()
     {
         Load(Flight() with { Via = "YSSY YMMB" }, Flight() with { From = "YSSY", To = "YMMB" }, Flight() with { From = "YMMB", To = "YMMB" });
@@ -73,6 +98,9 @@ public sealed class RoutesComponentTests : BunitContext, IAsyncLifetime
         var airport = payload.GetProperty("markers").EnumerateArray().Single(marker => marker.GetProperty("icao").GetString() == "YMMB");
         Assert.False(string.IsNullOrWhiteSpace(airport.GetProperty("name").GetString()));
         Assert.Equal(3, airport.GetProperty("count").GetInt32());
+        Assert.Equal(new[] { "ent_0", "ent_1", "ent_2" }, airport.GetProperty("flightIds").EnumerateArray().Select(id => id.GetString()).Order());
+        var connection = Assert.Single(payload.GetProperty("connections").EnumerateArray());
+        Assert.Equal(new[] { "ent_0", "ent_1" }, connection.GetProperty("flightIds").EnumerateArray().Select(id => id.GetString()).Order());
     }
 
     [Fact]
@@ -90,6 +118,32 @@ public sealed class RoutesComponentTests : BunitContext, IAsyncLifetime
         Assert.Empty(page.FindComponents<RouteMapCanvas>());
         page.Find(".routes-filter-summary button").Click();
         Assert.Contains("No recognised airports", page.Markup);
+    }
+
+    [Fact]
+    public void SavedChartsBasesMarkOnlyMatchingMapAirports()
+    {
+        Load(Flight());
+        JSInterop.Setup<string?>("electronicLogbookStore.load", "analytics-bases:log_routes_test").SetResult("[\"ymmb\"]");
+        var page = Render<Routes>();
+        var call = JSInterop.Invocations.Single(invocation => invocation.Identifier == "update");
+        var payload = JsonSerializer.SerializeToElement(call.Arguments[1], new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        var airports = payload.GetProperty("markers").EnumerateArray().ToArray();
+        Assert.True(airports.Single(airport => airport.GetProperty("icao").GetString() == "YMMB").GetProperty("isBase").GetBoolean());
+        Assert.False(airports.Single(airport => airport.GetProperty("icao").GetString() == "YSSY").GetProperty("isBase").GetBoolean());
+    }
+
+    [Theory]
+    [InlineData("invalid json")]
+    [InlineData("[\"UNKNOWN\"]")]
+    public void UnreadableBasesKeepMapAvailableWithWarning(string savedBases)
+    {
+        Load(Flight());
+        JSInterop.Setup<string?>("electronicLogbookStore.load", "analytics-bases:log_routes_test").SetResult(savedBases);
+        var page = Render<Routes>();
+        Assert.Contains("Saved bases could not be loaded", page.Markup);
+        Assert.Empty(page.FindComponent<RouteMapCanvas>().Instance.BaseAirports);
+        Assert.Single(page.FindComponent<RouteMapCanvas>().Instance.Data.Flights);
     }
 
     [Fact]
