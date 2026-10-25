@@ -256,6 +256,89 @@
         }
     };
 
+    window.electronicLogbookHourLayout = {
+        observe: (root) => {
+            const rows = [...root.querySelectorAll(".totals-table-row:not(.totals-table-header), .totals-pair-row")];
+            const grids = [...root.querySelectorAll(".entry-responsive-grid")];
+            const textMetrics = document.createElement("canvas").getContext("2d");
+            const textWidth = (element) => {
+                const range = document.createRange();
+                range.selectNodeContents(element);
+                return range.getBoundingClientRect().width;
+            };
+            const update = () => {
+                for (const grid of grids) {
+                    const style = getComputedStyle(grid);
+                    const columns = Number(style.getPropertyValue("--entry-field-columns")) || 2;
+                    const gap = parseFloat(style.columnGap) || 0;
+                    const available = grid.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+                    const fits = [...grid.children].filter(item => !item.classList.contains("field-span") &&
+                        !(grid.classList.contains("totals-approach-grid") && item === grid.lastElementChild)).every(item => {
+                        const caption = item.matches("label") ? item : item.querySelector("label, dt, .status-metric > span");
+                        const checkbox = item.querySelector('input[type="checkbox"]');
+                        let captionWidth = 0;
+                        let unscaledWidth = 0;
+                        let renderedWidth = 0;
+                        if (caption) textMetrics.font = getComputedStyle(caption).font;
+                        for (const node of caption?.childNodes ?? []) {
+                            if (node.nodeType !== Node.TEXT_NODE) continue;
+                            const range = document.createRange();
+                            range.selectNodeContents(node);
+                            renderedWidth += [...range.getClientRects()].reduce((sum, rect) => sum + rect.width, 0);
+                            unscaledWidth += textMetrics.measureText(node.textContent).width;
+                            if (checkbox || (caption.tagName === "DT" && columns === 3)) {
+                                for (const word of node.textContent.matchAll(/\S+/g)) {
+                                    range.setStart(node, word.index);
+                                    range.setEnd(node, word.index + word[0].length);
+                                    captionWidth = Math.max(captionWidth, range.getBoundingClientRect().width);
+                                }
+                            } else {
+                                range.selectNodeContents(node);
+                                captionWidth += [...range.getClientRects()].reduce((sum, rect) => sum + rect.width, 0);
+                            }
+                        }
+                        const itemStyle = getComputedStyle(item);
+                        // Android autosizing can enlarge glyphs without changing the computed font size.
+                        const textScale = unscaledWidth > 0 ? Math.max(1, renderedWidth / unscaledWidth) : 1;
+                        let needed = captionWidth;
+                        const input = item.querySelector("input:not([type=checkbox])");
+                        if (input) needed = Math.max(needed, parseFloat(getComputedStyle(input).fontSize) * 4.5 * textScale);
+                        const value = item.querySelector("dd");
+                        if (value) needed = Math.max(needed, parseFloat(getComputedStyle(value).fontSize) * 4.5 * textScale);
+                        if (checkbox) needed += checkbox.getBoundingClientRect().width + (parseFloat(itemStyle.columnGap) || 0);
+                        const number = item.querySelector(".status-metric > strong");
+                        if (number) needed += textWidth(number) + (parseFloat(itemStyle.columnGap) || 0);
+                        needed += parseFloat(itemStyle.paddingLeft) + parseFloat(itemStyle.paddingRight) + (input ? 24 : 0);
+                        return needed + 1 <= (available - gap * (columns - 1)) / columns;
+                    });
+                    grid.classList.toggle("entry-fields-stacked", !fits);
+                }
+                const fits = rows.every(row => {
+                    const style = getComputedStyle(row);
+                    const heading = row.querySelector("strong");
+                    const number = row.querySelector("input, dd, [role=cell]");
+                    const numberSize = number ? parseFloat(getComputedStyle(number).fontSize) : 16;
+                    const captions = [...row.querySelectorAll(".time-period-label")];
+                    const valueWidth = Math.max(88, numberSize * 4.5 + 16,
+                        ...captions.map(caption => caption.getBoundingClientRect().width + 8));
+                    const needed = (heading ? textWidth(heading) : 0) + valueWidth * 2
+                        + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight)
+                        + (parseFloat(style.columnGap) || 0) * 2;
+                    return needed <= row.clientWidth;
+                });
+                root.classList.toggle("hour-values-stacked", !fits);
+                root.querySelectorAll(".totals-table-header")
+                    .forEach(header => header.classList.toggle("visually-hidden", !fits));
+            };
+            const observer = new ResizeObserver(update);
+            root.hourLayoutObserver = observer;
+            [root, ...grids, ...root.querySelectorAll(".time-period-label, input, label, dt, .status-metric, .totals-table-row > strong, .totals-pair-row > strong")]
+                .forEach(element => observer.observe(element));
+            update();
+        },
+        disconnect: (root) => root?.hourLayoutObserver?.disconnect()
+    };
+
     window.electronicLogbookCurrencyOverview = {
         observe: (overview) => {
             const items = [...overview.querySelectorAll(".currency-overview-item")];

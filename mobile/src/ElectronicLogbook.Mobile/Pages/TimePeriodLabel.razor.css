@@ -1,0 +1,17 @@
+.time-period-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    white-space: nowrap;
+}
+
+.time-period-label ::deep .time-period-flight-icon {
+    transform: rotate(45deg);
+}
+
+.time-period-label ::deep .mud-icon-root {
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+}

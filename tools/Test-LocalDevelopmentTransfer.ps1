@@ -245,6 +245,7 @@ try {
     Assert-True ($entrypointText -match 'Expected\.HostedBackupR2CheckScript' -and $entrypointText -match 'Expected\.HostedBackupCurlCommand' -and $entrypointText -match "backupCurlHelp -match '--aws-sigv4'") 'transfer verification must check the R2 permission script and curl signing support'
     Assert-True ('*/backup-private.encrypted.pem' -in $config.ExcludedPathPatterns -and '*/recovery.elbbackup' -in $config.ExcludedPathPatterns) 'private recovery identity and capsule must never enter the transfer archive'
     Assert-True ($config.Expected.HostedBackupRecoveryPowerShellMinVersion -eq '7.2' -and (Test-Path (Join-Path $repoRoot $config.Expected.HostedBackupRecoveryScript))) 'protected recovery setup prerequisite and script must be documented in the manifest'
+    Assert-True ($config.Expected.HostedBackupMonitorPowerShellHost -eq 'System32/WindowsPowerShell/v1.0/powershell.exe' -and $entrypointText.Contains('Expected.HostedBackupMonitorPowerShellHost')) 'optional hidden monitor tasks must verify the existing Windows PowerShell host from the manifest'
     Assert-True ($entrypointText -match "Firebase CLI version.*Expected\.FirebaseCliVersion") 'verifier must enforce the pinned Firebase CLI version'
     Assert-True ($entrypointText -match 'sdkManager.*Expected\.AndroidRecoverySystemImage') 'installer must install the recovery emulator Google Play system image'
     Assert-True ($entrypointText -match 'Android recovery Google Play image') 'verifier must report whether the recovery emulator image is installed'

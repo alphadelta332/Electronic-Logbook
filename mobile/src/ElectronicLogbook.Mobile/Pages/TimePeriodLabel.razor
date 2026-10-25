@@ -1,0 +1,17 @@
+<span class="time-period-label">
+    <MudIcon Icon="@Icon" Class="@(Label == "In Flight" ? "time-period-flight-icon" : null)" aria-hidden="true" />
+    <span>@Label</span>
+</span>
+
+@code {
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    private string Icon => Label switch
+    {
+        "Day" => Icons.Material.Filled.LightMode,
+        "Night" => Icons.Material.Filled.DarkMode,
+        "In Flight" => Icons.Material.Filled.Flight,
+        "Simulator" => Icons.Material.Filled.Computer,
+        _ => throw new InvalidOperationException($"Unknown time period: {Label}")
+    };
+}

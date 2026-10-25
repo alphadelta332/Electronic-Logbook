@@ -1,0 +1,49 @@
+.entry-fields-layout {
+    display: grid;
+    gap: 28px;
+    min-width: 0;
+}
+
+.entry-category {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+}
+
+.entry-category > h2 {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 20px;
+    font-weight: 800;
+}
+
+.entry-category ::deep .entry-subsections {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+
+.entry-field-card {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: 12px;
+    background: var(--app-surface);
+}
+
+.entry-field-card-heading {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--app-border);
+    background: var(--app-surface-alt);
+}
+
+.entry-field-card-heading h3 {
+    margin: 0;
+    color: var(--app-text);
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.entry-field-card-content {
+    min-width: 0;
+}

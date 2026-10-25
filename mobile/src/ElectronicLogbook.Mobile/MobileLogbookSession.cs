@@ -489,6 +489,10 @@ public sealed class MobileLogbookSession(
         HasEditedDraft = false;
         EditingEntryId = null;
         EditingRevisionId = null;
+        if (LastActionMessageScope == MobileActionMessageScope.Draft)
+        {
+            ClearLastActionMessage();
+        }
     }
 
     public Task RenameWorkbookCustomFieldAsync(CustomFieldId fieldId, string label) =>

@@ -207,6 +207,7 @@
         HostedBackupMonitor = @('tools/hosted-backup/daily-monitor.mjs', 'tools/hosted-backup/daily-monitor.test.mjs', 'tools/hosted-backup/daily-monitor-observation.mjs', 'tools/hosted-backup/daily-monitor-observation.test.mjs', 'tools/hosted-backup/daily-alert-delivery.mjs', 'tools/hosted-backup/daily-alert-delivery.test.mjs', 'tools/hosted-backup/daily-watchdog.mjs', 'tools/hosted-backup/daily-watchdog-worker.mjs', 'tools/hosted-backup/daily-watchdog.wrangler.json', 'tools/hosted-backup/daily-watchdog.test.mjs', 'tools/hosted-backup/daily-watchdog.integration.test.mjs', 'docs/hosted-backup-monitor.md')
         HostedBackupRecoveryScript = 'tools/hosted-backup/Initialize-Recovery.ps1'
         HostedBackupRecoveryPowerShellMinVersion = '7.2'
+        HostedBackupMonitorPowerShellHost = 'System32/WindowsPowerShell/v1.0/powershell.exe'
         HostedBackupR2AccessScript = 'tools/hosted-backup/Initialize-R2Access.ps1'
         HostedBackupR2Policy = 'tools/hosted-backup/r2-policy.json'
         HostedBackupR2CheckScript = 'tools/hosted-backup/check-r2-access.mjs'

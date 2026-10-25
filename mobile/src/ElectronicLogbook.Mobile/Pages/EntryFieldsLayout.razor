@@ -1,0 +1,37 @@
+<div class="entry-fields-layout">
+    @foreach (var group in Groups)
+    {
+        <section class="entry-category" aria-label="@group.Title">
+            <h2>@group.Title</h2>
+            <ResponsiveHours Class="entry-subsections">
+                @foreach (var section in group.Sections)
+                {
+                    @if (section.Key != Subsection.Custom || ShowCustom)
+                    {
+                        <section class="entry-field-card" aria-label="@section.Title">
+                            <header class="entry-field-card-heading"><h3>@section.Title</h3></header>
+                            <div class="entry-field-card-content">@ChildContent(section.Key)</div>
+                        </section>
+                    }
+                }
+            </ResponsiveHours>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public RenderFragment<Subsection> ChildContent { get; set; } = default!;
+    [Parameter] public bool ShowCustom { get; set; } = true;
+
+    public enum Subsection { Details, Crew, Route, SingleEngine, MultiEngine, OtherTime, Custom, Landings, InstrumentApproaches }
+
+    private sealed record EntryGroup(string Title, (Subsection Key, string Title)[] Sections);
+
+    private static readonly EntryGroup[] Groups =
+    [
+        new("Flight", [(Subsection.Details, "Details"), (Subsection.Crew, "Crew"), (Subsection.Route, "Route")]),
+        new("Hours", [(Subsection.SingleEngine, "Single Engine"), (Subsection.MultiEngine, "Multi Engine"),
+            (Subsection.OtherTime, "Other time"), (Subsection.Custom, "Custom")]),
+        new("Recency", [(Subsection.Landings, "Landings"), (Subsection.InstrumentApproaches, "Instrument Approaches")])
+    ];
+}

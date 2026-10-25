@@ -932,6 +932,8 @@ function Invoke-VerifyAction {
     $recoveryShellOutput = Get-NativeCommandOutput -Name 'pwsh' -Arguments @('--version')
     $recoveryShellVersion = if ($recoveryShellOutput -match 'PowerShell (\d+\.\d+\.\d+)') { [version]$Matches[1] } else { [version]'0.0' }
     Add-CheckResult $results 'PowerShell for optional recovery setup' ($recoveryShellVersion -ge [version]$script:TransferConfig.Expected.HostedBackupRecoveryPowerShellMinVersion) $false 'PowerShell 7.2+ is needed only for one-time password-protected offline recovery setup'
+    $monitorShell = Join-Path $env:SystemRoot $script:TransferConfig.Expected.HostedBackupMonitorPowerShellHost
+    Add-CheckResult $results 'Windows PowerShell for optional monitor acceptance' (Test-Path -LiteralPath $monitorShell -PathType Leaf) $false 'Existing Windows PowerShell hosts local hidden recorder/independent-stop tasks; no new package or credential is needed'
 
     $dockerInfo = Get-NativeCommandOutput -Name 'docker' -Arguments @('info', '--format', '{{.ServerVersion}}')
     Add-CheckResult $results 'Docker Desktop engine' ($dockerInfo -match '^\d+\.\d+') $false $(if ($dockerInfo -match '^\d+\.\d+') { $dockerInfo } else { 'not running; launch Docker Desktop when hosted tests are needed' })

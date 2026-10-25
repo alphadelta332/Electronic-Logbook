@@ -588,6 +588,16 @@ Worker/SQLite tests. `%TEMP%/elb-daily-repository-*` stages are regenerated outp
 excluded from transfer. Publish only reviewed allowlisted files, never a whole
 stage after running tools, since generated state can appear there.
 
+Hidden local backup-monitor acceptance tasks use the Windows-provided
+`%SystemRoot%/System32/WindowsPowerShell/v1.0/powershell.exe` host with
+`-WindowStyle Hidden`, then create Node with `CreateNoWindow`. Verify checks that
+existing host separately; no additional package is needed. Local acceptance
+scripts, fixture receipts and logs under ignored `artifacts/` are regenerated
+engineering output and stay excluded from transfer. This does not enable timers
+or backups or carry approval for a new live test window.
+The existing Wrangler login must remain valid through the independent stop plus
+its execution allowance; `whoami` alone does not renew a still-valid session.
+
 One-time protected recovery setup uses the optional PowerShell 7 installation
 (version 7.2 or later); its password entry occurs in a local console. It creates the
 independent encrypted private identity and encrypted recovery capsule on owner-selected

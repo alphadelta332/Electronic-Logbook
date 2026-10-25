@@ -79,7 +79,7 @@ else
         }
         else if (ActiveView == LogbookView.Totals)
         {
-            <section class="form-section logbook-totals">
+            <ResponsiveHours Class="form-section logbook-totals">
                 <div class="section-title-row">
                     <div>
                         <span class="eyebrow">Totals</span>
@@ -111,28 +111,26 @@ else
                         <div class="totals-table-row totals-table-header" role="row">
                             <span role="columnheader">Capacity</span>
                             <span class="totals-time-header" role="columnheader">
-                                <MudIcon Icon="@Icons.Material.Filled.LightMode" aria-hidden="true" />
-                                <span>Day</span>
+                                <TimePeriodLabel Label="Day" />
                             </span>
                             <span class="totals-time-header" role="columnheader">
-                                <MudIcon Icon="@Icons.Material.Filled.DarkMode" aria-hidden="true" />
-                                <span>Night</span>
+                                <TimePeriodLabel Label="Night" />
                             </span>
                         </div>
                         <div class="totals-table-row" role="row">
                             <strong role="rowheader">ICUS</strong>
-                            <span role="cell">@FormatHoursTotal(entry => entry.SeIcusDay)</span>
-                            <span role="cell">@FormatHoursTotal(entry => entry.SeIcusNight)</span>
+                            <HourValueCell Period="Day"><span>@FormatHoursTotal(entry => entry.SeIcusDay)</span></HourValueCell>
+                            <HourValueCell Period="Night"><span>@FormatHoursTotal(entry => entry.SeIcusNight)</span></HourValueCell>
                         </div>
                         <div class="totals-table-row" role="row">
                             <strong role="rowheader">Dual</strong>
-                            <span role="cell">@FormatHoursTotal(entry => entry.SeDualDay)</span>
-                            <span role="cell">@FormatHoursTotal(entry => entry.SeDualNight)</span>
+                            <HourValueCell Period="Day"><span>@FormatHoursTotal(entry => entry.SeDualDay)</span></HourValueCell>
+                            <HourValueCell Period="Night"><span>@FormatHoursTotal(entry => entry.SeDualNight)</span></HourValueCell>
                         </div>
                         <div class="totals-table-row" role="row">
                             <strong role="rowheader">Command</strong>
-                            <span role="cell">@FormatHoursTotal(entry => entry.SeCommandDay)</span>
-                            <span role="cell">@FormatHoursTotal(entry => entry.SeCommandNight)</span>
+                            <HourValueCell Period="Day"><span>@FormatHoursTotal(entry => entry.SeCommandDay)</span></HourValueCell>
+                            <HourValueCell Period="Night"><span>@FormatHoursTotal(entry => entry.SeCommandNight)</span></HourValueCell>
                         </div>
                     </div>
                 </section>
@@ -145,28 +143,26 @@ else
                         <div class="totals-table-row totals-table-header" role="row">
                             <span role="columnheader">Capacity</span>
                             <span class="totals-time-header" role="columnheader">
-                                <MudIcon Icon="@Icons.Material.Filled.LightMode" aria-hidden="true" />
-                                <span>Day</span>
+                                <TimePeriodLabel Label="Day" />
                             </span>
                             <span class="totals-time-header" role="columnheader">
-                                <MudIcon Icon="@Icons.Material.Filled.DarkMode" aria-hidden="true" />
-                                <span>Night</span>
+                                <TimePeriodLabel Label="Night" />
                             </span>
                         </div>
                         <div class="totals-table-row" role="row">
                             <strong role="rowheader">ICUS</strong>
-                            <span role="cell">@FormatHoursTotal(entry => entry.MeIcusDay)</span>
-                            <span role="cell">@FormatHoursTotal(entry => entry.MeIcusNight)</span>
+                            <HourValueCell Period="Day"><span>@FormatHoursTotal(entry => entry.MeIcusDay)</span></HourValueCell>
+                            <HourValueCell Period="Night"><span>@FormatHoursTotal(entry => entry.MeIcusNight)</span></HourValueCell>
                         </div>
                         <div class="totals-table-row" role="row">
                             <strong role="rowheader">Dual</strong>
-                            <span role="cell">@FormatHoursTotal(entry => entry.MeDualDay)</span>
-                            <span role="cell">@FormatHoursTotal(entry => entry.MeDualNight)</span>
+                            <HourValueCell Period="Day"><span>@FormatHoursTotal(entry => entry.MeDualDay)</span></HourValueCell>
+                            <HourValueCell Period="Night"><span>@FormatHoursTotal(entry => entry.MeDualNight)</span></HourValueCell>
                         </div>
                         <div class="totals-table-row" role="row">
                             <strong role="rowheader">Command</strong>
-                            <span role="cell">@FormatHoursTotal(entry => entry.MeCommandDay)</span>
-                            <span role="cell">@FormatHoursTotal(entry => entry.MeCommandNight)</span>
+                            <HourValueCell Period="Day"><span>@FormatHoursTotal(entry => entry.MeCommandDay)</span></HourValueCell>
+                            <HourValueCell Period="Night"><span>@FormatHoursTotal(entry => entry.MeCommandNight)</span></HourValueCell>
                         </div>
                     </div>
                 </section>
@@ -178,13 +174,17 @@ else
                     <div class="totals-pair-list">
                         <div class="totals-pair-row">
                             <strong>Copilot</strong>
-                            <span><small>Day</small> @FormatHoursTotal(entry => entry.CopilotDay)</span>
-                            <span><small>Night</small> @FormatHoursTotal(entry => entry.CopilotNight)</span>
+                            <div class="time-period-values">
+                                <span><small><TimePeriodLabel Label="Day" /></small> @FormatHoursTotal(entry => entry.CopilotDay)</span>
+                                <span><small><TimePeriodLabel Label="Night" /></small> @FormatHoursTotal(entry => entry.CopilotNight)</span>
+                            </div>
                         </div>
                         <div class="totals-pair-row">
                             <strong>Instrument</strong>
-                            <span><small>Actual</small> @FormatHoursTotal(entry => entry.IfrIf)</span>
-                            <span><small>Simulator</small> @FormatHoursTotal(entry => entry.IfrSim)</span>
+                            <div class="time-period-values">
+                                <span><small><TimePeriodLabel Label="In Flight" /></small> @FormatHoursTotal(entry => entry.IfrIf)</span>
+                                <span><small><TimePeriodLabel Label="Simulator" /></small> @FormatHoursTotal(entry => entry.IfrSim)</span>
+                            </div>
                         </div>
                     </div>
                 </section>
@@ -205,7 +205,7 @@ else
                     <div class="totals-group-heading">
                         <h3 id="movement-totals-heading">Landings</h3>
                     </div>
-                    <div class="totals-count-grid">
+                    <div class="totals-count-grid entry-responsive-grid">
                         <StatusMetric Label="Day" Value="@(FormatCountTotal(entry => entry.LandingsDay))" />
                         <StatusMetric Label="Night" Value="@(FormatCountTotal(entry => entry.LandingsNight))" />
                     </div>
@@ -215,17 +215,17 @@ else
                     <div class="totals-group-heading">
                         <h3 id="approach-totals-heading">Approaches</h3>
                     </div>
-                    <div class="totals-count-grid totals-approach-grid">
+                    <div class="totals-count-grid totals-approach-grid entry-responsive-grid">
                         <StatusMetric Label="ILS" Value="@(FormatCountTotal(entry => entry.Ils))" />
                         <StatusMetric Label="VOR" Value="@(FormatCountTotal(entry => entry.Vor))" />
                         <StatusMetric Label="RNP" Value="@(FormatCountTotal(entry => entry.Rnp))" />
                         <StatusMetric Label="NDB" Value="@(FormatCountTotal(entry => entry.Ndb))" />
-                        <StatusMetric Label="DGA CDI" Value="@(FormatCountTotal(entry => entry.DgaCdi))" />
-                        <StatusMetric Label="DGA AZI" Value="@(FormatCountTotal(entry => entry.DgaAzi))" />
+                        <StatusMetric Label="DGA (CDI)" Value="@(FormatCountTotal(entry => entry.DgaCdi))" />
+                        <StatusMetric Label="DGA (Azi)" Value="@(FormatCountTotal(entry => entry.DgaAzi))" />
                         <StatusMetric Label="Circling" Value="@(FormatCountTotal(entry => entry.Circling))" />
                     </div>
                 </section>
-            </section>
+            </ResponsiveHours>
         }
         else
         {

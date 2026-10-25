@@ -1,0 +1,23 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="responsive-hours @Class" @ref="root">@ChildContent</div>
+
+@code {
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public bool Enabled { get; set; } = true;
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+    private ElementReference root;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Enabled) await JS.InvokeVoidAsync("electronicLogbookHourLayout.observe", root);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (!Enabled) return;
+        try { await JS.InvokeVoidAsync("electronicLogbookHourLayout.disconnect", root); }
+        catch (JSException) { }
+    }
+}

@@ -1780,6 +1780,18 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     padding: 16px;
 }
 
+.responsive-hours .entry-responsive-grid {
+    grid-template-columns: repeat(var(--entry-field-columns, 2), minmax(0, 1fr));
+}
+
+.entry-responsive-grid.entry-fields-stacked {
+    grid-template-columns: 1fr;
+}
+
+.responsive-hours .entry-responsive-grid > .record-field {
+    border-right: 0;
+}
+
 .field-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3043,27 +3055,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     font-weight: 600;
 }
 
-.entry-hour-table {
-    --totals-hour-columns: minmax(max-content, 1.6fr) repeat(2, minmax(64px, 1fr));
+.entry-hour-table,
+.entry-other-time {
+    --totals-hour-columns: minmax(max-content, 1.6fr) repeat(2, minmax(88px, 1fr));
     min-width: 0;
     container-type: inline-size;
-}
-
-.entry-hour-table h4,
-.entry-hour-group h4,
-.record-hour-group h4 {
-    margin: 0;
-    color: var(--app-text);
-    font-size: 14px;
-    font-weight: 800;
-}
-
-.entry-hour-table h4 {
-    padding: 16px 14px 12px;
-}
-
-.entry-hour-table + .entry-hour-table {
-    margin-top: 16px;
 }
 
 .entry-hour-table .totals-table-row {
@@ -3072,23 +3068,32 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     min-height: 48px;
 }
 
-.entry-hour-table .totals-table-row > strong {
+.entry-other-time .totals-pair-row {
+    grid-template-columns: var(--totals-hour-columns);
+}
+
+.entry-hour-table .totals-table-row > strong,
+.entry-other-time .totals-pair-row > strong {
     font-size: 13px;
     overflow-wrap: anywhere;
 }
 
-.entry-hour-table .record-field {
+.entry-hour-table .record-field,
+.entry-other-time .record-field {
     margin: 0;
     padding: 0;
     border: 0;
     text-align: right;
 }
 
-.entry-hour-table label {
+.entry-hour-table label,
+.entry-other-time label {
     min-width: 0;
+    width: 100%;
 }
 
-.entry-hour-table input {
+.entry-hour-table input,
+.entry-other-time input {
     width: 100%;
     min-width: 0;
     min-height: 48px;
@@ -3102,19 +3107,70 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     font-variant-numeric: tabular-nums;
 }
 
-@container (max-width: 280px) {
-    .entry-hour-table .totals-table-row {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
+.entry-other-time .totals-pair-row {
+    gap: 8px;
+}
 
-    .entry-hour-table .totals-table-row > :first-child {
-        grid-column: 1 / -1;
-        text-align: left;
-    }
+.time-period-values > div {
+    display: grid;
+    justify-items: stretch;
+    text-align: right;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
 
-    .entry-hour-table .totals-table-header > :first-child {
-        display: none;
-    }
+.hour-stacked-label {
+    display: none;
+    color: var(--app-text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.hour-value-cell {
+    display: grid;
+    min-width: 0;
+    gap: 6px;
+}
+
+.hour-values-stacked .totals-table-row,
+.hour-values-stacked .totals-pair-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+}
+
+.hour-values-stacked .totals-table-header {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+.hour-values-stacked .time-period-values {
+    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+}
+
+.hour-values-stacked .time-period-values small {
+    text-align: left;
+}
+
+.hour-values-stacked .hour-stacked-label {
+    display: block;
+    text-align: left;
+}
+
+.hour-values-stacked .totals-table-row > strong {
+    text-align: left;
+}
+
+.hour-values-stacked [aria-labelledby="custom-field-totals-heading"] .totals-count-grid {
+    grid-template-columns: minmax(0, 1fr);
 }
 
 .logbook-totals {
@@ -3341,6 +3397,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .totals-table-row {
     display: grid;
     grid-template-columns: var(--totals-hour-columns);
+    column-gap: 8px;
     align-items: center;
     min-height: 44px;
     padding: 0 14px;
@@ -3351,7 +3408,8 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     text-align: right;
 }
 
-.totals-table-row > span {
+.totals-table-row > span,
+.totals-table-row > .hour-value-cell {
     font-variant-numeric: tabular-nums;
     font-weight: 800;
 }
@@ -3386,22 +3444,33 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .totals-pair-row {
     display: grid;
     grid-template-columns: var(--totals-hour-columns);
+    gap: 8px;
     align-items: center;
     min-height: 52px;
     padding: 8px 14px;
     border-top: 1px solid var(--app-border);
 }
 
-.totals-pair-row > span {
+.time-period-values {
     display: grid;
-    justify-items: end;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    grid-column: span 2;
+    min-width: 0;
+    width: 100%;
+}
+
+.time-period-values > span {
+    display: grid;
+    justify-items: stretch;
+    text-align: right;
     font-weight: 800;
     font-variant-numeric: tabular-nums;
 }
 
 .totals-pair-row small {
     color: var(--app-text-muted);
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
 }
@@ -3430,12 +3499,8 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     text-align: right;
 }
 
-.totals-approach-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
 .totals-approach-grid .status-metric:last-child {
-    grid-column: span 2;
+    grid-column: 1 / -1;
 }
 
 .detail-hero {
@@ -3617,9 +3682,6 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .totals-approach-grid .status-metric:last-child {
-        grid-column: auto;
-    }
 
     .flight-row:not(.logbook-entry-row),
     .detail-primary-line {

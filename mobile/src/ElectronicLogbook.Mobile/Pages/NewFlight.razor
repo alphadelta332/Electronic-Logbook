@@ -180,140 +180,140 @@ else
             </section>
         }
 
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <h2>Flight Details</h2>
-            </div>
-            <div class="field-grid">
-                <label>Date <input type="date" max="@TodayIso" @bind="Session.WorkbookDraft.Date" /></label>
-                <label>Type <input @bind="Session.WorkbookDraft.Type" autocapitalize="characters" spellcheck="false" /></label>
-                <label>Registration <input @bind="Session.WorkbookDraft.Reg" autocapitalize="characters" spellcheck="false" /></label>
-                <label>Flight ID <input @bind="Session.WorkbookDraft.FlightId" autocapitalize="characters" spellcheck="false" /></label>
-            </div>
-        </section>
-
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <h2>Crew</h2>
-            </div>
-            <div class="field-grid">
-                <label>PIC <input @bind="Session.WorkbookDraft.Pic" autocapitalize="words" /></label>
-                <label>Other Pilot or crew <input @bind="Session.WorkbookDraft.OtherPilotOrCrew" autocapitalize="words" /></label>
-            </div>
-            <div class="field-grid check-grid crew-checks">
-                <label class="check-option"><input type="checkbox" @bind="Session.WorkbookDraft.FlightReview" /> Flight Review (FR)</label>
-                <label class="check-option"><input type="checkbox" @bind="Session.WorkbookDraft.InstrumentProficiencyCheck" /> Instrument Proficiency Check (IPC)</label>
-                <label class="check-option"><input type="checkbox" @bind="Session.WorkbookDraft.OperatorProficiencyCheck" /> Operator Proficiency Check (OPC)</label>
-            </div>
-        </section>
-
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <h2>Route</h2>
-            </div>
-            <div class="field-grid">
-                <AirportField Label="From" @bind-Value="Session.WorkbookDraft.From" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" />
-                <AirportField Label="To" @bind-Value="Session.WorkbookDraft.To" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" />
-                <div class="field-span"><AirportField Label="Via" Multiple="true" @bind-Value="Session.WorkbookDraft.Via" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" /></div>
-            </div>
-            @if (AirportBasesError is not null)
-            {
-                <p role="status">@AirportBasesError</p>
-                <MudButton Variant="Variant.Text" OnClick="LoadAirportBasesAsync">Retry bases</MudButton>
-            }
-            <label class="field-wide">Remarks <textarea @bind="Session.WorkbookDraft.Remarks"></textarea></label>
-        </section>
-
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <h2>Hours</h2>
-            </div>
-            <EntryHourTable Title="Single engine">
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">ICUS</strong>
-                    <div role="cell"><label><span class="visually-hidden">SE ICUS Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">SE ICUS Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusNight = value)" /></label></div>
-                </div>
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">Dual</strong>
-                    <div role="cell"><label><span class="visually-hidden">SE Dual Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">SE Dual Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualNight = value)" /></label></div>
-                </div>
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">Command</strong>
-                    <div role="cell"><label><span class="visually-hidden">SE Command Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">SE Command Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandNight = value)" /></label></div>
-                </div>
-            </EntryHourTable>
-            <EntryHourTable Title="Multi engine">
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">ICUS</strong>
-                    <div role="cell"><label><span class="visually-hidden">ME ICUS Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">ME ICUS Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusNight = value)" /></label></div>
-                </div>
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">Dual</strong>
-                    <div role="cell"><label><span class="visually-hidden">ME Dual Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">ME Dual Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualNight = value)" /></label></div>
-                </div>
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">Command</strong>
-                    <div role="cell"><label><span class="visually-hidden">ME Command Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">ME Command Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandNight = value)" /></label></div>
-                </div>
-            </EntryHourTable>
-            <EntryHourTable Title="Copilot">
-                <div class="totals-table-row" role="row">
-                    <strong role="rowheader">Copilot</strong>
-                    <div role="cell"><label><span class="visually-hidden">Copilot Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.CopilotDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotDay = value)" /></label></div>
-                    <div role="cell"><label><span class="visually-hidden">Copilot Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.CopilotNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotNight = value)" /></label></div>
-                </div>
-            </EntryHourTable>
-            <div class="entry-hour-group">
-                <h4>IFR</h4>
-                <div class="field-grid">
-                    <label>IFR IF <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.IfrIf)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrIf = value)" /></label>
-                    <label>IFR Sim <input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.IfrSim)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrSim = value)" /></label>
-                </div>
-            </div>
-            @if (Session.WorkbookCustomFields.Count > 0)
-            {
-                <div class="entry-hour-group">
-                    <h4>Custom fields</h4>
-                    <div class="field-grid custom-field-grid">
-                        @foreach (var field in Session.WorkbookCustomFields)
-                        {
-                            <label>@field.Label <input @bind="Session.WorkbookDraft.CustomValues[field.Id]" /></label>
-                        }
-                    </div>
-                </div>
-            }
-        </section>
-
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <h2>Landings</h2>
-            </div>
-            <div class="field-grid numeric-grid">
-                <label>Landings Day <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsDay" /></label>
-                <label>Landings Night <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsNight" /></label>
-            </div>
-        </section>
-
-        <section class="form-section" @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
-            <div class="section-title-row">
-                <h2>Instrument Approaches</h2>
-            </div>
-            <div class="field-grid numeric-grid">
-                <label>ILS <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Ils" /></label>
-                <label>VOR <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Vor" /></label>
-                <label>RNP <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Rnp" /></label>
-                <label>NDB <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Ndb" /></label>
-                <label>DGA (CDI) <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.DgaCdi" /></label>
-                <label>DGA (Azi) <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.DgaAzi" /></label>
-                <label>Circling <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Circling" /></label>
-            </div>
-        </section>
+        <div @oninput="Session.MarkDraftEdited" @onchange="Session.MarkDraftEdited">
+            <EntryFieldsLayout ShowCustom="@(Session.WorkbookCustomFields.Count > 0)" Context="section">
+                @switch (section)
+                {
+                    case EntryFieldsLayout.Subsection.Details:
+                        <div class="entry-edit-fields">
+                            <div class="field-grid entry-responsive-grid" style="--entry-field-columns: 3">
+                                <label class="field-span">Date <input type="date" max="@TodayIso" @bind="Session.WorkbookDraft.Date" /></label>
+                                <label>Type <input @bind="Session.WorkbookDraft.Type" autocapitalize="characters" spellcheck="false" /></label>
+                                <label>Registration <input @bind="Session.WorkbookDraft.Reg" autocapitalize="characters" spellcheck="false" /></label>
+                                <label>Flight ID <input @bind="Session.WorkbookDraft.FlightId" autocapitalize="characters" spellcheck="false" /></label>
+                            </div>
+                        </div>
+                        break;
+                    case EntryFieldsLayout.Subsection.Crew:
+                        <div class="entry-edit-fields">
+                            <div class="field-grid entry-responsive-grid">
+                                <label>PIC <input @bind="Session.WorkbookDraft.Pic" autocapitalize="words" /></label>
+                                <label>Other Pilot or crew <input @bind="Session.WorkbookDraft.OtherPilotOrCrew" autocapitalize="words" /></label>
+                            </div>
+                            <div class="field-grid check-grid crew-checks entry-responsive-grid" style="--entry-field-columns: 3">
+                                <label class="check-option"><input type="checkbox" @bind="Session.WorkbookDraft.FlightReview" /> Flight Review (FR)</label>
+                                <label class="check-option"><input type="checkbox" @bind="Session.WorkbookDraft.InstrumentProficiencyCheck" /> Instrument Proficiency Check (IPC)</label>
+                                <label class="check-option"><input type="checkbox" @bind="Session.WorkbookDraft.OperatorProficiencyCheck" /> Operator Proficiency Check (OPC)</label>
+                            </div>
+                        </div>
+                        break;
+                    case EntryFieldsLayout.Subsection.Route:
+                        <div class="entry-edit-fields">
+                            <div class="field-grid entry-responsive-grid">
+                                <AirportField Label="From" @bind-Value="Session.WorkbookDraft.From" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" />
+                                <AirportField Label="To" @bind-Value="Session.WorkbookDraft.To" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" />
+                                <div class="field-span"><AirportField Label="Via" Multiple="true" @bind-Value="Session.WorkbookDraft.Via" LoadSuggestions="LoadAirportSuggestionsAsync" Edited="Session.MarkDraftEdited" /></div>
+                            </div>
+                            @if (AirportBasesError is not null)
+                            {
+                                <p role="status">@AirportBasesError</p>
+                                <MudButton Variant="Variant.Text" OnClick="LoadAirportBasesAsync">Retry bases</MudButton>
+                            }
+                            <label class="field-wide">Remarks <textarea @bind="Session.WorkbookDraft.Remarks"></textarea></label>
+                        </div>
+                        break;
+                    case EntryFieldsLayout.Subsection.SingleEngine:
+                        <EntryHourTable>
+                            <div class="totals-table-row" role="row">
+                                <strong role="rowheader">ICUS</strong>
+                                <HourValueCell Period="Day"><label><span class="visually-hidden">SE ICUS Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusDay = value)" /></label></HourValueCell>
+                                <HourValueCell Period="Night"><label><span class="visually-hidden">SE ICUS Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeIcusNight = value)" /></label></HourValueCell>
+                            </div>
+                            <div class="totals-table-row" role="row">
+                                <strong role="rowheader">Dual</strong>
+                                <HourValueCell Period="Day"><label><span class="visually-hidden">SE Dual Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualDay = value)" /></label></HourValueCell>
+                                <HourValueCell Period="Night"><label><span class="visually-hidden">SE Dual Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeDualNight = value)" /></label></HourValueCell>
+                            </div>
+                            <div class="totals-table-row" role="row">
+                                <strong role="rowheader">Command</strong>
+                                <HourValueCell Period="Day"><label><span class="visually-hidden">SE Command Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandDay = value)" /></label></HourValueCell>
+                                <HourValueCell Period="Night"><label><span class="visually-hidden">SE Command Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.SeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.SeCommandNight = value)" /></label></HourValueCell>
+                            </div>
+                        </EntryHourTable>
+                        break;
+                    case EntryFieldsLayout.Subsection.MultiEngine:
+                        <EntryHourTable>
+                            <div class="totals-table-row" role="row">
+                                <strong role="rowheader">ICUS</strong>
+                                <HourValueCell Period="Day"><label><span class="visually-hidden">ME ICUS Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeIcusDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusDay = value)" /></label></HourValueCell>
+                                <HourValueCell Period="Night"><label><span class="visually-hidden">ME ICUS Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeIcusNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeIcusNight = value)" /></label></HourValueCell>
+                            </div>
+                            <div class="totals-table-row" role="row">
+                                <strong role="rowheader">Dual</strong>
+                                <HourValueCell Period="Day"><label><span class="visually-hidden">ME Dual Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeDualDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualDay = value)" /></label></HourValueCell>
+                                <HourValueCell Period="Night"><label><span class="visually-hidden">ME Dual Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeDualNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeDualNight = value)" /></label></HourValueCell>
+                            </div>
+                            <div class="totals-table-row" role="row">
+                                <strong role="rowheader">Command</strong>
+                                <HourValueCell Period="Day"><label><span class="visually-hidden">ME Command Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeCommandDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandDay = value)" /></label></HourValueCell>
+                                <HourValueCell Period="Night"><label><span class="visually-hidden">ME Command Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.MeCommandNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.MeCommandNight = value)" /></label></HourValueCell>
+                            </div>
+                        </EntryHourTable>
+                        break;
+                    case EntryFieldsLayout.Subsection.OtherTime:
+                        <div class="entry-other-time">
+                            <div class="totals-pair-list">
+                                <div class="totals-pair-row">
+                                    <strong>Copilot</strong>
+                                    <div class="time-period-values">
+                                        <span><label><small aria-hidden="true"><TimePeriodLabel Label="Day" /></small><span class="visually-hidden">Copilot Day</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.CopilotDay)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotDay = value)" /></label></span>
+                                        <span><label><small aria-hidden="true"><TimePeriodLabel Label="Night" /></small><span class="visually-hidden">Copilot Night</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.CopilotNight)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.CopilotNight = value)" /></label></span>
+                                    </div>
+                                </div>
+                                <div class="totals-pair-row">
+                                    <strong>Instrument</strong>
+                                    <div class="time-period-values">
+                                        <span><label><small aria-hidden="true"><TimePeriodLabel Label="In Flight" /></small><span class="visually-hidden">IFR IF</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.IfrIf)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrIf = value)" /></label></span>
+                                        <span><label><small aria-hidden="true"><TimePeriodLabel Label="Simulator" /></small><span class="visually-hidden">IFR Sim</span><input type="number" step="0.1" min="0" inputmode="decimal" value="@MobileHourField.Format(Session.WorkbookDraft.IfrSim)" @onchange="args => UpdateHour(args, value => Session.WorkbookDraft.IfrSim = value)" /></label></span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        break;
+                    case EntryFieldsLayout.Subsection.Custom:
+                        <div class="entry-edit-fields">
+                            <div class="field-grid custom-field-grid">
+                                @foreach (var field in Session.WorkbookCustomFields)
+                                {
+                                    <label>@field.Label <input @bind="Session.WorkbookDraft.CustomValues[field.Id]" /></label>
+                                }
+                            </div>
+                        </div>
+                        break;
+                    case EntryFieldsLayout.Subsection.Landings:
+                        <div class="entry-edit-fields">
+                            <div class="field-grid numeric-grid entry-responsive-grid">
+                                <label>Landings Day <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsDay" /></label>
+                                <label>Landings Night <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsNight" /></label>
+                            </div>
+                        </div>
+                        break;
+                    case EntryFieldsLayout.Subsection.InstrumentApproaches:
+                        <div class="entry-edit-fields">
+                            <div class="field-grid numeric-grid entry-responsive-grid">
+                                <label>ILS <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Ils" /></label>
+                                <label>VOR <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Vor" /></label>
+                                <label>RNP <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Rnp" /></label>
+                                <label>NDB <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Ndb" /></label>
+                                <label>DGA (CDI) <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.DgaCdi" /></label>
+                                <label>DGA (Azi) <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.DgaAzi" /></label>
+                                <label class="field-span">Circling <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.Circling" /></label>
+                            </div>
+                        </div>
+                        break;
+                }
+            </EntryFieldsLayout>
+        </div>
 
     </section>
 }
@@ -502,7 +502,17 @@ else
 
     private void LoadEditRoute()
     {
-        if (string.IsNullOrWhiteSpace(EntryId) || LoadedEditEntryId == EntryId)
+        if (string.IsNullOrWhiteSpace(EntryId))
+        {
+            LoadedEditEntryId = null;
+            if (Session.EditingEntryId is not null)
+            {
+                Session.ResetWorkbookDraft();
+            }
+            return;
+        }
+
+        if (LoadedEditEntryId == EntryId)
         {
             return;
         }

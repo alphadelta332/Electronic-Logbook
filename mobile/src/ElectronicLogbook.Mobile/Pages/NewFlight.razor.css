@@ -1,12 +1,15 @@
-.entry-hour-group {
+.entry-edit-fields {
     display: grid;
-    gap: 12px;
+    gap: 14px;
+    padding: 14px;
 }
 
-.entry-hour-group {
-    border-top: 1px solid var(--app-border);
-    padding-top: 16px;
-    margin-top: 2px;
+.custom-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+::deep .hour-values-stacked .custom-field-grid {
+    grid-template-columns: 1fr;
 }
 
 .crew-checks {

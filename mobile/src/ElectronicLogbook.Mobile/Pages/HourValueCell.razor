@@ -1,0 +1,9 @@
+<div class="hour-value-cell" role="cell">
+    <span class="hour-stacked-label" aria-hidden="true"><TimePeriodLabel Label="@Period" /></span>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Period { get; set; } = string.Empty;
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+}

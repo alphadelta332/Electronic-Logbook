@@ -133,67 +133,79 @@ else
             <span>@MobileLogbookSession.FormatDate(CurrentEntry.Entry.Date) | @Session.FormatAircraft(CurrentEntry.Entry)</span>
         </section>
 
-        <section class="form-section">
-            <div class="section-title-row">
-                <h2>Record fields</h2>
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditEntry">
-                    Edit entry
-                </MudButton>
-            </div>
-            <div class="record-field-groups" aria-label="Flight entry details">
-                @foreach (var group in DetailGroups)
-                {
-                    <section class="record-field-group" aria-labelledby="@group.HeadingId">
-                        <header class="record-field-group-heading">
-                            <MudIcon Icon="@group.Icon" />
-                            <h3 id="@group.HeadingId">@group.Heading</h3>
-                        </header>
-                        @foreach (var block in group.Details.GroupBy(HourGroup))
-                        {
-                            var isHours = group.HeadingId == "hours-heading";
-                            @if (isHours && block.Key is "se" or "me" or "copilot")
+        <div class="entry-detail-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditEntry">Edit entry</MudButton>
+        </div>
+        <EntryFieldsLayout ShowCustom="@(Session.WorkbookCustomFields.Count > 0)" Context="section">
+            @{ var details = SectionDetails(section); }
+            @if (section is EntryFieldsLayout.Subsection.SingleEngine or EntryFieldsLayout.Subsection.MultiEngine)
+            {
+                <EntryHourTable>
+                    @foreach (var pair in details.Chunk(2))
+                    {
+                        <div class="totals-table-row" role="row">
+                            <strong role="rowheader">@CapacityLabel(pair[0].Field)</strong>
+                            @foreach (var detail in pair)
                             {
-                                <EntryHourTable Title="@(block.Key switch { "se" => "Single engine", "me" => "Multi engine", _ => "Copilot" })">
-                                    @foreach (var pair in block.Chunk(2))
-                                    {
-                                        <div class="totals-table-row" role="row">
-                                            <strong role="rowheader">@CapacityLabel(pair[0].Field)</strong>
-                                            @foreach (var detail in pair)
-                                            {
-                                                <div role="cell">
-                                                    <dl class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
-                                                        <dt class="visually-hidden">@detail.Label</dt>
-                                                        <dd>@detail.Value</dd>
-                                                    </dl>
-                                                </div>
-                                            }
-                                        </div>
-                                    }
-                                </EntryHourTable>
-                            }
-                            else
-                            {
-                                <div class="@(isHours ? "record-hour-group" : null)">
-                                    @if (isHours)
-                                    {
-                                        <h4>@(block.Key == "ifr" ? "IFR" : "Custom fields")</h4>
-                                    }
-                                    <dl class="record-field-list">
-                                        @foreach (var detail in block)
-                                        {
-                                            <div class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
-                                                <dt>@detail.Label</dt>
-                                                <dd>@detail.Value</dd>
-                                            </div>
-                                        }
+                                <HourValueCell Period="@(detail.Field?.EndsWith("Day", StringComparison.Ordinal) == true ? "Day" : "Night")">
+                                    <dl class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
+                                        <dt class="visually-hidden">@detail.Label</dt>
+                                        <dd>@detail.Value</dd>
                                     </dl>
+                                </HourValueCell>
+                            }
+                        </div>
+                    }
+                </EntryHourTable>
+            }
+            else if (section == EntryFieldsLayout.Subsection.OtherTime)
+            {
+                <div class="entry-other-time">
+                    <div class="totals-pair-list">
+                        @foreach (var pair in details.Chunk(2))
+                        {
+                            <div class="totals-pair-row">
+                                <strong>@(pair[0].Field == nameof(PortableLogbookWorkbookEntry.CopilotDay) ? "Copilot" : "Instrument")</strong>
+                                <div class="time-period-values">
+                                @foreach (var detail in pair)
+                                {
+                                    <div>
+                                        <small><TimePeriodLabel Label="@OtherTimePeriod(detail.Field)" /></small>
+                                        <dl class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
+                                            <dt class="visually-hidden">@detail.Label</dt>
+                                            <dd>@detail.Value</dd>
+                                        </dl>
+                                    </div>
+                                }
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                var fieldGroups = section == EntryFieldsLayout.Subsection.Crew
+                    ? new[] { details.Take(2), details.Skip(2) }
+                    : new[] { details.AsEnumerable() };
+                <div class="@(section == EntryFieldsLayout.Subsection.Custom ? "record-custom-fields" : null)">
+                    @foreach (var fields in fieldGroups)
+                    {
+                        var columns = section == EntryFieldsLayout.Subsection.Details ? 3 :
+                            section == EntryFieldsLayout.Subsection.Crew && fields.Count() == 3 ? 1 : 2;
+                        <dl class="record-field-list @(section == EntryFieldsLayout.Subsection.Custom ? null : "entry-responsive-grid")" style="--entry-field-columns: @columns">
+                            @foreach (var detail in fields)
+                            {
+                                <div class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null) @(detail.Label is "Date" or "Via" or "Remarks" or "Circling" ? "field-span" : null)">
+                                    <dt>@detail.Label</dt>
+                                    <dd>@detail.Value</dd>
                                 </div>
                             }
-                        }
-                    </section>
-                }
-            </div>
-        </section>
+                        </dl>
+                    }
+                </div>
+            }
+        </EntryFieldsLayout>
 
     </section>
 }
@@ -216,26 +228,22 @@ else
         ? null
         : Session.FindLatestWorkbookEntryPayload(History);
 
-    private IReadOnlyList<DetailGroup> DetailGroups
+    private IReadOnlyList<EntryDetail> SectionDetails(EntryFieldsLayout.Subsection section)
     {
-        get
+        if (CurrentEntry?.Entry is null) return [];
+        return Session.EntryDetails(CurrentEntry.Entry).Where(detail => section switch
         {
-            if (CurrentEntry?.Entry is null)
-            {
-                return [];
-            }
-
-            var details = Session.EntryDetails(CurrentEntry.Entry).ToList();
-            return
-            [
-                CreateDetailGroup("flight-summary-heading", "Flight Details", Icons.Material.Filled.Flight, details, EntryDetailGroup.Flight),
-                CreateDetailGroup("crew-heading", "Crew", Icons.Material.Filled.People, details, EntryDetailGroup.Crew),
-                CreateDetailGroup("route-heading", "Route", Icons.Material.Filled.Route, details, EntryDetailGroup.Route),
-                CreateDetailGroup("hours-heading", "Hours", Icons.Material.Filled.Schedule, details, EntryDetailGroup.LoggedTime, EntryDetailGroup.CustomFields),
-                CreateDetailGroup("landings-heading", "Landings", Icons.Material.Filled.FlightLand, details, EntryDetailGroup.Landings),
-                CreateDetailGroup("approaches-heading", "Instrument Approaches", Icons.Material.Filled.Flight, details, EntryDetailGroup.InstrumentApproaches)
-            ];
-        }
+            EntryFieldsLayout.Subsection.Details => detail.Group == EntryDetailGroup.Flight,
+            EntryFieldsLayout.Subsection.Crew => detail.Group == EntryDetailGroup.Crew,
+            EntryFieldsLayout.Subsection.Route => detail.Group == EntryDetailGroup.Route,
+            EntryFieldsLayout.Subsection.SingleEngine => HourGroup(detail) == "se",
+            EntryFieldsLayout.Subsection.MultiEngine => HourGroup(detail) == "me",
+            EntryFieldsLayout.Subsection.OtherTime => HourGroup(detail) == "other",
+            EntryFieldsLayout.Subsection.Custom => detail.Group == EntryDetailGroup.CustomFields,
+            EntryFieldsLayout.Subsection.Landings => detail.Group == EntryDetailGroup.Landings,
+            EntryFieldsLayout.Subsection.InstrumentApproaches => detail.Group == EntryDetailGroup.InstrumentApproaches,
+            _ => false
+        }).ToList();
     }
 
     protected override async Task OnInitializedAsync()
@@ -254,14 +262,6 @@ else
         Session.WorkbookStateChanged -= OnWorkbookStateChanged;
     }
 
-    private static DetailGroup CreateDetailGroup(
-        string headingId,
-        string heading,
-        string icon,
-        IReadOnlyList<EntryDetail> details,
-        params EntryDetailGroup[] groups) =>
-        new(headingId, heading, icon, details.Where(detail => groups.Contains(detail.Group)).ToList());
-
     private static string HourGroup(EntryDetail detail) => detail.Group != EntryDetailGroup.LoggedTime
         ? "fields"
         : detail.Field switch
@@ -272,13 +272,21 @@ else
             nameof(PortableLogbookWorkbookEntry.MeIcusDay) or nameof(PortableLogbookWorkbookEntry.MeIcusNight)
                 or nameof(PortableLogbookWorkbookEntry.MeDualDay) or nameof(PortableLogbookWorkbookEntry.MeDualNight)
                 or nameof(PortableLogbookWorkbookEntry.MeCommandDay) or nameof(PortableLogbookWorkbookEntry.MeCommandNight) => "me",
-            nameof(PortableLogbookWorkbookEntry.CopilotDay) or nameof(PortableLogbookWorkbookEntry.CopilotNight) => "copilot",
-            nameof(PortableLogbookWorkbookEntry.IfrIf) or nameof(PortableLogbookWorkbookEntry.IfrSim) => "ifr",
+            nameof(PortableLogbookWorkbookEntry.CopilotDay) or nameof(PortableLogbookWorkbookEntry.CopilotNight)
+                or nameof(PortableLogbookWorkbookEntry.IfrIf) or nameof(PortableLogbookWorkbookEntry.IfrSim) => "other",
             _ => "fields"
         };
 
     private static bool IsEmptyDetailValue(string value) =>
         value == "-";
+
+    private static string OtherTimePeriod(string? field) => field switch
+    {
+        nameof(PortableLogbookWorkbookEntry.CopilotDay) => "Day",
+        nameof(PortableLogbookWorkbookEntry.CopilotNight) => "Night",
+        nameof(PortableLogbookWorkbookEntry.IfrIf) => "In Flight",
+        _ => "Simulator"
+    };
 
     private static string CapacityLabel(string? field) => field switch
     {
@@ -369,9 +377,4 @@ else
         }
     }
 
-    private sealed record DetailGroup(
-        string HeadingId,
-        string Heading,
-        string Icon,
-        IReadOnlyList<EntryDetail> Details);
 }

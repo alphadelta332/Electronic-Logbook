@@ -8,13 +8,17 @@ using MudBlazor.Services;
 
 namespace ElectronicLogbook.Mobile.Tests;
 
-public sealed class FlightDetailComponentTests : BunitContext
+public sealed class FlightDetailComponentTests : BunitContext, IAsyncLifetime
 {
+    public Task InitializeAsync() => Task.CompletedTask;
+    async Task IAsyncLifetime.DisposeAsync() => await base.DisposeAsync();
+
     [Fact]
     public void ExistingEntryShowsEveryFieldOnceInTheMatchingFormSection()
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddMudServices();
+        Services.AddSingleton(provider => new BrowserLogbookStore(provider.GetRequiredService<IJSRuntime>()));
         Services.AddSingleton(provider => new MobileLogbookSession(
             new BrowserLogbookStore(provider.GetRequiredService<IJSRuntime>()),
             new BrowserPackageKeyStore(provider.GetRequiredService<IJSRuntime>())));
@@ -34,28 +38,45 @@ public sealed class FlightDetailComponentTests : BunitContext
 
         var page = Render<FlightDetail>(parameters => parameters.Add(component => component.EntryId, "ent_detail"));
 
-        page.WaitForAssertion(() => Assert.Equal(6, page.FindAll(".record-field-group").Count));
-        Assert.Equal(["Flight Details", "Crew", "Route", "Hours", "Landings", "Instrument Approaches"],
-            page.FindAll(".record-field-group h3").Select(node => node.TextContent));
-        var sections = page.FindAll(".record-field-group");
+        page.WaitForAssertion(() => Assert.Equal(9, page.FindAll(".entry-field-card").Count));
+        string[] categories = ["Flight", "Hours", "Recency"];
+        string[] headings = ["Details", "Crew", "Route", "Single Engine", "Multi Engine", "Other time", "Custom", "Landings", "Instrument Approaches"];
+        Assert.Equal(categories, page.FindAll(".entry-category > h2").Select(node => node.TextContent));
+        Assert.Equal(headings, page.FindAll(".entry-field-card h3").Select(node => node.TextContent));
         var details = Services.GetRequiredService<MobileLogbookSession>().EntryDetails(entry).ToList();
-        EntryDetailGroup[][] groups = [[EntryDetailGroup.Flight], [EntryDetailGroup.Crew], [EntryDetailGroup.Route],
-            [EntryDetailGroup.LoggedTime, EntryDetailGroup.CustomFields], [EntryDetailGroup.Landings], [EntryDetailGroup.InstrumentApproaches]];
-        for (var index = 0; index < groups.Length; index++)
-        {
-            var expected = details.Where(detail => groups[index].Contains(detail.Group)).ToList();
-            Assert.Equal(expected.Select(detail => detail.Label), sections[index].QuerySelectorAll("dt").Select(node => node.TextContent));
-            Assert.Equal(expected.Select(detail => detail.Value), sections[index].QuerySelectorAll("dd").Select(node => node.TextContent));
-        }
-        Assert.Equal(["Single engine", "Multi engine"],
-            sections[3].QuerySelectorAll(".entry-hour-table h4").Select(node => node.TextContent));
-        Assert.Equal([3, 3], sections[3].QuerySelectorAll(".entry-hour-table")
-            .Select(node => node.QuerySelectorAll("[role=rowheader]").Length));
-        Assert.Equal(4, sections[3].QuerySelectorAll(".totals-time-header .mud-icon-root[aria-hidden=true]").Length);
-        Assert.Equal(["Other time", "Custom fields"],
-            sections[3].QuerySelectorAll(".record-hour-group h4").Select(node => node.TextContent));
+        EntryDetailGroup[] groups = [EntryDetailGroup.Flight, EntryDetailGroup.Crew, EntryDetailGroup.Route,
+            EntryDetailGroup.LoggedTime, EntryDetailGroup.CustomFields, EntryDetailGroup.Landings, EntryDetailGroup.InstrumentApproaches];
+        var expected = groups.SelectMany(group => details.Where(detail => detail.Group == group)).ToList();
+        Assert.Equal(expected.Select(detail => detail.Label), page.FindAll(".entry-fields-layout dt").Select(node => node.TextContent));
+        Assert.Equal(expected.Select(detail => detail.Value), page.FindAll(".entry-fields-layout dd").Select(node => node.TextContent));
+        Assert.Equal([3, 3], page.FindAll(".entry-hour-table").Select(node => node.QuerySelectorAll("[role=rowheader]").Length));
+        Assert.Equal(4, page.FindAll(".totals-time-header .mud-icon-root[aria-hidden=true]").Count);
         Assert.Equal(details.Count, page.FindAll(".record-field").Count);
-        Assert.Equal(["Copilot", "Instrument"], sections[3].QuerySelectorAll(".totals-pair-row > strong").Select(node => node.TextContent));
-        Assert.Equal(["Day", "Night", "Actual", "Simulator"], sections[3].QuerySelectorAll(".totals-pair-row small").Select(node => node.TextContent));
+        Assert.Equal(["Date", "Via", "Remarks", "Circling"],
+            page.FindAll(".record-field.field-span dt").Select(node => node.TextContent));
+        Assert.Equal([2, 3], page.FindAll("[aria-label=Crew] .entry-responsive-grid")
+            .Select(node => node.Children.Length));
+        Assert.Contains("--entry-field-columns: 1", page.FindAll("[aria-label=Crew] .entry-responsive-grid")[1].GetAttribute("style"));
+        Assert.Equal(["ILS", "VOR", "RNP", "NDB", "DGA (CDI)", "DGA (Azi)", "Circling"],
+            page.FindAll("[aria-label='Instrument Approaches'] dt").Select(node => node.TextContent));
+        Assert.Equal(["Copilot", "Instrument"], page.FindAll(".totals-pair-row > strong").Select(node => node.TextContent));
+        Assert.Equal(["Day", "Night", "In Flight", "Simulator"], page.FindAll(".totals-pair-row small").Select(node => node.TextContent.Trim()));
+        Assert.Equal([MudBlazor.Icons.Material.Filled.LightMode, MudBlazor.Icons.Material.Filled.DarkMode,
+            MudBlazor.Icons.Material.Filled.Flight, MudBlazor.Icons.Material.Filled.Computer],
+            page.FindComponents<TimePeriodLabel>().TakeLast(4).Select(component =>
+                component.FindComponent<MudBlazor.MudIcon>().Instance.Icon));
+
+        var edit = Render<NewFlight>(parameters => parameters.Add(component => component.EntryId, "ent_detail"));
+        edit.WaitForAssertion(() => Assert.Equal(9, edit.FindAll(".entry-field-card").Count));
+        Assert.Equal(categories, edit.FindAll(".entry-category > h2").Select(node => node.TextContent));
+        Assert.Equal(headings, edit.FindAll(".entry-field-card h3").Select(node => node.TextContent));
+        Assert.Equal("1.2", edit.FindAll("input[type=number]")[2].GetAttribute("value"));
+
+        var add = Render<NewFlight>();
+        add.WaitForAssertion(() => Assert.Equal(headings, add.FindAll(".entry-field-card h3").Select(node => node.TextContent)));
+        Assert.Equal(categories, add.FindAll(".entry-category > h2").Select(node => node.TextContent));
+        Assert.Equal(6, add.FindAll(".entry-responsive-grid").Count);
+        Assert.Equal(["Date", "Circling"], add.FindAll("label.field-span")
+            .Select(node => node.ChildNodes[0].TextContent.Trim()));
     }
 }
