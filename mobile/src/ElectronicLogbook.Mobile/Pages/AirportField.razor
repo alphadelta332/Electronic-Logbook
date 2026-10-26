@@ -31,6 +31,7 @@
                      MinCharacters="0" MaxItems="100" OpenOnFocus="true" DebounceInterval="0"
                      CoerceValue="@(!Multiple)" CoerceText="false" Immediate="true" ResetValueOnEmptyText="true"
                      TextChanged="TextChangedAsync" OnBlur="BlurredAsync" PopoverClass="airport-suggestions"
+                     AdornmentAriaLabel="@($"Toggle {Label} airport suggestions")"
                      ListItemClass="airport-suggestion" autocomplete="off" autocapitalize="characters" spellcheck="false">
         <ItemTemplate Context="airportCode">
             <span><strong>@airportCode</strong> · @AirportName(airportCode)</span>

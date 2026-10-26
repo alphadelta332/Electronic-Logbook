@@ -9,7 +9,10 @@
                     @if (section.Key != Subsection.Custom || ShowCustom)
                     {
                         <section class="entry-field-card" aria-label="@section.Title">
-                            <header class="entry-field-card-heading"><h3>@section.Title</h3></header>
+                            <header class="entry-field-card-heading">
+                                <MudIcon Icon="@section.Icon" Class="entry-field-card-icon" aria-hidden="true" />
+                                <h3>@section.Title</h3>
+                            </header>
                             <div class="entry-field-card-content">@ChildContent(section.Key)</div>
                         </section>
                     }
@@ -25,13 +28,16 @@
 
     public enum Subsection { Details, Crew, Route, SingleEngine, MultiEngine, OtherTime, Custom, Landings, InstrumentApproaches }
 
-    private sealed record EntryGroup(string Title, (Subsection Key, string Title)[] Sections);
+    private sealed record EntryGroup(string Title, (Subsection Key, string Title, string Icon)[] Sections);
 
     private static readonly EntryGroup[] Groups =
     [
-        new("Flight", [(Subsection.Details, "Details"), (Subsection.Crew, "Crew"), (Subsection.Route, "Route")]),
-        new("Hours", [(Subsection.SingleEngine, "Single Engine"), (Subsection.MultiEngine, "Multi Engine"),
-            (Subsection.OtherTime, "Other time"), (Subsection.Custom, "Custom")]),
-        new("Recency", [(Subsection.Landings, "Landings"), (Subsection.InstrumentApproaches, "Instrument Approaches")])
+        new("Flight", [(Subsection.Details, "Details", Icons.Material.Filled.Flight),
+            (Subsection.Crew, "Crew", Icons.Material.Filled.People), (Subsection.Route, "Route", Icons.Material.Filled.Route)]),
+        new("Hours", [(Subsection.SingleEngine, "Single Engine", MobileAircraftIcons.SingleEngine),
+            (Subsection.MultiEngine, "Multi Engine", MobileAircraftIcons.MultiEngine),
+            (Subsection.OtherTime, "Other time", Icons.Material.Filled.AvTimer), (Subsection.Custom, "Custom", Icons.Material.Filled.DashboardCustomize)]),
+        new("Recency", [(Subsection.Landings, "Landings", Icons.Material.Filled.FlightLand),
+            (Subsection.InstrumentApproaches, "Instrument Approaches", Icons.Material.Filled.GpsFixed)])
     ];
 }

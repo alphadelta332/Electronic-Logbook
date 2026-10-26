@@ -79,6 +79,88 @@ function durableFixture() {
   }};
 }
 
+test('Cloudflare429 identifies the fixed request without leaking response or account data or retrying', async t => {
+  const marker = 'SECRET-THROTTLE-MARKER', lines = [], db = durableFixture(), f = fixture();
+  t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+  let outbound = 0;
+  await assert.rejects(refreshProviderEvidence(db, config, credentials, (url, options) => {
+    outbound++;
+    return url.endsWith('/r2/metrics') ? Response.json({ success: false,
+      errors: [{ code: 10000, message: marker }], private: marker },
+    { status: 429, headers: { 'Retry-After': '60', private: marker } }) : f.request(url, options);
+  }, () => now));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(lines, [
+    { version: 1, event: 'backup-provider-failure', adapter: 'cloudflare', stage: 'http', status: 429 },
+    { version: 1, event: 'backup-provider-http-detail', adapter: 'cloudflare', operation: 'r2-metrics',
+      status: 429, retryAfterSeconds: 60, retryAfterAt: null, providerCodes: [10000] }
+  ]);
+  for (const secret of [marker, ...Object.values(credentials), config.accountId, config.projectRef, config.bucket,
+    config.githubUser, config.supabaseOrganization]) assert.ok(!JSON.stringify(lines).includes(secret));
+  assert.equal(outbound, 15);
+  assert.equal(db.values.get('provider-cache').active, null); assert.equal(db.values.get('provider-cache').evidence, undefined);
+  await assert.rejects(cachedProviderEvidence(db, config, now), /unavailable/);
+  await assert.rejects(refreshProviderEvidence(db, config, credentials, () => assert.fail('Retry made a request'), () => now), /hour/);
+});
+
+test('Cloudflare429 diagnostic labels distinguish every fixed metadata operation', async t => {
+  const operations = [
+    ['/entitlements','entitlements'], ['/r2/metrics','r2-metrics'], ['/graphql','r2-analytics'],
+    ['/r2/buckets/' + config.bucket,'r2-bucket'], ['/lock','r2-lock'], ['/lifecycle','r2-lifecycle'],
+    ['/domains/managed','r2-managed-domain'], ['/domains/custom','r2-custom-domains'],
+    ...['default','eu','us'].map(region => ['/r2/buckets','r2-inventory-' + region,region])
+  ];
+  for (const [path, operation, jurisdiction] of operations) await t.test(operation, async t => {
+    const lines = [], f = fixture(), db = durableFixture();
+    t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+    await assert.rejects(refreshProviderEvidence(db, config, credentials, (url, options) =>
+      new URL(url).pathname.endsWith(path) && (!jurisdiction || options.headers['cf-r2-jurisdiction'] === jurisdiction)
+        ? new Response('', { status: 429 }) : f.request(url, options), () => now));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(lines.length, 2); assert.equal(lines[1].operation, operation);
+    assert.deepEqual(lines[1].providerCodes, []); assert.equal(lines[1].retryAfterSeconds, null);
+  });
+});
+
+test('Cloudflare429 diagnostics reject hostile, malformed, oversized and unavailable metadata', async t => {
+  const marker = 'SECRET-HTTP-METADATA-MARKER';
+  const cases = [
+    { name: 'missing', reply: () => new Response('', { status: 429 }) },
+    { name: 'secret headers and body', reply: () => new Response(marker, { status: 429, headers: { 'retry-after': marker, authorization: marker } }) },
+    { name: 'fractional delay', retry: '1.5' }, { name: 'negative delay', retry: '-1' },
+    { name: 'oversized delay', retry: '604801' }, { name: 'zero delay', retry: '0', seconds: 0 },
+    { name: 'maximum delay', retry: '604800', seconds: 604800 },
+    { name: 'HTTP date', retry: 'Sun, 18 Oct 2026 13:00:00 GMT', at: '2026-10-18T13:00:00.000Z' },
+    { name: 'invalid HTTP date', retry: 'Mon, 30 Feb 2026 13:00:00 GMT' },
+    { name: 'secret code', errors: [{ code: marker, message: marker }] },
+    ...[-1,0,1.5,1000000].map(code => ({ name: 'invalid code ' + code, errors: [{ code }] })),
+    { name: 'too many codes', errors: Array.from({ length: 5 }, () => ({ code: 10000 })) },
+    { name: 'four numeric codes', errors: [1,10000,1015,999999].map(code => ({ code })), codes: [1,10000,1015,999999] },
+    { name: 'wrong envelope', reply: () => Response.json({ errors: [{ code: 10000 }] }, { status: 429 }) },
+    { name: 'oversized body', reply: () => Response.json({ success: false, errors: [{ code: 10000 }], private: marker.repeat(300) }, { status: 429 }) },
+    { name: 'broken stream', reply: () => new Response(new ReadableStream({ start(controller) { controller.error(new Error(marker)); } }), { status: 429 }) }
+  ];
+  for (const item of cases) await t.test(item.name, async t => {
+    const lines = [], db = durableFixture();
+    t.mock.method(console, 'log', line => lines.push(JSON.parse(line)));
+    await assert.rejects(refreshProviderEvidence(db, config, credentials, () => item.reply ? item.reply() :
+      Response.json({ success: false, errors: item.errors ?? [], private: marker },
+        { status: 429, headers: item.retry ? { 'Retry-After': item.retry } : {} }), () => now), /Provider evidence request failed/);
+    assert.equal(lines.length, 2);
+    assert.deepEqual(lines[1], { version: 1, event: 'backup-provider-http-detail', adapter: 'cloudflare', operation: 'entitlements',
+      status: 429, retryAfterSeconds: item.seconds ?? null, retryAfterAt: item.at ?? null, providerCodes: item.codes ?? [] });
+    assert.ok(!JSON.stringify(lines).includes(marker)); assert.equal(db.values.get('provider-cache').active, null);
+  });
+});
+
+test('a failed detail log cannot replace the original HTTP429 or prevent cache cleanup', async t => {
+  const db = durableFixture(); let logs = 0;
+  t.mock.method(console, 'log', () => { if (++logs === 2) throw new Error('SECRET-LOGGER-ERROR'); });
+  await assert.rejects(refreshProviderEvidence(db, config, credentials, () => new Response('', { status: 429 }), () => now),
+    /Provider evidence request failed/);
+  assert.equal(logs, 2); assert.equal(db.values.get('provider-cache').active, null);
+});
+
 test('private refresh failures expose only allowlisted provider/stage/status and preserve fail-closed state', async t => {
   const marker = 'SECRET-RESPONSE-IDENTITY-MARKER';
   const cases = [

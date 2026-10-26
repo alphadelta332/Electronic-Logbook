@@ -90,6 +90,18 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
         if(route==='/test-state')return Response.json({requests:await this.storage.get('component-requests'),
           cache:await this.storage.get('provider-cache'),source:await this.storage.get('source-budget'),monitor:await this.storage.get('monitor-state')});
         try {
+          if(route==='/test-http-detail') {
+            const lines=[],originalLog=console.log;let attempted=0,denied=false;
+            console.log=line=>lines.push(JSON.parse(line));
+            try {
+              await refreshProviderEvidence(this.storage,config,credentials,(url,options)=>{
+                new Request(url,options);attempted++;
+                return url.endsWith('/r2/metrics')?Response.json({success:false,errors:[{code:10000,message:'SECRET-ERROR-TEXT'}]},
+                  {status:429,headers:{'Retry-After':'60',private:'SECRET-HEADER'}}):provider(url,options);
+              },()=>payload.now);
+            } catch {denied=true;} finally {console.log=originalLog;}
+            return Response.json({denied,lines,attempted,cache:await this.storage.get('provider-cache'),source:await this.storage.get('source-budget')});
+          }
           if(['/test-primary','/test-permit'].includes(route)) {
             const review=JSON.parse(this.env.OWNER_REVIEW_JSON);
             review.sourceOrigin='https://'+config.projectRef+'.supabase.co';
@@ -128,7 +140,8 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     }
     export default {fetch(request,env) {
       if(new URL(request.url).pathname.startsWith('/test-'))
-        return env.DAILY_ATTEMPTS.get(env.DAILY_ATTEMPTS.idFromName('flightlogx-preview-source')).fetch(request);
+        return env.DAILY_ATTEMPTS.get(env.DAILY_ATTEMPTS.idFromName(new URL(request.url).pathname==='/test-http-detail'
+          ?'fixture-http-detail':'flightlogx-preview-source')).fetch(request);
       return router.fetch(request,env);
     }};
   `);
@@ -290,6 +303,19 @@ test('local Cloudflare SQLite grants one source/readback claim each and preserve
     assert.equal(state.monitor.checks,6);assert.equal(state.monitor.incident,incident);
     assert.equal(state.monitor.resend.bodySha256,wireDigest);assert.equal(state.monitor.resend.attempt,2);
     assert.equal(state.source.attempts,1);assert.equal(state.cache.batches,1);
+    const diagnostic=await(await internal('/test-http-detail',{now:Date.now()})).json();
+    assert.equal(diagnostic.denied,true);assert.equal(diagnostic.attempted,15);
+    assert.deepEqual(diagnostic.lines,[
+      {version:1,event:'backup-provider-failure',adapter:'cloudflare',stage:'http',status:429},
+      {version:1,event:'backup-provider-http-detail',adapter:'cloudflare',operation:'r2-metrics',status:429,
+        retryAfterSeconds:60,retryAfterAt:null,providerCodes:[10000]}
+    ]);
+    assert.ok(!JSON.stringify(diagnostic).includes('SECRET-'));
+    assert.equal(diagnostic.cache.active,null);assert.equal(diagnostic.cache.evidence,undefined);
+    assert.equal(diagnostic.source,undefined);
+    assert.equal((await internal('/test-http-detail',{now:Date.now()})).status,200);
+    const repeated=await(await internal('/test-http-detail',{now:Date.now()})).json();
+    assert.equal(repeated.denied,true);assert.equal(repeated.attempted,0);
   }finally{
     await stop();
     await assert.rejects(fetch(url,{signal:AbortSignal.timeout(500)}),'Synthetic Worker must release its listening port.');

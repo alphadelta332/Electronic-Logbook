@@ -106,6 +106,10 @@ try {
     $script:sevenZip = Resolve-TestSevenZip
 
     Assert-True ($config.SchemaVersion -eq 1) 'manifest schema version must be 1'
+    Assert-True ($config.Environment.AndroidJavaSocketTempRelativeToWindows -eq 'Temp') 'debug Gradle socket directory must resolve under Windows, not the profile temp directory'
+    $debugInstallerSource = Get-Content (Join-Path $repoRoot 'mobile/scripts/Install-AndroidDebugBuild.ps1') -Raw
+    Assert-True ($debugInstallerSource.Contains('$transferConfig.Environment.AndroidJavaSocketTempRelativeToWindows')) 'debug installer must use the transfer manifest socket setting'
+    Assert-True ($debugInstallerSource.Contains('$env:JAVA_TOOL_OPTIONS = $previousJavaToolOptions')) 'debug installer must restore the calling process Java options'
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'AGENTS.md' -and $_.Required }).Count -eq 1) 'AGENTS.md must be required'
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'TODO.md' -and $_.Required }).Count -eq 1) 'TODO.md must be required'
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'docs/local/*.md' -and -not $_.Required -and $_.Classification -eq 'private-reference' }).Count -eq 1) 'local Markdown research must be optional private transfer material'

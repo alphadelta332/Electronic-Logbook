@@ -221,6 +221,33 @@ freshly dated screenshot or nominal free allowance cannot replace supported curr
 evidence. Live read observations do not prove every token/write boundary, alert
 delivery, a deployed counter or a successful backup.
 
+## Private throttling diagnostics
+
+A failed collection still emits the existing fixed `backup-provider-failure`
+event. A Cloudflare HTTP429 can additionally emit `backup-provider-http-detail`
+with a fixed operation label distinguishing entitlements, each of the three
+inventories, bucket details, metrics, lock, lifecycle, managed/custom domains and
+analytics. Neither event contains a URL, account/bucket identity, token, raw header,
+response message or body.
+
+The detail contains only status429, optional `retryAfterSeconds` (integer0–604800)
+or a canonical HTTP-date normalized to `retryAfterAt`, and at most four positive
+numeric REST error codes up to999999. Missing/unsupported values become null or
+an empty code list. Error-body inspection is capped at4096bytes; malformed,
+oversized or unreadable bodies cannot replace the original denial or prevent
+cache/lease cleanup. Arbitrary error-object fields cannot supply these diagnostics.
+
+These fields are observations, never permission to retry, renew a review, change a
+counter or use stale evidence. No request, credential, schedule or quota ceiling is
+added. The collector's failure still invalidates its cache and consumes its normal
+allowance. Local fixtures cover logging/redaction and real local Worker execution;
+publishing these bytes and capturing a real production429 are separate acceptance
+steps. The original uninstrumented failure cannot be attributed retroactively.
+
+Cloudflare documents429 as rate limiting and describes `Retry-After` in seconds;
+its presence does not identify which limit applied to a particular request.
+See [Cloudflare API limits](https://developers.cloudflare.com/fundamentals/api/reference/limits/).
+
 ## Validation
 
 ```powershell

@@ -321,6 +321,14 @@ Java, Android Platform Tools, Android command-line tools, `%USERPROFILE%\.local\
 the npm global directory, and PostgreSQL 17 to the user `PATH` without duplicating
 entries.
 
+The debug Android installer temporarily sets Java's `jdk.net.unixdomain.tmpdir`
+to `%SystemRoot%\Temp` during Gradle assembly, using the transfer manifest's
+`Environment.AndroidJavaSocketTempRelativeToWindows` setting. This avoids Java
+selector socket failures in the profile temporary directory on the current Windows
+host. It preserves existing `JAVA_TOOL_OPTIONS` and restores them afterward; no
+user or machine environment setting is changed. Socket files are temporary outputs
+and must not be transferred.
+
 Some vendor installers or first launches cannot safely be automated. Complete every
 manual checkpoint printed by the command:
 

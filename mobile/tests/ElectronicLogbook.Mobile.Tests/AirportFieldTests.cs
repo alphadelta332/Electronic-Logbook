@@ -20,6 +20,25 @@ public sealed class AirportFieldTests : BunitContext, IAsyncLifetime
     async Task IAsyncLifetime.DisposeAsync() => await base.DisposeAsync();
 
     [Theory]
+    [InlineData("From", false)]
+    [InlineData("To", false)]
+    [InlineData("Via", true)]
+    public void SuggestionsButtonHasAFieldSpecificNameWhenClosedAndOpen(string label, bool multiple)
+    {
+        var field = Render<AirportField>(parameters => parameters.Add(component => component.Label, label)
+            .Add(component => component.Multiple, multiple)
+            .Add(component => component.LoadSuggestions, _ => Task.FromResult<IReadOnlyList<string>>(["YSSY"])));
+        var button = field.Find(".mud-input-adornment button");
+
+        Assert.Equal($"Toggle {label} airport suggestions", button.GetAttribute("aria-label"));
+        button.Click();
+        field.WaitForAssertion(() => Assert.True(field.FindComponent<MudAutocomplete<string>>().Instance.Open));
+        Assert.Equal($"Toggle {label} airport suggestions", field.Find(".mud-input-adornment button").GetAttribute("aria-label"));
+        field.Find(".mud-input-adornment button").Click();
+        field.WaitForAssertion(() => Assert.False(field.FindComponent<MudAutocomplete<string>>().Instance.Open));
+    }
+
+    [Theory]
     [InlineData("From")]
     [InlineData("To")]
     public async Task EmptyQueryUsesRankedDefaultsAndTypingSearchesTheWholeCatalogue(string label)

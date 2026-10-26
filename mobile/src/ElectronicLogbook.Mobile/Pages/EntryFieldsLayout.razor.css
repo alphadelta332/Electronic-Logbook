@@ -32,9 +32,17 @@
 }
 
 .entry-field-card-heading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     padding: 12px 14px;
     border-bottom: 1px solid var(--app-border);
     background: var(--app-surface-alt);
+}
+
+.entry-field-card-heading ::deep .entry-field-card-icon {
+    flex-shrink: 0;
+    color: var(--app-primary);
 }
 
 .entry-field-card-heading h3 {

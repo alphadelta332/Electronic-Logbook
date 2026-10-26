@@ -3,6 +3,7 @@ const requireValue = (condition, message) => { if (!condition) throw new Error(m
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const failures = new WeakMap();
+const httpDetails = new WeakMap();
 
 // Keep provenance private: a thrown provider object cannot supply log fields.
 export function tagProviderFailure(error, adapter, stage, status = null) {
@@ -16,12 +17,52 @@ export function logProviderFailure(error) {
   const stage = ['credentials', 'request', 'http', 'body', 'json', 'pagination', 'validation', 'lease', 'allowance']
     .includes(failure.stage) ? failure.stage : 'validation';
   const status = Number.isInteger(failure.status) && failure.status >= 100 && failure.status <= 599 ? failure.status : null;
-  try { console.log(JSON.stringify({ version: 1, event: 'backup-provider-failure', adapter, stage, status })); }
+  try {
+    console.log(JSON.stringify({ version: 1, event: 'backup-provider-failure', adapter, stage, status }));
+    if (httpDetails.has(error)) console.log(JSON.stringify(httpDetails.get(error)));
+  }
   catch { /* Logging must not replace a failed collection or prevent lease cleanup. */ }
 }
 
+async function cloudflare429Detail(url, headers, response) {
+  const parsed = new URL(url);
+  if (parsed.origin !== 'https://api.cloudflare.com') return;
+  const path = parsed.pathname.replace(/^\/client\/v4\/accounts\/[a-f0-9]{32}(?=\/)/, '');
+  const operations = { '/entitlements': 'entitlements', '/r2/metrics': 'r2-metrics',
+    '/client/v4/graphql': 'r2-analytics', '/r2/buckets/flightlogx-preview-backups': 'r2-bucket',
+    '/r2/buckets/flightlogx-preview-backups/lock': 'r2-lock',
+    '/r2/buckets/flightlogx-preview-backups/lifecycle': 'r2-lifecycle',
+    '/r2/buckets/flightlogx-preview-backups/domains/managed': 'r2-managed-domain',
+    '/r2/buckets/flightlogx-preview-backups/domains/custom': 'r2-custom-domains' };
+  const jurisdiction = headers['cf-r2-jurisdiction'];
+  const operation = path === '/r2/buckets' && ['default', 'eu', 'us'].includes(jurisdiction)
+    ? 'r2-inventory-' + jurisdiction : operations[path];
+  if (!operation) return;
+  const detail = { version: 1, event: 'backup-provider-http-detail', adapter: 'cloudflare', operation,
+    status: 429, retryAfterSeconds: null, retryAfterAt: null, providerCodes: [] };
+  try {
+    const retry = response.headers.get('retry-after');
+    if (/^[0-9]{1,6}$/.test(retry ?? '') && Number(retry) <= 604800) detail.retryAfterSeconds = Number(retry);
+    else if (/^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/.test(retry ?? '') &&
+      Number.isFinite(Date.parse(retry)) && new Date(retry).toUTCString() === retry) detail.retryAfterAt = new Date(retry).toISOString();
+  } catch { /* Optional diagnostics cannot replace the HTTP failure. */ }
+  try {
+    const chunks = []; let size = 0;
+    for await (const part of response.body ?? []) {
+      size += part.length; requireValue(size <= 4096, 'Error diagnostic exceeded limit.'); chunks.push(part);
+    }
+    const bytes = new Uint8Array(size); let offset = 0;
+    for (const part of chunks) { bytes.set(part, offset); offset += part.length; }
+    const body = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (body?.success === false && Array.isArray(body.errors) && body.errors.length <= 4 &&
+      body.errors.every(error => Number.isInteger(error?.code) && error.code > 0 && error.code <= 999999))
+      detail.providerCodes = body.errors.map(error => error.code);
+  } catch { /* No raw response text belongs in diagnostic events. */ }
+  return detail;
+}
+
 async function jsonRequest(adapter, url, token, request, body, headers = {}) {
-  let stage = 'credentials', status = null;
+  let stage = 'credentials', status = null, detail;
   try {
   requireValue(typeof token === 'string' && token.length >= 20 && !/\s/.test(token), 'Missing dedicated monitoring credential.');
   stage = 'request';
@@ -33,6 +74,10 @@ async function jsonRequest(adapter, url, token, request, body, headers = {}) {
     ...(body ? { body: JSON.stringify(body) } : {})
   });
   stage = 'http'; status = response.status;
+  if (adapter === 'cloudflare' && status === 429) {
+    try { detail = await cloudflare429Detail(url, headers, response); }
+    catch { /* Keep the original denial when optional diagnostics fail. */ }
+  }
   requireValue(response.status === 200, 'Provider evidence request failed; response suppressed.');
   stage = 'body';
   const chunks = []; let size = 0;
@@ -47,7 +92,10 @@ async function jsonRequest(adapter, url, token, request, body, headers = {}) {
   stage = 'pagination';
   requireValue(!response.headers.has('link'), 'Paginated provider evidence is unsupported.');
   return result;
-  } catch (error) { throw tagProviderFailure(error, adapter, stage, status); }
+  } catch (error) {
+    if (detail) httpDetails.set(error, detail);
+    throw tagProviderFailure(error, adapter, stage, status);
+  }
 }
 
 function cloudflareResult(value) {

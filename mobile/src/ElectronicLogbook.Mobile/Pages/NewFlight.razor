@@ -291,10 +291,15 @@ else
                         </div>
                         break;
                     case EntryFieldsLayout.Subsection.Landings:
-                        <div class="entry-edit-fields">
-                            <div class="field-grid numeric-grid entry-responsive-grid">
-                                <label>Landings Day <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsDay" /></label>
-                                <label>Landings Night <input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsNight" /></label>
+                        <div class="entry-other-time">
+                            <div class="totals-pair-list">
+                                <div class="totals-pair-row">
+                                    <strong>Landings</strong>
+                                    <div class="time-period-values">
+                                        <span><label><small aria-hidden="true"><TimePeriodLabel Label="Day" /></small><span class="visually-hidden">Landings Day</span><input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsDay" /></label></span>
+                                        <span><label><small aria-hidden="true"><TimePeriodLabel Label="Night" /></small><span class="visually-hidden">Landings Night</span><input type="number" min="0" inputmode="numeric" @bind="Session.WorkbookDraft.LandingsNight" /></label></span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         break;

@@ -67,6 +67,7 @@
     # State outside the transfer roots. These entries document security-sensitive local
     # prerequisites that must be recreated rather than archived.
     ExternalLocalStateExclusions = @(
+        @{ Path = '%SystemRoot%/Temp/socket_*'; Lifecycle = 'regenerated-output'; Reason = 'Java selector socket files are temporary Android build outputs, never transferable development state.' }
         @{ Path = '%APPDATA%/xdg.config/.wrangler'; Lifecycle = 'fresh-authentication'; Reason = 'Cloudflare OAuth credentials must be recreated with wrangler login, never transferred.' }
         @{ Path = '%USERPROFILE%/.android/avd'; Lifecycle = 'deliberate-exclusion'; Reason = 'Android virtual devices and snapshots can contain live Google sessions; recreate and authenticate the recovery AVD once on each trusted development machine.' }
         @{ Path = 'GitHub/alphadelta332/flightlogx-preview-backups/ActionsSecrets'; Lifecycle = 'fresh-authentication'; Reason = 'Reprovision scoped source/upload/readback job secrets through GitHub; never archive them or copy owner/recovery credentials into the job.' }
@@ -152,6 +153,7 @@
         AndroidSdkRelativeToLocalAppData = 'Android\Sdk'
         JavaInstallRoot = 'C:\Program Files\Eclipse Adoptium'
         JavaDirectoryPattern = 'jdk-21*'
+        AndroidJavaSocketTempRelativeToWindows = 'Temp'
         UserPathEntries = @(
             '%JAVA_HOME%\bin'
             '%ANDROID_HOME%\platform-tools'

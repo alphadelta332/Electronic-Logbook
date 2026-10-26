@@ -101,10 +101,17 @@ if (-not $SkipSync) {
 }
 
 Push-Location $androidRoot
+$previousJavaToolOptions = $env:JAVA_TOOL_OPTIONS
 try {
+    # Java selector sockets fail in the profile temp directory on this Windows host.
+    Import-Module "$PSHOME\Modules\Microsoft.PowerShell.Utility\Microsoft.PowerShell.Utility.psd1"
+    $transferConfig = Import-PowerShellDataFile -LiteralPath (Join-Path $mobileRoot '..\tools\local-development-transfer.psd1')
+    $socketTemp = Join-Path $env:SystemRoot $transferConfig.Environment.AndroidJavaSocketTempRelativeToWindows
+    $env:JAVA_TOOL_OPTIONS = ('{0} "-Djdk.net.unixdomain.tmpdir={1}"' -f $previousJavaToolOptions, $socketTemp).Trim()
     Invoke-Checked -FilePath ".\gradlew.bat" -Arguments @("assembleDebug")
 }
 finally {
+    $env:JAVA_TOOL_OPTIONS = $previousJavaToolOptions
     Pop-Location
 }
 

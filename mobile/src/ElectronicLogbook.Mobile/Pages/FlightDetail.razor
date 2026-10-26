@@ -158,19 +158,19 @@ else
                     }
                 </EntryHourTable>
             }
-            else if (section == EntryFieldsLayout.Subsection.OtherTime)
+            else if (section is EntryFieldsLayout.Subsection.OtherTime or EntryFieldsLayout.Subsection.Landings)
             {
                 <div class="entry-other-time">
                     <div class="totals-pair-list">
                         @foreach (var pair in details.Chunk(2))
                         {
                             <div class="totals-pair-row">
-                                <strong>@(pair[0].Field == nameof(PortableLogbookWorkbookEntry.CopilotDay) ? "Copilot" : "Instrument")</strong>
+                                <strong>@(section == EntryFieldsLayout.Subsection.Landings ? "Landings" : pair[0].Field == nameof(PortableLogbookWorkbookEntry.CopilotDay) ? "Copilot" : "Instrument")</strong>
                                 <div class="time-period-values">
                                 @foreach (var detail in pair)
                                 {
                                     <div>
-                                        <small><TimePeriodLabel Label="@OtherTimePeriod(detail.Field)" /></small>
+                                        <small><TimePeriodLabel Label="@PairPeriod(detail.Field)" /></small>
                                         <dl class="record-field @(IsEmptyDetailValue(detail.Value) ? "record-field-empty" : null)">
                                             <dt class="visually-hidden">@detail.Label</dt>
                                             <dd>@detail.Value</dd>
@@ -280,10 +280,10 @@ else
     private static bool IsEmptyDetailValue(string value) =>
         value == "-";
 
-    private static string OtherTimePeriod(string? field) => field switch
+    private static string PairPeriod(string? field) => field switch
     {
-        nameof(PortableLogbookWorkbookEntry.CopilotDay) => "Day",
-        nameof(PortableLogbookWorkbookEntry.CopilotNight) => "Night",
+        nameof(PortableLogbookWorkbookEntry.CopilotDay) or nameof(PortableLogbookWorkbookEntry.LandingsDay) => "Day",
+        nameof(PortableLogbookWorkbookEntry.CopilotNight) or nameof(PortableLogbookWorkbookEntry.LandingsNight) => "Night",
         nameof(PortableLogbookWorkbookEntry.IfrIf) => "In Flight",
         _ => "Simulator"
     };
