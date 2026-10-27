@@ -90,11 +90,14 @@ public sealed class FlightDetailComponentTests : BunitContext, IAsyncLifetime
                     .Where(icon => icon.Instance.Class == "entry-field-card-icon")
                     .Select(icon => icon.Instance.Icon));
             Assert.Equal(9, layout.FindAll(".entry-field-card-heading > .mud-icon-root[aria-hidden=true] + h3").Count);
-            Assert.Single(layout.FindAll("[aria-label='Single Engine'] header svg line"));
-            Assert.Equal(2, layout.FindAll("[aria-label='Multi Engine'] header svg line").Count);
-            Assert.Equal(2, layout.FindAll("[aria-label='Multi Engine'] header svg rect").Count);
-            Assert.All(layout.FindAll("header svg g[transform]"), group =>
-                Assert.Equal("rotate(45 12 12)", group.GetAttribute("transform")));
+            foreach (var name in new[] { "Single Engine", "Multi Engine" })
+            {
+                var aircraft = layout.Find($"[aria-label='{name}'] header svg");
+                Assert.NotEmpty(aircraft.QuerySelectorAll("path"));
+                Assert.Empty(aircraft.QuerySelectorAll("line, rect"));
+                Assert.Equal("rotate(45 12 12)",
+                    Assert.Single(aircraft.QuerySelectorAll("g[transform]")).GetAttribute("transform"));
+            }
         }
         Assert.Equal(5, add.FindAll(".entry-responsive-grid").Count);
         foreach (var form in new[] { add, edit })
@@ -111,5 +114,15 @@ public sealed class FlightDetailComponentTests : BunitContext, IAsyncLifetime
         }
         Assert.Equal(["Date", "Circling"], add.FindAll("label.field-span")
             .Select(node => node.ChildNodes[0].TextContent.Trim()));
+
+        Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>()
+            .NavigateTo("/flights?view=totals");
+        var totals = Render<Logbook>();
+        var entryHeadings = add.FindAll(".entry-field-card-heading").Skip(3).ToArray();
+        Assert.Equal(entryHeadings.Select(heading => heading.QuerySelector("h3")!.TextContent),
+            totals.FindAll(".totals-group-heading h3").Select(heading => heading.TextContent));
+        Assert.Equal(entryHeadings.Select(heading => heading.QuerySelector("svg")!.InnerHtml),
+            totals.FindAll(".totals-group-heading > svg[aria-hidden=true] + h3")
+                .Select(heading => heading.PreviousElementSibling!.InnerHtml));
     }
 }

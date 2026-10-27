@@ -111,6 +111,7 @@ Known local state is handled as follows:
 | Participant handoffs | Local transfer | Transfer only when present; keep private and outside git. |
 | Analysis tools | Regenerated dependency | Reinstall or regenerate; do not transfer caches or embedded source repositories. |
 | Evidence | Regenerated output | Recreate when needed; it is not configuration. |
+| Repository Codex attachments (`.codex-attachments/`, `.codex-remote-attachments/`) | Deliberate exclusion | May contain personal records. Keep ignored by Git, omit from exports, and reject from imported bundles. |
 | Local `ElectronicLogbook\Temp` files | Regenerated output | Temporary APK copies and extracted receipt-verification sources stay on the source machine. |
 | Android device-bridge and Gate 1 retained-state backups | Deliberate exclusion | Keep on the source machine; they are device-specific recovery evidence. |
 | Authenticated Android emulator and snapshots | Deliberate exclusion | Treat like a signed-in browser profile. Recreate and authenticate once per trusted machine; never archive, commit, upload, or share it. |

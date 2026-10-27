@@ -83,6 +83,8 @@
     )
 
     ExcludedPathPatterns = @(
+        '*/.codex-attachments/*'
+        '*/.codex-remote-attachments/*'
         '*/backup-private.encrypted.pem'
         '*/recovery.elbbackup'
         '*/bin/*'
@@ -100,6 +102,8 @@
     )
 
     ForbiddenBundlePatterns = @(
+        '*/.codex-attachments/*'
+        '*/.codex-remote-attachments/*'
         '*/auth.json'
         '*/sessions/*'
         '*/plugins/cache/*'

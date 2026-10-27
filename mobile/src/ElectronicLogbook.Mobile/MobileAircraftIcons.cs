@@ -2,20 +2,16 @@ namespace ElectronicLogbook.Mobile;
 
 public static class MobileAircraftIcons
 {
-    private const string Airframe = """
-        <path d="M12 4.5c-.9 0-1.4 1-1.4 2.5v2.7L2 12v2l8.6-1.4v5.2L7.5 19v1.5l4.5-.8 4.5.8V19l-3.1-1.2v-5.2L22 14v-2l-8.6-2.3V7c0-1.5-.5-2.5-1.4-2.5Z"/>
-        """;
-
-    public const string SingleEngine = "<g transform=\"rotate(45 12 12)\">" + Airframe + """
-        <line x1="8.8" y1="3.5" x2="15.2" y2="3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    public const string SingleEngine = """
+        <g transform="rotate(45 12 12)">
+        <path d="M12 4c-.8 0-1.2.8-1.2 1.8v3L1.5 9a.5.5 0 0 0-.5.5v2.3c0 .3.2.5.5.5l9.3.4.5 6-3.1.2a.7.7 0 0 0-.7.7v1.2c0 .4.3.7.7.7h7.6c.4 0 .7-.3.7-.7v-1.2a.7.7 0 0 0-.7-.7l-3.1-.2.5-6 9.3-.4c.3 0 .5-.2.5-.5V9.5a.5.5 0 0 0-.5-.5l-9.3-.2v-3C13.2 4.8 12.8 4 12 4Z"/>
         </g>
         """;
 
-    public const string MultiEngine = "<g transform=\"rotate(45 12 12)\">" + Airframe + """
-        <rect x="5.2" y="8.7" width="1.6" height="5.7" rx=".8"/>
-        <rect x="17.2" y="8.7" width="1.6" height="5.7" rx=".8"/>
-        <line x1="3.4" y1="7.8" x2="8.6" y2="7.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="15.4" y1="7.8" x2="20.6" y2="7.8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    public const string MultiEngine = """
+        <g transform="rotate(45 12 12)">
+        <path d="M12 1c-.9 0-1.4 1.1-1.4 2.6v6L1.5 10a.5.5 0 0 0-.5.5v2c0 .3.2.5.5.5l9.1.5.7 7-3.7.3a.6.6 0 0 0-.6.6v1c0 .3.3.6.6.6h8.8c.3 0 .6-.3.6-.6v-1a.6.6 0 0 0-.6-.6l-3.7-.3.7-7 9.1-.5c.3 0 .5-.2.5-.5v-2a.5.5 0 0 0-.5-.5l-9.1-.4v-6C13.4 2.1 12.9 1 12 1Z"/>
+        <path d="M6.5 7c-.6 0-1 .5-1 1.2v6.3c0 .6.4 1 1 1s1-.4 1-1V8.2c0-.7-.4-1.2-1-1.2Zm11 0c-.6 0-1 .5-1 1.2v6.3c0 .6.4 1 1 1s1-.4 1-1V8.2c0-.7-.4-1.2-1-1.2Z"/>
         </g>
         """;
 }

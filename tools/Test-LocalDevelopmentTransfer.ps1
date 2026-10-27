@@ -115,6 +115,23 @@ try {
     Assert-True (@($config.RepoAssets | Where-Object { $_.Path -eq 'docs/local/*.md' -and -not $_.Required -and $_.Classification -eq 'private-reference' }).Count -eq 1) 'local Markdown research must be optional private transfer material'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*auth.json*' }).Count -eq 1) 'Codex auth must be forbidden'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*sessions*' }).Count -eq 1) 'Codex sessions must be forbidden'
+    $transferAst = [Management.Automation.Language.Parser]::ParseFile($entrypoint, [ref]$null, [ref]$null)
+    $pathPolicyFunctions = $transferAst.FindAll({
+        param($node)
+        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
+            $node.Name -in @('ConvertTo-PortablePath', 'Test-TransferPathExcluded', 'Test-ForbiddenBundlePath')
+    }, $false)
+    & {
+        $script:TransferConfig = $config
+        foreach ($policyFunction in $pathPolicyFunctions) { Invoke-Expression $policyFunction.Extent.Text }
+        foreach ($directory in @('.codex-attachments', '.codex-remote-attachments')) {
+            $attachmentPath = "payload/repo/$directory/thread/message/probe.png"
+            Assert-True (Test-TransferPathExcluded $attachmentPath) "$directory must be omitted from export"
+            Assert-True (Test-ForbiddenBundlePath $attachmentPath) "$directory must be rejected on import"
+            git -C $repoRoot check-ignore -q -- "$directory/thread/message/probe.png"
+            Assert-True ($LASTEXITCODE -eq 0) "$directory must be ignored by Git"
+        }
+    }
     Assert-True (@($config.WingetPackages | Where-Object { $_.Id -eq 'PostgreSQL.PostgreSQL.17' -and $_.Required }).Count -eq 1) 'PostgreSQL 17 must be required for hosted cleanup and SQL evidence'
     Assert-True (@($config.NpmGlobalPackages | Where-Object { $_.Package -eq 'firebase-tools@15.28.2' -and $_.Command -eq 'firebase' -and $_.Required }).Count -eq 1) 'Firebase CLI must be pinned and required for Preview distribution'
     Assert-True ($config.Expected.FirebaseCliVersion -eq '15.28.2') 'Firebase CLI verifier version must match the pinned package'

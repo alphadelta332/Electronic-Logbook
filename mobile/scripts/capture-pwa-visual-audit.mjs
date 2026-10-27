@@ -986,6 +986,13 @@ try {
                             const populatedLastFlight = page.locator(".dashboard-last-flight-link");
                             const lastFlightLayout = await populatedLastFlight.evaluate((card) => {
                                 const body = card.querySelector(".dashboard-last-flight-body").getBoundingClientRect();
+                                const label = card.querySelector(".dashboard-last-flight-label").getBoundingClientRect();
+                                const date = card.querySelector(".date-with-relative").getBoundingClientRect();
+                                const time = card.querySelector("time").getBoundingClientRect();
+                                const relativeDate = card.querySelector(".relative-date")?.getBoundingClientRect();
+                                const wrappedDateMisaligned = date.top >= label.bottom && Math.abs(date.left - body.left) > 1;
+                                const wrappedRelativeDateMisaligned = relativeDate && relativeDate.top >= time.bottom &&
+                                    Math.abs(relativeDate.left - date.left) > 1;
                                 const bodyTextOverflow = [...card.querySelectorAll(
                                     ".dashboard-last-flight-label, time, .relative-date, .dashboard-last-flight-route, .dashboard-last-flight-aircraft")]
                                     .some(element => {
@@ -1009,6 +1016,8 @@ try {
                                     pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
                                     fieldsOverlap: body.right > hours.left + 1,
                                     bodyTextOverflow,
+                                    wrappedDateMisaligned,
+                                    wrappedRelativeDateMisaligned,
                                     hoursCenterOffsets,
                                     paddingInline: Math.min(parseFloat(style.paddingLeft),
                                         parseFloat(style.paddingRight) + parseFloat(getComputedStyle(hoursElement).paddingRight))
@@ -1020,6 +1029,8 @@ try {
                                 lastFlightLayout.pageOverflow ||
                                 lastFlightLayout.fieldsOverlap ||
                                 lastFlightLayout.bodyTextOverflow ||
+                                lastFlightLayout.wrappedDateMisaligned ||
+                                lastFlightLayout.wrappedRelativeDateMisaligned ||
                                 lastFlightLayout.hoursCenterOffsets.some(offset => Math.abs(offset) > 1) ||
                                 lastFlightLayout.paddingInline < 16) {
                                 throw new Error(`Populated Dashboard Last Flight layout failed for ${profile.name} ${colorScheme}: ${JSON.stringify(lastFlightLayout)}`);

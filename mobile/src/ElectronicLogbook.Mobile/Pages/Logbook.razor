@@ -105,7 +105,8 @@ else
 
                 <section class="totals-group" aria-labelledby="single-engine-totals-heading">
                     <div class="totals-group-heading">
-                        <h3 id="single-engine-totals-heading">Single engine</h3>
+                        <MudIcon Icon="@MobileAircraftIcons.SingleEngine" aria-hidden="true" />
+                        <h3 id="single-engine-totals-heading">Single Engine</h3>
                     </div>
                     <div class="totals-table" role="table" aria-label="Single engine flying totals">
                         <div class="totals-table-row totals-table-header" role="row">
@@ -137,7 +138,8 @@ else
 
                 <section class="totals-group" aria-labelledby="multi-engine-totals-heading">
                     <div class="totals-group-heading">
-                        <h3 id="multi-engine-totals-heading">Multi engine</h3>
+                        <MudIcon Icon="@MobileAircraftIcons.MultiEngine" aria-hidden="true" />
+                        <h3 id="multi-engine-totals-heading">Multi Engine</h3>
                     </div>
                     <div class="totals-table" role="table" aria-label="Multi engine flying totals">
                         <div class="totals-table-row totals-table-header" role="row">
@@ -169,6 +171,7 @@ else
 
                 <section class="totals-group" aria-labelledby="other-time-totals-heading">
                     <div class="totals-group-heading">
+                        <MudIcon Icon="@Icons.Material.Filled.AvTimer" aria-hidden="true" />
                         <h3 id="other-time-totals-heading">Other time</h3>
                     </div>
                     <div class="totals-pair-list">
@@ -191,7 +194,8 @@ else
 
                 <section class="totals-group" aria-labelledby="custom-field-totals-heading">
                     <div class="totals-group-heading">
-                        <h3 id="custom-field-totals-heading">Custom fields</h3>
+                        <MudIcon Icon="@Icons.Material.Filled.DashboardCustomize" aria-hidden="true" />
+                        <h3 id="custom-field-totals-heading">Custom</h3>
                     </div>
                     <div class="totals-count-grid">
                         @foreach (var total in CustomFieldTotals)
@@ -203,6 +207,7 @@ else
 
                 <section class="totals-group" aria-labelledby="movement-totals-heading">
                     <div class="totals-group-heading">
+                        <MudIcon Icon="@Icons.Material.Filled.FlightLand" aria-hidden="true" />
                         <h3 id="movement-totals-heading">Landings</h3>
                     </div>
                     <div class="totals-count-grid entry-responsive-grid">
@@ -213,7 +218,8 @@ else
 
                 <section class="totals-group" aria-labelledby="approach-totals-heading">
                     <div class="totals-group-heading">
-                        <h3 id="approach-totals-heading">Approaches</h3>
+                        <MudIcon Icon="@Icons.Material.Filled.GpsFixed" aria-hidden="true" />
+                        <h3 id="approach-totals-heading">Instrument Approaches</h3>
                     </div>
                     <div class="totals-count-grid totals-approach-grid entry-responsive-grid">
                         <StatusMetric Label="ILS" Value="@(FormatCountTotal(entry => entry.Ils))" />

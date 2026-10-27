@@ -47,14 +47,14 @@ else
                                     type="button"
                                     aria-pressed="@(SelectedEngine == SingleEngine)"
                                     @onclick="@(() => SelectedEngine = SingleEngine)">
-                                <MudIcon Icon="@Icons.Material.Filled.Flight" aria-hidden="true" />
+                                <MudIcon Icon="@MobileAircraftIcons.SingleEngine" aria-hidden="true" />
                                 <span>Single engine</span>
                             </button>
                             <button class="@EngineButtonClass(MultiEngine)"
                                     type="button"
                                     aria-pressed="@(SelectedEngine == MultiEngine)"
                                     @onclick="@(() => SelectedEngine = MultiEngine)">
-                                <MudIcon Icon="@Icons.Material.Filled.Flight" aria-hidden="true" />
+                                <MudIcon Icon="@MobileAircraftIcons.MultiEngine" aria-hidden="true" />
                                 <span>Multi engine</span>
                             </button>
                         </div>

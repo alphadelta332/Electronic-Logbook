@@ -770,6 +770,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
+    justify-content: space-between;
     gap: 4px 12px;
     min-width: 0;
 }
@@ -780,7 +781,7 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .dashboard-last-flight-heading .date-with-relative {
-    margin-left: auto;
+    justify-content: flex-start;
     max-width: 100%;
     overflow-wrap: anywhere;
 }
@@ -3378,10 +3379,14 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 
 .totals-group-heading {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
+    align-items: center;
+    gap: 10px;
     padding: 12px 14px 0;
+}
+
+.totals-group-heading .mud-icon-root {
+    flex-shrink: 0;
+    color: var(--app-primary);
 }
 
 .totals-group-heading h3 {
