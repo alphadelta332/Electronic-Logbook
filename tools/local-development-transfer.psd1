@@ -134,6 +134,9 @@
         @{ Id = 'Python.Python.3.14'; Name = 'Python 3.14'; Required = $false }
     )
 
+    # Lockfile-restored project dependencies; node_modules remains regenerated output.
+    NpmProjects = @('mobile', 'supabase/functions/aircraft-catalog')
+
     NpmGlobalPackages = @(
         @{ Package = 'wrangler@4.147.0'; Command = 'wrangler'; Required = $false }
         @{ Package = 'supabase@2.111.0'; Command = 'supabase'; Required = $true }

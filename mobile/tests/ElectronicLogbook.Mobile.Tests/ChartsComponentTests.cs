@@ -39,6 +39,8 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         logbook.Find(".logbook-filter-button").Click();
         Assert.Equal("true", logbook.Find(".logbook-filter-button").GetAttribute("aria-expanded"));
         Assert.Single(logbook.FindAll(".totals-filter-sheet"));
+        Assert.Empty(logbook.FindAll(".totals-filter-explanation, .totals-filter-hint"));
+        Assert.Equal(["Start date", "End date"], logbook.FindAll(".date-range-fields label").Select(label => label.ChildNodes[0].TextContent.Trim()));
         logbook.Find(".logbook-filter-button").Click();
         Assert.Empty(logbook.FindAll(".totals-filter-sheet"));
         var expected = logbook.FindComponents<MudButton>().Single(button => button.Instance.Class == "logbook-filter-button").Instance;
@@ -67,7 +69,7 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         page.Find(".logbook-filter-button").Click();
         page.Find(".logbook-filter-button").Click();
         Assert.Equal("2024-01-01", page.Find("#analytics-from").GetAttribute("value"));
-        Assert.Contains("2.0 flying hours", page.Markup);
+        Assert.Equal(2m, page.FindComponents<AnalyticsPlot>().Single(plot => plot.Instance.Data.Kind == "time").Instance.Data.Series.Single().Values.Last());
         page.Find(".analytics-filter-summary button").Click();
         Assert.Equal("Filters", page.Find(".logbook-filter-button").TextContent.Trim());
         Assert.Null(page.Find("#analytics-from").GetAttribute("max"));
@@ -82,10 +84,100 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Assert.Equal(new[] { "Hours by year", "Total hours over time", "Hours by category",
             "Top five registrations", "Top five aircraft types", "Top ten airports" },
             page.FindAll(".analytics-chart h2").Select(heading => heading.TextContent));
-        Assert.Equal(new[] { "2.0 flying hours · 1 flights.", "2.0 total flying hours." },
-            page.FindAll(".analytics-chart h2 + p").Select(paragraph => paragraph.TextContent));
+        Assert.Empty(page.FindAll(".analytics-chart h2 + p"));
         page.FindAll(".mud-tab")[1].Click();
         Assert.Empty(page.FindAll(".analytics-statistics h2 + p"));
+        Assert.Empty(page.FindAll(".analytics-bases > p"));
+    }
+
+    [Theory]
+    [InlineData("entries", "seCommandDay")]
+    [InlineData("totals", "seCommandDay")]
+    [InlineData("entries", "custom:cf_workbook_1")]
+    [InlineData("totals", "custom:cf_workbook_1")]
+    [InlineData("entries", "landingsDay")]
+    [InlineData("totals", "landingsDay")]
+    public void LogbookNumericFiltersApplyPersistValidateAndClearAcrossViews(string view, string fieldId)
+    {
+        Load(new[] { 1.5m, 2m, 3m }.Select((hours, index) => Flight(index + 1, hours) with {
+            LandingsDay = index + 1,
+            CustomFields = new Dictionary<CustomFieldId, string?> {
+                [MobileLogbookSession.CustomFields[0].Id] = hours.ToString(System.Globalization.CultureInfo.InvariantCulture) }
+        }).ToArray());
+        var fieldLabel = fieldId switch {
+            "landingsDay" => "Landings - day",
+            "seCommandDay" => "Single engine command - day",
+            _ => MobileLogbookSession.CustomFields[0].Label };
+        Services.GetRequiredService<NavigationManager>().NavigateTo($"/flights?view={view}");
+        var page = Render<Logbook>();
+        page.Find(".logbook-filter-button").Click();
+        Assert.Contains("Category", page.Find(".totals-filter-field").TextContent);
+        page.Find(".totals-filter-field select").Change("type");
+        Assert.Equal("Search", page.Find(".totals-filter-search").FirstChild!.TextContent.Trim());
+        Assert.False(page.Find(".totals-filter-search input").HasAttribute("placeholder"));
+        Assert.NotEmpty(page.FindAll(".totals-filter-values input[type=checkbox]"));
+        Assert.Single(page.FindAll(".totals-filter-value-actions"));
+        page.Find(".totals-filter-field select").Change(fieldId);
+        Assert.Empty(page.FindAll(".totals-filter-values, .totals-filter-value-actions, .totals-filter-search"));
+        Assert.Contains("Any value", page.FindAll(".totals-filter-field select")[1].TextContent);
+        page.FindAll(".totals-filter-field select")[1].Change("gt");
+        Assert.Contains("Enter a value.", page.Find(".totals-filter-sheet [role=alert]").TextContent);
+        page.Find("input[type=number]").Input("1.5");
+        Assert.Equal("Filters (1)", page.Find(".logbook-filter-button").TextContent.Trim());
+        Assert.Contains("Greater than 1.5", page.Find(".totals-active-filters").TextContent);
+        if (view == "entries")
+            Assert.Equal(2, page.FindComponents<LogbookFlightRow>().Count);
+        else
+            Assert.Contains("2 of 3 active entries included", page.Markup);
+
+        page.FindAll("[aria-label='Logbook view'] button")[view == "entries" ? 1 : 0].Click();
+        Assert.Equal("Filters (1)", page.Find(".logbook-filter-button").TextContent.Trim());
+        page.Find(".logbook-filter-button").Click();
+        Assert.Equal("1.5", page.Find("input[type=number]").GetAttribute("value"));
+        page.FindAll("[aria-label='Logbook view'] button")[view == "entries" ? 0 : 1].Click();
+        page.Find(".logbook-filter-button").Click();
+        page.Find(".logbook-filter-button").Click();
+        Assert.Equal("1.5", page.Find("input[type=number]").GetAttribute("value"));
+        var secondFieldId = fieldId == "landingsDay" ? "seCommandDay" : "landingsDay";
+        page.Find(".totals-filter-field select").Change(secondFieldId);
+        page.FindAll(".totals-filter-field select")[1].Change("le");
+        page.Find("input[type=number]").Input("2");
+        Assert.Equal("Filters (2)", page.Find(".logbook-filter-button").TextContent.Trim());
+        page.Find(".totals-filter-field select").Change(fieldId);
+        page.FindAll(".totals-filter-field select")[1].Change("between");
+        page.FindAll("input[type=number]")[1].Input("1");
+        Assert.Contains("Upper value must", page.Find(".totals-filter-sheet [role=alert]").TextContent);
+        page.FindAll("input[type=number]")[1].Input("2");
+        Assert.DoesNotContain("Upper value must", page.Markup);
+        page.Find($"[aria-label='Clear {fieldLabel} filter']").Click();
+        Assert.Equal("Filters (1)", page.Find(".logbook-filter-button").TextContent.Trim());
+        page.Find(".totals-active-filters > button").Click();
+        Assert.Equal("Filters", page.Find(".logbook-filter-button").TextContent.Trim());
+        Assert.Empty(page.FindAll(".totals-active-filter"));
+        Assert.Empty(page.FindAll(".totals-filter-values, .totals-filter-value-actions, .totals-filter-search"));
+        page.FindAll(".totals-filter-field select")[1].Change("eq");
+        page.Find("input[type=number]").Input("2");
+        page.FindAll(".totals-filter-field select")[1].Change("");
+        Assert.Equal("Filters", page.Find(".logbook-filter-button").TextContent.Trim());
+        Assert.Empty(page.FindAll(".totals-filter-values, .totals-filter-value-actions, .totals-filter-search"));
+    }
+
+    [Fact]
+    public void CustomEntryLinkUsesAnEditableNumericComparison()
+    {
+        var field = MobileLogbookSession.CustomFields[0];
+        Load(new string?[] { null, "0", "2", "Goggle" }.Select((value, index) => Flight(index + 1, 1m) with {
+            CustomFields = new Dictionary<CustomFieldId, string?> { [field.Id] = value }
+        }).ToArray());
+        Services.GetRequiredService<NavigationManager>().NavigateTo($"/flights?view=entries&customField={field.Id.Value}");
+        var page = Render<Logbook>();
+        Assert.Contains("Does not equal 0", page.Find(".totals-active-filters").TextContent);
+        Assert.Single(page.FindComponents<LogbookFlightRow>());
+        Assert.Empty(page.FindAll(".totals-filter-values, .totals-filter-value-actions"));
+        Assert.Equal("0", page.Find("input[type=number]").GetAttribute("value"));
+        page.FindAll(".totals-filter-field select")[1].Change("");
+        Assert.Equal(4, page.FindComponents<LogbookFlightRow>().Count);
+        Assert.Empty(page.FindAll(".totals-active-filter"));
     }
 
     [Fact]
@@ -108,7 +200,6 @@ public sealed class ChartsComponentTests : BunitContext, IAsyncLifetime
         Assert.Empty(page.FindAll(".analytics-chart details"));
         Assert.DoesNotContain("Show values for", page.Markup);
         Assert.Equal(3, page.FindAll(".analytics-chart .visually-hidden table").Count);
-        Assert.Contains("9.0 flying hours", page.Markup);
         var charts = page.FindComponents<AnalyticsPlot>();
         Assert.Equal(6, charts.Count);
         var year = charts.Single(chart => chart.Instance.Data.Kind == "year").Instance.Data;

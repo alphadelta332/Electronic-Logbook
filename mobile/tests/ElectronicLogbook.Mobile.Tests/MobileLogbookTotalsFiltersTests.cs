@@ -143,6 +143,104 @@ public sealed class MobileLogbookTotalsFiltersTests
         Assert.False(MobileLogbookTotalsFilters.Matches(Entry("C208", "VH-AAA"), selections, Fields));
     }
 
+    [Theory]
+    [InlineData("eq", 2, true)]
+    [InlineData("eq", 1.9, false)]
+    [InlineData("ne", 2, false)]
+    [InlineData("ne", 2.1, true)]
+    [InlineData("gt", 2, false)]
+    [InlineData("gt", 2.1, true)]
+    [InlineData("ge", 2, true)]
+    [InlineData("ge", 1.9, false)]
+    [InlineData("lt", 2, false)]
+    [InlineData("lt", 1.9, true)]
+    [InlineData("le", 2, true)]
+    [InlineData("le", 2.1, false)]
+    [InlineData("between", 2, true)]
+    [InlineData("between", 3, true)]
+    [InlineData("between", 1.9, false)]
+    [InlineData("between", 3.1, false)]
+    public void NumericComparison_UsesExactBoundaries(string comparison, double value, bool expected)
+    {
+        Assert.Equal(expected, new MobileLogbookNumericFilter(comparison, 2m, 3m).Matches((decimal)value));
+    }
+
+    [Fact]
+    public void NumericComparison_RejectsMissingValuesAndReversedRanges()
+    {
+        foreach (var filter in new[] {
+            new MobileLogbookNumericFilter("gt", null),
+            new MobileLogbookNumericFilter("between", 2m),
+            new MobileLogbookNumericFilter("between", 3m, 2m) })
+        {
+            Assert.NotNull(filter.Error);
+            Assert.False(filter.Matches(2m));
+        }
+    }
+
+    [Fact]
+    public void Matches_CombinesNumericHoursAndCountsWithTextAndDates()
+    {
+        var entries = new[] {
+            Entry("C208", "MATCH", 2.25m, new(2026, 1, 1)) with { LandingsDay = 2 },
+            Entry("C208", "LOW-HOURS", 2m, new(2026, 1, 1)) with { LandingsDay = 2 },
+            Entry("C208", "HIGH-COUNT", 2.25m, new(2026, 1, 1)) with { LandingsDay = 3 },
+            Entry("C404", "WRONG-TYPE", 2.25m, new(2026, 1, 1)) with { LandingsDay = 2 },
+            Entry("C208", "WRONG-DATE", 2.25m, new(2025, 1, 1)) with { LandingsDay = 2 } };
+        var selections = new Dictionary<string, HashSet<string>> { ["type"] = ["text:C208"] };
+        var numeric = new Dictionary<string, MobileLogbookNumericFilter> {
+            ["seCommandDay"] = new("gt", 2m), ["landingsDay"] = new("le", 2m) };
+
+        Assert.Equal(["MATCH"], entries.Where(entry => MobileLogbookTotalsFilters.Matches(
+            entry, selections, Fields, new(2026, 1, 1), new(2026, 1, 1), numeric)).Select(entry => entry.Reg));
+    }
+
+    [Theory]
+    [InlineData("seCommandDay")]
+    [InlineData("landingsDay")]
+    [InlineData("ils")]
+    public void Matches_NumericComparisonsCountBlanksAsZero(string fieldId)
+    {
+        var entries = new[] {
+            Entry("C208", "BLANK"),
+            Entry("C208", "ZERO", 0m) with { LandingsDay = 0, Ils = 0 },
+            Entry("C208", "TWO", 2m) with { LandingsDay = 2, Ils = 2 } };
+        var numeric = new Dictionary<string, MobileLogbookNumericFilter> { [fieldId] = new("eq", 0m) };
+        Assert.Equal(["BLANK", "ZERO"], entries.Where(entry => MobileLogbookTotalsFilters.Matches(
+            entry, new Dictionary<string, HashSet<string>>(), Fields, numericFilters: numeric)).Select(entry => entry.Reg));
+        numeric[fieldId] = new("gt", 0m);
+        Assert.Equal(["TWO"], entries.Where(entry => MobileLogbookTotalsFilters.Matches(
+            entry, new Dictionary<string, HashSet<string>>(), Fields, numericFilters: numeric)).Select(entry => entry.Reg));
+    }
+
+    [Theory]
+    [InlineData("gt", 1.5, null, "DECIMAL,WHOLE,GROUPED")]
+    [InlineData("lt", 2, null, "BLANK,SPACE,ZERO,DECIMAL")]
+    [InlineData("eq", 0, null, "BLANK,SPACE,ZERO")]
+    [InlineData("ne", 0, null, "DECIMAL,WHOLE,GROUPED")]
+    [InlineData("between", 1.75, 2d, "DECIMAL,WHOLE")]
+    public void Matches_CustomNumbersUseStoredPrecisionAndExcludeNonNumericText(
+        string comparison, double value, double? upperValue, string expected)
+    {
+        var field = Field($"custom:{NightVision.Id.Value}");
+        Assert.True(field.SupportsNumericComparison);
+        Assert.False(Field("type").SupportsNumericComparison);
+        var entries = new[] {
+            Entry("C208", "BLANK"),
+            Entry("C208", "SPACE", nightVision: " "),
+            Entry("C208", "ZERO", nightVision: "0"),
+            Entry("C208", "DECIMAL", nightVision: "1.75"),
+            Entry("C208", "WHOLE", nightVision: "2"),
+            Entry("C208", "GROUPED", nightVision: "1,000.5"),
+            Entry("C208", "TEXT", nightVision: "Goggle") };
+        var numeric = new Dictionary<string, MobileLogbookNumericFilter> {
+            [field.Id] = new(comparison, (decimal)value, (decimal?)upperValue) };
+
+        Assert.Equal(expected.Split(','), entries.Where(entry => MobileLogbookTotalsFilters.Matches(
+            entry, new Dictionary<string, HashSet<string>>(), Fields, numericFilters: numeric)).Select(entry => entry.Reg));
+        Assert.Equal("1.75", entries[3].CustomFields[NightVision.Id]);
+    }
+
     [Fact]
     public void Matches_DateRangeIsInclusiveAndRejectsEntriesWithoutAValidDate()
     {

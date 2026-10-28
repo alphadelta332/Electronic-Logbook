@@ -12,7 +12,7 @@ and reproducible operating or validation procedures.
 | Logical reconstruction | [Preview compatibility contract](hosted-backup-preview-logical-contract.md), [local HTTP fixture](hosted-backup-logical-http-fixture.md) |
 | Daily backup components | [Capability lifecycle](hosted-backup-daily-capability.md), [runner and controls](hosted-backup-daily-runner.md), [provider collector](hosted-backup-provider-collector.md), [internal monitoring policy](hosted-backup-monitor.md) |
 | Experimental backup boundary | [Metadata guard](hosted-backup-metadata-guard-contract.md), [hybrid restore fixture](hosted-backup-hybrid-restore-fixture.md) |
-| Other maintenance | [Airport catalogue](airport-catalog-updates.md), [Route map](route-map.md), [LogTen format](logten-dynamic-export.md), [UI consistency](product-ui-consistency.md), [architecture map](architecture-graph.md), [releases](release-runbook.md), [public hardening gate](public-release-hardening-gate.md) |
+| Other maintenance | [Aircraft catalogue](aircraft-catalog.md), [Airport catalogue](airport-catalog-updates.md), [Route map](route-map.md), [LogTen format](logten-dynamic-export.md), [UI consistency](product-ui-consistency.md), [architecture map](architecture-graph.md), [releases](release-runbook.md), [public hardening gate](public-release-hardening-gate.md) |
 
 ## What belongs in Git
 

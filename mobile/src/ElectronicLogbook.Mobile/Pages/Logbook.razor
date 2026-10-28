@@ -20,7 +20,6 @@ else
                 <span class="eyebrow">Logbook</span>
                 <h1>Flight record</h1>
             </div>
-            <span class="draft-pill">@(Session.CurrentEntriesV2.Count == 1 ? "1 entry" : $"{Session.CurrentEntriesV2.Count} entries")</span>
         </header>
 
         @if (Session.ShouldShowLastActionMessage(MobileActionMessageSurface.Logbook))
@@ -42,7 +41,6 @@ else
             <section class="form-section">
                 <div class="section-title-row">
                     <div>
-                        <span class="eyebrow">Entries</span>
                         <h2>Current record</h2>
                     </div>
                     <FilterToggleButton Count="@TotalsFilterCount" @bind-Expanded="ShowFilters" />
@@ -50,12 +48,12 @@ else
 
                 <label class="search-field">
                     Search
-                    <input @bind="SearchText" @bind:event="oninput" placeholder="Rego, route, type, remarks" />
+                    <input @bind="SearchText" @bind:event="oninput" />
                 </label>
 
                 @if (ShowFilters)
                 {
-                    @FilterPanel("Entry filters", "Active entry filters", "Filter the flights shown in these entries")
+                    @FilterPanel("Entry filters", "Active entry filters")
                 }
 
                 @if (FilteredEntries.Count == 0)
@@ -82,7 +80,6 @@ else
             <ResponsiveHours Class="form-section logbook-totals">
                 <div class="section-title-row">
                     <div>
-                        <span class="eyebrow">Totals</span>
                         <h2>Flying totals</h2>
                     </div>
                     <FilterToggleButton Count="@TotalsFilterCount" @bind-Expanded="ShowTotalsFilters" />
@@ -92,7 +89,7 @@ else
 
                 @if (ShowTotalsFilters)
                 {
-                    @FilterPanel("Totals filters", "Active totals filters", "Filter the flights included in these totals")
+                    @FilterPanel("Totals filters", "Active totals filters")
                 }
 
                 @if (TotalsEntries.Count == 0 && Session.CurrentEntriesV2.Count > 0)
@@ -238,12 +235,10 @@ else
             <section class="form-section deleted-entries-view">
                 <div class="section-title-row">
                     <div>
-                        <span class="eyebrow">Deletion history</span>
                         <h2>Deleted flights</h2>
                     </div>
                     <span class="draft-pill">@Session.DeletedEntriesV2.Count deleted</span>
                 </div>
-                <p class="totals-intro">Deleted flights remain available here. Open a flight to review its details or restore it to the active logbook.</p>
 
                 @if (Session.DeletedEntriesV2.Count == 0)
                 {
@@ -262,7 +257,7 @@ else
                             <NavLink class="deleted-entry-row" href="@($"/flights/{entry.EntryId.Value}")">
                                 <span class="deleted-entry-summary">
                                     <strong>@(flight is null ? "Deleted flight" : Session.FormatRoute(flight))</strong>
-                                    <span>@(flight is null ? "Flight details unavailable" : $"{MobileLogbookSession.FormatDate(flight.Date)} · {Session.FormatAircraft(flight)} · {Session.FormatRegistration(flight)}")</span>
+                                    <span>@(flight is null ? "Flight details unavailable" : $"{MobileLogbookSession.FormatDate(flight.Date)} · {Session.FormatAircraft(flight)}")</span>
                                 </span>
                                 <span class="deleted-entry-time">Deleted @MobileLogbookSession.FormatTimestamp(Session.FindOperationV2(entry.CurrentRevisionId).CreatedAt)</span>
                                 <MudIcon Icon="@Icons.Material.Filled.ChevronRight" aria-hidden="true" />
@@ -330,6 +325,9 @@ else
     private string? TotalsStartDateText { get; set; }
     private string? TotalsEndDateText { get; set; }
     private Dictionary<string, HashSet<string>> TotalsFilterSelections { get; } = new(StringComparer.Ordinal);
+    private Dictionary<string, MobileLogbookNumericFilter> NumericFilters { get; } = new(StringComparer.Ordinal);
+    private MobileLogbookNumericFilter SelectedNumericFilter =>
+        NumericFilters.GetValueOrDefault(SelectedTotalsFilterField.Id) ?? new("", null);
     private IReadOnlyList<MobileLogbookTotalsFilterField> totalsFilterFields = [];
     private IReadOnlyList<PortableLogbookMaterializedEntryV2> totalsEntries = [];
     private string? AppliedCustomFieldQuery { get; set; }
@@ -374,7 +372,7 @@ else
     private DateOnly? TotalsStartDate => ParseTotalsDate(TotalsStartDateText);
     private DateOnly? TotalsEndDate => ParseTotalsDate(TotalsEndDateText);
     private bool HasTotalsDateRange => TotalsStartDate is not null || TotalsEndDate is not null;
-    private int TotalsFilterCount => ActiveTotalsFilterSelections.Count + (HasTotalsDateRange ? 1 : 0);
+    private int TotalsFilterCount => ActiveTotalsFilterSelections.Count + NumericFilters.Count + (HasTotalsDateRange ? 1 : 0);
 
 
     private string TotalsEntryCountLabel => TotalsFilterCount == 0
@@ -455,17 +453,11 @@ else
         AppliedCustomFieldQuery = CustomField;
         SearchText = string.Empty;
         TotalsFilterSelections.Clear();
+        NumericFilters.Clear();
         TotalsStartDateText = null;
         TotalsEndDateText = null;
         var fieldId = $"custom:{definition.Id.Value}";
-        var field = TotalsFilterFields.Single(filterField => filterField.Id == fieldId);
-        TotalsFilterSelections[fieldId] = MobileLogbookTotalsFilters.Values(
-                field,
-                Session.CurrentEntriesV2
-                    .Select(entry => entry.Entry!)
-                    .Where(entry => MobileCustomFieldSettings.HasNonZeroValue(entry, definition.Id)))
-            .Select(value => value.Key)
-            .ToHashSet(StringComparer.Ordinal);
+        NumericFilters[fieldId] = new("ne", 0m);
         SelectedTotalsFilterFieldId = fieldId;
         TotalsFilterValueSearchText = string.Empty;
         ShowFilters = true;
@@ -508,7 +500,24 @@ else
             TotalsFilterSelections,
             TotalsFilterFields,
             TotalsStartDate,
-            TotalsEndDate);
+            TotalsEndDate,
+            NumericFilters);
+
+    private void SetNumericFilter(MobileLogbookNumericFilter filter)
+    {
+        var fieldId = SelectedTotalsFilterField.Id;
+        TotalsFilterSelections.Remove(fieldId);
+        if (string.IsNullOrEmpty(filter.Comparison))
+            NumericFilters.Remove(fieldId);
+        else
+            NumericFilters[fieldId] = filter;
+        RefreshTotalsProjection();
+    }
+
+    private static decimal? ParseNumericFilterValue(ChangeEventArgs args) =>
+        decimal.TryParse(args.Value?.ToString(), System.Globalization.NumberStyles.AllowLeadingSign |
+            System.Globalization.NumberStyles.AllowDecimalPoint, System.Globalization.CultureInfo.InvariantCulture,
+            out var value) ? value : null;
 
     private void OnTotalsFilterFieldChanged(ChangeEventArgs args)
     {
@@ -576,12 +585,14 @@ else
     private void ClearTotalsFilter(string fieldId)
     {
         TotalsFilterSelections.Remove(fieldId);
+        NumericFilters.Remove(fieldId);
         RefreshTotalsProjection();
     }
 
     private void ClearAllTotalsFilters()
     {
         TotalsFilterSelections.Clear();
+        NumericFilters.Clear();
         TotalsStartDateText = null;
         TotalsEndDateText = null;
         RefreshTotalsProjection();
@@ -617,9 +628,11 @@ else
     {
         totalsFilterFields = MobileLogbookTotalsFilters.CreateFields(Session.WorkbookCustomFields);
         var validFieldIds = totalsFilterFields.Select(filterField => filterField.Id).ToHashSet(StringComparer.Ordinal);
-        foreach (var staleFieldId in TotalsFilterSelections.Keys.Where(fieldId => !validFieldIds.Contains(fieldId)).ToArray())
+        foreach (var staleFieldId in TotalsFilterSelections.Keys.Concat(NumericFilters.Keys)
+                     .Distinct(StringComparer.Ordinal).Where(fieldId => !validFieldIds.Contains(fieldId)).ToArray())
         {
             TotalsFilterSelections.Remove(staleFieldId);
+            NumericFilters.Remove(staleFieldId);
         }
 
         if (!validFieldIds.Contains(SelectedTotalsFilterFieldId))
@@ -646,12 +659,7 @@ else
     private static string FormatFilterDate(DateOnly date) =>
         date.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture);
 
-    private RenderFragment FilterPanel(string ariaLabel, string activeFiltersLabel, string heading) => @<section class="totals-filter-sheet" aria-label="@ariaLabel">
-        <div class="totals-filter-explanation">
-            <strong>@heading</strong>
-            <span>Choose values from any logbook column. Values in one column use “or”; different columns use “and”.</span>
-        </div>
-
+    private RenderFragment FilterPanel(string ariaLabel, string activeFiltersLabel) => @<section class="totals-filter-sheet" aria-label="@ariaLabel">
         @if (TotalsFilterCount > 0)
         {
             <div class="totals-active-filters" aria-label="@activeFiltersLabel">
@@ -676,16 +684,27 @@ else
                         <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => ClearTotalsFilter(field.Id))" aria-label="@($"Clear {field.Label} filter")" />
                     </div>
                 }
+                @foreach (var filter in NumericFilters)
+                {
+                    var field = TotalsFilterFields.Single(field => field.Id == filter.Key);
+                    <div class="totals-active-filter">
+                        <span>
+                            <strong>@field.Label</strong>
+                            <small>@filter.Value.Summary</small>
+                        </span>
+                        <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" OnClick="@(() => ClearTotalsFilter(field.Id))" aria-label="@($"Clear {field.Label} filter")" />
+                    </div>
+                }
                 <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearAllTotalsFilters">Clear all filters</MudButton>
             </div>
         }
 
         <label class="totals-filter-field">
-            Logbook column
+            Category
             <select value="@SelectedTotalsFilterFieldId" @onchange="OnTotalsFilterFieldChanged">
                 @foreach (var field in TotalsFilterFields)
                 {
-                    <option value="@field.Id">@(TotalsFilterSelections.ContainsKey(field.Id) ? $"{field.Label} (filtered)" : field.Label)</option>
+                    <option value="@field.Id">@(TotalsFilterSelections.ContainsKey(field.Id) || NumericFilters.ContainsKey(field.Id) ? $"{field.Label} (filtered)" : field.Label)</option>
                 }
             </select>
         </label>
@@ -696,36 +715,73 @@ else
                 <label>Start date <input type="date" value="@TotalsStartDateText" max="@TotalsEndDateText" @onchange="OnTotalsStartDateChanged" /></label>
                 <label>End date <input type="date" value="@TotalsEndDateText" min="@TotalsStartDateText" @onchange="OnTotalsEndDateChanged" /></label>
             </div>
-            <small class="totals-filter-hint">The date range includes both selected dates. Leave either end blank for an open range.</small>
         }
         else
         {
-            <label class="totals-filter-search">
-                Find a value
-                <input @bind="TotalsFilterValueSearchText" @bind:event="oninput" placeholder="Search values in this column" />
-            </label>
-
-            <div class="totals-filter-value-actions">
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SelectAllTotalsFilterValues">Select all</MudButton>
-                <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SelectNoTotalsFilterValues">Select none</MudButton>
-            </div>
-
-            @if (VisibleTotalsFilterValues.Count == 0)
+            @if (SelectedTotalsFilterField.SupportsNumericComparison)
             {
-                <p class="totals-filter-empty">No column values match that search.</p>
+                <label class="totals-filter-field">
+                    Comparison
+                    <select value="@SelectedNumericFilter.Comparison" @onchange="@(args => SetNumericFilter(SelectedNumericFilter with { Comparison = args.Value?.ToString() ?? string.Empty }))">
+                        <option value="">Any value</option>
+                        <option value="eq">Equals</option>
+                        <option value="ne">Does not equal</option>
+                        <option value="gt">Greater than</option>
+                        <option value="ge">Greater than or equal to</option>
+                        <option value="lt">Less than</option>
+                        <option value="le">Less than or equal to</option>
+                        <option value="between">Between</option>
+                    </select>
+                </label>
             }
-            else
+
+            @if (NumericFilters.ContainsKey(SelectedTotalsFilterField.Id))
             {
-                <div class="totals-filter-values" role="group" aria-label="@($"Values for {SelectedTotalsFilterField.Label}")">
-                    @foreach (var value in VisibleTotalsFilterValues)
-                    {
-                        <label>
-                            <input type="checkbox" checked="@IsTotalsFilterValueSelected(value.Key)" @onchange="@(args => ToggleTotalsFilterValue(value.Key, args))" />
-                            <span>@value.Label</span>
-                            <small>@value.EntryCount</small>
-                        </label>
-                    }
+                <label class="totals-filter-search">
+                    @(SelectedNumericFilter.Comparison == "between" ? "Lower value" : "Value")
+                    <input type="number" step="any" inputmode="decimal" value="@SelectedNumericFilter.Value?.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-invalid="@(SelectedNumericFilter.Error is not null ? "true" : "false")" aria-describedby="@(SelectedNumericFilter.Error is not null ? "numeric-filter-error" : null)" @oninput="@(args => SetNumericFilter(SelectedNumericFilter with { Value = ParseNumericFilterValue(args) }))" />
+                </label>
+                @if (SelectedNumericFilter.Comparison == "between")
+                {
+                    <label class="totals-filter-search">
+                        Upper value
+                        <input type="number" step="any" inputmode="decimal" value="@SelectedNumericFilter.UpperValue?.ToString(System.Globalization.CultureInfo.InvariantCulture)" aria-invalid="@(SelectedNumericFilter.Error is not null ? "true" : "false")" aria-describedby="@(SelectedNumericFilter.Error is not null ? "numeric-filter-error" : null)" @oninput="@(args => SetNumericFilter(SelectedNumericFilter with { UpperValue = ParseNumericFilterValue(args) }))" />
+                    </label>
+                }
+                @if (SelectedNumericFilter.Error is { } error)
+                {
+                    <span id="numeric-filter-error" role="alert">@error</span>
+                }
+            }
+            else if (!SelectedTotalsFilterField.SupportsNumericComparison)
+            {
+                <label class="totals-filter-search">
+                    Search
+                    <input @bind="TotalsFilterValueSearchText" @bind:event="oninput" />
+                </label>
+
+                <div class="totals-filter-value-actions">
+                    <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SelectAllTotalsFilterValues">Select all</MudButton>
+                    <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="SelectNoTotalsFilterValues">Select none</MudButton>
                 </div>
+
+                @if (VisibleTotalsFilterValues.Count == 0)
+                {
+                    <p class="totals-filter-empty">No values match that search.</p>
+                }
+                else
+                {
+                    <div class="totals-filter-values" role="group" aria-label="@($"Values for {SelectedTotalsFilterField.Label}")">
+                        @foreach (var value in VisibleTotalsFilterValues)
+                        {
+                            <label>
+                                <input type="checkbox" checked="@IsTotalsFilterValueSelected(value.Key)" @onchange="@(args => ToggleTotalsFilterValue(value.Key, args))" />
+                                <span>@value.Label</span>
+                                <small>@value.EntryCount</small>
+                            </label>
+                        }
+                    </div>
+                }
             }
         }
     </section>;

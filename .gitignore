@@ -11,6 +11,7 @@ diagnostics_*.txt
 **/obj/
 **/TestResults/
 mobile/node_modules/
+supabase/functions/aircraft-catalog/node_modules/
 /artifacts/
 mobile/artifacts/
 mobile/android/.gradle

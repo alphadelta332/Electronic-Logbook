@@ -2641,6 +2641,11 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 .custom-entry-number-format-toggle {
     width: 104px;
     min-height: 48px;
+    --mud-palette-primary: var(--app-primary);
+}
+
+.custom-entry-number-format-toggle.mud-toggle-group-outlined.mud-toggle-group-primary {
+    border-color: var(--app-primary);
 }
 
 .custom-entry-number-format-toggle .mud-toggle-item {
@@ -3195,16 +3200,6 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
     background: var(--app-surface-alt);
 }
 
-.totals-filter-explanation {
-    display: grid;
-    gap: 4px;
-}
-
-.totals-filter-explanation strong {
-    font-size: 15px;
-}
-
-.totals-filter-explanation span,
 .totals-filter-empty {
     margin: 0;
     color: var(--app-text-muted);
@@ -3284,13 +3279,6 @@ html[data-elb-accent="teal"] { --app-accent-light: #007c78; --app-accent-dark: #
 }
 
 .date-range-fields label, .date-range-fields input { min-width: 0; }
-
-.totals-filter-hint {
-    margin-top: -8px;
-    color: var(--app-text-muted);
-    font-size: 12px;
-    line-height: 1.45;
-}
 
 .totals-filter-value-actions {
     display: flex;

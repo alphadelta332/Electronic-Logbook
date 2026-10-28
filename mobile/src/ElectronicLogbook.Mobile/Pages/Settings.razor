@@ -27,7 +27,10 @@ else
                 <div>
                     <strong>@(Session.HasHostedSync ? "Connected" : "Sign in required")</strong>
                     <span>@Session.HostedSyncStatusDetail</span>
-                    <span>@AttentionGuidance</span>
+                    @if (AttentionGuidance is { } guidance)
+                    {
+                        <span>@guidance</span>
+                    }
                 </div>
             </div>
             @if (Session.ShouldOfferHostedAuthentication)
@@ -78,7 +81,6 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <h2>Theme</h2>
-                <span class="draft-pill">@UiPreferences.ThemeMode</span>
             </div>
             <div class="segmented-control" role="group" aria-label="Appearance">
                 <button type="button" class="@ThemeButtonClass("System")" aria-pressed="@(UiPreferences.ThemeMode == "System" ? "true" : "false")" @onclick="SetSystemThemeModeAsync">System</button>
@@ -267,14 +269,6 @@ else
         <section class="form-section">
             <div class="section-title-row">
                 <h2>Export logbook</h2>
-                <span class="draft-pill">New file</span>
-            </div>
-            <div class="settings-connection-summary">
-                <MudIcon Icon="@Icons.Material.Filled.FileDownload" />
-                <div>
-                    <strong>XLSX or UTF-8 CSV</strong>
-                    <span>Create a new dated file from this app logbook. Existing workbooks are never opened or changed.</span>
-                </div>
             </div>
             <MudButton Href="/export" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.FileDownload">
                 Export logbook
@@ -295,7 +289,6 @@ else
             <summary>
                 <span>
                     <strong>Advanced settings</strong>
-                    <small>Diagnostics, recovery, backups and Preview tools</small>
                 </span>
             </summary>
 
@@ -306,7 +299,6 @@ else
                     <h2>FlightLogX updates</h2>
                     <span class="draft-pill">Preview only</span>
                 </div>
-                <MudText Typo="Typo.body2">FlightLogX Preview checks automatically when you open the app. Check again here if support asks you to.</MudText>
                 <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.SystemUpdate" OnClick="CheckForPreviewUpdateAsync" Disabled="@IsPreviewUpdateBusy">
                     @(IsPreviewUpdateBusy ? "Checking for update…" : "Check for Preview update")
                 </MudButton>
@@ -330,7 +322,10 @@ else
                 <article class="device-health-item">
                     <span>Local storage</span>
                     <strong>@(Session.IsStorageBlocked ? "Needs attention" : "Ready")</strong>
-                    <small>@(Session.IsStorageBlocked ? Session.StorageError : "Workbook-faithful data is available offline on this device.")</small>
+                    @if (Session.IsStorageBlocked)
+                    {
+                        <small>@Session.StorageError</small>
+                    }
                 </article>
                 <article class="device-health-item">
                     <span>Device encryption</span>
@@ -491,7 +486,6 @@ else
                 <article class="device-health-item">
                     <span>Account export</span>
                     <strong>Local only</strong>
-                    <small>Exports stay on this device until you choose where to store or share them.</small>
                 </article>
                 <article class="device-health-item">
                     <span>Account deletion</span>
@@ -503,7 +497,7 @@ else
                 <summary>Account sign-in and recovery fallback</summary>
                 <MudText Typo="Typo.caption">Open these controls only when FlightLogX support asks you to use the email-code or recovery-code fallback.</MudText>
                 <div class="field-grid">
-                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited account email" HelperText="Enter the email address that received the FlightLogX code." Immediate="true" Disabled="@IsAccountBusy" />
+                    <MudTextField @bind-Value="HostedEmail" InputType="InputType.Email" Label="Invited account email" Immediate="true" Disabled="@IsAccountBusy" />
                     <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.MarkEmailRead" OnClick="StartHostedSignInAsync" Disabled="@(IsAccountBusy || string.IsNullOrWhiteSpace(HostedEmail))">
                         Send sign-in code
                     </MudButton>
@@ -966,12 +960,12 @@ else
                 ? "Migration must happen before flights or manual packages are added to this app logbook."
                 : "Connect and initialize the invited account before selecting a workbook.";
 
-    private string AttentionGuidance => Session.HostedSyncStatusLabel switch
+    private string? AttentionGuidance => Session.HostedSyncStatusLabel switch
     {
         "Needs attention" => "You can reauthenticate here, or open Advanced settings to restore a lost key or recover a revoked device.",
         "Signing in" => "Finish sign-in with the six-digit code sent to the invited email. Check your junk or spam folder if it does not arrive.",
         "Offline" => "You can keep working; queued edits sync when the network returns.",
-        _ => "Sync is automatic. Recovery and support tools are in Advanced settings."
+        _ => null
     };
 
     private async Task StartHostedSignInAsync()

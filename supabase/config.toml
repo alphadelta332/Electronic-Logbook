@@ -392,6 +392,10 @@ verify_jwt = false
 # Publisher accepts only its dedicated AIRPORT_CATALOG_PUBLISH_TOKEN bearer secret.
 verify_jwt = false
 
+[functions.aircraft-catalog]
+# Independent reference-data publisher token; clients cannot publish.
+verify_jwt = false
+
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 

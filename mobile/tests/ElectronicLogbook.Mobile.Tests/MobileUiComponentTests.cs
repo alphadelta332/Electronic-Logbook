@@ -10,6 +10,39 @@ namespace ElectronicLogbook.Mobile.Tests;
 
 public sealed class MobileUiComponentTests : BunitContext
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SettingsRemovesRoutineCopyButKeepsStorageErrorsAndThemeControls(bool storageBlocked)
+    {
+        JSInterop.Mode = JSRuntimeMode.Loose;
+        Services.AddMudServices();
+        Services.AddSingleton(provider => new BrowserLogbookStore(provider.GetRequiredService<IJSRuntime>()));
+        Services.AddSingleton(provider => new BrowserFileStore(provider.GetRequiredService<IJSRuntime>()));
+        Services.AddSingleton(provider => new MobileUiPreferenceState(new BrowserUiPreferencesStore(provider.GetRequiredService<IJSRuntime>())));
+        Services.AddSingleton(provider => new MobileLogbookSession(
+            provider.GetRequiredService<BrowserLogbookStore>(),
+            new BrowserPackageKeyStore(provider.GetRequiredService<IJSRuntime>())));
+        JSInterop.Setup<string?>("electronicLogbookStore.load", "portable-document")
+            .SetResult(storageBlocked ? "invalid json" : null);
+
+        var page = Render<Settings>();
+
+        page.WaitForAssertion(() => Assert.Equal(3, page.FindAll("[aria-label=Appearance] button").Count));
+        Assert.Equal("true", page.Find("[aria-label=Appearance] button").GetAttribute("aria-pressed"));
+        Assert.Empty(page.FindAll("[aria-label=Appearance]").Single().ParentElement!.QuerySelectorAll(".draft-pill"));
+        Assert.DoesNotContain("New file", page.Markup);
+        Assert.DoesNotContain("Create a new dated file", page.Markup);
+        Assert.DoesNotContain("Workbook-faithful data is available offline", page.Markup);
+        Assert.DoesNotContain("Sync is automatic.", page.Markup);
+        var storage = page.FindAll(".device-health-item").Single(item => item.FirstElementChild?.TextContent == "Local storage");
+        Assert.Equal(storageBlocked ? "Needs attention" : "Ready", storage.QuerySelector("strong")!.TextContent);
+        if (storageBlocked)
+            Assert.Equal(Services.GetRequiredService<MobileLogbookSession>().StorageError, storage.QuerySelector("small")!.TextContent);
+        else
+            Assert.Null(storage.QuerySelector("small"));
+    }
+
     [Fact]
     public void StatusMetricMarksAttentionState()
     {

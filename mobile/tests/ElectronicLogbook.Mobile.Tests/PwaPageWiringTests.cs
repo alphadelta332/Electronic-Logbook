@@ -38,7 +38,13 @@ public sealed class PwaPageWiringTests
         Assert.DoesNotContain("Confirm and migrate", migration, StringComparison.Ordinal);
         var export = ReadMobilePage("LogbookExport.razor");
         Assert.Contains("@page \"/export\"", export, StringComparison.Ordinal);
-        Assert.Contains("Every export is a new file", export, StringComparison.Ordinal);
+        Assert.DoesNotContain("Every export is a new file", export, StringComparison.Ordinal);
+        Assert.DoesNotContain("The app does not read, update, or replace an existing workbook.", export, StringComparison.Ordinal);
+        Assert.DoesNotContain("The UTC export time is recorded in the file and its filename.", export, StringComparison.Ordinal);
+        var endDate = export.IndexOf("<label>End date", StringComparison.Ordinal);
+        var dateGuidance = export.IndexOf("<small>Leave both dates blank", StringComparison.Ordinal);
+        var layoutSelector = export.IndexOf("aria-label=\"Export layout\"", StringComparison.Ordinal);
+        Assert.True(endDate >= 0 && dateGuidance > endDate && layoutSelector > dateGuidance);
         Assert.Contains("MobileLogbookFileExportWorkflow.ExportAsync", export, StringComparison.Ordinal);
         Assert.Contains("Export XLSX", export, StringComparison.Ordinal);
         Assert.Contains("Export CSV", export, StringComparison.Ordinal);
@@ -395,7 +401,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Connected", settings, StringComparison.Ordinal);
         Assert.Contains("Hosted sync", settings, StringComparison.Ordinal);
         Assert.Contains("Invited account email", settings, StringComparison.Ordinal);
-        Assert.Contains("Enter the email address that received the FlightLogX code.", settings, StringComparison.Ordinal);
+        Assert.DoesNotContain("Enter the email address that received the FlightLogX code.", settings, StringComparison.Ordinal);
         Assert.Contains("Six-digit sign-in code", settings, StringComparison.Ordinal);
         Assert.Contains("Enter the code from the latest FlightLogX email. It expires after 10 minutes. Check your junk or spam folder if it does not arrive.", settings, StringComparison.Ordinal);
         Assert.Contains("Send sign-in code", settings, StringComparison.Ordinal);
@@ -663,6 +669,8 @@ public sealed class PwaPageWiringTests
         Assert.Matches(@"(?s)\.custom-entry-setting-name\s+input,\s*\.custom-entry-add-row\s+input\s*\{[^}]*min-height:\s*48px", css);
         Assert.Matches(@"(?s)\.custom-entry-number-format\s+\.mud-switch\s*\{[^}]*min-height:\s*48px", css);
         Assert.Matches(@"(?s)\.custom-entry-number-format-toggle\s*\{[^}]*width:\s*104px;[^}]*min-height:\s*48px", css);
+        Assert.Matches(@"(?s)\.custom-entry-number-format-toggle\s*\{[^}]*--mud-palette-primary:\s*var\(--app-primary\)", css);
+        Assert.Matches(@"(?s)\.custom-entry-number-format-toggle\.mud-toggle-group-outlined\.mud-toggle-group-primary\s*\{[^}]*border-color:\s*var\(--app-primary\)", css);
         Assert.Matches(@"(?s)\.custom-entry-number-format-toggle\s+\.mud-toggle-item\s*\{[^}]*min-width:\s*52px;[^}]*min-height:\s*48px", css);
         Assert.Contains("input:where(:not(.mud-switch-input)),", css, StringComparison.Ordinal);
         Assert.Contains(".mud-button-root:not(.mud-switch-base)", css, StringComparison.Ordinal);
@@ -770,7 +778,8 @@ public sealed class PwaPageWiringTests
         Assert.Contains(".Where(MatchesLogbookFilters)", page, StringComparison.Ordinal);
         Assert.Contains("Deleted", page, StringComparison.Ordinal);
         Assert.Contains("LogbookView.Deleted", page, StringComparison.Ordinal);
-        Assert.Contains("Deletion history", page, StringComparison.Ordinal);
+        Assert.Contains("<h2>Deleted flights</h2>", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Deletion history", page, StringComparison.Ordinal);
         Assert.Contains("Session.DeletedEntriesV2", page, StringComparison.Ordinal);
         Assert.Contains("Session.FindLatestWorkbookEntryPayload(entry)", page, StringComparison.Ordinal);
         Assert.Contains(".logbook-page .logbook-entry-row", css, StringComparison.Ordinal);
@@ -799,7 +808,7 @@ public sealed class PwaPageWiringTests
         var restoreHandler = detail[detail.IndexOf("private async Task RestoreEntryAsync()", StringComparison.Ordinal)..];
 
         Assert.Contains("Deleted flights", logbook, StringComparison.Ordinal);
-        Assert.Contains("review its details or restore it", logbook, StringComparison.Ordinal);
+        Assert.DoesNotContain("Deleted flights remain available here", logbook, StringComparison.Ordinal);
         Assert.Contains("class=\"deleted-entry-row\"", logbook, StringComparison.Ordinal);
         Assert.Contains("Restore flight", detail, StringComparison.Ordinal);
         Assert.Contains("Session.RestoreWorkbookEntryAsync(entryToRestore)", restoreHandler, StringComparison.Ordinal);
@@ -809,7 +818,7 @@ public sealed class PwaPageWiringTests
         Assert.True(
             restoreHandler.IndexOf("await Task.Yield()", StringComparison.Ordinal) <
             restoreHandler.IndexOf("Session.RestoreWorkbookEntryAsync(entryToRestore)", StringComparison.Ordinal));
-        Assert.Contains("Restore it to return it to your logbook.", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("This flight is no longer active.", detail, StringComparison.Ordinal);
         Assert.Contains("PortableLogbookOperationV2.Correct(", session, StringComparison.Ordinal);
         Assert.Contains("[entry.CurrentRevisionId]", session, StringComparison.Ordinal);
         Assert.Contains("\"Entry restored.\"", session, StringComparison.Ordinal);
@@ -864,8 +873,10 @@ public sealed class PwaPageWiringTests
         Assert.Contains("<FilterToggleButton Count=\"@TotalsFilterCount\"", page, StringComparison.Ordinal);
         Assert.Contains("@FilterPanel(\"Entry filters\"", page, StringComparison.Ordinal);
         Assert.Contains("@FilterPanel(\"Totals filters\"", page, StringComparison.Ordinal);
-        Assert.Single(Regex.Matches(page, "Values in one column use “or”; different columns use “and”\\."));
-        Assert.Single(Regex.Matches(page, "Logbook column"));
+        Assert.DoesNotContain("Choose values from any logbook column.", page, StringComparison.Ordinal);
+        Assert.Single(Regex.Matches(page, "Category"));
+        Assert.DoesNotContain("Find a value", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("Search values in this column", page, StringComparison.Ordinal);
         Assert.Contains("MobileLogbookTotalsFilters.Matches", page, StringComparison.Ordinal);
         Assert.Contains(".Where(MatchesLogbookFilters)", page, StringComparison.Ordinal);
         Assert.Contains("TotalsEntries.Select(entry => entry.Entry!)", page, StringComparison.Ordinal);
@@ -879,8 +890,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("Non-zero", filters, StringComparison.Ordinal);
         Assert.Contains("Zero or blank", filters, StringComparison.Ordinal);
         Assert.Contains("[SupplyParameterFromQuery(Name = \"customField\")]", page, StringComparison.Ordinal);
-        Assert.Contains("TotalsFilterSelections[fieldId] = MobileLogbookTotalsFilters.Values", page, StringComparison.Ordinal);
-        Assert.Contains("MobileCustomFieldSettings.HasNonZeroValue", page, StringComparison.Ordinal);
+        Assert.Contains("NumericFilters[fieldId] = new(\"ne\", 0m)", page, StringComparison.Ordinal);
         Assert.Contains("ShowFilters = true", page, StringComparison.Ordinal);
         Assert.Contains("Defaults.Classes.Position.BottomCenter", program, StringComparison.Ordinal);
         Assert.Contains(".totals-filter-values", css, StringComparison.Ordinal);
@@ -895,7 +905,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("SelectedTotalsFilterField.Kind == MobileLogbookTotalsFilterFieldKind.Date", page, StringComparison.Ordinal);
         Assert.Contains("Start date <input type=\"date\"", page, StringComparison.Ordinal);
         Assert.Contains("End date <input type=\"date\"", page, StringComparison.Ordinal);
-        Assert.Contains("The date range includes both selected dates.", page, StringComparison.Ordinal);
+        Assert.DoesNotContain("The date range includes both selected dates.", page, StringComparison.Ordinal);
         Assert.Contains("TotalsStartDate", page, StringComparison.Ordinal);
         Assert.Contains("TotalsEndDate", page, StringComparison.Ordinal);
     }
@@ -1900,8 +1910,7 @@ public sealed class PwaPageWiringTests
         Assert.Contains("updateIfNewReleaseAvailable()", plugin, StringComparison.Ordinal);
         Assert.Contains("window.electronicLogbookPreviewUpdates", javascript, StringComparison.Ordinal);
         Assert.Contains("electronicLogbookPreviewUpdates.isAvailable", settings, StringComparison.Ordinal);
-        Assert.Contains("FlightLogX Preview", settings, StringComparison.Ordinal);
-        Assert.Contains("checks automatically when you open the app", settings, StringComparison.Ordinal);
+        Assert.Contains("FlightLogX updates", settings, StringComparison.Ordinal);
         Assert.Contains("Check for Preview update", settings, StringComparison.Ordinal);
         Assert.DoesNotContain("Private pilot", settings, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("Preview updates are not included", plugin, StringComparison.Ordinal);

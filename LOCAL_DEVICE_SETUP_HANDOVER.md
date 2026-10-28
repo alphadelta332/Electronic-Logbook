@@ -706,6 +706,13 @@ Import performs these safeguards before changing a destination:
 9. runs `.NET` restore and `npm ci`; and
 10. runs the environment verifier.
 
+The transfer manifest's `NpmProjects` list restores lockfile dependencies in `mobile`
+and `supabase/functions/aircraft-catalog`. The aircraft source importer/publisher uses
+the pinned `fflate` ZIP reader, shared between Node maintenance and Supabase; no new
+runtime or global CLI is needed. To restore it manually, run
+`npm.cmd ci --prefix supabase/functions/aircraft-catalog` from the repository root.
+Its `node_modules` directory is regenerated and excluded from transfer archives.
+
 The existing mobile `npm ci` step restores the pinned chart and MapLibre renderer
 dependencies. The route-map background/provenance are tracked under
 `mobile/src/ElectronicLogbook.Mobile/wwwroot/data/`; renderer/worker/style assets are

@@ -116,6 +116,30 @@ try {
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*auth.json*' }).Count -eq 1) 'Codex auth must be forbidden'
     Assert-True (@($config.ForbiddenBundlePatterns | Where-Object { $_ -like '*sessions*' }).Count -eq 1) 'Codex sessions must be forbidden'
     $transferAst = [Management.Automation.Language.Parser]::ParseFile($entrypoint, [ref]$null, [ref]$null)
+    Assert-True (($config.NpmProjects -join ',') -eq 'mobile,supabase/functions/aircraft-catalog') 'restore must include the mobile and aircraft lockfile projects'
+    foreach ($project in $config.NpmProjects) {
+        Assert-True (Test-Path -LiteralPath (Join-Path $repoRoot "$project/package-lock.json")) "$project must have a reproducible npm lockfile"
+    }
+    $dependencyRestore = $transferAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-DependencyRestore' }, $true)
+    $restoreFixture = Join-Path $temporaryRoot 'dependency-restore'
+    foreach ($project in $config.NpmProjects) { New-Item -ItemType Directory -Force -Path (Join-Path $restoreFixture $project) | Out-Null }
+    $restoreResult = & (New-Module -ArgumentList $config, $restoreFixture, $dependencyRestore.Extent.Text -ScriptBlock {
+        param($Config, $Root, $Source)
+        $script:TransferConfig = $Config; $script:RepoRoot = $Root; $SkipDependencyRestore = $false
+        $script:calls = [Collections.Generic.List[string]]::new()
+        function Write-Step { param($Message) }
+        function dotnet { $global:LASTEXITCODE = 0 }
+        function npm.cmd { $script:calls.Add((Get-Location).Path); $global:LASTEXITCODE = 0 }
+        Invoke-Expression $Source
+    }) {
+        Invoke-DependencyRestore
+        $count = $script:calls.Count
+        $SkipDependencyRestore = $true
+        Invoke-DependencyRestore
+        [pscustomobject]@{ Calls = @($script:calls); CountBeforeSkip = $count }
+    }
+    Assert-True ($restoreResult.Calls.Count -eq 2 -and $restoreResult.CountBeforeSkip -eq 2) 'dependency restore must run both npm projects once and honor skip'
+    Assert-True ($restoreResult.Calls[1] -eq (Join-Path $restoreFixture 'supabase/functions/aircraft-catalog')) 'aircraft dependency restore must execute inside its own project'
     $pathPolicyFunctions = $transferAst.FindAll({
         param($node)
         $node -is [Management.Automation.Language.FunctionDefinitionAst] -and

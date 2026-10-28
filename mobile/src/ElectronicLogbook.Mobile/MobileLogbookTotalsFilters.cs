@@ -7,7 +7,12 @@ public sealed record MobileLogbookTotalsFilterField(
     string Id,
     string Label,
     MobileLogbookTotalsFilterFieldKind Kind,
-    Func<PortableLogbookWorkbookEntry, object?> ReadValue);
+    Func<PortableLogbookWorkbookEntry, object?> ReadValue)
+{
+    public bool SupportsNumericComparison =>
+        Kind is MobileLogbookTotalsFilterFieldKind.DecimalHours or MobileLogbookTotalsFilterFieldKind.Count ||
+        Id.StartsWith("custom:", StringComparison.Ordinal);
+}
 
 public sealed record MobileLogbookTotalsFilterValue(
     string Key,
@@ -21,6 +26,42 @@ public enum MobileLogbookTotalsFilterFieldKind
     Boolean,
     DecimalHours,
     Count
+}
+
+public sealed record MobileLogbookNumericFilter(string Comparison, decimal? Value, decimal? UpperValue = null)
+{
+    public string Label => Comparison switch
+    {
+        "eq" => "Equals",
+        "ne" => "Does not equal",
+        "gt" => "Greater than",
+        "ge" => "Greater than or equal to",
+        "lt" => "Less than",
+        "le" => "Less than or equal to",
+        "between" => "Between",
+        _ => string.Empty
+    };
+
+    public string? Error => Value is null ? "Enter a value."
+        : Comparison == "between" && UpperValue is null ? "Enter an upper value."
+        : Comparison == "between" && UpperValue < Value ? "Upper value must be at least the lower value."
+        : null;
+
+    public string Summary => Error ?? (Comparison == "between"
+        ? $"{Label} {Value} and {UpperValue}"
+        : $"{Label} {Value}");
+
+    public bool Matches(decimal value) => Error is null && (Comparison switch
+    {
+        "eq" => value == Value,
+        "ne" => value != Value,
+        "gt" => value > Value,
+        "ge" => value >= Value,
+        "lt" => value < Value,
+        "le" => value <= Value,
+        "between" => value >= Value && value <= UpperValue,
+        _ => false
+    });
 }
 
 public static class MobileLogbookTotalsFilters
@@ -127,7 +168,8 @@ public static class MobileLogbookTotalsFilters
         IReadOnlyDictionary<string, HashSet<string>> selectedValuesByField,
         IEnumerable<MobileLogbookTotalsFilterField> fields,
         DateOnly? startDate = null,
-        DateOnly? endDate = null)
+        DateOnly? endDate = null,
+        IReadOnlyDictionary<string, MobileLogbookNumericFilter>? numericFilters = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         ArgumentNullException.ThrowIfNull(selectedValuesByField);
@@ -149,6 +191,32 @@ public static class MobileLogbookTotalsFilters
         }
 
         var fieldsById = fields.ToDictionary(field => field.Id, StringComparer.Ordinal);
+        if (numericFilters is not null)
+        {
+            foreach (var filter in numericFilters)
+            {
+                if (!fieldsById.TryGetValue(filter.Key, out var field) ||
+                    !field.SupportsNumericComparison)
+                {
+                    continue;
+                }
+
+                decimal? number = field.ReadValue(entry) switch
+                {
+                    decimal hours => hours,
+                    int count => (decimal)count,
+                    null => 0m,
+                    string text when string.IsNullOrWhiteSpace(text) => 0m,
+                    string text when decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
+                    _ => null
+                };
+                if (number is null || !filter.Value.Matches(number.Value))
+                {
+                    return false;
+                }
+            }
+        }
+
         foreach (var selection in selectedValuesByField)
         {
             if (!fieldsById.TryGetValue(selection.Key, out var field))

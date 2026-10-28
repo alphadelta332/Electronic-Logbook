@@ -121,10 +121,13 @@ else
         <header class="entry-header entry-action-header">
             <div class="entry-action-context">
                 <h1>@Session.DraftModeLabel</h1>
-                <span class="entry-draft-status">
-                    <span class="entry-draft-status-dot" aria-hidden="true"></span>
-                    @(Session.HasEditedDraft ? "Draft edited" : "Ready")
-                </span>
+                @if (Session.HasEditedDraft)
+                {
+                    <span class="entry-draft-status">
+                        <span class="entry-draft-status-dot" aria-hidden="true"></span>
+                        Draft edited
+                    </span>
+                }
             </div>
             <div class="entry-header-actions" role="group" aria-label="Flight form actions">
                 <MudButton Class="entry-clear-action" Variant="Variant.Filled" Color="Color.Default" OnClick="RequestClear" Disabled="@Session.IsStorageBlocked" aria-label="Clear form" title="Clear form">

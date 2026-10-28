@@ -540,12 +540,14 @@ function Invoke-DependencyRestore {
     if ($LASTEXITCODE -ne 0) { throw 'Updater solution restore failed.' }
     & dotnet restore (Join-Path $script:RepoRoot 'mobile\src\ElectronicLogbook.Mobile\ElectronicLogbook.Mobile.csproj')
     if ($LASTEXITCODE -ne 0) { throw 'Mobile project restore failed.' }
-    Push-Location (Join-Path $script:RepoRoot 'mobile')
-    try {
-        & npm.cmd ci
-        if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+    foreach ($project in $script:TransferConfig.NpmProjects) {
+        Push-Location (Join-Path $script:RepoRoot $project)
+        try {
+            & npm.cmd ci
+            if ($LASTEXITCODE -ne 0) { throw "npm ci failed for $project." }
+        }
+        finally { Pop-Location }
     }
-    finally { Pop-Location }
 }
 
 function Invoke-ImportAction {

@@ -82,7 +82,6 @@
                     {
                         <section class="analytics-chart" aria-labelledby="hours-year-heading">
                             <h2 id="hours-year-heading">Hours by year</h2>
-                            <p class="analytics-selection">@MobileLogbookSession.FormatHours(analytics.FlyingHours) flying hours · @analytics.FlightCount flights.</p>
                             <AnalyticsPlot Title="Hours by year" Data="yearPlot" Height="205" />
                             <ul class="analytics-year-legend" aria-label="Year chart categories">
                                 @foreach (var series in yearPlot.Series)
@@ -105,7 +104,6 @@
                         </section>
                         <section class="analytics-chart" aria-labelledby="hours-total-heading">
                             <h2 id="hours-total-heading">Total hours over time</h2>
-                            <p class="analytics-selection">@MobileLogbookSession.FormatHours(analytics.FlyingHours) total flying hours.</p>
                             <AnalyticsPlot Title="Total hours over time" Data="timePlot" Height="210" />
                             <div class="visually-hidden">
                                 <table><caption>Cumulative flying hours</caption><thead><tr><th scope="col">Date</th><th scope="col">Hours</th></tr></thead><tbody>
@@ -143,7 +141,6 @@
             <MudTabPanel Text="Stats">
                 <details class="analytics-bases" aria-labelledby="analytics-bases-heading">
                     <summary id="analytics-bases-heading"><span>Base airports · @baseAirports.Length selected</span><MudIcon Icon="@Icons.Material.Filled.ExpandMore" aria-hidden="true" /></summary>
-                    <p>Choose airports to exclude from the non-base visit record. Saved for this logbook on this device only.</p>
                     @if (basesError is not null)
                     {
                         <MudAlert Severity="Severity.Error" role="alert">@basesError</MudAlert>
@@ -155,7 +152,6 @@
                         </label>
                         <MudButton OnClick="@(() => AddBaseAsync(baseCode))" Disabled="@(!basesAvailable || savingBases || string.IsNullOrWhiteSpace(baseCode))">Add base airport</MudButton>
                     </div>
-                    <p>Enter a catalogue airport code, such as YSSY or SY. You can add more than one airport.</p>
                     @if (BaseSuggestions.Any())
                     {
                         <details class="analytics-base-suggestions">

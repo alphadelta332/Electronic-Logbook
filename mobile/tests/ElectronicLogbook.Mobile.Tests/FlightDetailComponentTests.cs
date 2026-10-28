@@ -69,15 +69,20 @@ public sealed class FlightDetailComponentTests : BunitContext, IAsyncLifetime
 
         var edit = Render<NewFlight>(parameters => parameters.Add(component => component.EntryId, "ent_detail"));
         edit.WaitForAssertion(() => Assert.Equal(9, edit.FindAll(".entry-field-card").Count));
+        Assert.Empty(edit.FindAll(".entry-draft-status"));
         Assert.Equal(categories, edit.FindAll(".entry-category > h2").Select(node => node.TextContent));
         Assert.Equal(headings, edit.FindAll(".entry-field-card h3").Select(node => node.TextContent));
         Assert.Equal("1.2", edit.FindAll("input[type=number]")[2].GetAttribute("value"));
         Assert.Equal(["3", "2"], edit.FindAll("[aria-label=Landings] input").Select(node => node.GetAttribute("value")));
         edit.FindAll("[aria-label=Landings] input")[0].Change("4");
         Assert.Equal(4, Services.GetRequiredService<MobileLogbookSession>().WorkbookDraft.LandingsDay);
+        Services.GetRequiredService<MobileLogbookSession>().MarkDraftEdited();
+        edit.Render();
+        Assert.Equal("Draft edited", edit.Find(".entry-draft-status").TextContent.Trim());
 
         var add = Render<NewFlight>();
         add.WaitForAssertion(() => Assert.Equal(headings, add.FindAll(".entry-field-card h3").Select(node => node.TextContent)));
+        Assert.Empty(add.FindAll(".entry-draft-status"));
         Assert.Equal(categories, add.FindAll(".entry-category > h2").Select(node => node.TextContent));
         foreach (var layout in new[] { page.FindComponent<EntryFieldsLayout>(), edit.FindComponent<EntryFieldsLayout>(), add.FindComponent<EntryFieldsLayout>() })
         {

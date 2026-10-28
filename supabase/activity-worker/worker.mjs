@@ -27,6 +27,7 @@ export async function publishAirports(env) {
 
 export default {
   async scheduled(event, env) {
+    if (event.cron === '11 * * * *') return publishAircraft(env);
     // The original four-hour timer remains an independent activity probe.
     if (event.cron && event.cron !== "17 */4 * * *") return publishAirports(env);
     if (!/^https:\/\/[a-z]{20}\.supabase\.co$/.test(env.SUPABASE_URL) ||
@@ -66,3 +67,26 @@ export default {
     console.log(JSON.stringify({ status: "ok", database_time: body.database_time }));
   },
 };
+
+export async function publishAircraft(env) {
+  if (!/^https:\/\/[a-z]{20}\.supabase\.co$/.test(env.SUPABASE_URL) ||
+      !/^[a-f0-9]{64}$/.test(env.AIRCRAFT_CATALOG_PUBLISH_TOKEN))
+    throw new Error('Aircraft publisher configuration invalid');
+  const endpoint = env.SUPABASE_URL + '/functions/v1/aircraft-catalog';
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + env.AIRCRAFT_CATALOG_PUBLISH_TOKEN, 'Content-Type': 'application/json' },
+      body: '{}', redirect: 'manual', signal: AbortSignal.timeout(120000),
+    });
+    if (response.status !== 200 || response.url !== endpoint) throw new Error();
+    const body = await response.json();
+    const fields = body?.status === 'published' ? 'count,cycle,sha256,status' : 'count,cycle,status';
+    if (!body || Array.isArray(body) || Object.keys(body).sort().join(',') !== fields ||
+        !['current', 'published'].includes(body.status) || body.cycle !== airacCycle() ||
+        !Number.isInteger(body.count) || body.count < 2000 || body.count > 20000 ||
+        body.status === 'published' && !/^[a-f0-9]{64}$/.test(body.sha256)) throw new Error();
+    console.log(JSON.stringify({ aircraft_status: body.status, cycle: body.cycle, count: body.count }));
+  } catch {
+    throw new Error('Aircraft publisher request failed; previous catalogue retained');
+  }
+}

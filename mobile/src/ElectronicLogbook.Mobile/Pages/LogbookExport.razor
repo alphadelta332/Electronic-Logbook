@@ -22,13 +22,6 @@ else
                 </div>
                 <span class="draft-pill">@Session.CurrentEntriesV2.Count active</span>
             </div>
-            <div class="settings-connection-summary">
-                <MudIcon Icon="@Icons.Material.Filled.FileDownload" />
-                <div>
-                    <strong>Every export is a new file</strong>
-                    <span>The app does not read, update, or replace an existing workbook.</span>
-                </div>
-            </div>
         </section>
 
         <section class="form-section">
@@ -42,12 +35,12 @@ else
                 <label>Start date <input type="date" value="@StartDateText" max="@EndDateText" @onchange="args => StartDateText = args.Value?.ToString()" /></label>
                 <label>End date <input type="date" value="@EndDateText" min="@StartDateText" @onchange="args => EndDateText = args.Value?.ToString()" /></label>
             </div>
+            <small>Leave both dates blank to export every active flight. The date range includes both selected dates.</small>
             <div class="segmented-control" role="group" aria-label="Export layout">
                 <button type="button" class="@LayoutButtonClass(MobileLogbookFileExportLayout.Full)" aria-pressed="@(Layout == MobileLogbookFileExportLayout.Full)" @onclick="() => Layout = MobileLogbookFileExportLayout.Full">Full</button>
                 <button type="button" class="@LayoutButtonClass(MobileLogbookFileExportLayout.Compact)" aria-pressed="@(Layout == MobileLogbookFileExportLayout.Compact)" @onclick="() => Layout = MobileLogbookFileExportLayout.Compact">Compact</button>
             </div>
             <small>Full keeps route, remarks, and check flags in separate columns. Compact combines them into one Details column.</small>
-            <small>Leave both dates blank to export every active flight. The date range includes both selected dates.</small>
         </section>
 
         <section class="form-section">
@@ -65,7 +58,6 @@ else
                     Export CSV
                 </MudButton>
             </div>
-            <small>The UTC export time is recorded in the file and its filename.</small>
             @if (IsBusy)
             {
                 <span class="settings-status-line" role="status">Preparing export…</span>
