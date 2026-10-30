@@ -88,6 +88,38 @@ The last pair is the independently scoped read-only identity. Each job receives
 only its own pair. Provision through GitHub's encrypted secrets facility after
 live permission tests, never through command arguments, git, logs or transfer files.
 
+### Isolating scheduled-run creation
+
+`scheduled-trigger-diagnostic.mjs` observes the actual workflow and a separate
+`timer-control.yml` without exporting data. Keep `BACKUP_ENABLED=false`; the actual
+backup workflow must remain all-skipped. The control can also be all-skipped, or
+use `expectedConclusion: "success"` in its plan entry for a single runnable `timer`
+job with a one-minute timeout and only a `Record scheduled trigger` shell marker
+step. No checkout, actions, secret references or export calls in that control.
+Publish and review
+the workflow bytes separately, and register independent shutdown before enabling.
+This tests scheduled run creation, not runner startup or backup acceptance.
+
+Its local JSON plan contains `repository`, the reviewed private `commit`,
+`workflows` (actual workflow ID/path and control filename/path), `baselineRunIds`,
+`startedAt` and `captureUntil`. Capture is bounded to 24 hours from plan start,
+with observations every five minutes. The approved awake/online PC window must
+cover capture, independent shutdown and cleanup; a longer cap is not permission
+to extend an owner's window.
+Run `node tools/hosted-backup/scheduled-trigger-diagnostic.mjs capture <plan.json>`;
+the separate `stop` mode disables both workflow identities and verifies the backup
+variable stays false. Both modes write unique receipts beside the plan. Capture
+also attempts shutdown on failure or observation-window completion. Use an
+independent stop task in addition to that process's cleanup.
+
+A fresh authenticated `schedule` run at the reviewed commit must match its planned
+conclusion. The actual backup workflow must finish skipped with no executed steps;
+the runnable control must have exactly the one successful marker job and no extra
+steps beyond runner setup/completion. Report actual and control results separately. No run
+before the cutoff is an observation limit, not proof of a provider cause; manual
+dispatch cannot substitute for schedule delivery. Keep the immutable baseline and
+receipts, and explicitly inspect cleanup failures before removing stop tasks.
+
 ## Prepared public inputs
 
 `daily-job.public.json` has exactly `version: 1`, `repository`, `accountId`, `bucket`,
